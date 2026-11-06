@@ -8,15 +8,17 @@ use crate::{
 };
 use axum::{
     Extension,
-    extract::{FromRequestParts, OriginalUri},
-    http::{Method, StatusCode, request::Parts},
+    extract::FromRequestParts,
+    http::{StatusCode, request::Parts},
     response::{IntoResponse, Redirect, Response},
 };
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
-/// The signed-in user. Without a session, a `GET` is redirected through login and
-/// back; other methods get 401. When the access token expired and auth could not
+/// The signed-in user. Without a session, a browser navigating to a page
+/// (`Sec-Fetch-Mode: navigate`) is redirected through login and back; any other
+/// request, a `fetch` included, gets 401, since a redirect to auth would fail its
+/// CORS check. When the access token expired and auth could not
 /// renew it, the request gets 503, and the session is kept for the next one. Needs [`LoginRoutes::layer`](super::LoginRoutes::layer).
 ///
 /// A request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` must come from the app's
@@ -149,7 +151,10 @@ impl SignedIn {
     ///
     /// ```no_run
     /// use axum::response::{IntoResponse, Response};
-    /// use piquel_auth::{axum::SignedIn, protocol::challenge::BearerChallenge};
+    /// use piquel_auth::{
+    ///     axum::SignedIn,
+    ///     protocol::challenge::{BearerChallenge, BearerError},
+    /// };
     ///
     /// async fn settings(user: SignedIn) -> Response {
     ///     let http = reqwest::Client::new();
@@ -167,7 +172,11 @@ impl SignedIn {
     ///         .and_then(|value| value.to_str().ok())
     ///         .and_then(|value| value.parse::<BearerChallenge>().ok());
     ///     match challenge {
-    ///         Some(challenge) if answer.status() == 401 => {
+    ///         // Only this error asks for a stronger sign-in: an `invalid_token`, for
+    ///         // one, would not be cured by another.
+    ///         Some(challenge)
+    ///             if challenge.error == Some(BearerError::InsufficientUserAuthentication) =>
+    ///         {
     ///             user.step_up(challenge.step_up).into_response()
     ///         }
     ///         _ => answer.text().await.unwrap_or_default().into_response(),
@@ -249,21 +258,14 @@ impl<St: Send + Sync> FromRequestParts<St> for CrossOrigin<SignedIn> {
         if let Some(user) = user {
             return Ok(Self(user));
         }
-        if parts.method != Method::GET {
+        if !Login::navigation(&parts.method, &parts.headers) {
             return Err(StatusCode::UNAUTHORIZED.into_response());
         }
         let request = parts
             .extensions
             .get::<Arc<RequestSession>>()
             .ok_or_else(|| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
-        // A nested router strips its prefix from `uri`; the original keeps it.
-        let uri = parts
-            .extensions
-            .get::<OriginalUri>()
-            .map_or(&parts.uri, |original| &original.0);
-        let return_to = uri
-            .path_and_query()
-            .and_then(|path| path.as_str().parse().ok());
+        let return_to = Login::requested(&parts.extensions, &parts.uri).parse().ok();
         Err(Redirect::to(&request.login.login_url(return_to.as_ref(), None)).into_response())
     }
 }
@@ -286,8 +288,9 @@ impl<St: Send + Sync> FromRequestParts<St> for CrossOrigin<MaybeSignedIn> {
 
 /// A response asking the user to sign in again, more strongly or more recently, from
 /// [`SignedIn::require`] or [`SignedIn::step_up`]. With [`LoginRoutes::layer`](super::LoginRoutes::layer) around
-/// the route, a `GET` is redirected through login with `acr_values` and `max_age`,
-/// and comes back to the same page; other requests get 401. The login fails unless
+/// the route, a browser navigating to a page is redirected through login with
+/// `acr_values` and `max_age`, and comes back to the same page; other requests, a
+/// `fetch` included, get 401. The login fails unless
 /// the new sign-in meets the requirement, and a step-up asked for again on the page's
 /// return is [exhausted](Self::exhausted), so each action signs in again at most once,
 /// as long as the browser returns within a minute ([`SignedIn::step_up`]).

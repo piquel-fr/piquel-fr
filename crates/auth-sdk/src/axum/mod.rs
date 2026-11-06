@@ -73,9 +73,10 @@
 //! **Step-up.** A page that needs a stronger or more recent sign-in returns the
 //! [`StepUp`] from [`SignedIn::require`], and one calling an API answers the API's
 //! `insufficient_user_authentication` challenge with [`SignedIn::step_up`]. The layer
-//! redirects through login with what is needed and back to the same page, which
-//! retries once: a login that falls short fails, and a step-up asked for again on the
-//! return answers 403 instead of another redirect.
+//! redirects a browser's navigation through login with what is needed and back to
+//! the same page, which retries once: a login that falls short fails, and a step-up
+//! asked for again on the return answers 403 instead of another redirect. Any other
+//! request, a `fetch` included, gets the 401, as it does without a session.
 
 /// Bearer token validation for resource servers.
 mod bearer;

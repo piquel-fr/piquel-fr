@@ -57,11 +57,11 @@ impl RequestSession {
 }
 
 impl Login {
-    /// Turns a [`StepUp`] response to a `GET` into a redirect through login that
-    /// comes back to `path`.
-    fn step_up(&self, response: Response, method: &Method, path: &str) -> Response {
+    /// Turns a [`StepUp`] response to a browser's navigation into a redirect through
+    /// login that comes back to `path`. Other requests keep the 401.
+    fn step_up(&self, response: Response, navigation: bool, path: &str) -> Response {
         match response.extensions().get::<StepUp>() {
-            Some(step_up) if method == Method::GET => {
+            Some(step_up) if navigation => {
                 Redirect::to(&self.login_url(path.parse().ok().as_ref(), Some(step_up.requirement)))
                     .into_response()
             }
@@ -126,14 +126,11 @@ where
         let ready = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, ready);
         let login = self.login.clone();
-        let method = request.method().clone();
-        let path = request
-            .uri()
-            .path_and_query()
-            .map_or_else(|| "/".to_owned(), ToString::to_string);
+        let navigation = Login::navigation(request.method(), request.headers());
+        let path = Login::requested(request.extensions(), request.uri());
         // The `GET` a step-up login returns to is its retry, and uses up the marker.
         // Another tab loading the same page within the minute would use it instead.
-        let retry = method == Method::GET
+        let retry = request.method() == Method::GET
             && Login::cookie(request.headers(), &login.cookies.step_up)
                 .is_some_and(|marker| marker == Login::step_up_marker(&path));
         let session = Arc::new(RequestSession {
@@ -144,7 +141,7 @@ where
         });
         request.extensions_mut().insert(session.clone());
         Box::pin(async move {
-            let mut response = login.step_up(inner.call(request).await?, &method, &path);
+            let mut response = login.step_up(inner.call(request).await?, navigation, &path);
             let headers = response.headers_mut();
             if let Some(cookie) = session.take_cookie() {
                 headers.append(header::SET_COOKIE, cookie);

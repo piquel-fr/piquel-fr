@@ -39,16 +39,66 @@ async fn login_routes_refuse_public_clients() {
     assert!(matches!(LoginRoutes::new(public, key), Err(PublicClient)));
 }
 
-/// Without a session, a page is redirected through login and back to its full path,
-/// prefix included when it sits in a nested router.
+/// Without a session, a browser navigating to a page is redirected through login and
+/// back to its full path, prefix included when it sits in a nested router. Anything
+/// else, a `fetch` or a client sending no fetch metadata, gets 401: following the
+/// redirect to auth would fail its CORS check.
 #[tokio::test]
-async fn signed_in_redirects_back_to_the_full_path() {
+async fn signed_in_redirects_only_navigations() {
     let endpoint = TokenEndpoint::start(Duration::ZERO).await;
     let app = login_app(&endpoint.issuer(&clock()));
     let response = get_with(&app, "/app/notes?page=2", &[]).await;
     assert_eq!(
         response.headers()[header::LOCATION],
         "/auth/login?return_to=%2Fapp%2Fnotes%3Fpage%3D2"
+    );
+    for mode in [Some("cors"), Some("same-origin"), Some("no-cors"), None] {
+        let mut request = Request::get("/app/notes");
+        if let Some(mode) = mode {
+            request = request.header("sec-fetch-mode", mode);
+        }
+        let response = send_from(&app, request, (None, None)).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{mode:?}");
+    }
+}
+
+/// A layer inside a nested router redirects a step-up back to the full path, prefix
+/// included, and recognizes the retry on that path; a `fetch` asked to step up gets
+/// the 401 instead of a redirect.
+#[tokio::test]
+async fn step_ups_in_nested_routers_keep_their_prefix() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    let issuer = endpoint.issuer(&clock());
+    let key = CookieKey::generate().expect("cookie key");
+    let auth = LoginRoutes::new(client(&issuer), key).expect("a confidential client");
+    let settings = Router::new()
+        .route(
+            "/settings",
+            get(|user: SignedIn| async move { user.step_up(StepUpRequirement::default()) }),
+        )
+        .layer(auth.layer());
+    let app = Router::new()
+        .nest("/app", settings)
+        .nest("/auth", auth.router());
+    let session = sign_in(&app, USER).await;
+    let response = get_with(&app, "/app/settings", &[(header::COOKIE, &session)]).await;
+    assert_eq!(
+        response.headers()[header::LOCATION],
+        "/auth/login?return_to=%2Fapp%2Fsettings&step_up=true"
+    );
+    let fetch = Request::get("/app/settings")
+        .header("sec-fetch-mode", "cors")
+        .header(header::COOKIE, &session);
+    let response = send_from(&app, fetch, (None, None)).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let marker = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(<sha2::Sha256 as sha2::Digest>::digest("/app/settings"));
+    let cookies = format!("{session}; __Host-piquel-{CLIENT}-step-up={marker}");
+    let response = get_with(&app, "/app/settings", &[(header::COOKIE, &cookies)]).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "the retry is spent"
     );
 }
 

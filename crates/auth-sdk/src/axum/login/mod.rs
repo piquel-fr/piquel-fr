@@ -17,7 +17,8 @@ use super::{BoxFuture, CookieKey, bearer::ErrorChain, seal::SealError, session::
 use crate::{Client, ClientId, Credentials, LogoutToken, Scopes, StepUpRequirement};
 use axum::{
     Router,
-    http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
+    extract::OriginalUri,
+    http::{Extensions, HeaderMap, HeaderValue, Method, StatusCode, Uri, header, request::Parts},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -516,6 +517,27 @@ impl Login {
             self.mount.trim_end_matches('/'),
             query.finish()
         )
+    }
+
+    /// Whether the request is a browser navigating to a page with `GET`
+    /// (`Sec-Fetch-Mode: navigate`), the only request a redirect through login serves:
+    /// a `fetch` following it would fail auth's CORS check, and a client sending no
+    /// fetch metadata is no browser that could sign in.
+    fn navigation(method: &Method, headers: &HeaderMap) -> bool {
+        method == Method::GET
+            && headers
+                .get("sec-fetch-mode")
+                .is_some_and(|mode| mode.as_bytes() == b"navigate")
+    }
+
+    /// The path and query the browser asked for. A nested router strips its prefix
+    /// from `uri`, so the original, when the router recorded it, comes first.
+    fn requested(extensions: &Extensions, uri: &Uri) -> String {
+        extensions
+            .get::<OriginalUri>()
+            .map_or(uri, |original| &original.0)
+            .path_and_query()
+            .map_or_else(|| "/".to_owned(), ToString::to_string)
     }
 
     /// Whether a browser request comes from this app's own pages, whose origin is the

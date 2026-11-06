@@ -4,7 +4,7 @@ use super::{
     Login, MAX_PENDING_COOKIE_BYTES, PENDING_LIFETIME, ReturnTo, STEP_UP_RETURN, SessionCookie,
 };
 use crate::{
-    Acr, AuthorizeRequest, CallbackParams, LoginError, StepUpRequirement, TokenError,
+    Acr, AuthorizeRequest, CallbackParams, LoginError, RefreshToken, StepUpRequirement, TokenError,
     axum::{StoredLogin, bearer::ErrorChain, seal::SealError, session::PendingAuthorization},
     protocol::{oauth::Scope, sdk::ErrorCategory},
 };
@@ -15,7 +15,11 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
+
+/// Longest a session's revocation may hold up the sign-in or logout ending it,
+/// whatever the HTTP client's own timeout.
+const REVOCATION_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The query of `GET /login`.
 #[derive(Deserialize)]
@@ -181,9 +185,8 @@ impl Login {
     ) -> Response {
         if let SessionCookie::Open(previous) = self.open_session(headers)
             && let Some(refresh_token) = previous.refresh_token()
-            && let Err(error) = self.client.revoke(refresh_token).await
+            && !self.revoke(refresh_token).await
         {
-            tracing::warn!(error = %ErrorChain(&error), "the replaced session's refresh token could not be revoked");
             return (
                 StatusCode::BAD_GATEWAY,
                 "Signing in could not end your previous session; start again.",
@@ -234,6 +237,23 @@ impl Login {
         response
     }
 
+    /// Revokes `refresh_token` at auth, within [`REVOCATION_DEADLINE`], so a hanging
+    /// auth cannot hold up the sign-in or logout around it. Returns whether auth
+    /// revoked it, logging why not.
+    async fn revoke(&self, refresh_token: &RefreshToken) -> bool {
+        match tokio::time::timeout(REVOCATION_DEADLINE, self.client.revoke(refresh_token)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(error)) => {
+                tracing::warn!(error = %ErrorChain(&error), "a refresh token could not be revoked");
+                false
+            }
+            Err(_) => {
+                tracing::warn!("revoking a refresh token timed out");
+                false
+            }
+        }
+    }
+
     /// `POST /logout`: revokes the session's refresh token at auth, so no copy of the
     /// cookie refreshes again, clears the cookies, and redirects to RP-initiated
     /// logout. If auth cannot revoke it, the answer is 502 and the cookie is kept, so
@@ -251,9 +271,8 @@ impl Login {
         let mut destination = login.home.as_str().to_owned();
         if let SessionCookie::Open(session) = login.open_session(&headers) {
             if let Some(refresh_token) = session.refresh_token()
-                && let Err(error) = login.client.revoke(refresh_token).await
+                && !login.revoke(refresh_token).await
             {
-                tracing::warn!(error = %ErrorChain(&error), "the session's refresh token could not be revoked");
                 return (
                     StatusCode::BAD_GATEWAY,
                     "Signing out could not reach the sign-in service; try again.",

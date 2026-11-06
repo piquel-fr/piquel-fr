@@ -278,7 +278,16 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
   cannot revoke it, the answer is 502 and the cookie stays, for the user to try
   again: clearing it would leave any copy refreshing. A sign-in revokes the refresh
   token of the session it replaces before redeeming its code, and answers 502,
-  keeping that session, when it cannot.
+  keeping that session, when it cannot. A revocation that takes over five seconds
+  counts as failed, whatever the HTTP client's own timeout, so a hanging auth never
+  holds a sign-in or logout open.
+- **Redirects.** Without a session, or when a page asks to step up, only a browser
+  navigating to a page with `GET` (`Sec-Fetch-Mode: navigate`) is redirected
+  through login. Any other request gets 401, a client sending no fetch metadata
+  included, since a `fetch` following a redirect to auth would fail its CORS
+  check. The redirect returns to the path the browser asked for, the prefix of a
+  nested router included. The Rust SDK does this; `@piquel/auth/server` does not
+  yet, and has no revocation deadline either.
 
 So an app cannot end a session by itself. Clearing the cookie ends it in one
 browser; a copy lives on until auth revokes the grant, through the app's logout or

@@ -297,3 +297,34 @@ fn sessions_without_a_refresh_token_end_with_their_access_token() {
     let login = StoredLogin::new(tokens, Utc::now() + TimeDelta::hours(12)).expect("a session");
     assert_eq!(login.ends_at(), expires_at);
 }
+
+/// A revocation auth never answers gives up after the SDK's deadline, whatever the
+/// HTTP client's own timeout: logout answers 502 keeping the cookie, and a sign-in
+/// replacing the session answers 502 too, so neither hangs.
+#[tokio::test]
+async fn revocations_give_up_after_their_deadline() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    // An injected client without a timeout of its own.
+    let http = Http::new(reqwest::Client::new());
+    let app = login_app(&endpoint.issuer_with(&clock(), http));
+    let session = sign_in(&app, USER).await;
+    endpoint.revocations_hang.store(true, Ordering::SeqCst);
+    // Waiting out the hour the revocation hangs takes no time, but the deadline
+    // must end it first.
+    tokio::time::pause();
+    let logout = Request::post("/auth/logout")
+        .header(header::COOKIE, &session)
+        .header(header::ORIGIN, "https://notes.example.com")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.clone().oneshot(logout).await.expect("response");
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(set_cookies(&response), Vec::<String>::new());
+
+    let login = Started::at(&app, "%2F", std::slice::from_ref(&session)).await;
+    let both = [login.cookie.clone(), session];
+    let response = login.complete(&app, USER, &both).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(set_cookie(&response, SESSION_COOKIE), None);
+    assert!(endpoint.revoked.lock().expect("revocations").is_empty());
+}

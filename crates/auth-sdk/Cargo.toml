@@ -32,6 +32,8 @@ url.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+# Paused time, so a test can wait out a deadline without waiting.
+tokio = { workspace = true, features = ["test-util"] }
 trybuild.workspace = true
 
 [[example]]

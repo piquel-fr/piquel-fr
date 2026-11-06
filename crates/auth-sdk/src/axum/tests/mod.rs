@@ -69,9 +69,10 @@ fn token_case(name: &str) -> Case {
         .expect("token vector")
 }
 
-/// Sends a `GET` with optional `Authorization` and `Cookie` values.
+/// Sends a `GET` with optional `Authorization` and `Cookie` values, as a browser
+/// navigating to a page (`Sec-Fetch-Mode: navigate`).
 async fn get_with(app: &Router, path: &str, headers: &[(header::HeaderName, &str)]) -> Response {
-    let mut request = Request::get(path);
+    let mut request = Request::get(path).header("sec-fetch-mode", "navigate");
     for (name, value) in headers {
         request = request.header(name, *value);
     }
@@ -125,6 +126,8 @@ struct TokenEndpoint {
     revoked: Arc<Mutex<Vec<String>>>,
     /// Whether revocations fail, as when auth is down.
     revocations_fail: Arc<AtomicBool>,
+    /// Whether revocations hang for an hour before answering, as a stuck auth would.
+    revocations_hang: Arc<AtomicBool>,
 }
 
 /// The form a token or revocation request posts.
@@ -170,8 +173,13 @@ impl TokenEndpoint {
         let refreshes = Arc::new(AtomicUsize::new(0));
         let revoked = Arc::new(Mutex::new(Vec::new()));
         let revocations_fail = Arc::new(AtomicBool::new(false));
-        let (counted, recorded, failing) =
-            (refreshes.clone(), revoked.clone(), revocations_fail.clone());
+        let revocations_hang = Arc::new(AtomicBool::new(false));
+        let (counted, recorded, failing, hanging) = (
+            refreshes.clone(),
+            revoked.clone(),
+            revocations_fail.clone(),
+            revocations_hang.clone(),
+        );
         let token = move |::axum::Form(form): ::axum::Form<Form>| {
             let (counted, refresh) = (counted.clone(), refresh.clone());
             async move {
@@ -186,6 +194,9 @@ impl TokenEndpoint {
             }
         };
         let revoke = move |::axum::Form(form): ::axum::Form<Form>| async move {
+            if hanging.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            }
             if failing.load(Ordering::SeqCst) {
                 return StatusCode::SERVICE_UNAVAILABLE;
             }
@@ -205,11 +216,17 @@ impl TokenEndpoint {
             refreshes,
             revoked,
             revocations_fail,
+            revocations_hang,
         }
     }
 
     /// The vectors' issuer, using these endpoints, at `clock`.
     fn issuer(&self, clock: &ManualClock) -> Issuer {
+        self.issuer_with(clock, Http::default_client().expect("HTTP client"))
+    }
+
+    /// The vectors' issuer, using these endpoints through `http`, at `clock`.
+    fn issuer_with(&self, clock: &ManualClock, http: Http) -> Issuer {
         let mut metadata = metadata();
         metadata.token_endpoint = self.url.clone();
         metadata.revocation_endpoint = self.revocation.clone();
@@ -219,7 +236,7 @@ impl TokenEndpoint {
         Issuer::with_keys(
             metadata,
             KeyCache::fixed(KeySet::parse(&jwks).expect("keys")),
-            Http::default_client().expect("HTTP client"),
+            http,
             Arc::new(clock.clone()),
         )
     }

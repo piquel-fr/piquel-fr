@@ -138,10 +138,13 @@ impl LoginApp {
         format!("__Host-piquel-{}-{suffix}", self.flow.client.id)
     }
 
-    /// Sends a request to the app with an optional cookie. Posts carry the app's
-    /// `Origin`, as a browser on its pages sends.
+    /// Sends a request to the app with an optional cookie, as a browser navigating to
+    /// a page does. Posts carry the app's `Origin`, as a browser on its pages sends.
     async fn send(&self, method: Method, uri: &str, cookie: Option<&str>) -> Response {
-        let mut request = Request::builder().method(method.clone()).uri(uri);
+        let mut request = Request::builder()
+            .method(method.clone())
+            .uri(uri)
+            .header("sec-fetch-mode", "navigate");
         if method == Method::POST {
             let callback =
                 Url::parse(self.flow.client.redirect_uris[0].as_str()).expect("callback");
