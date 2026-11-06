@@ -27,15 +27,15 @@ mod handle;
 mod invite;
 /// Signing keys and token digest keys.
 mod keys;
+/// The generated command reference.
+#[cfg(test)]
+mod reference;
 /// Serving the public and admin listeners.
 mod serve;
 /// Ending sessions.
 mod session;
 /// Finding, showing, disabling and reactivating accounts.
 mod user;
-/// The generated command reference.
-#[cfg(test)]
-mod reference;
 
 use crate::{
     AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, account::AccountOperation, admin::AdminOperation,

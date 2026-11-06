@@ -63,7 +63,11 @@ fn configuration_reference_is_current() {
             "/../../docs/dev/operations/variables/auth-service.md"
         )
         .into(),
-        text: Section::render(&sections, 3, "the variables in `apps/auth-service/src/config`"),
+        text: Section::render(
+            &sections,
+            3,
+            "the variables in `apps/auth-service/src/config`",
+        ),
     }
     .write_or_compare()
     .expect("current reference");
