@@ -97,23 +97,33 @@ export class Http {
     });
   }
 
-  /** @internal Reads `body` whole, or `undefined` once it holds more than `limit` bytes. */
+  /**
+   * @internal Reads `body` whole, or `undefined` once it holds more than `limit` bytes.
+   * `signal` aborting cancels the body, so a stalled one is released.
+   */
   static async readBody(
     body: ReadableStream<Uint8Array> | null,
-    limit: number
+    limit: number,
+    signal?: AbortSignal
   ): Promise<Uint8Array | undefined> {
     const chunks: Uint8Array[] = [];
     let length = 0;
     const reader = body?.getReader();
-    for (;;) {
-      const chunk = await reader?.read();
-      if (chunk === undefined || chunk.done) break;
-      length += chunk.value.length;
-      if (length > limit) {
-        await reader?.cancel();
-        return undefined;
+    const cancel = () => void reader?.cancel().catch(() => undefined);
+    signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      for (;;) {
+        const chunk = await reader?.read();
+        if (chunk === undefined || chunk.done) break;
+        length += chunk.value.length;
+        if (length > limit) {
+          await reader?.cancel();
+          return undefined;
+        }
+        chunks.push(chunk.value);
       }
-      chunks.push(chunk.value);
+    } finally {
+      signal?.removeEventListener('abort', cancel);
     }
     const whole = new Uint8Array(length);
     let offset = 0;
@@ -165,16 +175,30 @@ export class Http {
     } catch (error) {
       throw failed(error);
     }
-    // A browser's `fetch` hides a manual redirect behind an opaque response.
-    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+    // A response that comes after the deadline, or that redirected, is not read: its
+    // body is cancelled so the connection is released.
+    const discard = () => void response.body?.cancel().catch(() => undefined);
+    if (signal.aborted) {
+      discard();
+      throw failed(signal.reason);
+    }
+    // A browser's `fetch` hides a manual redirect behind an opaque response, and one
+    // that ignored `redirect: 'manual'` marks the response it followed to.
+    const status = response.status;
+    if (
+      response.redirected ||
+      response.type === 'opaqueredirect' ||
+      (status >= 300 && status < 400)
+    ) {
+      discard();
       throw new AuthError(
         { code: 'network', url },
-        `${url} redirected with HTTP ${String(response.status)}`
+        `${url} redirected with HTTP ${String(status)}`
       );
     }
     let body: Uint8Array | undefined;
     try {
-      body = await Http.readBody(response.body, MAX_BODY_BYTES);
+      body = await Http.readBody(response.body, MAX_BODY_BYTES, signal);
     } catch (error) {
       throw failed(error);
     }

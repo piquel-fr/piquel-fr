@@ -63,9 +63,9 @@ resend a code or token elsewhere, and a request that takes over 10 seconds, from
 connecting to its last body byte, fails. The Rust SDK sets this policy on the
 client it builds. The TypeScript SDK checks the URL itself, asks `fetch` not to
 follow redirects and refuses any it gets, and holds its own deadline, which does
-not wait on `fetch` to honour its abort signal. Only an injected `fetch` that
-follows redirects despite `redirect: 'manual'` can resend a request before the SDK
-refuses it.
+not wait on `fetch` to honour its abort signal and cancels a body it stops reading.
+Only an injected `fetch` that follows redirects despite `redirect: 'manual'` can
+resend a request; the SDK still refuses the answer it reached.
 
 ## Token validation
 

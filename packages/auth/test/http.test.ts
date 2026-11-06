@@ -22,16 +22,56 @@ test('a server that never answers times out, though the fetch ignores its signal
   }
 });
 
-test('a redirect is refused, and never asked to be followed', async () => {
+/** A body that never sends a byte, and records whether it was cancelled. */
+class StalledBody {
+  cancelled = false;
+  readonly stream = new ReadableStream<Uint8Array>({
+    cancel: () => {
+      this.cancelled = true;
+    }
+  });
+}
+
+test('a body that stalls times out, and is cancelled', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const body = new StalledBody();
+    const http = new Http(() => Promise.resolve(new Response(body.stream)));
+    const sent = http.get(TOKEN_URL);
+    // Let the response arrive and its body start being read.
+    await new Promise((resolve) => setImmediate(resolve));
+    mock.timers.tick(10_000);
+    await assert.rejects(sent, network);
+    assert.equal(body.cancelled, true);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('a redirect is refused and its body cancelled, and it is never asked to be followed', async () => {
   let redirect: RequestRedirect | undefined;
+  const body = new StalledBody();
   const http = new Http((_, init) => {
     redirect = init.redirect;
     return Promise.resolve(
-      new Response(null, { status: 307, headers: { location: 'https://elsewhere.example' } })
+      new Response(body.stream, {
+        status: 307,
+        headers: { location: 'https://elsewhere.example' }
+      })
     );
   });
   await assert.rejects(http.post(TOKEN_URL, { refresh_token: 'prt_v1_secret' }), network);
   assert.equal(redirect, 'manual');
+  assert.equal(body.cancelled, true);
+});
+
+test('a response a fetch reached by following a redirect is refused', async () => {
+  const http = new Http(() => {
+    const followed = Response.json({ access_token: 'stolen' });
+    Object.defineProperty(followed, 'redirected', { value: true });
+    return Promise.resolve(followed);
+  });
+  await assert.rejects(http.get(TOKEN_URL), network);
 });
 
 test('only https URLs are requested', async () => {
