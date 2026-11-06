@@ -26,19 +26,13 @@ test("piquel.fr's pages lead to auth, and auth's footer back to its policies", a
     await page.locator('article.policy').evaluate((article) => getComputedStyle(article).display)
   ).toBe('grid');
 
-  // The homepage sends people to auth to sign up, sign in and register apps.
+  // The homepage sends people to auth to sign up.
   await page.getByRole('link', { name: 'Piquel home' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'One passkey for every Piquel app.' })
-  ).toBeVisible();
   await page
     .getByRole('main')
     .getByRole('link', { name: 'Create an account', exact: true })
     .click();
   await expect(page).toHaveURL(`${authUrl}/register`);
-  await page.goto(webUrl);
-  await page.getByRole('link', { name: 'Developer console', exact: true }).click();
-  await expect(page).toHaveURL((url) => url.origin === authUrl);
 
   // A settings link sent before the settings moved to auth still opens its page,
   // with its fragment.

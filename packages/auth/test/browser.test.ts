@@ -521,12 +521,6 @@ describe('a session', () => {
     }
   });
 
-  test('sends its access token', async () => {
-    const { page, session } = await signedIn();
-    assert.equal(await (await session.fetch(RESOURCE)).text(), 'notes');
-    assert.equal(page.requests[0]?.headers.get('authorization'), `Bearer at_${String(NOW)}`);
-  });
-
   test('a restore after a failed step-up does not step up again', async () => {
     const { auth, page, client, session } = await signedIn();
     page.resource = () => challenge.clone();
@@ -632,14 +626,19 @@ describe('a session', () => {
     }
   });
 
-  test('refreshes an expiring access token once for concurrent requests', async () => {
+  test('sends its access token, refreshed once for concurrent requests when expiring', async () => {
     const { auth, page, session } = await signedIn();
+    assert.equal(await (await session.fetch(RESOURCE)).text(), 'notes');
     auth.clock.seconds += 290;
     await Promise.all([session.fetch(RESOURCE), session.fetch(RESOURCE)]);
     assert.equal(auth.fetch.count(TOKEN_URL), 2);
     assert.deepEqual(
       page.requests.map((request) => request.headers.get('authorization')),
-      [`Bearer at_${String(NOW + 290)}`, `Bearer at_${String(NOW + 290)}`]
+      [
+        `Bearer at_${String(NOW)}`,
+        `Bearer at_${String(NOW + 290)}`,
+        `Bearer at_${String(NOW + 290)}`
+      ]
     );
   });
 

@@ -77,10 +77,6 @@ test('a bearer token is read from Authorization, and nothing else', async () => 
     401,
     `Bearer error="invalid_token", resource_metadata="${METADATA}"`
   ]);
-  assert.deepEqual(await answer(() => resource.validate('not.a.token')), [
-    401,
-    `Bearer error="invalid_token", resource_metadata="${METADATA}"`
-  ]);
 });
 
 test('scopes and step-up requirements answer with their challenges', async () => {

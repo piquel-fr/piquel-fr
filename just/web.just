@@ -33,7 +33,7 @@ test-browser *ARGS:
     @pnpm test:browser "$@"
 
 # The browser checks' clients have origins with no server: tests/browser/oidc.spec.ts,
-# related-origins.spec.ts, browser-client.spec.ts and sdk.spec.ts serve the clients'
+# browser-client.spec.ts and sdk.spec.ts serve the clients'
 # pages themselves and name the same origins. server.spec.ts's example app is a
 # confidential client, whose secret is in E2E_SERVER_CLIENT_SECRET.
 # Register the browser checks' OIDC clients with auth on localhost, as in CI.

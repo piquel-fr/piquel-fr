@@ -227,7 +227,6 @@ class Auth {
   }
 }
 
-/** A login started at auth: its `GET /login` answer, and the `state` and `nonce` it pushed. */
 /** A login started: the response, its cookie's name (its slot), its `state` and `nonce`. */
 type Started = { response: Response; name: string; state: string; nonce: string };
 

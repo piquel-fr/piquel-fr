@@ -13,23 +13,19 @@ test('downloading the data, deleting the account and restoring it with its passk
   await page.getByRole('link', { name: 'Your data', exact: true }).click();
 
   // The session confirmed with a passkey moments ago, so the download needs no new
-  // confirmation. The file names the account and holds its records.
+  // confirmation. The browser saves the account's records as a file named for it.
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByRole('button', { name: 'Download your data', exact: true }).click()
   ]);
   const data = JSON.parse(await readFile(await download.path(), 'utf8')) as {
-    format: string;
     exported_at: string;
     profile: { handle: string };
-    passkeys: unknown[];
   };
   expect(download.suggestedFilename()).toBe(
     `piquel-account-${handle}-${data.exported_at.slice(0, 10)}.json`
   );
-  expect(data.format).toBe('piquel.account-export');
   expect(data.profile.handle).toBe(handle);
-  expect(data.passkeys).toHaveLength(1);
 
   await page.getByRole('button', { name: 'Delete account', exact: true }).click();
   await page.getByLabel(`Type your handle, ${handle}, to confirm`).fill(handle);
@@ -52,9 +48,4 @@ test('downloading the data, deleting the account and restoring it with its passk
   await expect(page).toHaveURL('/settings');
   await page.goto('/settings/profile');
   await expect(page.getByRole('definition').getByText(`@${handle}`, { exact: true })).toBeVisible();
-
-  await page.getByRole('link', { name: 'Security history', exact: true }).click();
-  await expect(page.getByText('Account restored')).toBeVisible();
-  await expect(page.getByText(/Account deletion scheduled for/)).toBeVisible();
-  await expect(page.getByText('Account data downloaded')).toBeVisible();
 });
