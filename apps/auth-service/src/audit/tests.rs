@@ -472,6 +472,31 @@ async fn pruning_refuses_broken_chains_and_leaves_a_working_anchor() {
     assert_eq!(pruned.len(), 2);
 }
 
+/// After a prune, a chain none of whose checkpoints verify, as when the key that
+/// signed them was removed, is recomputed from the anchor rather than the first
+/// position, which pruning deleted, so signing resumes.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn signing_resumes_from_the_anchor_when_no_checkpoint_verifies() {
+    let mut fixture = Fixture::sealed_six().await;
+    AdminService::new(fixture.database.clone(), false)
+        .prune_audit_chain(&operator(), &fixture.keys, 3)
+        .await
+        .expect("prune");
+    let key = NoteKey::generate("auth.example/audit").expect("new key");
+    let audit = AuditConfig::new(&Fixture::origin(), key).expect("audit configuration");
+    fixture.sealer = Sealer::eager(&audit);
+    fixture.record(1).await;
+    fixture.seal().await;
+    let latest = fixture
+        .database
+        .audit()
+        .newest_checkpoints(None, 1)
+        .await
+        .expect("latest");
+    assert_eq!(latest.first().map(|latest| latest.position), Some(8));
+}
+
 /// The dashboard's audit page verifies nothing: it shows the newest verification
 /// recorded, so a break shows only once an operator verifies again, and judges each
 /// checkpoint by `audit prune`'s rules against that verification. Once pruned, the
