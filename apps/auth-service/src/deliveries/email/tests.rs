@@ -24,16 +24,6 @@ use std::{
     },
 };
 
-/// `notification`'s email to Ada, about the recovery `recovery_id`, if any.
-fn notification(notification: Notification, recovery_id: Option<RecoveryId>) -> EmailMessage {
-    EmailMessage::Notification {
-        address: "ada@example.com".into(),
-        notification_id: NotificationId::new(),
-        notification,
-        recovery_id,
-    }
-}
-
 /// A relay that keeps every message. The first send can be ambiguous: the relay
 /// keeps the message, but the connection breaks before its reply arrives.
 #[derive(Default)]
@@ -149,8 +139,9 @@ impl Outbox {
 /// A retry after an ambiguous send sends the same message again, with the same
 /// `Message-ID`: a duplicate the mail client can recognize. Once the address is
 /// removed, its verification link is not sent, but notices still are; nothing is
-/// while email is disabled. Every message has a plain-text and an HTML body, and
-/// a verification link names the account.
+/// while email is disabled. The verification email has a plain-text and an HTML
+/// body, and its link names the account. The notifications' rendering is checked
+/// with the recovery notices.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn retries_resend_the_same_message_to_the_current_address() {
@@ -184,11 +175,13 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     let expected = (format!("<{id}@piquel.fr>"), "ada@example.com".to_owned());
     assert_eq!(outbox.headers(), [expected.clone(), expected]);
 
-    let notice = notification(Notification::PrimaryEmailChanged, None);
-    let removed = notification(Notification::EmailRemoved, None);
-    for message in [&verify, &notice, &removed] {
-        sender.assert_renders(user_id, message).await;
-    }
+    sender.assert_renders(user_id, &verify).await;
+    let removed = EmailMessage::Notification {
+        address: "ada@example.com".into(),
+        notification_id: NotificationId::new(),
+        notification: Notification::EmailRemoved,
+        recovery_id: None,
+    };
     let Some(Content::VerifyAddress { link, handle, .. }) =
         sender.content(user_id, &verify).await.expect("content")
     else {

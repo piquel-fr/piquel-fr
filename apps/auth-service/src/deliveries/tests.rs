@@ -160,13 +160,8 @@ fn statuses_classify_and_retry_after_parses() {
         "Wednesday, 21-Oct-26 07:30:00 GMT",
         "Wed Oct 21 07:30:00 2026",
     ] {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            RETRY_AFTER,
-            HeaderValue::from_str(obsolete).expect("header"),
-        );
         assert_eq!(
-            OutboundClient::check_status(StatusCode::SERVICE_UNAVAILABLE, &headers, now),
+            check(StatusCode::SERVICE_UNAVAILABLE, Some(obsolete)),
             retryable(StatusCode::SERVICE_UNAVAILABLE, Some(120)),
             "{obsolete}"
         );

@@ -1,9 +1,8 @@
 //! Granting and revoking administrator rights, and the protections around them.
 
 use super::*;
-use crate::config::LinkKeys;
 use crate::deletion::DeletionError;
-use crate::recovery::RecoveryLinks;
+use crate::tests::{recovery_links, recovery_reason};
 
 /// Administrator accounts are out of the dashboard's reach until their rights
 /// are revoked, and nobody grants or revokes their own rights there. A
@@ -155,11 +154,9 @@ async fn no_grant_while_a_recovery_can_be_undone() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     let target = harness.account().await.user_id;
-    let links = RecoveryLinks::new(origin(), LinkKeys::generate());
-    let reason = || reason("Lost every passkey");
     let service = harness.service();
     service
-        .recover_account(&cli(), target, reason(), &links, None)
+        .recover_account(&cli(), target, recovery_reason(), &recovery_links(), None)
         .await
         .expect("recovery");
 
@@ -179,7 +176,7 @@ async fn no_grant_while_a_recovery_can_be_undone() {
     assert!(!granted.expect("rights"), "not granted");
 
     service
-        .undo_recovery(&cli(), target, reason())
+        .undo_recovery(&cli(), target, recovery_reason())
         .await
         .expect("support cancels the unused link");
     service

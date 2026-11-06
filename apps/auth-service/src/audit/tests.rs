@@ -1,17 +1,17 @@
 //! Sealing order, verification of tampered history, and pruning. Each test uses a
 //! schema of its own, since the chain covers every event of its database.
 use super::*;
-use crate::{AdminError, AdminService, tests::operator};
+use crate::{
+    AdminError, AdminService,
+    tests::{Replicas, operator},
+};
 use chrono::SubsecRound;
 use piquel_common::{
     Personal, Provider,
-    config::Variable,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
 };
 use piquel_crypto::NoteKey;
-use piquel_repository::{
-    DatabaseConfig, DatabaseTransaction, EventFilter, ExclusiveConnection, LockKey, Tamper,
-};
+use piquel_repository::{DatabaseTransaction, EventFilter, ExclusiveConnection, LockKey, Tamper};
 use std::{sync::Arc, time::Duration};
 
 /// A migrated schema of its own on `TEST_DATABASE_URL`, with a sealer that signs
@@ -30,16 +30,11 @@ struct Fixture {
 impl Fixture {
     /// Creates the schema and a fresh audit key.
     async fn new() -> Self {
-        let url = Variable::new("TEST_DATABASE_URL")
-            .required()
-            .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
         // Two connections: a test holds at most a transaction and a read at once,
         // and every fixture's pool is one more on the server the suite shares.
-        let database = Database::isolated(
-            DatabaseConfig::new(&url, 2, Duration::from_secs(5)).expect("database configuration"),
-        )
-        .await
-        .expect("isolated database");
+        let database = Database::isolated(Replicas::database_config(2))
+            .await
+            .expect("isolated database");
         let key = NoteKey::generate("auth.example/audit").expect("audit key");
         Self {
             database,
@@ -536,21 +531,6 @@ async fn checkpoints_are_published() {
     assert_eq!(page[0]["note"], latest);
 }
 
-/// The dashboard verifies with the environment's committed key, or, where none is
-/// committed, as on a preview, with the server's own, and says which.
-#[test]
-fn the_dashboard_falls_back_to_the_servers_own_key() {
-    let own = NoteKey::generate("auth.example/audit").expect("key");
-    for (origin, source) in [
-        ("https://auth.piquel.fr", VerificationKeys::Committed),
-        ("https://auth.example", VerificationKeys::Uncommitted),
-    ] {
-        let keys =
-            AuditKeys::for_server(&origin.parse().expect("origin"), own.verifier()).expect("keys");
-        assert_eq!(keys.source, source, "{origin}");
-    }
-}
-
 /// Checkpoint text renders and parses back, and nothing else parses.
 #[test]
 fn checkpoint_text_round_trips() {
@@ -580,6 +560,8 @@ fn checkpoint_text_round_trips() {
 
 /// Production and staging each find only their own committed key, so one cannot
 /// vouch for the other's checkpoints, and `audit verify` works without `--key`.
+/// Where none is committed, as on a preview, the dashboard verifies with the
+/// server's own key, and says which.
 #[test]
 fn committed_keys_are_per_environment() {
     for (host, other) in [
@@ -598,4 +580,13 @@ fn committed_keys_are_per_environment() {
         AuditKeys::committed(&"https://auth.example".parse().expect("origin")),
         Err(AuditError::NoCommittedKey(_))
     ));
+    let own = NoteKey::generate("auth.example/audit").expect("key");
+    for (origin, source) in [
+        ("https://auth.piquel.fr", VerificationKeys::Committed),
+        ("https://auth.example", VerificationKeys::Uncommitted),
+    ] {
+        let keys =
+            AuditKeys::for_server(&origin.parse().expect("origin"), own.verifier()).expect("keys");
+        assert_eq!(keys.source, source, "{origin}");
+    }
 }

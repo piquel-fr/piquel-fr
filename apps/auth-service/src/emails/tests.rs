@@ -5,7 +5,7 @@ use super::*;
 use crate::security::{BrowserCookie, Session, tests::assert_step_up_required};
 use crate::{
     account::AccountApplication,
-    tests::{AUTH_ORIGIN, Replicas},
+    tests::{AUTH_ORIGIN, MAX_RESPONSE_BYTES, Replicas},
 };
 use axum::{
     body::{Body, to_bytes},
@@ -17,9 +17,6 @@ use piquel_repository::{DeliverySummary, InsertUser};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv6Addr};
 use tower::ServiceExt;
-
-/// Largest response body the scenarios read.
-const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 /// A scenario account with one signed-in browser.
 struct Account {
@@ -215,28 +212,14 @@ async fn adding_asks_for_confirmation_first() {
     }
 }
 
-/// Adding, changing the primary address and removing need a passkey
-/// confirmation; a link verifies its address once, without a session, and makes
-/// the first one primary. A new primary address notifies the previous one, which
-/// can then be removed; the primary one only once no other could replace it.
+/// A link verifies its address once, without a session, and makes the first one
+/// primary. A new primary address notifies the previous one, which can then be
+/// removed; the primary one only once no other could replace it. That adding one
+/// needs a passkey confirmation is checked above.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn addresses_need_confirmation_and_links_verify_once() {
+async fn links_verify_once_and_the_primary_address_moves() {
     let harness = Harness::new(true).await;
-    let social = harness.account(AuthenticationMethod::Federation).await;
-    let body = json!({ "email": "ada@example.com" });
-    assert_step_up_required(
-        harness
-            .send(
-                Some(&social),
-                Method::POST,
-                routes::emails::LIST,
-                Some(body),
-            )
-            .await,
-    )
-    .await;
-
     let account = harness.account(AuthenticationMethod::Passkey).await;
     let (status, added) = harness.add(&account, "Ada@Example.COM").await;
     assert_eq!(status, StatusCode::CREATED, "{added}");
