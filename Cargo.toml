@@ -76,7 +76,7 @@ thiserror = "2.0"
 # they carry, so they run under a policy with no 'unsafe-eval'
 # (tokio-rs/topcoat#484), with `@mount` handlers (tokio-rs/topcoat#550). Back to
 # crates.io once Topcoat has both.
-topcoat = { git = "https://github.com/PiquelChips/topcoat", rev = "7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274", default-features = false }
+topcoat = { git = "https://github.com/PiquelChips/topcoat", rev = "42285ca30046e5a4c213857b3158db7c77139ea5", default-features = false }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"

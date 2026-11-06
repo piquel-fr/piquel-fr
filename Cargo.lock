@@ -3630,7 +3630,7 @@ checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 [[package]]
 name = "topcoat"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "serde",
  "topcoat-asset",
@@ -3655,7 +3655,7 @@ dependencies = [
 [[package]]
 name = "topcoat-asset"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "http",
  "memchr",
@@ -3672,7 +3672,7 @@ dependencies = [
 [[package]]
 name = "topcoat-asset-grammar"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3683,7 +3683,7 @@ dependencies = [
 [[package]]
 name = "topcoat-asset-macro"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "quote",
  "syn 3.0.8",
@@ -3693,7 +3693,7 @@ dependencies = [
 [[package]]
 name = "topcoat-cookie"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "cookie",
  "getrandom 0.2.17",
@@ -3707,7 +3707,7 @@ dependencies = [
 [[package]]
 name = "topcoat-core"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "base64 0.22.1",
  "elsa",
@@ -3721,7 +3721,7 @@ dependencies = [
 [[package]]
 name = "topcoat-core-grammar"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3732,7 +3732,7 @@ dependencies = [
 [[package]]
 name = "topcoat-core-macro"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "quote",
  "syn 3.0.8",
@@ -3742,7 +3742,7 @@ dependencies = [
 [[package]]
 name = "topcoat-font"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "heck",
  "serde",
@@ -3757,7 +3757,7 @@ dependencies = [
 [[package]]
 name = "topcoat-font-grammar"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3769,7 +3769,7 @@ dependencies = [
 [[package]]
 name = "topcoat-font-macro"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "quote",
  "syn 3.0.8",
@@ -3779,7 +3779,7 @@ dependencies = [
 [[package]]
 name = "topcoat-l10n"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "http",
  "icu_locale",
@@ -3791,7 +3791,7 @@ dependencies = [
 [[package]]
 name = "topcoat-mail"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "lettre",
  "thiserror 2.0.18",
@@ -3804,7 +3804,7 @@ dependencies = [
 [[package]]
 name = "topcoat-metadata"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "topcoat-asset",
  "topcoat-core",
@@ -3817,7 +3817,7 @@ dependencies = [
 [[package]]
 name = "topcoat-router"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "bytes",
  "form_urlencoded",
@@ -3850,7 +3850,7 @@ dependencies = [
 [[package]]
 name = "topcoat-router-grammar"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -3862,7 +3862,7 @@ dependencies = [
 [[package]]
 name = "topcoat-router-macro"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "quote",
  "syn 3.0.8",
@@ -3872,7 +3872,7 @@ dependencies = [
 [[package]]
 name = "topcoat-runtime"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "futures-util",
  "inventory",
@@ -3893,7 +3893,7 @@ dependencies = [
 [[package]]
 name = "topcoat-runtime-grammar"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3908,7 +3908,7 @@ dependencies = [
 [[package]]
 name = "topcoat-runtime-macro"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "quote",
  "syn 3.0.8",
@@ -3918,7 +3918,7 @@ dependencies = [
 [[package]]
 name = "topcoat-session"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
@@ -3933,7 +3933,7 @@ dependencies = [
 [[package]]
 name = "topcoat-view"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -3948,7 +3948,7 @@ dependencies = [
 [[package]]
 name = "topcoat-view-grammar"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -3961,7 +3961,7 @@ dependencies = [
 [[package]]
 name = "topcoat-view-macro"
 version = "0.11.0"
-source = "git+https://github.com/PiquelChips/topcoat?rev=7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274#7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274"
+source = "git+https://github.com/PiquelChips/topcoat?rev=42285ca30046e5a4c213857b3158db7c77139ea5#42285ca30046e5a4c213857b3158db7c77139ea5"
 dependencies = [
  "quote",
  "syn 3.0.8",
