@@ -33,17 +33,16 @@ fn formatting_never_emits_control_characters() {
     );
 }
 
-/// Malformed, repeated or non-Bearer headers are rejected.
+/// Malformed, repeated or non-Bearer headers are rejected, with the reason. The
+/// shared vectors' `parse-*` cases cover the other syntax errors.
 #[test]
 fn rejects_invalid_headers() {
     for (header, expected) in [
         ("Basic realm=\"x\"", ChallengeError::NotBearer),
         ("Bearer error=\"unterminated", ChallengeError::Syntax(13)),
         ("=x", ChallengeError::Syntax(0)),
-        ("Bearer error=\"a\"scope=\"b\"", ChallengeError::Syntax(16)),
         ("Bearer error=\"a\r\nb\"", ChallengeError::Syntax(13)),
         ("Negotiate abc==, error=x", ChallengeError::Syntax(17)),
-        ("Bearer,error=x", ChallengeError::Syntax(7)),
         (
             "Bearer scope=\"a\tb\"",
             ChallengeError::InvalidValue("scope"),

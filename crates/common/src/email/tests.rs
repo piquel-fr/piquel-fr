@@ -1,32 +1,26 @@
 //! Focused coverage of the conservative equality and rejection policies.
 use super::{InvalidEmail, NormalizedEmail};
 
-/// Provider-specific dot and plus equivalence must never merge addresses.
+/// Only the domain's case folds for equality: provider-specific dot and plus
+/// equivalence must never merge addresses. The mailbox folds case and plus tags
+/// together, for sending limits only.
 #[test]
-fn preserves_provider_specific_local_part_semantics() {
+fn equality_is_exact_and_the_mailbox_folds_case_and_plus_tags() {
+    let email = |value| NormalizedEmail::parse(value).expect("valid email");
     assert_eq!(
-        NormalizedEmail::parse("Ada+jobs@Example.COM")
-            .expect("valid email")
-            .as_str(),
+        email("Ada+jobs@Example.COM").as_str(),
         "Ada+jobs@example.com"
     );
-    assert_ne!(
-        NormalizedEmail::parse("a.da@example.com"),
-        NormalizedEmail::parse("ada@example.com")
+    assert_ne!(email("a.da@example.com"), email("ada@example.com"));
+    assert_eq!(email("Ada+jobs@Example.COM").mailbox(), "ada@example.com");
+    assert_eq!(
+        email("ADA@example.com").mailbox(),
+        email("ada+1@example.com").mailbox()
     );
-}
-
-/// Case and plus tags of one mailbox fold together for sending limits only.
-#[test]
-fn mailbox_folds_case_and_plus_tags() {
-    let mailbox = |value| {
-        NormalizedEmail::parse(value)
-            .expect("valid email")
-            .mailbox()
-    };
-    assert_eq!(mailbox("Ada+jobs@Example.COM"), "ada@example.com");
-    assert_eq!(mailbox("ADA@example.com"), mailbox("ada+1@example.com"));
-    assert_ne!(mailbox("a.da@example.com"), mailbox("ada@example.com"));
+    assert_ne!(
+        email("a.da@example.com").mailbox(),
+        email("ada@example.com").mailbox()
+    );
 }
 
 /// Ambiguous addresses fail with a useful policy reason.

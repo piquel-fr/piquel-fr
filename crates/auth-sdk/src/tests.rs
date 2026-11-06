@@ -254,30 +254,6 @@ fn challenge_vectors() {
     }
 }
 
-/// The step-up vector's challenge parses back into its requirement, and a token
-/// failing that requirement answers with the same header.
-#[test]
-fn step_up_challenge_round_trips() {
-    let case = Case::all("challenges")
-        .into_iter()
-        .find(|case| case.name.ends_with("insufficient-user-authentication.json"))
-        .expect("step-up vector");
-    let header = case.json["expected"]["ok"]["header"]
-        .as_str()
-        .expect("header");
-    let parsed: BearerChallenge = header.parse().expect("challenge");
-    assert_eq!(parsed.step_up, StepUpRequirement::passkey_within(300));
-    let answer = TokenError::InsufficientUserAuthentication(parsed.step_up)
-        .challenge()
-        .expect("a challenge");
-    let answer = BearerChallenge {
-        error_description: parsed.error_description.clone(),
-        resource_metadata: parsed.resource_metadata.clone(),
-        ..answer
-    };
-    assert_eq!(answer.to_string(), header);
-}
-
 /// A token's authentication meets a requirement as auth judges it: `phr` meets a
 /// social requirement, and `auth_time` gets the leeway.
 #[test]

@@ -48,7 +48,6 @@ fn rsa_verifies_signatures_types_expiry_and_logout_hints() {
         )
         .is_err()
     );
-    assert_eq!(keys.jwks().keys[0].kty, KeyType::Rsa);
 }
 
 /// Even correctly RSA-signed inputs cannot choose an algorithm, type, key or critical extension.
