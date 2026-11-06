@@ -37,12 +37,41 @@ pub(crate) mod passkey {
     pub(crate) const LIST: &str = "/account/passkeys";
     /// Renames or removes one passkey.
     pub(crate) const ITEM: &str = "/account/passkeys/{id}";
-    /// The passkey proof the admin dashboard's handoff page posts, which counts
-    /// for that handoff only: the passkey script starts it at
-    /// [`ADMIN_PROOF_START`].
-    pub(crate) const ADMIN_PROOF: &str = "/admin/proof";
-    /// Starts the passkey proof of a handoff to the admin dashboard.
+    /// Starts the passkey proof of a handoff to the admin dashboard, which the
+    /// handoff page posts and verifies itself: it counts for that handoff only.
     pub(crate) const ADMIN_PROOF_START: &str = "/admin/proof/start";
+
+    /// The ceremonies auth's pages run, which their router keeps in every page's
+    /// context.
+    pub(crate) const CEREMONIES: piquel_ui::PasskeyRoutes = {
+        use piquel_ui::CeremonyRoutes as Routes;
+        piquel_ui::PasskeyRoutes {
+            sign_in: Routes {
+                start: AUTHENTICATE_START,
+                finish: AUTHENTICATE_FINISH,
+            },
+            register: Routes {
+                start: REGISTER_START,
+                finish: REGISTER_FINISH,
+            },
+            enroll: Routes {
+                start: ENROLL_START,
+                finish: ENROLL_FINISH,
+            },
+            confirm: Routes {
+                start: CONFIRM_START,
+                finish: CONFIRM_FINISH,
+            },
+            recover: Routes {
+                start: super::recovery::START,
+                finish: super::recovery::FINISH,
+            },
+            undo: Routes {
+                start: super::recovery::UNDO_START,
+                finish: super::recovery::UNDO_FINISH,
+            },
+        }
+    };
 }
 
 /// Social sign-in and linked identities.
@@ -174,7 +203,7 @@ pub(crate) mod oidc {
 pub(crate) mod dashboard {
     /// Redeems auth's handoff code, signing the browser in to the dashboard.
     pub(crate) const SIGN_IN: &str = "/sign-in";
-    /// The passkey ceremony the dashboard's script runs, under `/start` and
+    /// The passkey ceremony the dashboard's dialog runs, under `/start` and
     /// `/finish`, to confirm the dashboard on its own page.
     pub(crate) const CONFIRM: &str = "/confirm";
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.

@@ -9,18 +9,24 @@
 //! paths, and know nothing of the domain, the database or HTTP. Auth's page handlers
 //! resolve who acts, call the service, and render the result with these.
 //!
-//! Nothing here uses Topcoat's browser runtime, `suspense`, `live!` or `asset!`: they
-//! need inline scripts or `'unsafe-eval'`, which auth's pages forbid.
+//! Components run in the browser through Topcoat's runtime: their state is
+//! signals, their behaviour `@event` handlers and `:` bindings, which the server
+//! renders first, so a page reads before its scripts run. Pages carry the
+//! runtime's expressions as data, never code, and [`EXPRESSIONS`] defines them,
+//! so the runtime needs no `'unsafe-eval'`, which auth's pages forbid. What the
+//! runtime's expressions cannot name, such as passkeys, is the `browser`
+//! module's. Nothing here uses `suspense`, `live!` or `asset!`: they need inline
+//! scripts, or a bundle beside the executable, which embeds its files instead.
 //!
 //! ```
 //! use topcoat::{context::Cx, view::{ViewExt, view}};
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> topcoat::Result<()> {
-//! let cx = Cx::default();
-//! let html = view! { cx =>
+//! let cx = &Cx::default();
+//! let html = view! {
 //!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
-//!         scripts: &["/assets/passkey.js"],
+//!         runtime: true,
 //!         piquel_ui::auth_shell(home: "/settings", policies: piquel_ui::Policies::PATHS,
 //!             piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
 //!         )
@@ -28,7 +34,7 @@
 //! }
 //! .single()
 //! .await?
-//! .render(&cx);
+//! .render(cx);
 //! assert!(html.contains(r#"<input type="hidden" name="client_id" value="notes">"#));
 //! # Ok(())
 //! # }
@@ -39,6 +45,8 @@ mod admin;
 /// Files pages link, embedded in the executable: the stylesheet and the
 /// typefaces.
 mod asset;
+/// What the pages ask of the browser beyond Topcoat's runtime expressions.
+mod browser;
 /// An OIDC client's status, facts, settings form and secrets, which the console
 /// and the admin dashboard show.
 mod clients;
@@ -73,7 +81,7 @@ pub use admin::{
     handoff_proof, invitation_created, invitation_list, no_access, recovery_list,
     reserved_handle_choice, signing_key_list, signing_key_rotation, user_page, user_search,
 };
-pub use asset::{Asset, FONTS, STYLESHEET};
+pub use asset::{Asset, EXPRESSIONS, FONTS, RUNTIME, STYLESHEET};
 pub use clients::{
     ClientDraft, ClientRow, ClientStatus, Connection, FieldError, Grace, Revealed, ScopeChoice,
     SecretRow,
@@ -83,7 +91,10 @@ pub use developers::{
     SecretsChange, SecretsState, app_header, app_secrets, app_settings, apps, back_to_apps,
     new_app, overview,
 };
-pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
+pub use form::{
+    Alert, CeremonyRoutes, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, PasskeyRoutes, Query,
+    QueryError,
+};
 pub use layout::{
     AccountNav, Crumb, Health, Pager, Policies, PreferenceChange, Preferences, SOURCE, Search,
     Section, Sidebar, Theme, Title, Who, account, auth_shell, document, signed_out, site_shell,

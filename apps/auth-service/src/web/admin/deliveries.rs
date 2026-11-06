@@ -14,7 +14,7 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub delivery: DeliveryId, error = not_found);
+path_param!(pub delivery: DeliveryId else not_found);
 
 /// How many deliveries the list shows, as `auth-service deliveries list` does
 /// by default.
@@ -68,7 +68,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let (page, rows) = (&href!(list).resolve(cx), &rows);
-    let view = view! { cx =>
+    let view = view! {
         piquel_ui::delivery_list(
             action: page.as_str(),
             status: status,
@@ -115,7 +115,7 @@ impl App {
             }
         })
         .await?;
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::dashboard_change(
                 change: change,
                 back: back.as_str(),

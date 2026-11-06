@@ -12,7 +12,7 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub key: KeyId, error = not_found);
+path_param!(pub key: KeyId else not_found);
 
 /// The form rotating the signing key.
 #[derive(Clone, Deserialize)]
@@ -42,7 +42,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let (rows, rotating) = (&rows, &href!(rotate).resolve(cx));
-    let page = view! { cx => piquel_ui::signing_key_list(rows: rows, rotate: rotating.as_str()) };
+    let page = view! { piquel_ui::signing_key_list(rows: rows, rotate: rotating.as_str()) };
     App::render(cx, StatusCode::OK, "Signing keys", page).await
 }
 
@@ -62,7 +62,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Resp
     .await?;
     let now = refused.as_ref().is_some_and(|refused| refused.form.now.0);
     let (back, refused) = (&back, refused.as_deref());
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::signing_key_rotation(back: back.as_str(), refused: refused, now: now)
     };
     App::render(cx, StatusCode::OK, Change::RotateSigningKey.title(), page).await
@@ -84,7 +84,7 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
             .map(drop)
     })
     .await?;
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_change(
             change: Change::RevokeSigningKey,
             back: back.as_str(),

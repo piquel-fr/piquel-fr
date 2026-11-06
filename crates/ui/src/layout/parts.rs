@@ -3,13 +3,60 @@
 
 use crate::{
     Alert, Messages,
+    browser::Browser,
     icons::{Icon, icon},
 };
 use piquel_common::admin::Paging;
 use topcoat::{
     Result,
+    context::Cx,
+    runtime::{Event, Expr, Signal, expr, signal},
     view::{Child, View, component, view},
 };
+
+/// Something a page offers until this browser dismisses it, by its key: it starts
+/// hidden, and shows unless dismissed. Where the browser keeps no local storage,
+/// it shows on every page, and dismissing it hides it on that page only.
+pub(crate) struct Dismissal {
+    /// The key this browser keeps it dismissed under.
+    key: String,
+    /// Whether it shows.
+    shown: Signal<bool>,
+}
+
+impl Dismissal {
+    /// The one dismissed under `key`.
+    pub(crate) fn new(cx: &Cx, key: String) -> Self {
+        Self {
+            key,
+            shown: signal(cx, || false),
+        }
+    }
+
+    /// Its `@mount` handler, which shows it unless this browser dismissed it.
+    pub(crate) fn mount(&self) -> Expr<impl FnOnce(Event) + use<>> {
+        let (shown, dismissed) = (self.shown.clone(), Browser::dismissed(&self.key));
+        expr!(|_e: Event| shown.set(!dismissed))
+    }
+
+    /// Whether it is hidden.
+    pub(crate) fn hidden(&self) -> Expr<bool> {
+        let shown = self.shown.clone();
+        expr!(!shown.get())
+    }
+
+    /// The `@click` handler of the button dismissing it, which hides it from then
+    /// on. Hiding it takes the focus from the button, so the page's heading gets it.
+    pub(crate) fn dismiss(&self) -> Expr<impl FnOnce(Event) + use<>> {
+        let shown = self.shown.clone();
+        let (focus, dismiss) = (Browser::focus_heading(), Browser::dismiss(&self.key));
+        expr!(|_e: Event| {
+            let _focused = focus;
+            shown.set(false);
+            let _dismissed = dismiss;
+        })
+    }
+}
 
 /// Something a navigation links, by its label.
 pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
@@ -21,7 +68,7 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
     fn label(self) -> &'static str;
 
     /// Whether its page needs the dashboard's passkey confirmation, so the
-    /// dashboard's script confirms before following its link.
+    /// dashboard confirms before following its link.
     fn confirms_first(self) -> bool {
         false
     }
@@ -59,7 +106,7 @@ impl Pager {
 /// The pager below a list of `what`: which items the page shows of how many, and
 /// the previous and next pages. A list that fits one page shows only its count.
 #[component]
-pub(crate) async fn pager<'a>(pages: &'a Pager, what: &'a str) -> Result<impl View> {
+pub(crate) async fn pager<'a>(cx: &Cx, pages: &'a Pager, what: &'a str) -> Result<impl View> {
     let paging = pages.paging;
     let shown = match paging.range() {
         Some((first, last)) => format!("{first}–{last} of {} {what}", paging.total),
@@ -89,6 +136,7 @@ pub(crate) async fn pager<'a>(pages: &'a Pager, what: &'a str) -> Result<impl Vi
 /// the whole page as `actions`, beside them.
 #[component]
 pub async fn page_head(
+    cx: &Cx,
     #[into] title: String,
     #[into]
     #[default]
@@ -113,7 +161,7 @@ pub async fn page_head(
 /// What a page says: the `alert` of a change that failed, and the `notice` of
 /// the one just made.
 #[component]
-pub(crate) async fn page_messages<'a>(messages: Messages<'a>) -> Result<impl View> {
+pub(crate) async fn page_messages<'a>(cx: &Cx, messages: Messages<'a>) -> Result<impl View> {
     Ok(view! {
         // A refused setting is said beside its input instead.
         if let Some(Alert::Page(alert)) = messages.alert {
@@ -135,7 +183,7 @@ pub(crate) async fn page_messages<'a>(messages: Messages<'a>) -> Result<impl Vie
 
 /// Why a change failed, as `message` says it.
 #[component]
-pub(crate) async fn alert_notice<'a>(message: &'a str) -> Result<impl View> {
+pub(crate) async fn alert_notice<'a>(cx: &Cx, message: &'a str) -> Result<impl View> {
     Ok(view! {
         <p class="notice error" role="alert">icon(kind: Icon::Warning)<span class="text">(message)</span></p>
     })
@@ -150,6 +198,7 @@ pub(crate) async fn alert_notice<'a>(message: &'a str) -> Result<impl View> {
 /// into it as it opens; one that does autofocuses its input.
 #[component]
 pub(crate) async fn dialog<'a>(
+    cx: &Cx,
     id: &'a str,
     title: &'a str,
     shown: bool,
@@ -192,7 +241,7 @@ pub(crate) async fn dialog<'a>(
 /// clicking again blurs it. A checkbox, visually hidden, holds whether it shows,
 /// so it needs no script.
 #[component]
-pub(crate) async fn private_address<'a>(address: &'a str) -> Result<impl View> {
+pub(crate) async fn private_address<'a>(cx: &Cx, address: &'a str) -> Result<impl View> {
     Ok(view! {
         <label class="private-address">
             <input type="checkbox" aria-label="Show address">
@@ -206,6 +255,7 @@ pub(crate) async fn private_address<'a>(address: &'a str) -> Result<impl View> {
 /// `data-confirm-first` when [`Label::confirms_first`].
 #[component]
 pub(crate) async fn navigation<'a, T: Label>(
+    cx: &Cx,
     label: &'a str,
     class: &'a str,
     links: &'a [(T, &'a str)],
@@ -213,7 +263,8 @@ pub(crate) async fn navigation<'a, T: Label>(
 ) -> Result<impl View> {
     Ok(view! {
         <nav class=(class) aria-label=(label)>
-            for (link, href) in links {
+            #[key(position)]
+            for (position, (link, href)) in links.iter().enumerate() {
                 <a href=(*href) aria-current=((*link == current).then_some(T::CURRENT)) data-confirm-first=(link.confirms_first())>(link.label())</a>
             }
         </nav>

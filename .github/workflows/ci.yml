@@ -3,8 +3,8 @@
 #
 #   checks -> Rust formatting, unused Rust dependencies and the Rust dependency
 #             audit, which compile nothing
-#   web    -> Prettier, tsc, ESLint and knip, the passkey script included, the
-#             TypeScript SDK's package checks, tests with coverage and runtime
+#   web    -> Prettier, tsc, ESLint and knip, the TypeScript SDK's package
+#             checks, tests with coverage and runtime
 #             smoke in Node, Bun and workerd, and the web dependency audit
 #   rust   -> Clippy, unit and database tests against PostgreSQL with
 #             coverage, doc tests, and the SQLx query cache checked to match
@@ -246,7 +246,7 @@ jobs:
       - *setup-node
       - *rust-cache
       - run: just install
-      # The binary embeds the passkey script and the stylesheet, as in the
+      # The binary embeds Topcoat's runtime and the stylesheet, as in the
       # deployed image.
       - run: just rust build
       # The keys reach every later step, so the commands the suite runs, such as

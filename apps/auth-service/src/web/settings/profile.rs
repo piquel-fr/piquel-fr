@@ -206,7 +206,7 @@ impl AccountPage for Profile {
             administrator,
         };
         let state = &state;
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             piquel_ui::profile_settings(
                 page: settings::PROFILE,
                 who: who,

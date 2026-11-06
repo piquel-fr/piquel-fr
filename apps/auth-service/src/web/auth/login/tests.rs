@@ -6,10 +6,13 @@ use crate::{
     account::AccountService,
     deletion::Deletions,
     federation::ReturnTo,
-    routes::page::{LOGIN, REGISTER, settings},
+    routes::{
+        page::{LOGIN, REGISTER, settings},
+        passkey::{AUTHENTICATE_START, CONFIRM_START, REGISTER_START},
+    },
     security::BrowserCookie,
     tests::{
-        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, parameter,
+        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, ceremonies, cookie, html, location, parameter,
         pending_sign_in, policy, redirect, register, registration, unusable_passkey,
     },
     web::tests::{authorize, value_after},
@@ -148,19 +151,16 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     let action = attribute(&link(LOGIN, &query));
     assert!(
         page.contains(&format!(
-            r#"<form class="stack" method="post" action="{action}" data-passkey-sign-in="">"#
+            r#" class="stack" method="post" action="{action}" "#
         )),
         "{page}"
     );
+    assert_eq!(ceremonies(&page, AUTHENTICATE_START), 1, "{page}");
     assert!(
         page.contains(r#"<input type="hidden" name="action" value="signed_in">"#),
         "{page}"
     );
-    assert_eq!(
-        count(&page, ">Sign in with a passkey</button>"),
-        1,
-        "{page}"
-    );
+    assert_eq!(count(&page, ">Sign in with a passkey<"), 1, "{page}");
     assert!(
         page.contains(r#"<div class="divider">or continue with</div>"#),
         "{page}"
@@ -191,14 +191,10 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     );
     assert!(page.contains(">Handle<"), "{page}");
     assert!(!page.contains("Use a handle instead"), "{page}");
-    assert_eq!(
-        count(&page, ">Sign in with a passkey</button>"),
-        1,
-        "{page}"
-    );
+    assert_eq!(count(&page, ">Sign in with a passkey<"), 1, "{page}");
 }
 
-/// Once the passkey script signed the browser in, its form sends it on to the path
+/// Once the browser signed in with a passkey, its form sends it on to the path
 /// on auth it asked for, or to the settings when it asked for none or for another
 /// site. A browser already signed in is told to which account, and may sign out
 /// first.
@@ -430,7 +426,7 @@ async fn signing_up_starts_with_the_invitation() {
         "{page}"
     );
     assert!(page.contains("<h1>Create your account</h1>"), "{page}");
-    assert!(page.contains("data-passkey-register"), "{page}");
+    assert_eq!(ceremonies(&page, REGISTER_START), 1, "{page}");
     assert!(
         page.contains(r#"<input type="hidden" name="action" value="registered">"#),
         "{page}"
@@ -452,11 +448,7 @@ async fn signing_up_starts_with_the_invitation() {
         page.contains(r#"<input name="invitation" value="invited" required"#),
         "{page}"
     );
-    assert_eq!(
-        count(&page, ">Create account with a passkey</button>"),
-        1,
-        "{page}"
-    );
+    assert_eq!(count(&page, ">Create account with a passkey<"), 1, "{page}");
     assert!(
         page.contains(r#"Already have an account? <a href="/login">Sign in</a>"#),
         "{page}"
@@ -581,7 +573,7 @@ async fn linking_confirms_the_account_with_a_passkey() {
         page.contains(&format!(r#"<p class="notice info">{email}</p>"#)),
         "{page}"
     );
-    assert!(page.contains("data-passkey-sign-in"), "{page}");
+    assert_eq!(ceremonies(&page, AUTHENTICATE_START), 1, "{page}");
     assert!(
         page.contains(r#"<input type="hidden" name="action" value="link">"#),
         "{page}"
@@ -605,11 +597,8 @@ async fn linking_confirms_the_account_with_a_passkey() {
     );
     let page = html(stale.visit(&replicas.a, &here).await).await;
     assert!(page.contains(&signed_in_as), "{page}");
-    assert!(page.contains("data-passkey-confirm"), "{page}");
-    assert!(
-        page.contains(">Verify passkey and add provider</button>"),
-        "{page}"
-    );
+    assert!(ceremonies(&page, CONFIRM_START) > 0, "{page}");
+    assert!(page.contains(">Verify passkey and add provider<"), "{page}");
     assert!(page.contains(">Use a different account</button>"), "{page}");
     let refused = stale.post(&replicas, &here, &LoginChange::Link {}).await;
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
@@ -618,12 +607,12 @@ async fn linking_confirms_the_account_with_a_passkey() {
         page.contains("Confirm with your passkey to continue."),
         "{page}"
     );
-    assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(ceremonies(&page, CONFIRM_START) > 0, "{page}");
 
     let recent = holding(&owner);
     let page = html(recent.visit(&replicas.a, &here).await).await;
     assert!(page.contains(&signed_in_as), "{page}");
-    assert!(!page.contains("data-passkey-confirm"), "{page}");
+    assert_eq!(ceremonies(&page, CONFIRM_START), 0, "{page}");
     let linked = recent.post(&replicas, &here, &LoginChange::Link {}).await;
     assert_eq!(linked.status(), StatusCode::SEE_OTHER);
     assert_eq!(redirect(&linked), settings::SESSIONS);
@@ -775,11 +764,7 @@ async fn failures_are_said_above_the_page() {
         let alert = format!(r#"<p class="notice error" role="alert">{message}</p>"#);
         assert!(page.contains(&alert), "{page}");
         assert!(!page.contains(&format!("error={error}")), "{page}");
-        assert_eq!(
-            count(&page, ">Sign in with a passkey</button>"),
-            1,
-            "{page}"
-        );
+        assert_eq!(count(&page, ">Sign in with a passkey<"), 1, "{page}");
     }
 
     let page = html(
@@ -826,7 +811,7 @@ async fn failures_are_said_above_the_page() {
 
 /// A browser holding the offer a passkey sign-in left for an account scheduled for
 /// deletion sees the sign-in page ask to restore it, signed in to another account
-/// or not, also when the passkey script posts its sign-in. Keeping it scheduled
+/// or not, also when the browser posts its passkey sign-in. Keeping it scheduled
 /// forgets the offer; an offer used, or none, restores nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]

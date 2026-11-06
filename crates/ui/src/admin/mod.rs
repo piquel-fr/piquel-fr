@@ -5,9 +5,9 @@
 //! them, with the links their handler resolves. Each change has its own page: a
 //! `GET` shows its form, and only that form's `POST` makes the change, so a link,
 //! even with a query, never changes anything. A passkey confirmation happens in
-//! a dialog on the page, which the dashboard's one script opens, as
-//! [`Confirmation`] says; without the script, the browser confirms on auth's
-//! handoff page, and comes back. Every page works without it.
+//! a dialog on the page, which the browser opens, as [`Confirmation`] says;
+//! without scripts, the browser confirms on auth's handoff page, and comes back.
+//! Every page works without them.
 
 /// The audit chain's state and its checkpoints.
 mod audit;
@@ -51,7 +51,8 @@ pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
 
 use crate::{
     Checkbox, Query,
-    form::{Precision, time},
+    browser::{AsyncHandler, Browser, CeremonyRequest, Refusal},
+    form::{Ceremony, Passkey, Precision, post_form, time},
     icons::{Icon, icon},
     layout::{
         Crumb, Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who,
@@ -67,6 +68,8 @@ use piquel_common::{
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
+    runtime::{Event, Expr, Signal, expr, signal},
     view::{Child, View, class, component, view},
 };
 
@@ -87,14 +90,15 @@ pub struct HandoffQuery {
 impl Query for HandoffQuery {}
 
 /// What the handoff page's form posts once a passkey proved the handoff: the
-/// handoff, and the proof, which the passkey script fills in.
+/// handoff, and the proof, which the browser fills in.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HandoffProof {
     /// The state of the handoff.
     pub state: String,
     /// The dashboard path to go on to.
     pub return_to: String,
-    /// The passkey's assertion, as the passkey script encodes it.
+    /// The passkey's assertion, as the browser encodes it: its ceremony and the
+    /// credential's JSON.
     #[serde(default)]
     pub assertion: String,
 }
@@ -205,16 +209,16 @@ pub struct Dashboard<'a> {
     pub confirmation: Option<Confirmation<'a>>,
 }
 
-/// The dialog confirming the dashboard with a passkey, which its script opens,
-/// and how long the confirmation lasts, which it reads from the dialog. Once too
-/// little is left, it asks for a passkey there before it follows a link marked
-/// `data-confirm-first`, to a change's page, or posts a form in the page's
-/// `<main>`, a change; then it goes on. Without the script, or a browser that
-/// cannot run the ceremony on the dashboard's origin, the browser goes on at
-/// once, and the page confirms on auth's handoff page instead.
+/// The dialog confirming the dashboard with a passkey, and how long the
+/// confirmation lasts. Once too little is left, the browser asks for a passkey
+/// there before it follows a link marked `data-confirm-first`, to a change's page,
+/// or posts a form in the page with one of its buttons, a change; then it goes on.
+/// Without scripts, or in a browser that cannot run the ceremony on the
+/// dashboard's origin, the browser goes on at once, and the page confirms on
+/// auth's handoff page instead.
 #[derive(Clone, Copy, Debug)]
 pub struct Confirmation<'a> {
-    /// Where the script starts the passkey ceremony, for the dashboard's
+    /// Where the browser starts the passkey ceremony, for the dashboard's
     /// origin.
     pub start: &'a str,
     /// Where it posts the assertion, which confirms the dashboard.
@@ -227,11 +231,237 @@ pub struct Confirmation<'a> {
     pub form_time: i64,
 }
 
+/// The dashboard's [`Confirmation`] in the browser: whether the browser can run
+/// its ceremony on the dashboard's origin, which it finds out as the page loads,
+/// the change its dialog is open for, and the ceremony, started as the dialog
+/// opens, so the button's click reaches the browser's passkey prompt at once, as
+/// Safari needs. Closing the dialog drops the change.
+struct Gate {
+    /// Starting the ceremony.
+    start: CeremonyRequest,
+    /// Running it, once started, which confirms the dashboard.
+    run: CeremonyRequest,
+    /// The milliseconds, from when the page loaded, until the confirmation ends.
+    until: f64,
+    /// The milliseconds a change's page needs left to show its form.
+    form_time: f64,
+    /// Whether the browser runs the ceremony on the dashboard's origin, once
+    /// known: until then, it does not, and the change goes on at once.
+    usable: Signal<bool>,
+    /// The change the dialog is open for, as [`Browser::go_on`] takes it.
+    change: Signal<String>,
+    /// How many times the dialog opened: a ceremony goes on only with the change
+    /// of the opening it started in.
+    opening: Signal<usize>,
+    /// What the ceremony's start answered, once it did.
+    started: Signal<String>,
+    /// Whether the ceremony runs.
+    busy: Signal<bool>,
+    /// Why the last one failed, if it did.
+    error: Signal<String>,
+}
+
+impl Gate {
+    /// The dialog's ID.
+    const DIALOG: &'static str = "passkey-confirmation";
+
+    /// The browser's state of `confirmation`.
+    fn new(cx: &Cx, confirmation: Confirmation<'_>) -> Self {
+        Self {
+            start: CeremonyRequest::assertion(confirmation.start, confirmation.finish, true),
+            run: CeremonyRequest::assertion(confirmation.start, confirmation.finish, false),
+            // Whole seconds, which an `f64` holds exactly.
+            #[expect(clippy::cast_precision_loss, reason = "seconds of a confirmation")]
+            until: confirmation.left.max(0) as f64 * 1000.0,
+            #[expect(clippy::cast_precision_loss, reason = "seconds of a confirmation")]
+            form_time: confirmation.form_time as f64 * 1000.0,
+            usable: signal(cx, || false),
+            change: signal(cx, String::new),
+            opening: signal(cx, || 0usize),
+            started: signal(cx, String::new),
+            busy: signal(cx, || false),
+            error: signal(cx, String::new),
+        }
+    }
+
+    /// The dialog's `@mount` handler, which finds whether the browser runs the
+    /// ceremony on the dashboard's origin.
+    fn mount(&self) -> Expr<impl AsyncHandler + use<>> {
+        let (usable, capable) = (self.usable.clone(), Browser::related_origins());
+        expr!(async |_e: Event| {
+            usable.set(raw!("await ${capable}", false));
+        })
+    }
+
+    /// The `@click` handler of the page, which opens the dialog for a click
+    /// making a change once too little of the confirmation is left: on a link
+    /// marked `data-confirm-first`, to a change's page, which needs time left to
+    /// fill in its form, or on a button posting a form. A click opening a link
+    /// elsewhere, such as in a new tab, goes on as it is.
+    fn intercept(&self) -> Expr<impl AsyncHandler + use<>> {
+        let (usable, change, started) = (
+            self.usable.clone(),
+            self.change.clone(),
+            self.started.clone(),
+        );
+        let (busy, error, opening) = (self.busy.clone(), self.error.clone(), self.opening.clone());
+        let (until, form_time, now) = (self.until, self.form_time, Browser::since_load());
+        let (show, hide, shown) = (
+            Browser::show(Self::DIALOG),
+            Browser::hide(Self::DIALOG),
+            Browser::shown(Self::DIALOG),
+        );
+        let start = Browser::ceremony(None, &self.start, &Expr::from(String::new()));
+        let go_on = Browser::go_on(&expr!(change.get()));
+        expr!(async |e: Event| {
+            // Topcoat's events name no element, so the change the click makes is
+            // read from the DOM event: a link's `a:` and its URL, or `b:` for a
+            // posting button, which it marks `data-pending`.
+            let clicked = raw!(
+                r#"cx.hydrate(((event) => {
+                    const target = event.target instanceof Element ? event.target : null;
+                    const link = target?.closest('a[data-confirm-first]');
+                    if (link)
+                        return event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
+                            ? 'a:' + link.href : '';
+                    const button = target?.closest('button');
+                    if (!button || button.type !== 'submit' || button.form?.method !== 'post') return '';
+                    // A form that does not validate posts nothing: the browser says why.
+                    if (!button.formNoValidate && !button.form.noValidate && !button.form.checkValidity()) return '';
+                    for (const marked of document.querySelectorAll('[data-pending]')) marked.removeAttribute('data-pending');
+                    button.setAttribute('data-pending', '');
+                    return 'b:';
+                })(${e}.inner))"#,
+                String::new()
+            );
+            if usable.get() {
+                if !clicked.is_empty() {
+                    let ahead = if clicked.starts_with("a:") {
+                        form_time
+                    } else {
+                        0.0
+                    };
+                    if now + ahead >= until {
+                        e.prevent_default();
+                        change.set(clicked);
+                        opening.increment();
+                        let mine = opening.get();
+                        started.set("".to_owned());
+                        busy.set(false);
+                        error.set("".to_owned());
+                        let _shown = show;
+                        let begun = raw!("await ${start}", Ok::<String, Refusal>(String::new()));
+                        // A ceremony that does not start, such as when the session
+                        // ended, goes on at once: the change's page then confirms on
+                        // auth's handoff page.
+                        if opening.get() == mine {
+                            if begun.is_ok() {
+                                started.set(begun.unwrap());
+                            } else if shown {
+                                let _hidden = hide;
+                                let _went = go_on;
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// The `@click` handler of the dialog's button, which runs the ceremony, then
+    /// goes on with the change, unless the dialog closed meanwhile. A browser that
+    /// refuses the dashboard's origin for auth's RP ID goes on at once.
+    fn confirm(&self) -> Expr<impl AsyncHandler + use<>> {
+        let (usable, change, started) = (
+            self.usable.clone(),
+            self.change.clone(),
+            self.started.clone(),
+        );
+        let (busy, error, opening) = (self.busy.clone(), self.error.clone(), self.opening.clone());
+        let (hide, shown) = (Browser::hide(Self::DIALOG), Browser::shown(Self::DIALOG));
+        let run = Browser::ceremony(None, &self.run, &expr!(started.get()));
+        let start = Browser::ceremony(None, &self.start, &Expr::from(String::new()));
+        let go_on = Browser::go_on(&expr!(change.get()));
+        expr!(async |_e: Event| {
+            let mine = opening.get();
+            busy.set(true);
+            error.set("".to_owned());
+            let outcome = raw!("await ${run}", Ok::<String, Refusal>(String::new()));
+            // A dialog closed meanwhile, or opened for another change, confirms
+            // nothing.
+            if shown {
+                if opening.get() == mine {
+                    if outcome.is_ok() {
+                        let _hidden = hide;
+                        let _went = go_on;
+                    } else {
+                        let refusal = outcome.unwrap_err();
+                        if refusal.unsupported {
+                            usable.set(false);
+                            let _hidden = hide;
+                            let _went = go_on;
+                        } else {
+                            busy.set(false);
+                            error.set(refusal.message);
+                            // A ceremony serves one try.
+                            started.set("".to_owned());
+                            let again =
+                                raw!("await ${start}", Ok::<String, Refusal>(String::new()));
+                            // One that does not start again goes on at once, as in
+                            // `intercept`.
+                            if shown {
+                                if opening.get() == mine {
+                                    if again.is_ok() {
+                                        started.set(again.unwrap());
+                                    } else {
+                                        let _hidden = hide;
+                                        let _went = go_on;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Whether the dialog's button is disabled: while the ceremony runs, and until
+    /// it started, so a click goes on with that start rather than another.
+    fn busy(&self) -> Expr<bool> {
+        let (busy, started) = (self.busy.clone(), self.started.clone());
+        expr!(if busy.get() {
+            true
+        } else {
+            started.get().is_empty()
+        })
+    }
+
+    /// The dialog's button's label.
+    fn label(&self) -> Expr<String> {
+        let busy = self.busy.clone();
+        expr!(if busy.get() {
+            "Waiting for your passkey…".to_owned()
+        } else {
+            "Confirm with a passkey".to_owned()
+        })
+    }
+
+    /// The alert saying why the last ceremony failed, hidden until one does.
+    fn alert<'a>(&self, cx: &'a Cx) -> Child<'a> {
+        let error = self.error.clone();
+        Child::new(view! {
+            <p class="notice error" role="alert" :hidden=$(error.get().is_empty())>$(error.get())</p>
+        })
+    }
+}
+
 /// The document around every dashboard page, in the shell `dashboard` describes:
 /// the sidebar of its tabs, the signed-in administrator, the status bar with the
 /// service's health; then the page as `child`.
 #[component]
 pub async fn dashboard_frame<'a>(
+    cx: &Cx,
     dashboard: &'a Dashboard<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
@@ -287,29 +517,31 @@ pub async fn dashboard_frame<'a>(
             reference: dashboard.reference,
         };
         if let Some(confirmation) = dashboard.confirmation {
+            let gate = Gate::new(cx, confirmation);
             <div
                 class="dialog"
-                id="passkey-confirmation"
+                id=(Gate::DIALOG)
                 popover=""
                 role="dialog"
                 aria-labelledby="passkey-confirmation-title"
                 aria-describedby="passkey-confirmation-help"
-                data-confirmation-start=(confirmation.start)
-                data-confirmation-finish=(confirmation.finish)
-                data-confirmed-for=(confirmation.left.max(0).to_string())
-                data-form-time=(confirmation.form_time.to_string())
+                @mount=(gate.mount())
             >
                 <span class="dialog-mark">icon(kind: Icon::Key)</span>
                 <h2 id="passkey-confirmation-title">"Confirm it's you"</h2>
                 <p class="help" id="passkey-confirmation-help">"This change needs your passkey. It confirms the dashboard only, for five minutes."</p>
-                <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
+                (gate.alert(cx))
                 <div class="row actions">
-                    <button type="button" data-passkey-confirm="" autofocus="">"Confirm with a passkey"</button>
-                    <button type="button" class="secondary" popovertarget="passkey-confirmation" popovertargetaction="hide">"Cancel"</button>
+                    <button type="button" autofocus="" :disabled=(gate.busy()) @click=(gate.confirm())>
+                        (gate.label())
+                    </button>
+                    <button type="button" class="secondary" popovertarget=(Gate::DIALOG) popovertargetaction="hide">"Cancel"</button>
                 </div>
             </div>
+            shell(frame: &frame, <div class="gate" @click=(gate.intercept())>(child)</div>)
+        } else {
+            shell(frame: &frame, (child))
         }
-        shell(frame: &frame, (child))
     })
 }
 
@@ -619,7 +851,7 @@ impl Change {
 /// A change's button on a row, with where it posts: its page, at `href`. A
 /// dashboard confirmed with a passkey makes the change `inline`, from a dialog
 /// on the row's page; one that is not links the page, which confirms first,
-/// in the frame's dialog where the dashboard's script can open it.
+/// in the frame's dialog where the browser can open it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Action {
     /// The change's page, whose `POST` makes it.
@@ -648,6 +880,7 @@ impl Action {
 /// typed. The handler confirms a recent passkey before showing it.
 #[component]
 pub async fn dashboard_change<'a>(
+    cx: &Cx,
     change: Change,
     back: &'a str,
     #[into]
@@ -664,14 +897,14 @@ pub async fn dashboard_change<'a>(
             <p class="notice error" role="alert">(refusal)</p>
         }
         <section class="card">
-            <form class="stack" method="post" data-submit-once="">
+            post_form(class: "stack",
                 (child)
                 reason_field(change: change, value: reason)
                 <div class="row actions">
                     <button class=(class!("danger" if change.danger()))>(change.button())</button>
                     <a class="button secondary" href=(back)>"Cancel"</a>
                 </div>
-            </form>
+            )
         </section>
     })
 }
@@ -679,6 +912,7 @@ pub async fn dashboard_change<'a>(
 /// The reason input of `change`'s form, if it asks why, holding `value`.
 #[component]
 async fn reason_field<'a>(
+    cx: &Cx,
     change: Change,
     #[into]
     #[default]
@@ -702,6 +936,7 @@ async fn reason_field<'a>(
 /// shows and its button is named by.
 #[component]
 pub(crate) async fn confirm<'a>(
+    cx: &Cx,
     action: &'a Action,
     change: Change,
     #[into]
@@ -727,14 +962,14 @@ pub(crate) async fn confirm<'a>(
                     <p><strong>(subject)</strong></p>
                 }
                 <p class="help">(change.description())</p>
-                <form method="post" action=(action.href.as_str()) data-submit-once="">
+                post_form(action: action.href.as_str(),
                     (child)
                     reason_field(change: change)
                     <div class="row actions">
                         <button class=(class!("danger" if change.danger()))>(change.button())</button>
                         <button type="button" class="secondary" popovertarget=(dialog.as_str()) popovertargetaction="hide">"Cancel"</button>
                     </div>
-                </form>
+                )
             </div>
         } else {
             <a data-confirm-first="" class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
@@ -747,6 +982,7 @@ pub(crate) async fn confirm<'a>(
 /// the tab's section as `child`.
 #[component]
 pub async fn account_settings<'a>(
+    cx: &Cx,
     tabs: &'a [(SettingsTab, &'a str)],
     current: SettingsTab,
     #[into]
@@ -765,7 +1001,11 @@ pub async fn account_settings<'a>(
 
 /// A change the service would refuse, shown disabled with the `reason`.
 #[component]
-pub(crate) async fn refused_action<'a>(label: &'a str, reason: &'a str) -> Result<impl View> {
+pub(crate) async fn refused_action<'a>(
+    cx: &Cx,
+    label: &'a str,
+    reason: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         <span class="refused">
             <button class="secondary small" disabled="" title=(reason)>(label)</button>
@@ -776,7 +1016,7 @@ pub(crate) async fn refused_action<'a>(label: &'a str, reason: &'a str) -> Resul
 
 /// An account's status, as a badge.
 #[component]
-pub(crate) async fn account_status(status: AccountStatus) -> Result<impl View> {
+pub(crate) async fn account_status(cx: &Cx, status: AccountStatus) -> Result<impl View> {
     let (tone, label) = match status {
         AccountStatus::Active => ("ok", "Active"),
         AccountStatus::Disabled => ("neutral", "Disabled"),
@@ -789,14 +1029,14 @@ pub(crate) async fn account_status(status: AccountStatus) -> Result<impl View> {
 
 /// A moment, to the minute, in UTC.
 #[component]
-pub(crate) async fn moment(at: DateTime<Utc>) -> Result<impl View> {
+pub(crate) async fn moment(cx: &Cx, at: DateTime<Utc>) -> Result<impl View> {
     Ok(view! { time(at: at, precision: Precision::Minute) })
 }
 
 /// What an account that does not administer Piquel sees, on the dashboard or on
 /// auth's handoff page, and where it may go instead.
 #[component]
-pub async fn no_access<'a>(home: &'a str) -> Result<impl View> {
+pub async fn no_access<'a>(cx: &Cx, home: &'a str) -> Result<impl View> {
     Ok(view! {
         <h1>"This account has no access"</h1>
         <p class="lead">"Only administrators can use the admin dashboard."</p>
@@ -808,6 +1048,7 @@ pub async fn no_access<'a>(home: &'a str) -> Result<impl View> {
 /// `title`, the `detail` of why, and a link to `retry`, if there is one.
 #[component]
 pub async fn dashboard_failure<'a>(
+    cx: &Cx,
     title: &'a str,
     #[into] detail: String,
     #[into]
@@ -827,6 +1068,7 @@ pub async fn dashboard_failure<'a>(
 /// quick while the Piquel session lasts, which signs out at `auth_sign_out`.
 #[component]
 pub async fn dashboard_signed_out<'a>(
+    cx: &Cx,
     sign_in: &'a str,
     auth_sign_out: &'a str,
 ) -> Result<impl View> {
@@ -841,12 +1083,13 @@ pub async fn dashboard_signed_out<'a>(
 }
 
 /// Auth's page asking an administrator to prove a passkey before going on to the
-/// dashboard to make a change: its form posts to `action` once the
-/// passkey script ran the ceremony `proof` starts, for this handoff only. It
-/// posts the handoff `query` asked for, and says why the last proof was refused,
-/// as `alert`, if it was.
+/// dashboard to make a change: its form posts to `action` once the browser ran
+/// the ceremony `proof` starts, for this handoff only. It posts the handoff
+/// `query` asked for, and says why the last proof was refused, as `alert`, if it
+/// was.
 #[component]
 pub async fn handoff_proof<'a>(
+    cx: &Cx,
     action: &'a str,
     proof: &'a str,
     query: &'a HandoffQuery,
@@ -854,6 +1097,8 @@ pub async fn handoff_proof<'a>(
     #[default]
     alert: Option<&'a str>,
 ) -> Result<impl View> {
+    let ceremony = Ceremony::Prove { start: proof };
+    let passkey = Passkey::new(cx, ceremony);
     Ok(view! {
         <div>
             <h1>"Confirm it's you"</h1>
@@ -863,17 +1108,20 @@ pub async fn handoff_proof<'a>(
             <p class="notice error" role="alert">(alert)</p>
         }
         <form
+            id=(passkey.id())
             class="stack"
             method="post"
             action=(action)
-            data-passkey-assertion=(proof)
+            @mount=(passkey.mount())
+            @submit=(passkey.submit())
+            :aria-busy=(passkey.busy())
         >
             <input type="hidden" name="state" value=(query.state.as_str())>
             <input type="hidden" name="return_to" value=(query.return_to.as_str())>
             <input type="hidden" name="assertion" value="">
-            <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
-            <p class="help" data-unavailable="">"Confirming needs a browser that supports passkeys, with scripts allowed."</p>
-            <button disabled="">"Confirm with a passkey"</button>
+            (passkey.alert(cx))
+            (passkey.unavailable(cx, ceremony.unavailable()))
+            <button :disabled=(passkey.disabled(true))>(passkey.label("Confirm with a passkey"))</button>
         </form>
     })
 }

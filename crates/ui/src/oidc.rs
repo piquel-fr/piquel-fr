@@ -2,6 +2,7 @@
 //! cannot go on.
 
 use crate::{
+    form::post_form,
     icons::{Icon, icon},
     login::switch_account,
 };
@@ -11,6 +12,7 @@ use piquel_common::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -24,6 +26,7 @@ use topcoat::{
 /// authorization already used.
 #[component]
 pub async fn consent<'a>(
+    cx: &Cx,
     client: &'a str,
     host: &'a str,
     #[default] registered_by: Option<&'a str>,
@@ -50,7 +53,8 @@ pub async fn consent<'a>(
         <section class="card" aria-labelledby="access-heading">
             <header><h2 id="access-heading">(format!("{client} will receive"))</h2></header>
             <ul class="list">
-                for scope in scopes {
+                #[key(position)]
+                for (position, scope) in scopes.iter().enumerate() {
                     <li>icon(kind: Icon::Check)<span class="text">(scope_label(scope))</span></li>
                 }
             </ul>
@@ -58,11 +62,11 @@ pub async fn consent<'a>(
         <p class="help">
             (format!("{client} cannot see your passkeys or change your account. You can remove its access at any time from your connected apps."))
         </p>
-        <form method="post" action=(action) data-submit-once="">
+        post_form(action: action,
             <input type="hidden" name="transaction" value=(transaction)>
             <button name="decision" value="approve">"Continue"</button>
             <button class="secondary" name="decision" value="deny">"Cancel"</button>
-        </form>
+        )
         <footer>
             <p class="help">(format!("Signed in as @{account}."))</p>
             switch_account(action: sign_in, label: "Not you? Switch account", class: "text-button")
@@ -87,6 +91,7 @@ pub(crate) fn scope_label(scope: &str) -> &str {
 /// the request's parameters, back to `action`, and a link to `keep` the session.
 #[component]
 pub async fn logout<'a>(
+    cx: &Cx,
     action: &'a str,
     fields: &'a [(&'a str, &'a str)],
     keep: &'a str,
@@ -97,7 +102,8 @@ pub async fn logout<'a>(
             <p class="lead">"This will end your Piquel sign-in session in this browser."</p>
         </div>
         <form method="post" action=(action)>
-            for (name, value) in fields {
+            #[key(position)]
+            for (position, (name, value)) in fields.iter().enumerate() {
                 <input type="hidden" name=(*name) value=(*value)>
             }
             <button>"Sign out"</button>
@@ -111,6 +117,7 @@ pub async fn logout<'a>(
 /// onwards as its label and URL.
 #[component]
 pub async fn failure<'a>(
+    cx: &Cx,
     code: &'a ErrorCode,
     #[default] description: Option<&'a str>,
     #[default] link: Option<(&'a str, &'a str)>,
@@ -162,7 +169,7 @@ pub enum Onward {
 /// application's loopback address: a link to `href`, which leads `to` there, that
 /// the user follows instead.
 #[component]
-pub async fn onward(href: &str, to: Onward) -> Result<impl View> {
+pub async fn onward(cx: &Cx, href: &str, to: Onward) -> Result<impl View> {
     let (title, lead) = match to {
         Onward::Application => (
             "Return to the application".to_owned(),

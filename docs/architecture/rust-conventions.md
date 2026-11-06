@@ -48,13 +48,17 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   including the `Checkbox` and `Lines` types for values a form sends as text;
   `clients` the client views the console shares with the dashboard; `settings`,
   `developers` and `admin` each area's pages, an overview first; `icons` the
-  inline glyphs; `asset` the files pages link, embedded in the executable: the
-  stylesheet, `STYLESHEET`, under a path naming its content, and the `FONTS` it
-  links, under paths naming their version, which the admin dashboard serves
-  with its own, and the document piquel.fr's pages share. It depends only on
-  `piquel-common` (with `admin` and `events`), `chrono`, `serde`, `serde_json`,
-  `serde_urlencoded`, `url` and Topcoat's `view`, so it compiles beside the
-  database crate.
+  inline glyphs; `browser` the browser APIs Topcoat's expressions cannot name,
+  such as WebAuthn, one `raw!` each; `asset` the files pages link, embedded in
+  the executable: the stylesheet, `STYLESHEET`, under a path naming its content,
+  the `FONTS` it links, under paths naming their version, and Topcoat's
+  `RUNTIME` and the `EXPRESSIONS` it runs, which the admin dashboard serves with
+  its own, and the document piquel.fr's pages share. What the pages do in the
+  browser is their components', on Topcoat's runtime: signals, `@event` handlers
+  and `:` bindings. It depends only on `piquel-common` (with `admin` and
+  `events`), `chrono`, `serde`, `serde_json`, `serde_urlencoded`, `url` and
+  Topcoat's `view`, `asset` and `runtime`, so it compiles beside the database
+  crate.
 
 Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet`,
 `KeyEncryptionKey` and `NoteKey` instead of calling `openssl`, `sha2` or `rand`
@@ -122,11 +126,12 @@ template they match (`/developers/clients/{id}`), with a request context and the
 `page` budget. A page handler resolves who
 acts, calls the service in-process and renders `piquel-ui` components, or returns
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
-form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
-or `asset!`, and register every route explicitly. Their Content-Security-Policy
-loads only the stylesheet, its typefaces and the passkey and picture scripts
-embedded under `/assets/`, auth's own profile pictures and the `blob:` of one
-being chosen, lets the passkey script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
+form that succeeds answers `303`. Pages use Topcoat's browser runtime, but no
+`suspense`, `live!` or `asset!`, and register every route explicitly. Their
+Content-Security-Policy loads only the stylesheet, its typefaces, Topcoat's runtime
+and the expressions module embedded under `/assets/`, and auth's own profile
+pictures and the `blob:` of one being chosen, lets the pages fetch only auth itself (`connect-src 'self'`), for their
+passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect
 targets, the enabled providers' authorization origins on the sign-in and sign-in
@@ -182,7 +187,7 @@ and answers the form with it: an authorization continues in-process and goes on
 through the onward page when no policy can name its client. A provider's sign-in for
 such a client links to the provider rather than redirecting there, since a provider
 the user already allowed sends the browser straight back and on to the client. A
-passkey ceremony runs in the browser through the passkey script, then posts the
+passkey ceremony runs in the browser, then posts the
 form's change: signing in or up changes nothing and continues, and linking while
 signed out links once the sign-in succeeds. While the account has a recovery that
 can be undone, a passkey sign-in that continues an authorization first asks whether
@@ -191,28 +196,29 @@ recovery pages (`src/web/auth/recovery`), `/recover` and `/recover/undo`, which 
 recovery's emails link to, serve signed-out browsers too, so they are pages of their
 own as well.
 
-The passkey script (`apps/auth-service/assets/passkey.js`) wires the pages' forms by
-their attributes. It keeps a form marked `data-submit-once` from posting twice, and
-confirms with a passkey before posting one marked `data-passkey-confirm`, which a
-page marks while the session has no recent confirmation. A `data-passkey-sign-in`
-form signs in with a passkey, with its `handle` when typed, and a
-`data-passkey-register` form creates the account and its passkey; both then post. A
-`data-passkey-enroll` form runs the passkey enrollment, then posts, so its page says
-so. A `data-passkey-recover` form enrolls a passkey with the recovery link's token
-its attribute carries, so the form's post never sends the token again, and a
-`data-passkey-undo` form undoes the recovery its attribute names with an older
-passkey; both then post, the undo saying whether it signed the browser in. A
-`data-fragment-form` copies the link's fragment into its inputs as it posts, so an
-emailed link's token never reaches the server in a URL. A ceremony form's or a
-fragment form's button starts disabled, with a `data-unavailable` note saying why,
-until the script finds it can work. While a ceremony runs, its form's button is
-disabled and says it waits for the passkey, and the form's last error hides. A
-`data-dismiss` element, rendered hidden, shows unless the browser's local storage
-holds its key, which a `data-dismisses` button with that key stores as it hides the
-element; without local storage, it shows on every page. A `data-copy` button copies
-a value, and a `data-replace-url` element makes a page that shows a secret reload by
-`GET`. The script is plain JavaScript, embedded as written: `tsc` checks its JSDoc
-types, and ESLint lints it as it does the browser tests.
+What a page does in the browser is Rust, in its components: their state is
+Topcoat signals, their behaviour `@event` handlers and `:` bindings
+(`crates/ui/src/form.rs` holds the forms'). Topcoat's fork (see `Cargo.toml`)
+compiles every runtime expression into one script, `piquel_ui::EXPRESSIONS`, and a
+page carries its expressions as data naming them, so the policy above, which
+allows no `'unsafe-eval'`, runs nothing a page holds. Every form posts once, so a
+double click posts it once. One that needs a recent passkey confirmation, while
+the session has none, confirms with a passkey before it posts. A passkey form
+(`passkey_form`, `Ceremony`) signs in, creates an account, enrolls a passkey, uses
+a recovery link's token, which the ceremony rather than an input carries so the
+form's post never sends it again, or undoes a recovery, then posts: the undo says
+whether it signed the browser in. A fragment form copies the link's fragment into
+its inputs as it posts, so an emailed link's token never reaches the server in a
+URL. A ceremony form's or a fragment form's button starts disabled, with a note
+saying why, until the browser finds it can work. While a ceremony runs, its
+form's button is disabled and says it waits for the passkey, and the form's last
+error hides. A dismissible hint shows unless the browser's local storage holds
+its key; without local storage, it shows on every page. A copy button copies a
+value, a page that shows a secret reloads by `GET`, and the picture form moves and
+zooms the chosen image to choose the square auth keeps. What Topcoat's expressions
+cannot name, such as `WebAuthn` and the clipboard, is a `raw!` call in
+`crates/ui/src/browser.rs`, one per browser API; no page loads a script of its
+own.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin dashboard's pages (`src/web/admin`) and the CLI's commands (`src/cli`)

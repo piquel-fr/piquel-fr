@@ -6,7 +6,7 @@ mod account;
 /// The operations the admin dashboard and the CLI share, and signing
 /// administrators in to the dashboard.
 mod admin;
-/// The stylesheet and passkey script of auth's pages, embedded at compile time.
+/// The stylesheet, typefaces and scripts of auth's pages, embedded at compile time.
 mod assets;
 /// The tamper-evident audit chain: sealing, checkpoints, verification and pruning.
 mod audit;

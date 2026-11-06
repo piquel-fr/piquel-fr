@@ -5,6 +5,7 @@ use crate::layout::page_head;
 use piquel_common::admin::{DeliveryStatus, DeliverySummary};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -34,6 +35,7 @@ const fn status_badge(status: DeliveryStatus) -> (&'static str, &'static str) {
 /// `action` by `GET`.
 #[component]
 pub async fn delivery_list<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into]
     #[default]
@@ -77,7 +79,8 @@ pub async fn delivery_list<'a>(
                             </tr>
                         </thead>
                         <tbody>
-                            for row in rows {
+                            #[key(position)]
+                            for (position, row) in rows.iter().enumerate() {
                                 let delivery = row.delivery;
                                 let (tone, label) = status_badge(delivery.status);
                                 let subject = delivery.id.to_string();

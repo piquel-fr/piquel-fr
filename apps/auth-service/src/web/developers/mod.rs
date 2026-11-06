@@ -84,7 +84,7 @@ impl AccountPage for Apps {
                 page: developers::of(APP, &client.id),
             })
             .collect();
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::apps(links: &links, limit: MAX_OWNED_CLIENTS, new: NEW)
         };
         let head = Child::default();
@@ -151,7 +151,7 @@ impl AccountPage for NewApp {
             scopes: DEFAULT_CLIENT_SCOPES.into_iter().collect(),
             ..ClientDraft::default()
         });
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::new_app(
                 page: NEW,
                 home: HOME,
@@ -265,7 +265,7 @@ impl WebApplication {
                 (vec![(app, overview.as_str())], Crumb::Label(tab.label()))
             }
         };
-        let head = view! { cx =>
+        let head = view! {
             piquel_ui::app_header(home: HOME, client: row, tabs: &tabs, current: tab)
         };
         let framed = Framed {

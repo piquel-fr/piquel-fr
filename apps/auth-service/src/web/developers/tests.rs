@@ -1,9 +1,10 @@
 //! The developer console through the whole service, as a browser uses it.
 
 use crate::{
+    routes,
     routes::page::developers::{self, APP, APP_SECRETS, APP_SETTINGS, HOME, NEW},
     security::BrowserCookie,
-    tests::{Browser, Replicas, cookie, html, policy, redirect},
+    tests::{Browser, Replicas, captures, ceremonies, cookie, html, policy, redirect},
     web::tests::value_after,
 };
 use axum::{
@@ -105,7 +106,7 @@ fn browser_forms_decode() {
 }
 
 /// A confidential app's secret shows once, in the answer registering it, which
-/// nothing stores and which asks the passkey script to put back the form's address;
+/// nothing stores and which puts back the form's address in the browser;
 /// neither its overview nor the apps show it again. A rotation shows the new one the
 /// same way, and lists when the earlier one stops working: once the grace chosen
 /// ends.
@@ -125,10 +126,7 @@ async fn secrets_show_once_in_the_answer_that_makes_them() {
     );
     let page = html(registered).await;
     let first = secret(&page).to_owned();
-    assert!(
-        page.contains(r#"data-replace-url="/developers/new""#),
-        "{page}"
-    );
+    assert!(captures(&page, "/developers/new"), "{page}");
     let id: ClientId = value_after(&page, r#"href="/developers/clients/"#)
         .parse()
         .expect("app ID");
@@ -151,10 +149,7 @@ async fn secrets_show_once_in_the_answer_that_makes_them() {
     let page = html(rotated).await;
     let second = secret(&page);
     assert_ne!(second, first);
-    assert!(
-        page.contains(&format!(r#"data-replace-url="{secrets}""#)),
-        "{page}"
-    );
+    assert!(captures(&page, &secrets), "{page}");
     assert!(page.contains("stops working "), "{page}");
     assert!(page.contains("works until you rotate it"), "{page}");
     let secrets = database.oidc().client_secrets(&id).await.expect("secrets");
@@ -295,7 +290,11 @@ async fn every_change_needs_a_passkey() {
     .await;
     let settings = developers::of(APP_SETTINGS, &id);
     let page = html(social.visit(&replicas.a, &settings).await).await;
-    assert_eq!(page.matches("data-passkey-confirm").count(), 2, "{page}");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::CONFIRM_START),
+        2,
+        "{page}"
+    );
     let app = async || {
         database
             .oidc()
@@ -323,7 +322,10 @@ async fn every_change_needs_a_passkey() {
         "{page}"
     );
     assert!(page.contains(r#"value="Renamed""#), "{page}");
-    assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(
+        ceremonies(&page, routes::passkey::CONFIRM_START) > 0,
+        "{page}"
+    );
 
     let refused = social
         .post(&replicas, &settings, &AppChange::Disable {})
@@ -338,7 +340,7 @@ async fn every_change_needs_a_passkey() {
         .find(&format!("Delete “{}”?", before.display_name))
         .expect("confirmation");
     assert!(
-        page[confirmation..].contains("data-passkey-confirm"),
+        ceremonies(&page[confirmation..], routes::passkey::CONFIRM_START) > 0,
         "{page}"
     );
     let after = app().await;
@@ -346,7 +348,11 @@ async fn every_change_needs_a_passkey() {
     assert!(after.enabled && after.deleted_at.is_none());
 
     let page = html(confirmed.visit(&replicas.a, &settings).await).await;
-    assert!(!page.contains("data-passkey-confirm"), "{page}");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::CONFIRM_START),
+        0,
+        "{page}"
+    );
     let saved = confirmed.post(&replicas, &settings, &save).await;
     assert_eq!(saved.status(), StatusCode::SEE_OTHER);
     assert_eq!(redirect(&saved), settings);

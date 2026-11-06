@@ -14,7 +14,7 @@ use piquel_ui::{
 };
 use serde::Deserialize;
 use topcoat::{
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{Body, StatusCode, response::Response},
     view::{Child, View, view},
 };
@@ -22,7 +22,7 @@ use topcoat::{
 /// What the verification page posts.
 #[derive(Deserialize)]
 struct Verification {
-    /// The link's token, which the passkey script copies from its fragment.
+    /// The link's token, which the browser copies from its fragment.
     token: String,
 }
 
@@ -94,7 +94,7 @@ impl AccountPage for Addresses {
         emails.sort_by_key(|email| !email.primary);
         let rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
         let sends = web.email.smtp.is_some();
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             piquel_ui::addresses(
                 page: settings::EMAILS,
                 emails: &rows,
@@ -112,14 +112,14 @@ impl WebApplication {
     /// `GET /settings/emails/verify`: the confirmation of an address, from its
     /// link. It never verifies: mail scanners open links.
     pub(in crate::web) async fn verify(cx: &Cx) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         web.verify_page(cx, StatusCode::OK, None).await
     }
 
     /// `POST /settings/emails/verify`: confirms the address the link's token names,
     /// signed in or not; an owner signed in to another account cannot.
     pub(in crate::web) async fn confirm_address(cx: &Cx, body: Body) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let owner = web.owner(cx).await?;
         let Some(Verification { token }) = Self::change(cx, body).await else {
             return web
@@ -132,7 +132,7 @@ impl WebApplication {
             .await
         {
             Ok(verified) => {
-                let page = view! { cx =>
+                let page = view! {
                     piquel_ui::verified(
                         address: &verified.address,
                         primary: verified.primary,
@@ -157,7 +157,7 @@ impl WebApplication {
         status: StatusCode,
         alert: Option<&str>,
     ) -> Result<Response, Failure> {
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::verify(action: settings::VERIFY, emails: settings::EMAILS, alert: alert)
         };
         self.verification(cx, status, page).await

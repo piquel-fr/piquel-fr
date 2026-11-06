@@ -5,6 +5,7 @@ use crate::layout::page_head;
 use piquel_common::admin::{AuditPage, ChainPoint, Pruning, VerificationKeys};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -13,6 +14,7 @@ use topcoat::{
 /// command that would, and the link to `later` checkpoints, if there are more.
 #[component]
 pub async fn audit_page<'a>(
+    cx: &Cx,
     page: &'a AuditPage,
     #[into]
     #[default]
@@ -85,7 +87,8 @@ pub async fn audit_page<'a>(
                             <tr><th>"position"</th><th>"signed"</th><th>"pruning"</th></tr>
                         </thead>
                         <tbody>
-                            for checkpoint in &page.checkpoints {
+                            #[key(position)]
+                            for (position, checkpoint) in page.checkpoints.iter().enumerate() {
                                 <tr>
                                     <td><code title=(checkpoint.point.hash.as_str())>(checkpoint.point.position.to_string())</code></td>
                                     <td>moment(at: checkpoint.signed_at)</td>

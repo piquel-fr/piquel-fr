@@ -5,13 +5,15 @@ use crate::{
     AdminService,
     recovery::PROBATION,
     routes::{
+        self,
         oidc::AUTHORIZE_RESUME,
         page::{LOGIN, RECOVER, RECOVER_UNDO, settings},
     },
     security::{BrowserCookie, RequestContext},
     tests::{
-        Browser, Replicas, cookie, html, location, operator, parameter, recovery_links,
-        recovery_reason, recovery_token, redirect, register, registration, unusable_passkey,
+        Browser, Replicas, captures, ceremonies, cookie, html, location, operator, parameter,
+        recovery_links, recovery_reason, recovery_token, redirect, register, registration, sends,
+        unusable_passkey,
     },
     web::tests::authorize,
 };
@@ -157,9 +159,9 @@ const MINUTE: &str = "%-d %b %Y %H:%M";
 /// A recovery link's page never opens the link on its own: its form does, signed
 /// out. A token that no longer works says why, and the link's own asks for a
 /// passkey for its account until the link's deadline, saying up front what the
-/// probation holds back. The token rides only in the passkey script's marker, so
-/// the form never posts it again. Once the passkey script added the passkey, the
-/// browser it signed in goes on to the settings.
+/// probation holds back. The token rides only in the passkey ceremony, so the
+/// form never posts it again. Once the ceremony added the passkey, the browser
+/// it signed in goes on to the settings.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn recovery_links_enroll_a_passkey_from_their_form() {
@@ -171,7 +173,7 @@ async fn recovery_links_enroll_a_passkey_from_their_form() {
     let page = html(page).await;
     let fragment = r#"<input type="hidden" name="token" data-fragment="token">"#;
     assert!(page.contains(fragment), "{page}");
-    assert!(page.contains("data-fragment-missing"), "{page}");
+    assert!(page.contains("This link is incomplete"), "{page}");
 
     let open = |token: &str| RecoverChange::Open {
         token: token.to_owned(),
@@ -183,7 +185,7 @@ async fn recovery_links_enroll_a_passkey_from_their_form() {
         page.contains("This recovery link no longer works."),
         "{page}"
     );
-    assert!(!page.contains("data-fragment-missing"), "{page}");
+    assert!(!page.contains("This link is incomplete"), "{page}");
 
     let opened = browser
         .post(&replicas, RECOVER, &open(&recovering.token))
@@ -192,11 +194,10 @@ async fn recovery_links_enroll_a_passkey_from_their_form() {
     let page = html(opened).await;
     let heading = format!("Add a passkey to @{} (Browser test)", recovering.handle);
     assert!(page.contains(&heading), "{page}");
-    let marker = format!(r#"data-passkey-recover="{}""#, recovering.token);
-    assert!(page.contains(&marker), "{page}");
+    assert_eq!(ceremonies(&page, routes::recovery::START), 1, "{page}");
+    assert!(sends(&page, "token", &recovering.token), "{page}");
     assert!(!page.contains(r#"name="token""#), "{page}");
-    let replaced = format!(r#"data-replace-url="{RECOVER}""#);
-    assert!(page.contains(&replaced), "{page}");
+    assert!(captures(&page, RECOVER), "{page}");
     let until = format!(
         "This link works until {}.",
         time(recovering.expires_at, MINUTE)
@@ -224,7 +225,7 @@ async fn recovery_links_enroll_a_passkey_from_their_form() {
 /// enrollment time and ID only, then offers the ceremony. Without a passkey from
 /// before, only support can undo it, and an unknown recovery leaves nothing to
 /// undo. Signed in, the page offers the account's own recovery should the link name
-/// none. Once the passkey script undid it, a browser the undo signed in goes on to
+/// none. Once the browser undid it, a browser the undo signed in goes on to
 /// the settings, and one it did not is told why, whatever session it holds.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -239,7 +240,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
     assert!(page.contains("This link is incomplete"), "{page}");
 
     let open = |recovery| UndoChange::Open { recovery };
-    let marker = format!(r#"data-passkey-undo="{}""#, recovering.id);
+    let undoes = |page: &str| sends(page, "recovery_id", &recovering.id.to_string());
     let outcome = r#"<input type="hidden" name="action" value="undone"><input type="hidden" name="signed_in" value="false">"#;
     let named = open(Some(recovering.id));
     let page = html(browser.post(&replicas, RECOVER_UNDO, &named).await).await;
@@ -249,7 +250,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
         page.contains("If the link is used before you cancel, cancelling takes back"),
         "{page}"
     );
-    assert!(page.contains(&marker), "{page}");
+    assert!(undoes(&page), "{page}");
     assert!(page.contains(outcome), "{page}");
 
     let passkey = recovering.enroll("Sneaky name").await;
@@ -270,7 +271,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
     let page = html(signed_in.visit(&replicas.a, RECOVER_UNDO).await).await;
     let account = format!("a recovery link added a passkey to @{}", recovering.handle);
     assert!(page.contains(&account), "{page}");
-    assert!(page.contains(&marker), "{page}");
+    assert!(undoes(&page), "{page}");
 
     for recovery in [Some(RecoveryId::new()), None] {
         let nothing = browser.post(&replicas, RECOVER_UNDO, &open(recovery)).await;
@@ -281,7 +282,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
     let unaided = open(Some(unaided.id));
     let page = html(browser.post(&replicas, RECOVER_UNDO, &unaided).await).await;
     assert!(page.contains("only Piquel support can undo it"), "{page}");
-    assert!(!page.contains("data-passkey-undo"), "{page}");
+    assert_eq!(ceremonies(&page, routes::recovery::UNDO_START), 0, "{page}");
 
     let undone = |signed_in| UndoChange::Undone { signed_in };
     let answered = signed_in.post(&replicas, RECOVER_UNDO, &undone(true)).await;
@@ -303,7 +304,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
 }
 
 /// While a recovery can be undone, the account's pages ask whether it was the
-/// owner's once the passkey script finds this session has not answered at this
+/// owner's once the browser finds this session has not answered at this
 /// stage, with a link to cancel or undo it. While its link works, no passkey can
 /// be removed; once it is used, the pages say until when the probation holds its
 /// passkey back, and only that passkey can be removed. The passkey list, its
@@ -321,14 +322,16 @@ async fn settings_show_the_recovery() {
     let key = |stage| format!("piquel-recovery:{}:{stage}:confirmed", browser.session_id);
     let asks = |page: &str, stage, refusal| {
         let key = key(stage);
-        let banner =
-            format!(r#"<section class="notice warning stack" data-dismiss="{key}" hidden="">"#);
-        let answer = format!(r#"data-dismisses="{key}""#);
+        let banner = r#"<section class="notice warning stack" hidden="""#;
+        let answer = ">Yes, it was me</button>";
         let undo = format!(
             r#"<a class="button danger small" href="{RECOVER_UNDO}#recovery={}">{refusal}</a>"#,
             recovering.id
         );
-        page.contains(&banner) && page.contains(&answer) && page.contains(&undo)
+        page.contains(banner)
+            && captures(page, &key)
+            && page.contains(answer)
+            && page.contains(&undo)
     };
     let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
     assert!(asks(&page, "open", "No, cancel it"), "{page}");

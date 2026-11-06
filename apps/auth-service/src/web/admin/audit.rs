@@ -33,6 +33,6 @@ pub(super) async fn verify(cx: &Cx) -> Result<Response> {
     let later = page
         .next
         .map(|after| format!("{}?after={after}", href!(verify).resolve(cx)));
-    let view = view! { cx => piquel_ui::audit_page(page: page, later: later) };
+    let view = view! { piquel_ui::audit_page(page: page, later: later) };
     App::render(cx, StatusCode::OK, "Audit", view).await
 }

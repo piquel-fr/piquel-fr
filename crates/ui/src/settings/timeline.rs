@@ -15,6 +15,7 @@ use piquel_common::{
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -342,6 +343,7 @@ pub struct HistoryPage<'a> {
 /// owner reports.
 #[component]
 pub async fn history<'a>(
+    cx: &Cx,
     rows: &'a [HistoryRow<'a>],
     holds: Holdings<'a>,
     page: HistoryPage<'a>,
@@ -391,11 +393,13 @@ pub async fn history<'a>(
                 }
             </div>
         }
-        for (day, entries) in HistoryRow::days(rows) {
+        #[key(position)]
+        for (position, (day, entries)) in HistoryRow::days(rows).into_iter().enumerate() {
             <section class="card" aria-label=(day.as_str())>
                 <header><h2>(day.as_str())</h2></header>
                 <ul class="events">
-                    for row in entries {
+                    #[key(position)]
+                    for (position, row) in entries.into_iter().enumerate() {
                         entry(row: row, holds: &holds, page: &page, back: back.as_str())
                     }
                 </ul>
@@ -419,12 +423,14 @@ pub async fn history<'a>(
 /// overview shows them: each with its day and time.
 #[component]
 pub(crate) async fn activity_feed<'a>(
+    cx: &Cx,
     rows: &'a [HistoryRow<'a>],
     holds: &'a Holdings<'a>,
 ) -> Result<impl View> {
     Ok(view! {
         <ul class="events">
-            for row in rows {
+            #[key(position)]
+            for (position, row) in rows.iter().enumerate() {
                 <li>
                     time(at: row.occurred_at, precision: Precision::Minute)
                     <span class=(class!("dot", "warning" if row.worrying(), "ok" if !row.worrying()))></span>
@@ -442,6 +448,7 @@ pub(crate) async fn activity_feed<'a>(
 /// it, whose confirmation goes back to `back` and takes the focus once open.
 #[component]
 async fn entry<'a>(
+    cx: &Cx,
     row: &'a HistoryRow<'a>,
     holds: &'a Holdings<'a>,
     page: &'a HistoryPage<'a>,

@@ -2,14 +2,13 @@
 //! refused, and the parts every form is built of.
 //!
 //! A change posts one form to its page, naming it in the hidden `action` field.
-//! One that needs a recent passkey confirmation is marked `data-passkey-confirm`
-//! while the session has none, and the passkey script confirms before posting it.
-//! One that a passkey ceremony makes, signing in, creating an account, adding a
-//! passkey or undoing a recovery, is a [`passkey_form`], which the passkey script
-//! posts once the ceremony is done. One that a link's fragment fills in is a
-//! [`fragment_form`]. Every other form is marked `data-submit-once`, so a double
-//! click posts it once. A row opens for editing or confirmation by a `GET` form, so
-//! it works without a script.
+//! Every form posts once: a double click posts it once ([`Once`]). One that needs a
+//! recent passkey confirmation, while the session has none, confirms with a
+//! passkey before it posts. One that a passkey ceremony makes, signing in, creating
+//! an account, adding a passkey or undoing a recovery, is a [`passkey_form`], which
+//! posts once the ceremony is done ([`Passkey`]). One that a link's fragment fills in
+//! is a [`fragment_form`]. A row opens for editing or confirmation by a `GET` form,
+//! so it works without a script.
 //!
 //! Each page's changes and query are types, such as [`SignInChange`] and
 //! [`SignInState`]. Forms and links serialize them, and the page that receives them
@@ -22,6 +21,7 @@ use crate::{
     DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange, HistoryState, LoginChange,
     LoginQuery, NewAppChange, ProfileChange, RecoverChange, SecretsChange, SignInChange,
     SignInState, UndoChange,
+    browser::{AsyncHandler, Browser, CeremonyRequest, Fill, Refusal},
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use piquel_common::{
@@ -36,7 +36,9 @@ use std::str::FromStr;
 pub use serde_urlencoded::ser::Error as QueryError;
 use topcoat::{
     Result,
-    view::{Child, View, component, view},
+    context::{Cx, context},
+    runtime::{Event, Expr, Signal, expr, signal},
+    view::{Child, View, component, element_id, view},
 };
 
 piquel_common::str_enum! {
@@ -405,7 +407,7 @@ impl Precision {
 /// A moment, in UTC, at `precision`. Its `datetime` is to the second, as HTML
 /// allows no more than three fractional digits.
 #[component]
-pub(crate) async fn time(at: DateTime<Utc>, precision: Precision) -> Result<impl View> {
+pub(crate) async fn time(cx: &Cx, at: DateTime<Utc>, precision: Precision) -> Result<impl View> {
     Ok(view! {
         <time datetime=(at.to_rfc3339_opts(SecondsFormat::Secs, true))>(precision.write(at))</time>
     })
@@ -413,7 +415,7 @@ pub(crate) async fn time(at: DateTime<Utc>, precision: Precision) -> Result<impl
 
 /// The hidden inputs sending `fields`.
 #[component]
-pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
+pub(crate) async fn hidden(cx: &Cx, #[into] fields: Fields) -> Result<impl View> {
     let pairs = fields.pairs()?;
     Ok(view! {
         for (name, value) in &pairs {
@@ -422,13 +424,186 @@ pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
     })
 }
 
+/// What a form that posts once does in the browser: a second submission, such as
+/// a double click, is ignored while the first is under way. Its buttons stay
+/// enabled, so the clicked one still sends its value.
+pub(crate) struct Once {
+    /// Whether the form was submitted.
+    sent: Signal<bool>,
+}
+
+impl Once {
+    /// A form's, not yet submitted.
+    pub(crate) fn new(cx: &Cx) -> Self {
+        Self {
+            sent: signal(cx, || false),
+        }
+    }
+
+    /// The form's `@submit` handler.
+    pub(crate) fn submit(&self) -> Expr<impl FnOnce(Event) + use<>> {
+        let sent = self.sent.clone();
+        expr!(|e: Event| {
+            if sent.get() {
+                e.prevent_default();
+            } else {
+                sent.set(true);
+            }
+        })
+    }
+
+    /// The form's `aria-busy`, set once it is submitted.
+    pub(crate) fn busy(&self) -> Expr<&'static str> {
+        let sent = self.sent.clone();
+        expr!(if sent.get() { "true" } else { "false" })
+    }
+}
+
+/// A form posting to `action`, or to its page without one, once: its `child`
+/// is its inputs and buttons, and it is of `class`. A `multipart` one sends files.
+#[component]
+pub(crate) async fn post_form<'a>(
+    cx: &Cx,
+    #[into]
+    #[default]
+    action: Option<&'a str>,
+    #[into]
+    #[default]
+    class: Option<&'a str>,
+    #[default] multipart: bool,
+    child: Child<'_>,
+) -> Result<impl View> {
+    let once = Once::new(cx);
+    Ok(view! {
+        <form
+            class=(class)
+            method="post"
+            action=(action)
+            enctype=(multipart.then_some("multipart/form-data"))
+            @submit=(once.submit())
+            :aria-busy=(once.busy())
+        >
+            (child)
+        </form>
+    })
+}
+
+/// A form auth posts once it ran a passkey [`Ceremony`] in the browser: while it
+/// runs, the form is busy, its button disabled and saying so; a ceremony that
+/// failed says why in the form, and leaves it to try again.
+pub(crate) struct Passkey {
+    /// The form's ID, which the ceremony reads the fields of and posts.
+    id: String,
+    /// What the ceremony sends.
+    request: CeremonyRequest,
+    /// Whether this browser can run it, which only the browser knows: until it
+    /// says, it cannot.
+    available: Signal<bool>,
+    /// Whether it runs.
+    busy: Signal<bool>,
+    /// Why the last one failed, if it did.
+    error: Signal<String>,
+}
+
+impl Passkey {
+    /// The state of the form running `ceremony` at the routes `cx` holds.
+    pub(crate) fn new(cx: &Cx, ceremony: Ceremony<'_>) -> Self {
+        Self {
+            id: element_id(cx),
+            request: ceremony.request(context::<PasskeyRoutes>(cx)),
+            available: signal(cx, || false),
+            busy: signal(cx, || false),
+            error: signal(cx, String::new),
+        }
+    }
+
+    /// The form's ID.
+    pub(crate) fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    /// The form's `@mount` handler, which finds whether the browser can run the
+    /// ceremony.
+    pub(crate) fn mount(&self) -> Expr<impl FnOnce(Event) + use<>> {
+        let (available, passkeys) = (self.available.clone(), Browser::passkeys());
+        expr!(|_e: Event| available.set(passkeys))
+    }
+
+    /// The form's `@submit` handler, which runs the ceremony once at a time.
+    pub(crate) fn submit(&self) -> Expr<impl AsyncHandler + use<>> {
+        let (busy, error) = (self.busy.clone(), self.error.clone());
+        let ceremony = Browser::ceremony(Some(&self.id), &self.request, &Expr::from(String::new()));
+        expr!(async |e: Event| {
+            e.prevent_default();
+            if !busy.get() {
+                busy.set(true);
+                error.set("".to_owned());
+                let outcome = raw!("await ${ceremony}", Ok::<String, Refusal>(String::new()));
+                if outcome.is_err() {
+                    busy.set(false);
+                    error.set(outcome.unwrap_err().message);
+                }
+            }
+        })
+    }
+
+    /// The form's `aria-busy`, set while the ceremony runs.
+    pub(crate) fn busy(&self) -> Expr<&'static str> {
+        let busy = self.busy.clone();
+        expr!(if busy.get() { "true" } else { "false" })
+    }
+
+    /// Whether the form's button is disabled: while the ceremony runs, and, when
+    /// `gated`, until the browser is known to run it.
+    pub(crate) fn disabled(&self, gated: bool) -> Expr<bool> {
+        let (busy, available) = (self.busy.clone(), self.available.clone());
+        expr!(if busy.get() {
+            true
+        } else if gated {
+            !available.get()
+        } else {
+            false
+        })
+    }
+
+    /// The form's button's label: `label`, or that the ceremony waits for the
+    /// passkey while it runs.
+    pub(crate) fn label(&self, label: &str) -> Expr<String> {
+        let (busy, label) = (self.busy.clone(), label.to_owned());
+        expr!(if busy.get() {
+            "Waiting for your passkey…".to_owned()
+        } else {
+            label
+        })
+    }
+
+    /// The alert saying why the last ceremony failed, hidden until one does.
+    pub(crate) fn alert<'a>(&self, cx: &'a Cx) -> Child<'a> {
+        let error = self.error.clone();
+        Child::new(view! {
+            <p class="notice error" role="alert" :hidden=$(error.get().is_empty())>$(error.get())</p>
+        })
+    }
+
+    /// The note saying why the button stays disabled, `unavailable`, hidden once
+    /// the browser is known to run the ceremony.
+    pub(crate) fn unavailable<'a>(&self, cx: &'a Cx, unavailable: &'static str) -> Child<'a> {
+        let available = self.available.clone();
+        Child::new(view! {
+            <p class="help" :hidden=$(available.get())>(unavailable)</p>
+        })
+    }
+}
+
 /// A change posted to the page at `action`: `change` as hidden inputs, the inputs
 /// the user fills in as `child`, the reason an administrator gives when `reason`
-/// asks for one, holding what they typed last, and a button labelled `label`, of `class`, beside a link back to
-/// `cancel` when there is one. With `confirm`, the passkey script first confirms
-/// the session with a passkey; a ceremony that fails says why in the form.
+/// asks for one, holding what they typed last, and a button labelled `label`, of
+/// `class`, beside a link back to `cancel` when there is one. It posts once; with
+/// `confirm`, it first confirms the session with a passkey, and a ceremony that
+/// fails says why in the form.
 #[component]
 pub(crate) async fn change_form<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into] change: Fields,
     #[into] label: String,
@@ -445,68 +620,184 @@ pub(crate) async fn change_form<'a>(
     cancel: Option<String>,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
+    let fields = view! {
+        hidden(fields: change)
+        (child)
+        if let Some(reason) = reason {
+            <label>
+                "Reason, shown to the owner in their history"
+                <input name="reason" required="" maxlength="500" value=(reason)>
+            </label>
+        }
+    };
+    let cancel = view! {
+        if let Some(cancel) = &cancel {
+            <a class="button secondary" href=(cancel.as_str())>"Cancel"</a>
+        }
+    };
     Ok(view! {
-        <form
-            method="post"
-            action=(action)
-            data-passkey-confirm=(confirm)
-            data-submit-once=(!confirm)
-        >
-            hidden(fields: change)
-            (child)
-            if let Some(reason) = reason {
-                <label>
-                    "Reason, shown to the owner in their history"
-                    <input name="reason" required="" maxlength="500" value=(reason)>
-                </label>
-            }
-            if confirm {
-                <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
-            }
-            <div class="row actions">
-                <button class=(class) aria-label=(aria_label.as_deref())>(label.as_str())</button>
-                if let Some(cancel) = &cancel {
-                    <a class="button secondary" href=(cancel.as_str())>"Cancel"</a>
-                }
-            </div>
-        </form>
+        if confirm {
+            let passkey = Passkey::new(cx, Ceremony::Confirm);
+            <form
+                id=(passkey.id())
+                method="post"
+                action=(action)
+                @submit=(passkey.submit())
+                :aria-busy=(passkey.busy())
+            >
+                (fields)
+                (passkey.alert(cx))
+                <div class="row actions">
+                    <button class=(class) aria-label=(aria_label.as_deref()) :disabled=(passkey.disabled(false))>
+                        (passkey.label(&label))
+                    </button>
+                    (cancel)
+                </div>
+            </form>
+        } else {
+            post_form(action: action,
+                (fields)
+                <div class="row actions">
+                    <button class=(class) aria-label=(aria_label.as_deref())>(label.as_str())</button>
+                    (cancel)
+                </div>
+            )
+        }
     })
 }
 
-/// A passkey ceremony the passkey script runs before posting a [`passkey_form`],
-/// named by the form's marker.
+/// A passkey ceremony a [`Passkey`] form runs before it posts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Ceremony<'a> {
     /// Signing in, with the form's `handle`, if any, or the browser's account
-    /// picker: `data-passkey-sign-in`.
+    /// picker.
     SignIn,
     /// Creating an account with its first passkey, from the form's `handle`,
-    /// `friendly_name`, `passkey_kind`, `invitation` and `pending_signup`:
-    /// `data-passkey-register`.
+    /// `friendly_name`, `passkey_kind`, `invitation` and `pending_signup`.
     Register,
     /// Adding a passkey to the signed-in account, from the form's `friendly_name`
-    /// and `passkey_kind`, confirming first if it must: `data-passkey-enroll`.
+    /// and `passkey_kind`, confirming first if it must.
     Enroll,
     /// Adding a passkey with a recovery link, which signs the browser in, from the
-    /// form's `friendly_name` and `passkey_kind`: `data-passkey-recover`, whose
-    /// value is the link's `token`. The token rides in the marker rather than in an
-    /// input, so the form's post never sends it again.
+    /// form's `friendly_name` and `passkey_kind`. The link's `token` rides in the
+    /// ceremony rather than in an input, so the form's post never sends it again.
     Recover {
         /// The recovery link's token.
         token: &'a str,
     },
-    /// Undoing the `recovery` with a passkey the account had before it:
-    /// `data-passkey-undo`, whose value is the recovery's ID.
+    /// Undoing the `recovery` with a passkey the account had before it; the form
+    /// posts whether that signed the browser in, in its `signed_in` input, since
+    /// the session cookie is `HttpOnly`.
     Undo {
         /// The recovery.
         recovery: RecoveryId,
     },
+    /// Confirming the session, for a change that needs a recent passkey.
+    Confirm,
+    /// Proving a passkey in the ceremony `start` starts; the form posts the proof
+    /// in its `assertion` input, and its page verifies it. The session stays as it
+    /// was: the proof counts only for that form.
+    Prove {
+        /// Where the ceremony starts.
+        start: &'a str,
+    },
+}
+
+/// A passkey ceremony's routes on auth: where it starts, which answers its
+/// `WebAuthn` options, and where it finishes, which takes the credential.
+#[derive(Clone, Copy, Debug)]
+pub struct CeremonyRoutes {
+    /// Where it starts.
+    pub start: &'static str,
+    /// Where it finishes.
+    pub finish: &'static str,
+}
+
+/// Where auth runs the passkey ceremonies its forms ask for. Auth's router keeps
+/// it in every page's context, where passkey forms read it.
+#[derive(Clone, Copy, Debug)]
+pub struct PasskeyRoutes {
+    /// Signing in.
+    pub sign_in: CeremonyRoutes,
+    /// Creating an account.
+    pub register: CeremonyRoutes,
+    /// Adding a passkey to the signed-in account.
+    pub enroll: CeremonyRoutes,
+    /// Confirming the session.
+    pub confirm: CeremonyRoutes,
+    /// Adding a passkey with a recovery link.
+    pub recover: CeremonyRoutes,
+    /// Undoing a recovery.
+    pub undo: CeremonyRoutes,
 }
 
 impl Ceremony<'_> {
-    /// Why the form's button stays disabled, until the passkey script finds the
-    /// browser can run the ceremony.
-    const fn unavailable(self) -> &'static str {
+    /// What the browser sends to run it at `routes`.
+    fn request(self, routes: &PasskeyRoutes) -> CeremonyRequest {
+        let run = |routes: CeremonyRoutes, create: bool| CeremonyRequest {
+            start: routes.start.to_owned(),
+            finish: Some(routes.finish.to_owned()),
+            create,
+            fields: &[],
+            finish_fields: &[],
+            fixed: serde_json::Map::new(),
+            confirm: None,
+            fill: None,
+            submit: true,
+            start_only: false,
+        };
+        let fixed = |name: &str, value: String| {
+            serde_json::Map::from_iter([(name.to_owned(), serde_json::Value::String(value))])
+        };
+        match self {
+            Self::SignIn => CeremonyRequest {
+                fields: &["handle"],
+                ..run(routes.sign_in, false)
+            },
+            Self::Register => CeremonyRequest {
+                fields: &["handle", "passkey_kind", "invitation", "pending_signup"],
+                finish_fields: &["friendly_name"],
+                ..run(routes.register, true)
+            },
+            Self::Enroll => CeremonyRequest {
+                fields: &["passkey_kind"],
+                finish_fields: &["friendly_name"],
+                confirm: Some((
+                    routes.confirm.start.to_owned(),
+                    routes.confirm.finish.to_owned(),
+                )),
+                ..run(routes.enroll, true)
+            },
+            Self::Recover { token } => CeremonyRequest {
+                fields: &["passkey_kind"],
+                finish_fields: &["friendly_name"],
+                fixed: fixed("token", token.to_owned()),
+                ..run(routes.recover, true)
+            },
+            Self::Undo { recovery } => CeremonyRequest {
+                fixed: fixed("recovery_id", recovery.to_string()),
+                fill: Some(Fill {
+                    input: "signed_in",
+                    field: Some("signed_in"),
+                }),
+                ..run(routes.undo, false)
+            },
+            Self::Confirm => run(routes.confirm, false),
+            Self::Prove { start } => CeremonyRequest {
+                start: start.to_owned(),
+                finish: None,
+                fill: Some(Fill {
+                    input: "assertion",
+                    field: None,
+                }),
+                ..run(routes.confirm, false)
+            },
+        }
+    }
+
+    /// Why the form's button stays disabled, until the browser is known to run
+    /// the ceremony.
+    pub(crate) const fn unavailable(self) -> &'static str {
         match self {
             Self::SignIn | Self::Register => {
                 "Passkeys need a supported browser and a secure connection, with scripts allowed. Open this page in Safari, Chrome, or another browser with passkey support."
@@ -520,17 +811,20 @@ impl Ceremony<'_> {
             Self::Undo { .. } => {
                 "Undoing needs a browser that supports passkeys, with scripts allowed."
             }
+            Self::Confirm | Self::Prove { .. } => {
+                "Confirming needs a browser that supports passkeys, with scripts allowed."
+            }
         }
     }
 }
 
-/// A change posted to the page at `action` once the passkey script ran the passkey
-/// `ceremony`: `change` as hidden inputs, the inputs the ceremony reads as `child`,
-/// and a button labelled `label`, of `class`. The button stays disabled, and says
-/// so, until the passkey script finds the browser can run the ceremony; a ceremony
-/// that fails says why in the form.
+/// A change posted to the page at `action` once the browser ran the passkey
+/// `ceremony`: `change` as hidden inputs, the inputs the ceremony reads as
+/// `child`, and a button labelled `label`, of `class`. The button stays disabled,
+/// and says so, until the browser is known to run the ceremony.
 #[component]
 pub(crate) async fn passkey_form<'a>(
+    cx: &Cx,
     action: &'a str,
     ceremony: Ceremony<'a>,
     #[into] change: Fields,
@@ -538,27 +832,22 @@ pub(crate) async fn passkey_form<'a>(
     #[default] class: &'a str,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
-    let (recover, undo) = match ceremony {
-        Ceremony::Recover { token } => (Some(token), None),
-        Ceremony::Undo { recovery } => (None, Some(recovery.to_string())),
-        Ceremony::SignIn | Ceremony::Register | Ceremony::Enroll => (None, None),
-    };
+    let passkey = Passkey::new(cx, ceremony);
     Ok(view! {
         <form
+            id=(passkey.id())
             class="stack"
             method="post"
             action=(action)
-            data-passkey-sign-in=(ceremony == Ceremony::SignIn)
-            data-passkey-register=(ceremony == Ceremony::Register)
-            data-passkey-enroll=(ceremony == Ceremony::Enroll)
-            data-passkey-recover=(recover)
-            data-passkey-undo=(undo.as_deref())
+            @mount=(passkey.mount())
+            @submit=(passkey.submit())
+            :aria-busy=(passkey.busy())
         >
             hidden(fields: change)
             (child)
-            <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
-            <p class="help" data-unavailable="">(ceremony.unavailable())</p>
-            <button class=(class) disabled="">(label)</button>
+            (passkey.alert(cx))
+            (passkey.unavailable(cx, ceremony.unavailable()))
+            <button class=(class) :disabled=(passkey.disabled(true))>(passkey.label(label))</button>
         </form>
     })
 }
@@ -568,6 +857,7 @@ pub(crate) async fn passkey_form<'a>(
 /// save it with Google Password Manager, where it is saved.
 #[component]
 pub(crate) async fn new_passkey<'a>(
+    cx: &Cx,
     label: &'a str,
     #[into]
     #[default]
@@ -594,15 +884,17 @@ pub(crate) async fn new_passkey<'a>(
 
 /// A change posted to the page at `action` with values a link carries in its
 /// fragment, which never reaches a server: `change` as hidden inputs, then an input
-/// for each of `fragments`, named as the fragment names it, which the passkey
-/// script fills in from the fragment as it posts the form, dropping the fragment
-/// from the address. The form holds `child`, and a button labelled `label`, which
-/// stays disabled without scripts, as the note `unavailable` says. It shows, with
-/// its button enabled, while the link has every value; otherwise `missing` shows
-/// instead, as after a post that failed, whose `alert` says why: the fragment is
-/// gone by then. With `alert_replaces_missing`, the alert says why alone.
+/// for each of `fragments`, named as the fragment names it, which the browser fills
+/// in from the fragment as it posts the form, once, dropping the fragment from the
+/// address. The form holds `child`, and a button labelled `label`, which stays
+/// disabled without scripts, as the note `unavailable` says. It shows, with its
+/// button enabled, while the link has every value, following the fragment as it
+/// changes; otherwise `missing` shows instead, as after a post that failed, whose
+/// `alert` says why: the fragment is gone by then. With `alert_replaces_missing`,
+/// the alert says why alone.
 #[component]
 pub(crate) async fn fragment_form<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into] change: Fields,
     fragments: &'a [&'a str],
@@ -613,31 +905,61 @@ pub(crate) async fn fragment_form<'a>(
     #[into] missing: Child<'_>,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
+    let id = element_id(cx);
+    let once = Once::new(cx);
+    // The fragment, once the browser read it: only it sees the fragment.
+    let (fragment, read) = (signal(cx, String::new), signal(cx, || false));
+    let complete = Browser::fragment_holds(fragments, &expr!(fragment.get()));
+    let (link, follow) = (Browser::fragment(), Browser::follow_fragment(&fragment));
+    let (fill, drop) = (Browser::fill_from_fragment(&id), Browser::drop_fragment());
+    let sent = once.sent.clone();
     Ok(view! {
         if let Some(alert) = alert {
             <p class="notice error" role="alert">(alert)</p>
         }
-        <form class="card stack" method="post" action=(action) data-submit-once="" data-fragment-form="">
+        <form
+            id=(id.as_str())
+            class="card stack"
+            method="post"
+            action=(action)
+            :aria-busy=(once.busy())
+            :hidden=$(if read.get() { !complete } else { false })
+            @mount=$(|_e: Event| {
+                fragment.set(link);
+                read.set(true);
+                let _followed = follow;
+            })
+            @submit=$(|e: Event| {
+                if sent.get() {
+                    e.prevent_default();
+                } else {
+                    sent.set(true);
+                    let _filled = fill;
+                    let _dropped = drop;
+                }
+            })
+        >
             hidden(fields: change)
             for name in fragments {
                 <input type="hidden" name=(*name) data-fragment=(*name)>
             }
             (child)
-            <p class="help" data-unavailable="">(unavailable)</p>
-            <button disabled="">(label)</button>
+            <p class="help" :hidden=$(read.get())>(unavailable)</p>
+            <button :disabled=$(if read.get() { !complete } else { true })>(label)</button>
         </form>
         if !(alert_replaces_missing && alert.is_some()) {
-            <div class="card stack" data-fragment-missing="" hidden="">(missing)</div>
+            <div class="card stack" :hidden=$(if read.get() { complete } else { true })>(missing)</div>
         }
     })
 }
 
-/// An account's handle, as the passkey script and the handle's settings send it:
+/// An account's handle, as a passkey ceremony and the handle's settings send it:
 /// a `new` one, which creating an account or changing the handle checks against the
 /// handle rules, or one to sign in with. It shows `value`, if any, and takes the
 /// focus with `focus`.
 #[component]
 pub(crate) async fn handle_input<'a>(
+    cx: &Cx,
     new: bool,
     #[default] value: Option<&'a str>,
     #[default] focus: bool,
@@ -671,6 +993,7 @@ pub(crate) async fn handle_input<'a>(
 /// text button, a `secondary` one, or a `danger` one for a removal.
 #[component]
 pub(crate) async fn open<'a>(
+    cx: &Cx,
     page: &'a str,
     #[into] opens: Fields,
     label: &'a str,

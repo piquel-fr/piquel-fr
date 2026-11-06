@@ -108,7 +108,7 @@ impl AccountPage for SignInMethods {
             .authorization_endpoints()
             .map_err(Error::from)?;
         let android = PasskeyApplication::offers_google_password_manager(headers(cx));
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             piquel_ui::sign_in_methods(
                 page: settings::SIGN_IN,
                 passkeys: &passkeys,

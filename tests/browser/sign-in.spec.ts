@@ -19,7 +19,7 @@ test('signing in with a handle, after one without an account is refused', async 
   // Handles are public, so a handle without an account is refused before any ceremony.
   await field.fill(`nobody-${Date.now().toString(36)}`);
   await signIn.click();
-  await expect(page.locator('form[data-passkey-sign-in]').getByRole('alert')).toHaveText(
+  await expect(page.locator('form', { has: signIn }).getByRole('alert')).toHaveText(
     'No active account has this handle.'
   );
   await expect(page).toHaveURL(/\/login/);

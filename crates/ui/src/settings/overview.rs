@@ -8,11 +8,13 @@ use super::{
 use crate::{
     form::change_form,
     icons::{Icon, icon},
-    layout::page_head,
+    layout::{Dismissal, page_head},
 };
 use chrono::{DateTime, Utc};
+use piquel_common::Provider;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -56,6 +58,7 @@ pub struct AccountOverview<'a> {
 /// and the devices signed in, linking the pages in `links`.
 #[component]
 pub async fn account_overview<'a>(
+    cx: &Cx,
     overview: AccountOverview<'a>,
     links: OverviewLinks<'a>,
 ) -> Result<impl View> {
@@ -97,23 +100,9 @@ pub async fn account_overview<'a>(
                 <span class="detail">"sign-ins and changes"</span>
             </div>
         </div>
+        #[key(row.provider.as_str())]
         for row in unlinked {
-            let key = format!("piquel-link:{}", row.provider.as_str());
-            let name = row.provider.name();
-            <section class="hint" data-dismiss=(key.as_str()) hidden="">
-                icon(kind: Icon::Link)
-                <div class="text">
-                    <strong>(format!("You can still link {name}"))</strong>
-                    <small>(format!("Sign in with a {name} account you already have. Linking never replaces your passkeys."))</small>
-                </div>
-                change_form(
-                    action: links.sign_in,
-                    change: SignInChange::Link { provider: row.provider },
-                    label: format!("Link {name}"),
-                    class: "small",
-                )
-                <button type="button" class="secondary small" data-dismisses=(key.as_str())>"Not now"</button>
-            </section>
+            link_hint(provider: row.provider, sign_in: links.sign_in)
         }
         <div class="two side">
             <section class="card" aria-labelledby="activity-heading">
@@ -166,4 +155,28 @@ fn sessions_detail(browsers: usize, other: usize) -> String {
         (0, other) => plural(other, "unrecorded device"),
         (browsers, other) => format!("{} · {other} unrecorded", plural(browsers, "browser")),
     }
+}
+
+/// The hint that the account can still link `provider`, posting to the sign-in
+/// methods at `sign_in`, until this browser dismisses it.
+#[component]
+async fn link_hint<'a>(cx: &Cx, provider: Provider, sign_in: &'a str) -> Result<impl View> {
+    let name = provider.name();
+    let dismissal = Dismissal::new(cx, format!("piquel-link:{}", provider.as_str()));
+    Ok(view! {
+        <section class="hint" :hidden=(dismissal.hidden()) @mount=(dismissal.mount())>
+            icon(kind: Icon::Link)
+            <div class="text">
+                <strong>(format!("You can still link {name}"))</strong>
+                <small>(format!("Sign in with a {name} account you already have. Linking never replaces your passkeys."))</small>
+            </div>
+            change_form(
+                action: sign_in,
+                change: SignInChange::Link { provider },
+                label: format!("Link {name}"),
+                class: "small",
+            )
+            <button type="button" class="secondary small" @click=(dismissal.dismiss())>"Not now"</button>
+        </section>
+    })
 }

@@ -7,14 +7,13 @@ use crate::{
     AdminService, AuthConfig, DashboardConfig, Reason,
     account::AccountService,
     admin::DashboardSignIn,
-    assets::EmbeddedAssets,
     config::EmailConfig,
     passkey::AdminProof,
     routes,
     security::{BrowserCookie, RequestContext},
     tests::{
-        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, operator, parameter,
-        policy, redirect,
+        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, ceremonies, cookie, html, location, operator,
+        parameter, policy, redirect,
     },
 };
 use axum::{
@@ -236,8 +235,8 @@ async fn a_server_error_shows_its_trace_id() {
 
 /// An administrator's passkey session signs in to the dashboard through auth's
 /// handoff page, silently. The code works once, only in the browser holding the
-/// state it was bound to. Every page loads the dashboard's script alone, and
-/// posts only to itself.
+/// state it was bound to. Every page loads Topcoat's runtime and its expressions
+/// alone, and posts only to itself.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_in_hands_off_through_auth_once() {
@@ -257,10 +256,11 @@ async fn signing_in_hands_off_through_auth_once() {
     let csp = policy(&page).to_owned();
     let handoff = format!("form-action 'self' {AUTH_ORIGIN}{};", routes::page::ADMIN);
     assert!(csp.contains(&handoff), "{csp}");
-    let script = EmbeddedAssets::DASHBOARD_SCRIPT.path();
+    let (runtime, expressions) = (piquel_ui::RUNTIME.path(), piquel_ui::EXPRESSIONS.path());
     assert!(
-        csp.contains(&format!("script-src {DASHBOARD}{script};"))
-            && csp.contains("connect-src 'self';")
+        csp.contains(&format!(
+            "script-src {DASHBOARD}{runtime} {DASHBOARD}{expressions};"
+        )) && csp.contains("connect-src 'self';")
             && csp.contains(&format!("img-src {AUTH_ORIGIN};")),
         "{csp}"
     );
@@ -329,10 +329,11 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
         csp.contains(&format!("form-action 'self' {DASHBOARD}")),
         "{csp}"
     );
-    assert!(
-        html(page)
-            .await
-            .contains(r#"data-passkey-assertion="/admin/proof""#)
+    let page = html(page).await;
+    assert_eq!(
+        ceremonies(&page, routes::passkey::ADMIN_PROOF_START),
+        1,
+        "{page}"
     );
 
     let sign_in = DashboardSignIn::new(
@@ -380,6 +381,10 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
     assert_eq!(stored.status, AccountStatus::Disabled);
 }
 
+/// What the dialog's expressions capture of a dashboard with no confirmation
+/// left: the milliseconds until it ends, from when the page loaded.
+const UNCONFIRMED: &str = "{&quot;v&quot;:0.0}";
+
 /// The frame's dialog confirms the dashboard on its own page: it says how long
 /// the confirmation lasts, nothing before it and five minutes after, and starts
 /// the passkey ceremony for auth's RP ID, bound to the browser, as auth's own
@@ -391,12 +396,16 @@ async fn the_dialog_confirms_on_the_page() {
     let admin = harness.admin().await;
     let dashboard = harness.sign_in(&admin, "/users").await;
     let page = html(harness.visit(&dashboard, "/users").await).await;
+    // The dialog starts, then runs, the ceremony of the dashboard's own routes,
+    // and the confirmation has no time left, of the two minutes a change's page
+    // needs.
+    assert!(ceremonies(&page, "/confirm/start") > 0, "{page}");
+    assert!(page.contains("{&quot;v&quot;:120000.0}"), "{page}");
     assert!(
-        page.contains(
-            r#"data-confirmation-start="/confirm/start" data-confirmation-finish="/confirm/finish" data-confirmed-for="0" data-form-time="120""#
-        ),
+        page.contains(r"\&quot;finish\&quot;:\&quot;/confirm/finish\&quot;"),
         "{page}"
     );
+    assert!(page.contains(UNCONFIRMED), "{page}");
     let url = format!("{DASHBOARD}/confirm/start");
     let started = dashboard
         .submit(&harness.dashboard, &url, &[], OWN_PAGE)
@@ -413,7 +422,7 @@ async fn the_dialog_confirms_on_the_page() {
 
     let confirmed = harness.confirmed(&admin, "/users", Utc::now()).await;
     let page = html(harness.visit(&confirmed, "/users").await).await;
-    assert!(!page.contains(r#"data-confirmed-for="0""#), "{page}");
+    assert!(!page.contains(UNCONFIRMED), "{page}");
 }
 
 /// While email is disabled, the Recover page says why the service refuses a
@@ -887,7 +896,11 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
 
     let page = html(harness.visit(&dashboard, &sign_in).await).await;
     assert!(page.contains("Existing key"), "{page}");
-    assert!(!page.contains("data-passkey-enroll"), "no passkey is added");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::ENROLL_START),
+        0,
+        "no passkey is added"
+    );
     let opened = format!("{sign_in}?rename={}", passkeys[0]);
     let page = html(harness.visit(&dashboard, &opened).await).await;
     assert!(

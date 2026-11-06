@@ -95,7 +95,7 @@ impl Site {
     /// Answers with `page` in Piquel's document and the site's frame, whose
     /// status bar links the policies here.
     async fn render(&self, page: Page) -> Response {
-        let cx = Cx::default();
+        let cx = &Cx::default();
         let stylesheet = STYLESHEET.path();
         let (sign_in, register, settings, developers) = (
             self.auth.join("/login"),
@@ -113,7 +113,7 @@ impl Site {
             ("Sign in", sign_in.as_str()),
             ("Create an account", register.as_str()),
         ];
-        let html = view! { cx =>
+        let html = view! {
             piquel_ui::document(
                 title: page.title(),
                 stylesheet: &stylesheet,
@@ -141,7 +141,7 @@ impl Site {
                     ),
                     (header::CACHE_CONTROL, HeaderValue::from_static(PAGE_CACHE)),
                 ],
-                html.render(&cx),
+                html.render(cx),
             )
                 .into_response(),
             Err(error) => {

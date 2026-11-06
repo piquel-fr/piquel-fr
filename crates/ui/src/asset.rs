@@ -1,6 +1,8 @@
 //! Files pages link, embedded in the executable serving them under paths that
 //! never serve other content, so browsers and shared caches keep them forever.
 
+use std::sync::LazyLock;
+
 /// A file pages link, such as [`STYLESHEET`], embedded at compile time. Its
 /// [`path`](Self::path) names a hash of its content, so a changed file is served
 /// at a new path and a cached copy never goes stale. A font's path names its
@@ -142,6 +144,21 @@ pub const STYLESHEET: Asset = Asset::stylesheet(
     )
     .as_bytes(),
 );
+
+/// Topcoat's browser runtime, which runs the pages' expressions: their
+/// handlers, bindings and signals. It loads after [`EXPRESSIONS`].
+pub const RUNTIME: Asset = Asset::script("topcoat", topcoat::runtime::SCRIPT_SOURCE.as_bytes());
+
+/// The functions of every runtime expression in the pages, which the runtime
+/// looks up by the data a page carries: pages hold no code, so a policy listing
+/// these two scripts runs them, and nothing a page holds. Built once, as the
+/// executable's expressions are known only once it runs.
+pub static EXPRESSIONS: LazyLock<Asset> = LazyLock::new(|| {
+    Asset::script(
+        "expressions",
+        topcoat::runtime::expressions().source().as_bytes(),
+    )
+});
 
 /// The typefaces the stylesheet links, by the paths it names: the Latin subsets
 /// of DM Sans, a variable weight, and DM Mono at two weights.

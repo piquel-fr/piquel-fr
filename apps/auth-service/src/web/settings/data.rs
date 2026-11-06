@@ -64,7 +64,7 @@ impl AccountPage for AccountData {
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
         let profile = web.account.profile(&reader.viewer()).await?;
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             piquel_ui::account_data(
                 page: settings::DATA,
                 handle: profile.handle.as_str(),
@@ -109,7 +109,7 @@ impl WebApplication {
         cx: &Cx,
         deleted: &AccountDeleted,
     ) -> Result<Response, Failure> {
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::account_deleted(purge_after: deleted.purge_after, sign_in: page::LOGIN)
         };
         let title = Title::AccountDeleted.as_str();

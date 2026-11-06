@@ -3,9 +3,8 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 # Checked SQL compiles from crates/database/.sqlx; no database is reachable here.
 COPY .cargo .cargo
-# With the shared stylesheet in crates/ui/assets and the passkey script in
-# apps/auth-service/assets, which the executable embeds. It serves the admin
-# dashboard too. The workspace's manifests need every member, piquel-web's
+# With the shared stylesheet and typefaces in crates/ui/assets, which the
+# executable embeds with Topcoat's runtime. It serves the admin dashboard too. The workspace's manifests need every member, piquel-web's
 # included, though only auth-service is built.
 COPY crates crates
 COPY apps apps

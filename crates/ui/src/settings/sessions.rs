@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -102,6 +103,7 @@ impl DeviceRow<'_> {
 /// one out, or every other one, posts to `page`.
 #[component]
 pub async fn devices<'a>(
+    cx: &Cx,
     page: &'a str,
     rows: &'a [DeviceRow<'a>],
     now: DateTime<Utc>,
@@ -127,7 +129,8 @@ pub async fn devices<'a>(
                 <h2 id="sessions-heading">"Signed-in devices " <span class="count">(rows.len().to_string())</span></h2>
             </header>
             <ul class="list">
-                for row in rows {
+                #[key(position)]
+                for (position, row) in rows.iter().enumerate() {
                     let name = row.name();
                     <li>
                         <div class="text">

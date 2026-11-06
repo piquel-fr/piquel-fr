@@ -1,10 +1,14 @@
 //! The document around every page, and what the browser chose for it: the
 //! theme and the sidebar's width, which a form posts and a cookie keeps.
 
-use crate::form::Fields;
+use crate::{
+    asset::{EXPRESSIONS, RUNTIME},
+    form::Fields,
+};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -119,8 +123,9 @@ pub struct PreferenceChange {
     pub return_to: String,
 }
 
-/// The document around every page: the head, which links `stylesheet` and loads
-/// the page's `scripts`, if it has any, and the page as `child`. `title`
+/// The document around every page: the head, which links `stylesheet` and, with
+/// `runtime`, loads Topcoat's browser runtime, which every page with a handler or
+/// a binding needs, and the page as `child`. `title`
 /// names the page in the browser, before "· Piquel". The browser's `preferences`
 /// set the theme and the sidebar's width on the root, where the stylesheet reads
 /// them, and an `admin` page is marked so the stylesheet colours it as the
@@ -128,9 +133,10 @@ pub struct PreferenceChange {
 /// by search engines.
 #[component]
 pub async fn document<'a>(
+    cx: &Cx,
     title: &'a str,
     stylesheet: &'a str,
-    #[default] scripts: &'a [&'a str],
+    #[default] runtime: bool,
     #[default] preferences: Preferences,
     #[default] admin: bool,
     #[default] indexable: bool,
@@ -152,8 +158,11 @@ pub async fn document<'a>(
                 <meta name="color-scheme" content="light dark">
                 <title>(format!("{title} · Piquel"))</title>
                 <link rel="stylesheet" href=(stylesheet)>
-                for script in scripts {
-                    <script type="module" src=(*script)></script>
+                if runtime {
+                    // The expressions first, a classic deferred script, so they are
+                    // defined before the runtime's module starts.
+                    <script defer="" src=(EXPRESSIONS.path())></script>
+                    <script type="module" src=(RUNTIME.path()) data-topcoat-usize-bits=(usize::BITS.to_string())></script>
                 }
             </head>
             <body class=(admin.then_some("admin"))>

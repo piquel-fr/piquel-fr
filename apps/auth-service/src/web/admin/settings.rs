@@ -118,7 +118,7 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
     let (state, reason) = App::reopened::<SignInMethods>(cx, refused.as_ref());
     let (page, passkeys, providers, state, recovery) =
         (&App::here(cx), &passkeys, &providers, &state, &recovery);
-    let section = view! { cx =>
+    let section = view! {
         piquel_ui::sign_in_methods(
             page: page.as_str(),
             passkeys: passkeys,
@@ -186,7 +186,7 @@ pub(super) async fn profile(cx: &Cx, body: Body) -> Result<Response> {
         href!(display_name, Account(user)).resolve(cx),
         href!(handle, Account(user)).resolve(cx),
     ];
-    let section = view! { cx =>
+    let section = view! {
         piquel_ui::profile_settings(
             page: page.as_str(),
             who: who,
@@ -235,7 +235,7 @@ pub(super) async fn emails(cx: &Cx, body: Body) -> Result<Response> {
     let rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
     let (state, reason) = App::reopened::<Addresses>(cx, refused.as_ref());
     let (page, rows, state) = (&App::here(cx), &rows, &state);
-    let section = view! { cx =>
+    let section = view! {
         piquel_ui::addresses(
             page: page.as_str(),
             emails: rows,
@@ -244,7 +244,14 @@ pub(super) async fn emails(cx: &Cx, body: Body) -> Result<Response> {
             sends: false,
         )
     };
-    App::settings_page(cx, user, Tab::Emails, refused.as_deref(), section).await
+    Box::pin(App::settings_page(
+        cx,
+        user,
+        Tab::Emails,
+        refused.as_deref(),
+        section,
+    ))
+    .await
 }
 
 /// `/users/{account}/apps`: the apps that keep access to the account, to remove
@@ -267,7 +274,7 @@ pub(super) async fn apps(cx: &Cx, body: Body) -> Result<Response> {
     let rows: Vec<_> = apps.iter().map(ConnectedAppRow::from).collect();
     let (state, reason) = App::reopened::<ConnectedApps>(cx, refused.as_ref());
     let (page, rows, state) = (&App::here(cx), &rows, &state);
-    let section = view! { cx =>
+    let section = view! {
         piquel_ui::connected_apps(
             page: page.as_str(),
             rows: rows,
@@ -326,8 +333,8 @@ pub(super) async fn history(cx: &Cx) -> Result<Response> {
         audience: Audience::Administrator { reason: "" },
     };
     let rows = &rows;
-    let section = view! { cx => piquel_ui::history(rows: rows, holds: holds, page: page) };
-    App::settings_page(cx, user, Tab::History, None, section).await
+    let section = view! { piquel_ui::history(rows: rows, holds: holds, page: page) };
+    Box::pin(App::settings_page(cx, user, Tab::History, None, section)).await
 }
 
 /// `/users/{account}/handle`: gives the account a new handle, such as one that
@@ -361,7 +368,7 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
         )
     });
     let refused = refused.as_deref();
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_change(
             change: Change::ChangeHandle,
             back: back.as_str(),
@@ -400,7 +407,7 @@ pub(super) async fn display_name(cx: &Cx, form: Option<Form<NewDisplayName>>) ->
         )
     });
     let refused = refused.as_deref();
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_change(
             change: Change::ChangeDisplayName,
             back: back.as_str(),
@@ -510,7 +517,7 @@ impl App {
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
         let section = Child::new(section);
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::account_settings(
                 tabs: tabs,
                 current: tab,

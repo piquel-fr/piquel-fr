@@ -5,6 +5,7 @@ use crate::clients::copyable;
 use piquel_common::TraceId;
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -47,6 +48,7 @@ pub enum Health {
 /// source, and the links: the source, Piquel's `policies` and support.
 #[component]
 pub(crate) async fn status_bar<'a>(
+    cx: &Cx,
     #[default] health: Option<Health>,
     #[default] environment: Option<&'a str>,
     policies: Policies<'a>,
@@ -87,6 +89,7 @@ pub(crate) async fn status_bar<'a>(
 /// links Piquel's `policies`.
 #[component]
 pub async fn auth_shell<'a>(
+    cx: &Cx,
     home: &'a str,
     #[default] reference: Option<TraceId>,
     #[default] admin: bool,
@@ -124,6 +127,7 @@ pub async fn auth_shell<'a>(
 /// Its pages have no forms, so the theme follows the browser alone.
 #[component]
 pub async fn site_shell<'a>(
+    cx: &Cx,
     home: &'a str,
     links: &'a [(&'a str, &'a str)],
     policies: Policies<'a>,
@@ -137,7 +141,8 @@ pub async fn site_shell<'a>(
                     "piquel"
                 </a>
                 <nav class="site-links" aria-label="Piquel">
-                    for (label, href) in links {
+                    #[key(position)]
+                    for (position, (label, href)) in links.iter().enumerate() {
                         <a href=(*href)>(*label)</a>
                     }
                 </nav>
