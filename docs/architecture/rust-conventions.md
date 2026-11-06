@@ -271,8 +271,8 @@ transaction that makes the change. It takes a `ClientRegistration` from
 never reaches the repository. `AdminService` (for the `client` command) and the
 owner's `AccountService` operations (`src/clients/owned.rs`), which the developer
 console calls, use it, and a registration API (RFC 7591) should too. The owner's input types there are the policy for
-clients accounts own: they hold no ID or trust, and only standard scopes, and an
-invalid one names its field (`InvalidSetting`). Every
+clients accounts own: they hold no ID or trust, only standard scopes and no
+reserved brand in their name, and an invalid one names its field (`InvalidSetting`). Every
 owner operation looks the client up as the owner's first, so any other client is
 not found, and nothing checks ownership again. Clients are read from the database on each
 request and nothing is cached, so changes apply at once on every replica.

@@ -730,8 +730,9 @@ explains how to choose a requirement and handle the challenge.
   runs, which may take the ceremony's five minutes, does not discard the new
   passkey. Without one, a page asks for the passkey before it posts the change,
   and again if the change is refused; the API answers `403` with
-  `"code": "step_up_required"` and `max_age`. Reads, renaming a passkey and
-  changing the display name need only ordinary login.
+  `"code": "step_up_required"` and `max_age`. Reads, renaming a passkey,
+  changing the display name and setting the profile picture need only ordinary
+  login.
 - Matching verified email suggests linking; it never grants account access.
   Linking requires possession of the provider account and the target account's
   passkey confirmation. Explicit linking, started from settings, permits
@@ -750,8 +751,10 @@ explains how to choose a requirement and handle the challenge.
   session tells the clients that registered a back-channel logout URI, which end
   their own sessions; already issued access tokens stay valid until they expire.
 - Browser state and opaque secrets are random, and hashed where lookup is needed.
-  A social sign-in's provider redirect and a pending social signup are bound, by
-  a cookie, to the browser that started them. A pending authorization is not: its
+  Browser flows are bound, by a cookie, to the browser that started them: WebAuthn
+  ceremonies, a social sign-in's provider redirect, a pending social signup or
+  link, the offer to restore an account, and a sign-in to the admin dashboard.
+  A pending authorization is not: its
   token travels in the sign-in and consent URLs, as the authorization request it
   continues does, and only a session that meets the request's requirements
   finishes it. Auth cookies are host-only, Secure and HttpOnly.
