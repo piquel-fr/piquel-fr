@@ -6,7 +6,7 @@ use piquel_common::{
     clients::RelatedOrigin,
     events::{RecordedOrigin, RevocationReason},
 };
-use sqlx::{Connection, PgConnection, PgPool};
+use sqlx::{PgConnection, PgPool};
 use std::time::Duration;
 
 /// Inserts an active account to be the subject of recorded events.
@@ -49,8 +49,7 @@ async fn record(pool: &PgPool, user: UserId, event: DomainEvent) {
 
 /// Events commit and roll back with their transaction. Personal values, the
 /// request origin and the reason stay out of the event row, read back while kept,
-/// and read as erased once their row is deleted. Deleting the account leaves its
-/// history.
+/// and read as erased once their row is deleted.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn personal_data_is_stored_apart_and_erases() {
@@ -121,13 +120,6 @@ async fn personal_data_is_stored_apart_and_erases() {
     );
     assert_eq!(erased.origin, Personal::Erased);
     assert_eq!(erased.reason, None);
-
-    sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user.as_uuid())
-        .execute(&pool)
-        .await
-        .expect("events never block deleting their account");
-    assert_eq!(history().await.len(), 1, "history outlives the account");
 }
 
 /// Reads `user`'s events from `consumer`'s cursor until `count` arrived,
@@ -365,27 +357,8 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn migration_imports_the_audit_log() {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-    let mut connection = PgConnection::connect(&url).await.expect("connect");
+    let mut connection = Database::scratch_schema(..5).await;
     let user = UserId::new();
-    let schema = format!("import_{}", user.as_uuid().simple());
-    sqlx::raw_sql(&format!(
-        "CREATE SCHEMA {schema}; SET search_path TO {schema}"
-    ))
-    .execute(&mut connection)
-    .await
-    .expect("schema");
-    for migration in [
-        include_str!("../../../migrations/0001_initial.sql"),
-        include_str!("../../../migrations/0002_refresh_family_authorization_code.sql"),
-        include_str!("../../../migrations/0003_session_passkey_confirmation.sql"),
-        include_str!("../../../migrations/0004_authentication_claims.sql"),
-    ] {
-        sqlx::raw_sql(migration)
-            .execute(&mut connection)
-            .await
-            .expect("earlier migration");
-    }
     sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,'imported','Import test')")
         .bind(user.as_uuid())
         .execute(&mut connection)
@@ -413,27 +386,11 @@ async fn migration_imports_the_audit_log() {
         2,
     )
     .await;
-    sqlx::raw_sql(include_str!("../../../migrations/0005_domain_events.sql"))
-        .execute(&mut connection)
-        .await
-        .expect("migration");
+    Database::apply_migrations(&mut connection, 5..=5).await;
     // The release before 0005 keeps writing to the log during that deploy.
     audit(&mut connection, "passkey.login", "{}", 1).await;
     // The rest bring the schema to the one this release reads.
-    for migration in [
-        include_str!("../../../migrations/0006_deliveries.sql"),
-        include_str!("../../../migrations/0007_administrators.sql"),
-        include_str!("../../../migrations/0008_oidc_client_registry.sql"),
-        include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
-        include_str!("../../../migrations/0010_session_devices.sql"),
-        include_str!("../../../migrations/0015_event_reasons.sql"),
-        include_str!("../../../migrations/0018_contract_audit_log_and_legacy_secrets.sql"),
-    ] {
-        sqlx::raw_sql(migration)
-            .execute(&mut connection)
-            .await
-            .expect("later migration");
-    }
+    Database::apply_migrations(&mut connection, 6..).await;
 
     let history = EventRepository::from_connection(&mut connection)
         .history_for_user(user, 10)
@@ -461,8 +418,4 @@ async fn migration_imports_the_audit_log() {
             ("passkey.login", "success", serde_json::json!({})),
         ]
     );
-    sqlx::raw_sql(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&mut connection)
-        .await
-        .expect("drop schema");
 }

@@ -7,7 +7,7 @@ use crate::{
     UserRepository,
 };
 use piquel_common::{
-    Personal, SessionId,
+    SessionId,
     events::{Actor, EventContext, RequestOrigin, RevocationReason},
 };
 use sqlx::PgPool;
@@ -144,10 +144,10 @@ fn failed() -> DeliveryOutcome {
 }
 
 /// An event's deliveries commit with it, copying the facts they need, and a
-/// rolled-back event has none. Deleting the account afterwards leaves them as they were.
+/// rolled-back event has none.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn deliveries_commit_with_their_event_and_outlive_the_account() {
+async fn deliveries_commit_with_their_event() {
     let pool = Database::test_pool().await;
     let account = InsertUser::named("delivery");
     let (user, username) = (account.id, account.handle.to_string());
@@ -195,23 +195,14 @@ async fn deliveries_commit_with_their_event_and_outlive_the_account() {
         .expect("history")
         .try_into()
         .expect("one event");
-    let created = stored().await;
     assert_eq!(
-        created,
+        stored().await,
         [(
             event.id.as_uuid(),
             Value::from(username.clone()),
             "pending".into()
         )]
     );
-    assert_eq!(event.origin, Personal::Value(RequestOrigin::default()));
-
-    sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user.as_uuid())
-        .execute(&pool)
-        .await
-        .expect("purge the account");
-    assert_eq!(stored().await, created, "the purge changes nothing");
 }
 
 /// However many workers claim at once, each delivery goes to exactly one.

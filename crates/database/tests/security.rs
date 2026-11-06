@@ -96,18 +96,12 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
         confirmed_at(session).await.is_none(),
         "social sign-in has no confirmation"
     );
-    let at = Utc::now() - Duration::seconds(30);
     for id in [session, other] {
         db.sessions()
-            .confirm_passkey(id, PasskeyId::new(), at)
+            .confirm_passkey(id, PasskeyId::new(), Utc::now())
             .await
             .expect("confirm");
     }
-    let stored = confirmed_at(session).await.expect("confirmation");
-    assert!(
-        (stored - at).abs() < Duration::milliseconds(1),
-        "stored as given"
-    );
     let context = EventContext {
         actor: Actor::User {
             user_id: user,

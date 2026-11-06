@@ -50,14 +50,6 @@ fn authentication() -> SessionAuthentication {
     }
 }
 
-/// Returns the server process of a connection, to observe its lock waits.
-async fn backend(connection: &mut PgConnection) -> i32 {
-    sqlx::query_scalar("SELECT pg_backend_pid()")
-        .fetch_one(connection)
-        .await
-        .expect("backend pid")
-}
-
 /// Counts the rows the connection's server process wrote. The count includes
 /// earlier transactions' rows not flushed to the statistics yet, so only its
 /// change within a transaction shows what that transaction wrote.
@@ -69,32 +61,6 @@ async fn written(connection: &mut PgConnection) -> i64 {
     .fetch_one(connection)
     .await
     .expect("rows written")
-}
-
-/// Waits until the server process `backend` is blocked on a lock.
-async fn wait_for_lock(pool: &PgPool, backend: i32) {
-    tokio::time::timeout(Wait::from_secs(2), async {
-        loop {
-            let waiting: bool = sqlx::query_scalar(
-                "SELECT EXISTS (
-                    SELECT 1
-                    FROM pg_stat_activity
-                    WHERE pid = $1
-                    AND wait_event_type = 'Lock'
-                )",
-            )
-            .bind(backend)
-            .fetch_one(pool)
-            .await
-            .expect("wait state");
-            if waiting {
-                break;
-            }
-            tokio::time::sleep(Wait::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the transaction waits for a lock");
 }
 
 /// A committed account, browser session and unredeemed authorization code.
@@ -239,7 +205,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         .await
         .expect("lock session");
     let mut rotation = pool.begin().await.expect("rotation transaction");
-    let rotation_backend = backend(&mut rotation).await;
+    let rotation_backend = Database::backend(&mut rotation).await;
     let rotation_task = tokio::spawn(async move {
         let result = TokenRepository::from_connection(&mut rotation)
             .redeem_refresh(
@@ -252,7 +218,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         rotation.rollback().await.expect("rollback rotation");
         result
     });
-    wait_for_lock(&pool, rotation_backend).await;
+    Database::wait_for_lock(&pool, rotation_backend).await;
     tokio::time::timeout(
         Wait::from_secs(2),
         SessionRepository::from_connection(&mut logout)
@@ -443,7 +409,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
                 .expect("remove redirect URI");
         }
         let mut replay = DatabaseTransaction::new(pool.begin().await.expect("replay"));
-        let replay_backend = backend(&mut replay.inner).await;
+        let replay_backend = Database::backend(&mut replay.inner).await;
         let (code, code_digest, replay_client) =
             (grant.code, grant.code_digest.clone(), client.clone());
         let replay_task = tokio::spawn(async move {
@@ -454,7 +420,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
             replay.commit().await.expect("commit replay");
             result
         });
-        wait_for_lock(&pool, replay_backend).await;
+        Database::wait_for_lock(&pool, replay_backend).await;
         first.commit().await.expect("commit first redemption");
         let result = replay_task.await.expect("replay task");
         assert!(
@@ -597,7 +563,7 @@ async fn logout_revokes_a_family_committed_while_it_waited() {
         )
         .await;
     let mut logout = pool.begin().await.expect("logout transaction");
-    let logout_backend = backend(&mut logout).await;
+    let logout_backend = Database::backend(&mut logout).await;
     let (user, session) = (grant.user, grant.session);
     let logout_task = tokio::spawn(async move {
         let revoked = SessionRepository::from_connection(&mut logout)
@@ -607,7 +573,7 @@ async fn logout_revokes_a_family_committed_while_it_waited() {
         logout.commit().await.expect("commit logout");
         revoked
     });
-    wait_for_lock(&pool, logout_backend).await;
+    Database::wait_for_lock(&pool, logout_backend).await;
     exchange.commit().await.expect("commit exchange");
     assert_eq!(logout_task.await.expect("logout task"), [session]);
     let revoked: bool = sqlx::query_scalar(
