@@ -677,9 +677,11 @@ async fn the_crumb_leads_through_the_tab() {
     assert!(page.contains("<b>security history</b>"), "{page}");
 }
 
-/// The audit page shows the newest recorded verification without verifying, its
-/// form verifies as `audit verify` does and comes back to the page, and it says
-/// that pruning is the database owner's, from the command line.
+/// The audit page's form verifies as `audit verify` does and comes back to the
+/// page, which then shows that verification, and the page says that pruning is
+/// the database owner's, from the command line. The database is shared, so other
+/// tests may have verified already: the isolated audit tests show that loading the
+/// page verifies nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_audit_page_verifies_on_request_and_leaves_pruning_to_the_owner() {
@@ -689,7 +691,6 @@ async fn the_audit_page_verifies_on_request_and_leaves_pruning_to_the_owner() {
     let page = html(harness.visit(&dashboard, "/audit").await).await;
     assert!(page.contains("Audit history"), "{page}");
     assert!(page.contains("needs the database owner"), "{page}");
-    assert!(!page.contains("Events checked"), "{page}");
     let url = format!("{DASHBOARD}/audit");
     let verified = dashboard
         .submit(&harness.dashboard, &url, &[], OWN_PAGE)
