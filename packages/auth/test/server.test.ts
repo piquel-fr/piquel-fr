@@ -80,12 +80,15 @@ const unreachable = () =>
 
 /**
  * A fake auth, signing its tokens with a fresh RSA key, and the app's login in front
- * of it. `token` answers the token endpoint and `revoke` the revocation endpoint.
+ * of it. `token` answers the token endpoint, and `revoke` the revocation of a token.
  */
 class Auth {
   readonly clock = new ManualClock(1_800_000_000);
+  /** When the user signed in, which auth keeps across refreshes: every ID token's `auth_time` by default. */
+  readonly authTime = this.clock.seconds;
   token: () => Response | Promise<Response> = () => new Response(null, { status: 500 });
-  revoke: () => Response | Promise<Response> = () => new Response(null, { status: 200 });
+  revoke: (token: string) => Response | Promise<Response> = () =>
+    new Response(null, { status: 200 });
   readonly fetch: FakeFetch;
   readonly #keys: CryptoKeyPair;
   /** The key ID new tokens name. */
@@ -102,7 +105,10 @@ class Auth {
       [PAR_URL]: () =>
         Response.json({ request_uri: 'urn:pushed', expires_in: 60 }, { status: 201 }),
       [TOKEN_URL]: () => this.token(),
-      [REVOKE_URL]: () => this.revoke()
+      [REVOKE_URL]: (init) =>
+        this.revoke(
+          new URLSearchParams(typeof init.body === 'string' ? init.body : '').get('token') ?? ''
+        )
     });
   }
 
@@ -162,7 +168,7 @@ class Auth {
         exp: now + 300,
         nonce,
         sid: uuid(1),
-        auth_time: now,
+        auth_time: this.authTime,
         acr: 'urn:piquel:acr:social',
         ...signed
       });
@@ -369,21 +375,57 @@ test('a session without a refresh token ends with its access token', async () =>
   assert.match(done.headers.getSetCookie()[0] ?? '', /; Max-Age=300$/);
 });
 
-test('a sign-in revokes the session it replaces first, or keeps it when it cannot', async () => {
+test('a sign-in revokes the session it replaces, or fails and keeps it when it cannot', async () => {
   const auth = await Auth.start();
   const browser = new Browser(auth);
   await browser.signIn();
-  // Auth being unreachable stops the sign-in before its code is redeemed.
-  auth.revoke = unreachable;
+  // Auth cannot revoke the first session's grant, `rt-1`, and revokes any other.
+  auth.revoke = (token) => (token === 'rt-1' ? unreachable() : new Response(null, { status: 200 }));
   const refused = await browser.signIn();
   assert.equal(refused.status, 502);
-  assert.equal(setCookie(refused, SESSION_COOKIE), undefined, 'the old session stays');
-  assert.equal(await (await browser.session())?.accessToken(), 'at-1');
+  assert.equal(
+    setCookie(refused, SESSION_COOKIE),
+    undefined,
+    'no new session, and the old one stays'
+  );
+  assert.deepEqual(auth.revoked(), ['rt-1', 'rt-2'], 'the new grant is revoked');
+  // The old session still renews.
+  auth.clock.seconds += 300;
+  auth.refreshing();
+  assert.equal(await (await browser.session())?.accessToken(), 'at-3');
   auth.revoke = () => new Response(null, { status: 200 });
   assert.equal((await browser.signIn()).status, 303);
-  // Both attempts asked to revoke the first session's token.
-  assert.deepEqual(auth.revoked(), ['rt-1', 'rt-1']);
-  assert.notEqual(await (await browser.session())?.accessToken(), 'at-1');
+  assert.deepEqual(auth.revoked(), ['rt-1', 'rt-2', 'rt-1']);
+});
+
+test('a step-up stays on the signed-in account; an ordinary sign-in may switch', async () => {
+  const auth = await Auth.start();
+  const browser = new Browser(auth);
+  await browser.signIn();
+  const session = browser.cookies.get(SESSION_COOKIE) ?? '';
+  const stepUp = '/auth/login?step_up=true';
+  const other = { sub: OTHER_USER };
+  const refused = (response: Response) => {
+    assert.equal(response.status, 400);
+    assert.equal(setCookie(response, SESSION_COOKIE), undefined, 'the session is kept');
+  };
+  // Started from the session, then completed as another account.
+  refused(await browser.signIn(other, stepUp));
+  // Started from the session, which another tab then signed out of: the pin alone
+  // stops another account.
+  const pinned = await browser.start(stepUp);
+  browser.cookies.delete(SESSION_COOKIE);
+  refused(await browser.complete(pinned, other));
+  // Started without a session, then completed beside another account's.
+  const unpinned = await browser.start(stepUp);
+  browser.cookies.set(SESSION_COOKIE, session);
+  refused(await browser.complete(unpinned, other));
+  // The session's grant is `rt-1`; each refused sign-in's, revoked, the next.
+  assert.deepEqual(auth.revoked(), ['rt-2', 'rt-3', 'rt-4']);
+
+  assert.equal((await browser.signIn({}, stepUp)).status, 303);
+  assert.equal(auth.revoked().at(-1), 'rt-1', "the replaced session's grant");
+  assert.equal((await browser.signIn(other)).status, 303, 'an ordinary sign-in');
 });
 
 test('a sign-in redirects only navigations, with their full path', async () => {
@@ -405,29 +447,22 @@ test('revocations give up after their deadline', { timeout: 10_000 }, async (t) 
   const auth = await Auth.start();
   const browser = new Browser(auth);
   await browser.signIn();
-  // Auth never answers, and the injected `fetch` ignores its own timeout.
-  let revoking: () => void = () => undefined;
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // Auth never answers, and the injected `fetch` ignores its own timeout. The fake
+  // answers before the deadline is set, so it waits the five seconds out just after.
   auth.revoke = () => {
-    revoking();
+    setImmediate(() => {
+      t.mock.timers.tick(5000);
+    });
     return new Promise(() => undefined);
   };
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  /** What `send` answers once its revocation has waited out the five seconds. */
-  const deadline = async (send: () => Promise<Response>) => {
-    const revoked = new Promise<void>((resolve) => {
-      revoking = resolve;
-    });
-    const answer = send();
-    await revoked;
-    t.mock.timers.tick(5000);
-    return answer;
-  };
-  const logout = await deadline(() =>
-    browser.send('/auth/logout', { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } })
-  );
+  const logout = await browser.send('/auth/logout', {
+    method: 'POST',
+    headers: { 'sec-fetch-site': 'same-origin' }
+  });
   assert.equal(logout.status, 502);
   assert.deepEqual(logout.headers.getSetCookie(), []);
-  const signIn = await deadline(() => browser.signIn());
+  const signIn = await browser.signIn();
   assert.equal(signIn.status, 502);
   assert.equal(setCookie(signIn, SESSION_COOKIE), undefined, 'the old session stays');
 });
@@ -640,15 +675,50 @@ test('auth’s refusal ends the session; other failures keep it while its access
   }
 });
 
-test('a refresh naming another user ends the session', async () => {
-  const auth = await Auth.start();
-  const browser = new Browser(auth);
-  await browser.signIn();
-  auth.clock.seconds += 300;
-  auth.token = async () => Response.json(await auth.tokens({ sub: OTHER_USER }));
-  const { user, response } = await browser.visit();
-  assert.equal(user, null);
-  assert.equal(setCookie(response, SESSION_COOKIE), `${SESSION_COOKIE}=`);
+test('a refresh that changes the sign-in ends the session; one carrying it over keeps it', async () => {
+  const changes: [string, SignIn][] = [
+    ['unchanged', {}],
+    ['another user', { sub: OTHER_USER }],
+    ['a later auth_time', { auth_time: 1_800_000_060 }],
+    ['another acr', { acr: 'phr' }],
+    ['a nonce', { nonce: 'replayed' }]
+  ];
+  for (const [change, claims] of changes) {
+    const auth = await Auth.start();
+    const browser = new Browser(auth);
+    await browser.signIn();
+    auth.clock.seconds += 300;
+    auth.token = async () => Response.json(await auth.tokens({ refresh: false, ...claims }));
+    const { user, response } = await browser.visit();
+    if (change === 'unchanged') {
+      assert.ok(user instanceof SignedIn);
+      assert.equal(await user.accessToken(), 'at-2');
+    } else {
+      assert.equal(user, null, change);
+      assert.equal(setCookie(response, SESSION_COOKIE), `${SESSION_COOKIE}=`, change);
+    }
+  }
+});
+
+test('a refresh’s nonce must be the sign-in’s, which a refresh without one keeps', async () => {
+  for (const kept of [true, false]) {
+    const auth = await Auth.start();
+    const browser = new Browser(auth);
+    const login = await browser.start();
+    await browser.complete(login);
+    let refreshes = 0;
+    auth.token = async () => {
+      refreshes += 1;
+      const nonce = refreshes === 1 ? {} : { nonce: kept ? login.nonce : 'another' };
+      return Response.json(await auth.tokens({ refresh: false, ...nonce }));
+    };
+    auth.clock.seconds += 300;
+    assert.equal(await (await browser.session())?.accessToken(), 'at-2');
+    auth.clock.seconds += 300;
+    const { user, response } = await browser.visit();
+    assert.equal(user instanceof SignedIn, kept);
+    if (!kept) assert.equal(setCookie(response, SESSION_COOKIE), `${SESSION_COOKIE}=`);
+  }
 });
 
 test('ended or unreadable session cookies are cleared', async () => {

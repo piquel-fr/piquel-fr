@@ -677,3 +677,54 @@ async fn cancelled_fetches_leave_keys_unavailable() {
         Err(TokenError::Keys(KeyError::Unavailable))
     ));
 }
+
+/// `UserInfo` is used only when it names the user of the ID token (OIDC Core §5.3.2):
+/// an answer for anyone else is refused.
+#[tokio::test]
+async fn userinfo_must_name_the_signed_in_user() {
+    let case = Case::all("tokens")
+        .into_iter()
+        .find(|case| case.name.ends_with("/id-valid.json"))
+        .expect("ID token vector");
+    let claims = case.json["expected"]["ok"].clone();
+    let user = claims["sub"].as_str().expect("sub").to_owned();
+    let answered = user.clone();
+    let router = Router::new().route(
+        "/userinfo",
+        get(move |headers: ::axum::http::HeaderMap| {
+            let mine = headers[::axum::http::header::AUTHORIZATION] == "Bearer mine";
+            let sub = if mine {
+                answered.clone()
+            } else {
+                "someone-else".into()
+            };
+            async move { ::axum::Json(serde_json::json!({ "sub": sub })) }
+        }),
+    );
+    let address = serve(router).await;
+    let mut metadata = metadata();
+    metadata.userinfo_endpoint = format!("http://{address}/userinfo").parse().expect("URL");
+    let client = issuer_with(&case, metadata).client(ClientConfig {
+        client_id: "notes-web".parse::<ClientId>().expect("client ID"),
+        credentials: Credentials::None,
+        redirect_uri: "https://client.example.com/callback".parse().expect("URL"),
+    });
+    let claims: crate::IdTokenClaims = serde_json::from_value(claims).expect("ID token claims");
+    let info = client
+        .userinfo(&BearerToken::new("mine".into()), &claims)
+        .await
+        .expect("the user's claims");
+    assert_eq!(info.sub, user);
+    let refused = client
+        .userinfo(&BearerToken::new("theirs".into()), &claims)
+        .await
+        .expect_err("another user's claims");
+    assert!(matches!(refused, OAuthError::UserInfoSubject { .. }));
+    assert_eq!(
+        refused.code(),
+        SdkError::new(
+            protocol::sdk::ErrorCategory::InvalidToken,
+            protocol::sdk::ErrorReason::SubjectMismatch
+        )
+    );
+}

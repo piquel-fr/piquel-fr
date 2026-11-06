@@ -10,7 +10,7 @@ use piquel_common::{
             AccessTokenClaims, Acr, Actor, Amr, Audience, Confirmation, IdTokenClaims,
             LogoutTokenClaims, ProfileClaims,
         },
-        jwt::{Algorithm, TokenType},
+        jwt::{Algorithm, Claim, TokenType},
         oauth::Scopes,
         sdk::{ErrorCategory, ErrorReason, SdkError},
         step_up::StepUpRequirement,
@@ -138,6 +138,19 @@ pub enum TokenError {
     /// The user's authentication is too weak or too old for the request (RFC 9470).
     #[error("authentication does not meet {0:?}")]
     InsufficientUserAuthentication(StepUpRequirement),
+    /// The token names another user than expected: a step-up that came back as
+    /// another account, or a refresh (OIDC Core §12.2).
+    #[error("token names the user {found:?}, expected {expected:?}")]
+    SubjectMismatch {
+        /// The user expected.
+        expected: String,
+        /// The token's `sub`.
+        found: String,
+    },
+    /// A refreshed ID token changes the original authentication's claim (OIDC Core
+    /// §12.2), which a refresh must carry over unchanged.
+    #[error("a refreshed ID token changes the original authentication's {0}")]
+    AuthenticationChanged(Claim),
     /// A valid token lacks scopes the request needs.
     #[error("token lacks the scopes {required}")]
     InsufficientScope {
@@ -176,6 +189,8 @@ impl TokenError {
             Self::NonceMismatch => ErrorReason::NonceMismatch,
             Self::WrongAuthorizedParty { .. } => ErrorReason::WrongAuthorizedParty,
             Self::AuthenticationTooOld { .. } => ErrorReason::AuthenticationTooOld,
+            Self::SubjectMismatch { .. } => ErrorReason::SubjectMismatch,
+            Self::AuthenticationChanged(_) => ErrorReason::AuthenticationChanged,
         };
         SdkError::new(ErrorCategory::InvalidToken, reason)
     }
@@ -466,6 +481,45 @@ impl IdToken {
             authentication.auth_time,
             now,
         )
+    }
+
+    /// Requires this token to name the user `expected` names.
+    ///
+    /// # Errors
+    /// [`TokenError::SubjectMismatch`] if it names another.
+    pub fn require_subject(&self, expected: &str) -> Result<(), TokenError> {
+        if self.claims.sub == expected {
+            Ok(())
+        } else {
+            Err(TokenError::SubjectMismatch {
+                expected: expected.to_owned(),
+                found: self.claims.sub.clone(),
+            })
+        }
+    }
+
+    /// Requires this ID token, from a refresh, to carry over the sign-in `signed_in`
+    /// describes (OIDC Core §12.2): the same `sub`, `auth_time` and `acr`, and no
+    /// `nonce` but the sign-in's. Its `iss`, `aud` and `azp` already passed the same
+    /// checks as the sign-in's.
+    ///
+    /// # Errors
+    /// [`TokenError::SubjectMismatch`] or [`TokenError::AuthenticationChanged`].
+    pub fn require_refresh_of(&self, signed_in: &IdTokenClaims) -> Result<(), TokenError> {
+        self.require_subject(&signed_in.sub)?;
+        let (new, old) = (&self.claims, signed_in);
+        let changed = if new.authentication.auth_time != old.authentication.auth_time {
+            Some(Claim::AuthTime)
+        } else if new.authentication.acr != old.authentication.acr {
+            Some(Claim::AuthenticationClass)
+        } else if new.nonce.is_some() && new.nonce != old.nonce {
+            Some(Claim::Nonce)
+        } else {
+            None
+        };
+        changed.map_or(Ok(()), |claim| {
+            Err(TokenError::AuthenticationChanged(claim))
+        })
     }
 
     /// The signed-in account.

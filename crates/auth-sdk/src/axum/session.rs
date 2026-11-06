@@ -34,7 +34,8 @@ pub struct StoredLogin(pub(super) LoginData);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct LoginData {
     /// The validated claims of the sign-in's ID token, or of the latest refresh that
-    /// returned one.
+    /// returned one, which kept the sign-in's `sub`, `auth_time` and `acr`, and its
+    /// `nonce` even when it returned none (OIDC Core §12.2).
     claims: IdTokenClaims,
     /// The latest access token.
     access_token: BearerToken,
@@ -73,20 +74,22 @@ impl StoredLogin {
         }))
     }
 
-    /// This session after a refresh returned `tokens`. An absent ID token or refresh
-    /// token keeps the current one. `None` if a new ID token names another user or
-    /// issuer (OIDC Core §12.2).
-    pub(super) fn refreshed(&self, tokens: Tokens) -> Option<Self> {
+    /// This session after a refresh returned `tokens`, which
+    /// [`Client::refresh`](crate::Client::refresh) checked against its claims (OIDC
+    /// Core §12.2). An absent ID token or refresh token keeps the current one, and a
+    /// new ID token without a `nonce` keeps the sign-in's, which the next refresh is
+    /// checked against.
+    pub(super) fn refreshed(&self, tokens: Tokens) -> Self {
         let current = &self.0;
         let claims = match tokens.id_token {
             Some(id_token) => {
-                let claims = id_token.into_claims();
-                (claims.sub == current.claims.sub && claims.iss == current.claims.iss)
-                    .then_some(claims)?
+                let mut claims = id_token.into_claims();
+                claims.nonce = claims.nonce.or_else(|| current.claims.nonce.clone());
+                claims
             }
             None => current.claims.clone(),
         };
-        Some(Self(LoginData {
+        Self(LoginData {
             claims,
             access_token: tokens.access_token,
             expires_at: tokens.expires_at,
@@ -95,7 +98,7 @@ impl StoredLogin {
                 .refresh_token
                 .or_else(|| current.refresh_token.clone()),
             ends_at: current.ends_at,
-        }))
+        })
     }
 
     /// The validated claims of the sign-in's ID token, or of the latest refresh that
@@ -158,6 +161,9 @@ pub(super) struct PendingAuthorization {
     pub(super) return_to: ReturnTo,
     /// Whether the login steps up, so the return to `return_to` is its retry.
     pub(super) step_up: bool,
+    /// The user a step-up started from, whom its new sign-in must name too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) subject: Option<String>,
     /// When the login expires, checked as well as the cookie's `Max-Age`, which a
     /// copied cookie escapes.
     pub(super) expires_at: DateTime<Utc>,

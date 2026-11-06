@@ -621,4 +621,4 @@ reason?: ErrorReason, };
 
 export type ErrorCategory = "discovery" | "keys" | "invalid_token" | "insufficient_scope" | "insufficient_user_authentication" | "callback" | "oauth" | "network";
 
-export type ErrorReason = "issuer_mismatch" | "invalid_document" | "pkce_unsupported" | "duplicate_key_id" | "malformed" | "unsupported_critical_header" | "wrong_type" | "unsupported_algorithm" | "unknown_key" | "bad_signature" | "wrong_audience" | "expired" | "not_yet_valid" | "issued_in_future" | "lifetime_too_long" | "invalid_claims" | "nonce_mismatch" | "wrong_authorized_party" | "authentication_too_old" | "state_mismatch" | "missing_issuer" | "missing_code";
+export type ErrorReason = "issuer_mismatch" | "invalid_document" | "pkce_unsupported" | "duplicate_key_id" | "malformed" | "unsupported_critical_header" | "wrong_type" | "unsupported_algorithm" | "unknown_key" | "bad_signature" | "wrong_audience" | "expired" | "not_yet_valid" | "issued_in_future" | "lifetime_too_long" | "invalid_claims" | "nonce_mismatch" | "wrong_authorized_party" | "authentication_too_old" | "subject_mismatch" | "authentication_changed" | "state_mismatch" | "missing_issuer" | "missing_code";

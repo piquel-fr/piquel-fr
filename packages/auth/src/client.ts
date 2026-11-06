@@ -9,7 +9,13 @@ import { AuthError } from './error.ts';
 import type { Reply } from './http.ts';
 import type { Issuer } from './issuer.ts';
 import * as json from './json.ts';
-import type { ErrorResponse, Prompt, StepUpRequirement, UserInfo } from './protocol.ts';
+import type {
+  ErrorResponse,
+  IdTokenClaims,
+  Prompt,
+  StepUpRequirement,
+  UserInfo
+} from './protocol.ts';
 import { Scopes } from './scope.ts';
 import type { IdToken, LogoutToken } from './token.ts';
 import { ACR } from './vocabulary.ts';
@@ -38,6 +44,12 @@ export type AuthorizeRequest = {
    * step-up challenge names. {@link Client.complete} fails unless the ID token meets it.
    */
   stepUp?: StepUpRequirement;
+  /**
+   * The signed-in user's ID token, sent as `id_token_hint` so auth signs in that
+   * account only, as a step-up must. {@link Client.complete} fails unless the new ID
+   * token names the same user.
+   */
+  idTokenHint?: IdToken;
 };
 
 /**
@@ -60,6 +72,8 @@ export type PendingLogin = {
   verifier: string;
   /** The authentication asked for, which the ID token must meet. */
   stepUp: StepUpRequirement;
+  /** The user the login's `id_token_hint` names, whom the ID token must name too. */
+  subject?: string;
 };
 
 /** @internal Reads back a {@link PendingLogin} stored as JSON. */
@@ -73,7 +87,8 @@ export const pendingLogin: json.Decoder<PendingLogin> = json.object({
   stepUp: json.object({
     acr_values: json.optional(json.oneOf(ACR)),
     max_age: json.optional(json.integer(0, 0xffff_ffff))
-  })
+  }),
+  subject: json.optional(json.string)
 });
 
 /** Tokens from a code exchange or refresh. */
@@ -178,7 +193,8 @@ export class Client {
       nonce: base64.random(RANDOM_BYTES),
       verifier: base64.random(RANDOM_BYTES),
       // Only the requirement, should a whole parsed challenge be passed.
-      stepUp: stepUpRequirement(request.stepUp ?? {})
+      stepUp: stepUpRequirement(request.stepUp ?? {}),
+      ...(request.idTokenHint === undefined ? {} : { subject: request.idTokenHint.claims.sub })
     };
     const digest = await crypto.subtle.digest(
       'SHA-256',
@@ -197,6 +213,7 @@ export class Client {
     if (request.prompt !== undefined) parameters.prompt = request.prompt;
     if (pending.stepUp.acr_values !== undefined) parameters.acr_values = pending.stepUp.acr_values;
     if (pending.stepUp.max_age !== undefined) parameters.max_age = String(pending.stepUp.max_age);
+    if (request.idTokenHint !== undefined) parameters.id_token_hint = request.idTokenHint.token;
     const url = new URL(this.issuer.metadata.authorization_endpoint);
     const endpoint = this.issuer.metadata.pushed_authorization_request_endpoint;
     if (endpoint === undefined) {
@@ -219,7 +236,8 @@ export class Client {
    * twice fails its check (RFC 6749 §3.1); an error response only ever fails. The code is then exchanged, and the ID token validated
    * against the pending login's `nonce` and `max_age`. It must meet the login's
    * step-up requirement (`insufficient_user_authentication`), so a step-up login
-   * that falls short fails instead of being asked for again.
+   * that falls short fails instead of being asked for again, and name the user of the
+   * login's `idTokenHint` (`subject_mismatch`), whose refused grant is revoked.
    */
   async complete(pending: PendingLogin, callback: URLSearchParams): Promise<Tokens> {
     const code = this.#check(pending, callback);
@@ -234,23 +252,42 @@ export class Client {
     if (tokens.idToken === undefined) {
       throw new AuthError({ code: 'network' }, 'the token endpoint returned no ID token');
     }
+    // A step-up login that fell short would only be asked for again, and one that
+    // signed in another account must not replace the hinted one.
     tokens.idToken.requireAuthentication(pending.stepUp);
+    if (pending.subject !== undefined) {
+      try {
+        tokens.idToken.requireSubject(pending.subject);
+      } catch (error) {
+        // The code is spent: revoke its grant, which would otherwise live on at auth
+        // unused. The mismatch is the error either way, so a failed revocation adds
+        // nothing to report.
+        if (tokens.refreshToken !== undefined) {
+          await this.revoke(tokens.refreshToken).catch(() => undefined);
+        }
+        throw error;
+      }
+    }
     return tokens;
   }
 
   /**
-   * Redeems a refresh token. A public client gets a new one, and must not use the old
-   * one again; a confidential client's stays valid, so concurrent refreshes are safe.
-   * A returned ID token is validated, but has no pending login to compare with: a
-   * caller holding the previous ID token must check that `sub` is unchanged (OIDC
-   * Core §12.2).
+   * Redeems a refresh token of the sign-in that `signedIn` describes: the claims of
+   * the sign-in's ID token, or of a later one that passed this check with the
+   * sign-in's `nonce` kept. A public client gets a new refresh token, and must not
+   * use the old one again; a confidential client's stays valid, so concurrent
+   * refreshes are safe. A returned ID token is validated, then must carry over the
+   * sign-in (OIDC Core §12.2): the same user (`subject_mismatch`), `auth_time` and
+   * `acr`, and no `nonce` but the sign-in's (`authentication_changed`).
    */
-  async refresh(refreshToken: string): Promise<Tokens> {
+  async refresh(refreshToken: string, signedIn: IdTokenClaims): Promise<Tokens> {
     const reply = await this.#post(this.issuer.metadata.token_endpoint, {
       grant_type: 'refresh_token',
       refresh_token: refreshToken
     });
-    return this.#tokens(reply, undefined, undefined);
+    const tokens = await this.#tokens(reply, undefined, undefined);
+    tokens.idToken?.requireRefreshOf(signedIn);
+    return tokens;
   }
 
   /** Revokes a refresh token and its whole family (RFC 7009). */
@@ -263,11 +300,19 @@ export class Client {
     Client.#read('revocation', reply, (value) => value);
   }
 
-  /** Reads the user's claims with an access token. */
-  async userinfo(accessToken: string): Promise<UserInfo> {
+  /**
+   * Reads the claims of the user `signedIn` names, the claims of their ID token, with
+   * an access token of the same sign-in. `UserInfo` must name that user (OIDC Core
+   * §5.3.2), or this throws `invalid_token` (`subject_mismatch`).
+   */
+  async userinfo(accessToken: string, signedIn: IdTokenClaims): Promise<UserInfo> {
     const url = this.issuer.metadata.userinfo_endpoint;
     const reply = await this.issuer.http.get(url, { authorization: `Bearer ${accessToken}` });
-    return Client.#read('userinfo', reply, userInfo);
+    const user = Client.#read('userinfo', reply, userInfo);
+    if (user.sub !== signedIn.sub) {
+      throw AuthError.subjectMismatch('UserInfo', user.sub, signedIn.sub);
+    }
+    return user;
   }
 
   /**

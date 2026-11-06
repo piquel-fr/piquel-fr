@@ -183,13 +183,16 @@ async fn logout_revokes_the_refresh_token() {
     assert_eq!(query, ["client_id"]);
 }
 
-/// A sign-in replacing the browser's session first revokes that session's refresh
-/// token, so no copy of the old cookie outlives its access token. If auth cannot
-/// revoke it, the sign-in stops before redeeming its code, and the old session stays.
+/// A sign-in replacing the browser's session revokes that session's refresh token,
+/// so no copy of the old cookie outlives its access token. If auth cannot revoke it,
+/// the sign-in fails with 502 once its code is redeemed: the new grant is revoked,
+/// no new session is set, and the old cookie stays, still renewable, so the user can
+/// sign in again.
 #[tokio::test]
 async fn sign_ins_revoke_the_session_they_replace() {
     let endpoint = TokenEndpoint::start(Duration::ZERO).await;
-    let app = login_app(&endpoint.issuer(&clock()));
+    let clock = clock();
+    let app = login_app(&endpoint.issuer(&clock));
     let first = sign_in(&app, USER).await;
     let replace = async || {
         let login = Started::at(&app, "%2F", &[]).await;
@@ -197,21 +200,33 @@ async fn sign_ins_revoke_the_session_they_replace() {
             .complete(&app, USER, &[login.cookie.clone(), first.clone()])
             .await
     };
-    endpoint.revocations_fail.store(true, Ordering::SeqCst);
+    endpoint
+        .refused
+        .lock()
+        .expect("refused")
+        .push("refresh-0".into());
     let response = replace().await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(
         set_cookie(&response, SESSION_COOKIE),
         None,
-        "the old session stays"
+        "no new session, and the old one stays"
     );
+    assert_eq!(
+        *endpoint.revoked.lock().expect("revocations"),
+        ["refresh-1"],
+        "the new grant is revoked"
+    );
+    clock.advance(300);
+    let (status, shown, _) = home(&app, &first).await;
+    assert_eq!((status, shown.as_str()), (StatusCode::OK, "access-1"));
 
-    endpoint.revocations_fail.store(false, Ordering::SeqCst);
+    endpoint.refused.lock().expect("refused").clear();
     let response = replace().await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         *endpoint.revoked.lock().expect("revocations"),
-        ["refresh-0"]
+        ["refresh-1", "refresh-0"]
     );
 }
 
@@ -327,6 +342,104 @@ async fn revocations_give_up_after_their_deadline() {
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(set_cookie(&response, SESSION_COOKIE), None);
     assert!(endpoint.revoked.lock().expect("revocations").is_empty());
-    // Both reached the hanging endpoint, so the deadline, not an early error, ended them.
-    assert_eq!(endpoint.revocations_received.load(Ordering::SeqCst), 2);
+    // The logout's, the replaced session's and then the refused new grant's revocations
+    // all reached the hanging endpoint, so the deadline, not an early error, ended them.
+    assert_eq!(endpoint.revocations_received.load(Ordering::SeqCst), 3);
+}
+
+/// A change to an ID token's claims.
+type ClaimChange = fn(&mut serde_json::Value);
+
+/// Serves endpoints whose refreshes return an ID token for [`USER`], with `nonce`
+/// for the `n`th refresh when `nonce(n)` gives one, and `change` applied.
+async fn refreshing_id_tokens(
+    nonce: impl Fn(usize) -> Option<String> + Clone + Send + Sync + 'static,
+    change: ClaimChange,
+) -> TokenEndpoint {
+    TokenEndpoint::refreshing(move |call| {
+        let nonce = nonce.clone();
+        async move {
+            let mut claims = id_claims(USER);
+            if let Some(nonce) = nonce(call) {
+                claims["nonce"] = json!(nonce);
+            }
+            change(&mut claims);
+            let mut tokens = TokenEndpoint::tokens(&format!("access-{call}"));
+            tokens["id_token"] = json!(sign(&claims, "JWT"));
+            ::axum::Json(tokens).into_response()
+        }
+    })
+    .await
+}
+
+/// A refresh whose ID token changes the sign-in ends the session and clears its
+/// cookie (OIDC Core §12.2): another user, `auth_time` or `acr`, or a `nonce` the
+/// sign-in did not send. One carrying them over is kept.
+#[tokio::test]
+async fn refreshes_keep_the_original_sign_in() {
+    let changes: [(&str, ClaimChange); 5] = [
+        ("unchanged", |_| {}),
+        ("another user", |claims| {
+            claims["sub"] = json!("01936f3e-8c00-7000-8000-000000000009");
+        }),
+        ("a later auth_time", |claims| {
+            claims["auth_time"] = json!(claims["auth_time"].as_i64().expect("auth_time") + 60);
+        }),
+        ("another acr", |claims| {
+            claims["acr"] = json!("urn:piquel:acr:social");
+        }),
+        ("a nonce", |claims| claims["nonce"] = json!("replayed")),
+    ];
+    for (change, apply) in changes {
+        let endpoint = refreshing_id_tokens(|_| None, apply).await;
+        let clock = clock();
+        let app = login_app(&endpoint.issuer(&clock));
+        let session = sign_in(&app, USER).await;
+        clock.advance(300);
+        let (status, shown, cookie) = home(&app, &session).await;
+        if change == "unchanged" {
+            assert_eq!((status, shown.as_str()), (StatusCode::OK, "access-1"));
+        } else {
+            assert_eq!(status, StatusCode::SEE_OTHER, "{change}");
+            assert_eq!(cookie, Some(format!("{SESSION_COOKIE}=")), "{change}");
+        }
+    }
+}
+
+/// A refresh's `nonce` is checked against the sign-in's, which the session keeps
+/// even after a refresh that returned none: one sending it again keeps the session,
+/// and one sending another ends it.
+#[tokio::test]
+async fn refresh_nonces_match_the_sign_in() {
+    for kept in [true, false] {
+        let signed_in = Arc::new(Mutex::new(String::new()));
+        let nonce = {
+            let signed_in = signed_in.clone();
+            move |call| match call {
+                1 => None,
+                _ if kept => Some(signed_in.lock().expect("nonce").clone()),
+                _ => Some("another".to_owned()),
+            }
+        };
+        let endpoint = refreshing_id_tokens(nonce, |_| {}).await;
+        let clock = clock();
+        let app = login_app(&endpoint.issuer(&clock));
+        let login = Started::at(&app, "%2F", &[]).await;
+        signed_in.lock().expect("nonce").clone_from(&login.nonce);
+        let response = login
+            .complete(&app, USER, std::slice::from_ref(&login.cookie))
+            .await;
+        let session = set_cookie(&response, SESSION_COOKIE).expect("a session");
+        clock.advance(300);
+        let (_, shown, cookie) = home(&app, &session).await;
+        assert_eq!(shown, "access-1");
+        clock.advance(300);
+        let (status, _, cookie) = home(&app, &cookie.expect("the refreshed session")).await;
+        if kept {
+            assert_eq!(status, StatusCode::OK);
+        } else {
+            assert_eq!(status, StatusCode::SEE_OTHER);
+            assert_eq!(cookie, Some(format!("{SESSION_COOKIE}=")));
+        }
+    }
 }

@@ -23,6 +23,8 @@ const START_URL = `${ISSUER}/webauthn/related/start`;
 const FINISH_URL = `${ISSUER}/webauthn/related/finish`;
 const RESOURCE = 'https://notes.example/notes';
 const USER = '01936f3e-8c00-7000-8000-000000000001';
+const OTHER_USER = '01936f3e-8c00-7000-8000-000000000009';
+const REVOKE_URL = `${ISSUER}/oauth/revoke`;
 const NOW = 1_767_225_540;
 
 /** Unpadded base64url of `text` or bytes. */
@@ -51,8 +53,14 @@ class FakeAuth {
   readonly pushed = new Map<string, Record<string, string>>();
   /** Whether token responses carry a refresh token. */
   refresh = true;
+  /** The user codes sign in. */
+  user = USER;
+  /** Whether refreshed ID tokens echo the sign-in's `nonce`, as OIDC Core §12.2 allows. */
+  refreshNonce = false;
   readonly fetch: FakeFetch;
   readonly #codes = new Map<string, Record<string, string>>();
+  /** The sign-in each refresh token carries over. */
+  readonly #grants = new Map<string, { sub: string; auth_time: number; nonce?: string }>();
   readonly #key: CryptoKeyPair;
   readonly #jwk: JsonWebKey;
 
@@ -78,7 +86,8 @@ class FakeAuth {
           }
         }
       }),
-      [FINISH_URL]: () => Response.json(this.authorization(this.lastRequestUri))
+      [FINISH_URL]: () => Response.json(this.authorization(this.lastRequestUri)),
+      [REVOKE_URL]: () => new Response(null, { status: 200 })
     });
   }
 
@@ -117,21 +126,33 @@ class FakeAuth {
     return { code, state: request.state ?? '', iss: ISSUER };
   }
 
-  /** Redeems a code, or a refresh token, signing an ID token for its request. */
+  /**
+   * Redeems a code, or a refresh token, signing an ID token for its request. A
+   * refresh carries over its sign-in's user and `auth_time`, as auth does.
+   */
   async #token(parameters: Record<string, string>): Promise<Response> {
     const request = this.#codes.get(parameters.code ?? '') ?? {};
     const now = this.clock.seconds;
+    const refreshing = parameters.refresh_token !== undefined;
+    const grant = this.#grants.get(parameters.refresh_token ?? '') ?? {
+      sub: this.user,
+      auth_time: now,
+      ...(request.nonce === undefined ? {} : { nonce: request.nonce })
+    };
+    const refreshToken = `prt_${String(now)}`;
+    this.#grants.set(refreshToken, grant);
+    const { nonce, ...signIn } = grant;
+    const echoed = !refreshing || this.refreshNonce ? nonce : undefined;
     const claims = {
       iss: ISSUER,
-      sub: USER,
       aud: 'notes-web',
       iat: now,
       exp: now + 300,
-      auth_time: now,
+      ...signIn,
       acr: 'phr',
       sid: '01936f3e-8c00-7000-8000-000000000002',
       preferred_username: 'ada',
-      ...(request.nonce === undefined ? {} : { nonce: request.nonce })
+      ...(echoed === undefined ? {} : { nonce: echoed })
     };
     const encode = (value: object) => base64url(JSON.stringify(value));
     const input = `${encode({ alg: 'RS256', typ: 'JWT', kid: 'k1' })}.${encode(claims)}`;
@@ -146,7 +167,7 @@ class FakeAuth {
       expires_in: 300,
       scope: request.scope ?? 'openid offline_access',
       id_token: `${input}.${base64url(new Uint8Array(signature))}`,
-      ...(this.refresh ? { refresh_token: `prt_${String(now)}` } : {})
+      ...(this.refresh ? { refresh_token: refreshToken } : {})
     });
   }
 }
@@ -539,6 +560,7 @@ describe('a session', () => {
     assert.equal(request?.acr_values, 'phr');
     assert.equal(request.max_age, '0');
     assert.equal(request.scope, 'openid profile');
+    assert.equal(request.id_token_hint, session.idToken.token, 'only this user may sign in');
 
     page.callback(auth.authorization(page.redirectedWith ?? ''));
     const stepped = await client.handleCallback();
@@ -559,6 +581,19 @@ describe('a session', () => {
       ]),
       page.left(navigations).then(() => assert.fail('a refusal left the page again'))
     ]);
+  });
+
+  test('a step-up that signs in another account fails, revoking its grant', async () => {
+    const { auth, page, client, session } = await signedIn();
+    page.resource = () => challenge.clone();
+    await leaving(session.fetch(RESOURCE), page);
+    auth.user = OTHER_USER;
+    page.callback(auth.authorization(page.redirectedWith ?? ''));
+    await assert.rejects(client.handleCallback(), {
+      code: 'invalid_token',
+      reason: 'subject_mismatch'
+    });
+    assert.equal(auth.fetch.count(REVOKE_URL), 1);
   });
 
   test('refuses to come back to another origin, before asking anything', async () => {
@@ -608,13 +643,22 @@ describe('a session', () => {
     );
   });
 
+  test('checks every refresh against the sign-in, whose nonce a refresh may drop', async () => {
+    const { auth, session } = await signedIn();
+    auth.clock.seconds += 290;
+    await session.accessToken();
+    // The next refresh sends the sign-in's nonce again, as the first did not.
+    auth.refreshNonce = true;
+    auth.clock.seconds += 290;
+    assert.equal(await session.accessToken(), `at_${String(NOW + 580)}`);
+  });
+
   test('logs out through auth, revoking its refresh token', async () => {
     const { auth, page, session } = await signedIn();
-    auth.fetch.routes[`${ISSUER}/oauth/revoke`] = () => new Response(null, { status: 200 });
     await leaving(session.logout(`${APP}/`), page);
     const logout = new URL(page.navigations.at(-1) ?? '');
     assert.equal(`${logout.origin}${logout.pathname}`, `${ISSUER}/oidc/logout`);
     assert.equal(logout.searchParams.get('post_logout_redirect_uri'), `${APP}/`);
-    assert.equal(auth.fetch.count(`${ISSUER}/oauth/revoke`), 1);
+    assert.equal(auth.fetch.count(REVOKE_URL), 1);
   });
 });

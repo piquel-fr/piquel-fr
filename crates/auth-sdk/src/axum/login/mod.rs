@@ -197,7 +197,8 @@ pub(super) struct Login {
 ///   the push fails. A browser keeps up to three logins at once, in slots chosen by
 ///   their `state`; a login that lands in a taken slot replaces the one there.
 /// - `GET /callback` completes the login its `state` names and starts a session,
-///   first revoking the refresh token of the session it replaces.
+///   revoking the refresh token of the session it replaces first. A step-up must
+///   sign in the same user as that session, or it fails and keeps the session.
 /// - `POST /logout` revokes the session's refresh token at auth, clears the cookie,
 ///   and redirects to RP-initiated logout.
 /// - `POST /backchannel-logout`, only with [`Self::on_backchannel_logout`].

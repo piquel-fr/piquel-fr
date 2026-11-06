@@ -112,7 +112,10 @@ type Route = { method: 'GET' | 'POST'; answer: (request: Request) => Promise<Res
 /** What a request's session cookie holds: no cookie, one to clear, or a live session. */
 type SessionCookie = 'absent' | 'ended' | StoredLogin;
 
-/** What refreshing a session came to: new tokens, the session as it was, or its end. */
+/**
+ * What refreshing a session came to: new tokens, the session as it was, or its end,
+ * when auth refused the refresh token or named another user or sign-in.
+ */
 type Refresh = StoredLogin | 'kept' | 'ended';
 
 /**
@@ -134,8 +137,10 @@ type RequestSession = {
  *   to auth. A browser keeps up to three logins at once, in slots chosen by their
  *   `state`; a login that lands in a taken slot replaces the one there.
  * - `GET /callback` completes the login its `state` names and starts a session,
- *   first revoking the refresh token of any session the browser already had, or
- *   answering 502 and keeping that session when auth cannot within five seconds.
+ *   revoking the refresh token of any session the browser already had first, or
+ *   answering 502 and keeping that session when auth cannot within five seconds. A
+ *   step-up must sign in the same user as that session, or it fails and keeps the
+ *   session.
  * - `POST /logout` revokes the session's refresh token at auth, clears the cookies,
  *   and redirects to RP-initiated logout; it answers 502, keeping the cookie, when
  *   auth cannot revoke it within five seconds. It accepts only requests from the
@@ -535,19 +540,27 @@ export class Login {
 
   /**
    * Refreshes the session's access token within {@link REFRESH_DEADLINE}. Auth's
-   * `invalid_grant` ends the session, as does an ID token naming another user; any
-   * other failure, or the deadline, keeps it.
+   * `invalid_grant` ends the session, as does an ID token naming another user or
+   * sign-in (OIDC Core §12.2); any other failure, or the deadline, keeps it.
    */
   async #refresh(login: StoredLogin): Promise<Refresh> {
     const { refreshToken } = login;
     if (refreshToken === undefined) return 'kept';
     let tokens;
     try {
-      tokens = await Login.#within(REFRESH_DEADLINE, this.client.refresh(refreshToken));
+      tokens = await Login.#within(
+        REFRESH_DEADLINE,
+        this.client.refresh(refreshToken, login.claims)
+      );
     } catch (error) {
       if (!(error instanceof AuthError)) throw error;
       // Auth refused the refresh token: the grant is over.
       if (error.code === 'oauth' && error.response?.error === 'invalid_grant') return 'ended';
+      // The session cannot go on as another user or sign-in.
+      if (error.reason === 'subject_mismatch' || error.reason === 'authentication_changed') {
+        console.warn('@piquel/auth: a refresh changed the signed-in user or sign-in', error);
+        return 'ended';
+      }
       console.warn('@piquel/auth: session refresh failed', error);
       return 'kept';
     }
@@ -555,7 +568,7 @@ export class Login {
       console.warn('@piquel/auth: session refresh timed out');
       return 'kept';
     }
-    return login.refreshed(tokens) ?? 'ended';
+    return login.refreshed(tokens);
   }
 
   /**
@@ -578,6 +591,15 @@ export class Login {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Revokes the grant of `login`, a sign-in the callback refuses after redeeming its
+   * code, so it does not live on at auth unused. A failure is logged by
+   * {@link Login.#revoke} and changes nothing: the refusal stands either way.
+   */
+  async #abandon(login: StoredLogin): Promise<void> {
+    if (login.refreshToken !== undefined) await this.#revoke(login.refreshToken);
   }
 
   /**
@@ -625,7 +647,12 @@ export class Login {
     return keys.pending.open(sealed, this.#context(name), pendingAuthorization);
   }
 
-  /** `GET /login`: keeps a pending login in a sealed cookie and redirects to auth. */
+  /**
+   * `GET /login`: keeps a pending login in a sealed cookie and redirects to auth. A
+   * step-up strengthens the session it starts from, so it is pinned to its user: the
+   * session holds no raw ID token to send as `id_token_hint`, so auth may let another
+   * account sign in, and the callback refuses it.
+   */
   async #start(request: Request): Promise<Response> {
     const query = new URL(request.url).searchParams;
     const returnTo = Login.#returnTo(query.get('return_to')) ?? this.#home;
@@ -647,10 +674,13 @@ export class Login {
       return Login.text(502, `Sign-in could not start: ${error.message}.`);
     }
     const name = await this.#pendingName(authorization.pending.state);
+    const stepUpLogin = query.get('step_up') === 'true';
+    const session = stepUpLogin ? await this.openSession(request) : 'absent';
     const pending: PendingAuthorization = {
       login: authorization.pending,
       returnTo,
-      stepUp: query.get('step_up') === 'true',
+      stepUp: stepUpLogin,
+      ...(session instanceof StoredLogin ? { subject: session.claims.sub } : {}),
       expiresAt: this.now() + PENDING_LIFETIME
     };
     // A `return_to` too long for the cookie returns home instead, or to the root if
@@ -695,24 +725,21 @@ export class Login {
 
   /**
    * Completes `pending` from `callback` and starts its session. The session the
-   * browser had is replaced, and its refresh token revoked first, so no copy of it,
-   * nor a response still in flight that sets it back, outlives its access token. If
-   * auth cannot revoke it within {@link REVOCATION_DEADLINE}, the sign-in stops
-   * before the code is redeemed, with 502, and the browser keeps its session.
+   * browser had is replaced, and its refresh token revoked before the new session is
+   * set, so no copy of it, nor a response still in flight that sets it back, outlives
+   * its access token. If auth cannot revoke it within {@link REVOCATION_DEADLINE}, the
+   * sign-in fails with 502 and the browser keeps its session; the code is spent, so
+   * the user starts again.
+   *
+   * A step-up must sign in the user it started from, and the one whose session it
+   * replaces, as after switching accounts in another tab: otherwise it fails, and the
+   * session it would replace is kept, its refresh token unrevoked.
    */
   async #complete(
     request: Request,
     pending: PendingAuthorization,
     callback: URLSearchParams
   ): Promise<Response> {
-    const previous = await this.openSession(request);
-    if (
-      previous instanceof StoredLogin &&
-      previous.refreshToken !== undefined &&
-      !(await this.#revoke(previous.refreshToken))
-    ) {
-      return Login.text(502, 'Signing in could not end your previous session; start again.');
-    }
     let tokens;
     try {
       tokens = await this.client.complete(pending.login, callback);
@@ -723,6 +750,24 @@ export class Login {
     // `complete` fails without an ID token, so this only narrows the type.
     const login = StoredLogin.start(tokens, this.now() + this.#lifetime);
     if (login === undefined) return Login.text(502, 'Sign-in failed: no ID token.');
+    const previous = await this.openSession(request);
+    const replaced = previous instanceof StoredLogin ? previous : undefined;
+    if (
+      pending.stepUp &&
+      [pending.subject, replaced?.claims.sub].some(
+        (subject) => subject !== undefined && subject !== login.claims.sub
+      )
+    ) {
+      await this.#abandon(login);
+      return Login.text(
+        400,
+        "Sign-in failed: this step-up signed in another account than this session's."
+      );
+    }
+    if (replaced?.refreshToken !== undefined && !(await this.#revoke(replaced.refreshToken))) {
+      await this.#abandon(login);
+      return Login.text(502, 'Signing in could not end your previous session; start again.');
+    }
     let session;
     try {
       session = await this.#sealSession(login);

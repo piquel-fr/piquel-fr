@@ -283,3 +283,115 @@ async fn signed_in_refuses_unsafe_requests_from_other_origins() {
         }
     }
 }
+
+/// Another account than the session's.
+const OTHER: &str = "01936f3e-8c00-7000-8000-000000000009";
+
+/// A step-up must sign in the user it started from, and the one whose session it
+/// replaces: otherwise it fails with 400 and keeps that session, its refresh token
+/// unrevoked, while the grant it was refused revokes. An ordinary sign-in may switch
+/// accounts.
+#[tokio::test]
+async fn step_ups_stay_on_the_signed_in_account() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    let app = login_app(&endpoint.issuer(&clock()));
+    let session = sign_in(&app, USER).await;
+    let step_up = "%2F&step_up=true";
+    let refused = |response: &Response| {
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            set_cookie(response, SESSION_COOKIE),
+            None,
+            "the session is kept"
+        );
+    };
+
+    // Started from the session, then completed as another account.
+    let login = Started::at(&app, step_up, std::slice::from_ref(&session)).await;
+    let both = [login.cookie.clone(), session.clone()];
+    refused(&login.complete(&app, OTHER, &both).await);
+    // Started from the session, which another tab then signed out of: the pin alone
+    // stops another account.
+    let login = Started::at(&app, step_up, std::slice::from_ref(&session)).await;
+    refused(
+        &login
+            .complete(&app, OTHER, std::slice::from_ref(&login.cookie))
+            .await,
+    );
+    // Started without a session, then completed beside another account's.
+    let login = Started::at(&app, step_up, &[]).await;
+    let both = [login.cookie.clone(), session.clone()];
+    refused(&login.complete(&app, OTHER, &both).await);
+    // The session's grant is `refresh-0`; each refused sign-in's, revoked, the next.
+    assert_eq!(
+        *endpoint.revoked.lock().expect("revoked"),
+        ["refresh-1", "refresh-2", "refresh-3"]
+    );
+
+    let login = Started::at(&app, step_up, std::slice::from_ref(&session)).await;
+    let both = [login.cookie.clone(), session.clone()];
+    let response = login.complete(&app, USER, &both).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        endpoint
+            .revoked
+            .lock()
+            .expect("revoked")
+            .last()
+            .map(String::as_str),
+        Some("refresh-0"),
+        "the replaced session's grant"
+    );
+
+    let login = Started::at(&app, "%2F", std::slice::from_ref(&session)).await;
+    let both = [login.cookie.clone(), session];
+    let response = login.complete(&app, OTHER, &both).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::SEE_OTHER,
+        "an ordinary sign-in"
+    );
+}
+
+/// A login with `id_token_hint` sends it to auth, and completes only for the user it
+/// names; another user's grant is revoked as it is refused.
+#[tokio::test]
+async fn hinted_logins_complete_only_for_the_hinted_user() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    let client = client(&endpoint.issuer(&clock()));
+    let hint: crate::IdToken =
+        serde_json::from_value(json!({ "claims": id_claims(USER), "raw": "id-0" }))
+            .expect("ID token");
+    let request = crate::AuthorizeRequest {
+        id_token_hint: Some(hint),
+        ..crate::AuthorizeRequest::default()
+    };
+    for (sub, completes) in [(OTHER, false), (USER, true)] {
+        let (url, pending) = client.authorize(&request).await.expect("authorize");
+        let parameter = |name: &str| {
+            url.query_pairs()
+                .find_map(|(key, value)| (key == name).then(|| value.into_owned()))
+                .expect("parameter")
+        };
+        assert_eq!(parameter("id_token_hint"), "id-0");
+        let callback = crate::CallbackParams {
+            code: Some(code(sub, &parameter("nonce"))),
+            state: Some(parameter("state")),
+            iss: Some("https://auth.example.com".into()),
+            ..crate::CallbackParams::default()
+        };
+        let completed = client.complete(pending, &callback).await;
+        assert_eq!(completed.is_ok(), completes, "{sub}");
+        let revoked = endpoint.revoked.lock().expect("revoked").clone();
+        assert_eq!(revoked, ["refresh-0"], "only the refused grant, {sub}");
+        if let Err(error) = completed {
+            assert_eq!(
+                error.code(),
+                crate::SdkError::new(
+                    crate::protocol::sdk::ErrorCategory::InvalidToken,
+                    crate::protocol::sdk::ErrorReason::SubjectMismatch
+                )
+            );
+        }
+    }
+}
