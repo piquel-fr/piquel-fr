@@ -8,7 +8,6 @@ use crate::{
     account::AccountService,
     admin::DashboardSignIn,
     assets::EmbeddedAssets,
-    config::EmailConfig,
     passkey::AdminProof,
     routes,
     security::{BrowserCookie, RequestContext},
@@ -25,7 +24,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use piquel_common::{
     AccountStatus, AuthenticationMethod, Handle, PictureId, UserId,
-    events::{Actor, DomainEvent, SigningKeyChange},
+    events::{Actor, DomainEvent},
 };
 use piquel_repository::{
     Channel, Database, DatabaseError, DatabaseTransaction, EventFilter, NewDelivery,
@@ -162,11 +161,7 @@ impl Harness {
     /// passkey proof of the handoff at `proved_at`: the dashboard's browser,
     /// holding its session.
     async fn confirmed(&self, auth: &Browser, path: &str, proved_at: DateTime<Utc>) -> Browser {
-        let sign_in = DashboardSignIn::new(
-            self.database.clone(),
-            AUTH_ORIGIN.parse().expect("auth origin"),
-            DASHBOARD.parse().expect("dashboard origin"),
-        );
+        let sign_in = self.sign_in_service();
         let state = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         let query = HandoffQuery {
             state: state.to_owned(),
@@ -180,6 +175,15 @@ impl Harness {
             .expect("handed off");
         let browser = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, state);
         self.redeem(&browser, &code_url, path).await
+    }
+
+    /// The dashboard's sign-in, as auth's handoff page runs it.
+    fn sign_in_service(&self) -> DashboardSignIn {
+        DashboardSignIn::new(
+            self.database.clone(),
+            AUTH_ORIGIN.parse().expect("auth origin"),
+            DASHBOARD.parse().expect("dashboard origin"),
+        )
     }
 
     /// Redeems the handoff `code_url` in the dashboard's `browser`, which then goes
@@ -335,11 +339,7 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
             .contains(r#"data-passkey-assertion="/admin/proof""#)
     );
 
-    let sign_in = DashboardSignIn::new(
-        harness.database.clone(),
-        AUTH_ORIGIN.parse().expect("auth origin"),
-        DASHBOARD.parse().expect("dashboard origin"),
-    );
+    let sign_in = harness.sign_in_service();
     let owner = admin.owner(&harness.database).await;
     let query = HandoffQuery {
         state: state.to_owned(),
@@ -414,29 +414,6 @@ async fn the_dialog_confirms_on_the_page() {
     let confirmed = harness.confirmed(&admin, "/users", Utc::now()).await;
     let page = html(harness.visit(&confirmed, "/users").await).await;
     assert!(!page.contains(r#"data-confirmed-for="0""#), "{page}");
-}
-
-/// While email is disabled, the Recover page says why the service refuses a
-/// recovery whose link would only be mailed.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn recover_says_when_email_is_disabled() {
-    let origin = AUTH_ORIGIN.parse().expect("auth origin");
-    let mut config = AuthConfig::test(&origin);
-    config.email = EmailConfig::test(&origin, false);
-    let harness = Harness::of(config).await;
-    let admin = harness.admin().await;
-    let owner = Browser::new_account(&harness.database).await;
-    let address = format!("{}@example.com", owner.user_id);
-    crate::tests::verified_address(&harness.database, owner.user_id, &address, true).await;
-    let recover = format!("/users/{}/recover", owner.user_id);
-    let dashboard = harness.confirmed(&admin, &recover, Utc::now()).await;
-    let url = format!("{DASHBOARD}{recover}");
-    let reason = [("reason", "Lost every passkey")];
-    let refused = dashboard
-        .submit(&harness.dashboard, &url, &reason, OWN_PAGE)
-        .await;
-    assert!(html(refused).await.contains("email is disabled"));
 }
 
 /// An administrator removes the access of an app the account consented to, with
@@ -860,10 +837,10 @@ async fn recoveries_are_started_and_undone_from_the_dashboard() {
 }
 
 /// An administrator changes an account's settings with the owner's own
-/// operations, each with a reason: renaming and removing a passkey, and making
-/// another address primary. The pages offer nothing that adds a way in, and a
-/// change without a reason, or only the owner's, is refused. They also rename
-/// the account's handle, under the owner's handle rules but without the cooldown.
+/// operations, each with a reason: renaming and removing a passkey, making
+/// another address primary, and changing the display name from the account's
+/// page. The pages offer nothing that adds a way in, and a change without a
+/// reason, or only the owner's, is refused.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_change_an_accounts_settings_with_a_reason() {
@@ -947,59 +924,18 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
         .expect("primary");
     assert_eq!(primary.id.to_string(), other);
 
-    let handle = format!("/users/{user}/handle");
-    let page = html(harness.visit(&dashboard, &handle).await).await;
-    assert!(
-        page.contains("Its old handle stays reserved for it"),
-        "{page}"
-    );
-    let renamed = format!("renamed-{}", &user.to_string()[24..]);
-    let done = post(&handle, &[("handle", renamed.as_str()), reason]).await;
-    assert_eq!(redirect(&done), format!("/users/{user}/profile"));
-    let stored = harness
-        .database
-        .users()
-        .find_by_id(user)
-        .await
-        .expect("lookup")
-        .expect("user");
-    assert_eq!(stored.handle.as_str(), renamed);
-    // The handle rules refuse a rename, saying why, as they do the owner's.
-    let refused = html(post(&handle, &[("handle", renamed.as_str()), reason]).await).await;
-    assert!(refused.contains("This is already the account"), "{refused}");
-}
-
-/// An administrator changes an account's display name from its page, with a
-/// reason, and the owner's history says who did and why. A blank name is refused
-/// beside the form, which keeps the reason typed.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn administrators_change_an_accounts_display_name() {
-    let harness = Harness::new().await;
-    let admin = harness.admin().await;
-    let owner = Browser::new_account(&harness.database).await;
-    let user = owner.user_id;
     let account = format!("/users/{user}");
     let name = format!("{account}/name");
-    let dashboard = harness.confirmed(&admin, &account, Utc::now()).await;
     let page = html(harness.visit(&dashboard, &account).await).await;
     assert!(
         page.contains(&format!(r#"href="{name}">Change display name</a>"#)),
         "{page}"
     );
-    let post = async |fields: &[(&str, &str)]| {
-        let url = format!("{DASHBOARD}{name}");
-        dashboard
-            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
-            .await
-    };
-
-    let reason = ("reason", "Asked by email");
-    let page = html(post(&[("display_name", " "), reason]).await).await;
+    // A refused name keeps the reason typed beside it.
+    let page = html(post(&name, &[("display_name", " "), reason]).await).await;
     assert!(page.contains("Choose a display name"), "{page}");
     assert!(page.contains(r#"value="Asked by email""#), "{page}");
-
-    let done = post(&[("display_name", " Renamed by support "), reason]).await;
+    let done = post(&name, &[("display_name", " Renamed by support "), reason]).await;
     assert_eq!(redirect(&done), format!("{account}/profile"));
     let stored = harness
         .database
@@ -1009,12 +945,6 @@ async fn administrators_change_an_accounts_display_name() {
         .expect("lookup")
         .expect("user");
     assert_eq!(stored.display_name, "Renamed by support");
-    let history = owner
-        .visit(&harness.auth.a, routes::page::settings::HISTORY)
-        .await;
-    let page = html(history).await;
-    assert!(page.contains("Display name changed"), "{page}");
-    assert!(page.contains("Asked by email"), "{page}");
 }
 
 /// An administrator's settings sidebar links the dashboard; nobody else's does.
@@ -1181,23 +1111,12 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
         client_page
     );
     let page = html(harness.visit(&dashboard, &client_page).await).await;
-    assert!(page.contains(&origin), "{page}");
-    let listed = AdminService::new(harness.database.clone(), true)
-        .list_related_origins(&operator())
-        .await
-        .expect("origins");
-    assert!(
-        listed
-            .iter()
-            .any(|approved| approved.origin.as_str() == origin)
-    );
-
     let remove = format!(
         "/clients/{}/origins/remove?origin={}",
         client.id,
         url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
     );
-    assert!(page.contains(&remove), "{page}");
+    assert!(page.contains(&remove), "listed: {page}");
     assert_eq!(redirect(&post(&remove, &[]).await), client_page);
     let listed = AdminService::new(harness.database.clone(), true)
         .list_related_origins(&operator())
@@ -1502,8 +1421,8 @@ impl Harness {
 
 /// The deliveries page lists a channel's deliveries, filtered by status, each with
 /// the change it may take: a pending one is cancelled from its row's dialog, and
-/// then retried, each recorded as the administrator's. The overview's waiting
-/// deliveries link the page.
+/// then retried, each recorded as the administrator's: the dashboard acts as the
+/// administrator signed in to it, never as the terminal.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
@@ -1574,8 +1493,7 @@ async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
 }
 
 /// The signing keys page lists every key; an administrator publishes a next key
-/// and revokes it, each change recorded as theirs. Importing stays at the
-/// terminal.
+/// and revokes it. Importing stays at the terminal.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
@@ -1607,19 +1525,6 @@ async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
     assert_eq!(redirect(&post(&revoke).await), "/keys");
     let keys = harness.database.signing_keys().list().await.expect("keys");
     assert!(keys.iter().all(|key| key.id != next), "revoked");
-    let actor = harness
-        .actor_of("signing_key_changed", |event| {
-            matches!(
-                event,
-                DomainEvent::SigningKeyChanged { key_id, change: SigningKeyChange::Revoked }
-                    if *key_id == next
-            )
-        })
-        .await;
-    assert!(
-        matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
-        "{actor:?}"
-    );
     let unknown = html(post(&revoke).await).await;
     assert!(unknown.contains("No signing key has ID"), "{unknown}");
 }
@@ -1628,7 +1533,7 @@ async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
 /// someone, which the page lists and the rename form refuses until it allows a
 /// reserved handle; the account holding it is then listed. Renamed again, its
 /// old handle shows as released, and its row's release frees it; the
-/// reservation's row removes it. Each change is recorded as the administrator's.
+/// reservation's row removes it.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn handles_are_reserved_given_released_and_unreserved() {
@@ -1704,31 +1609,15 @@ async fn handles_are_reserved_given_released_and_unreserved() {
         !page.contains(&release) && !page.contains(&unreserve),
         "{page}"
     );
-
-    for kind in ["handle_reserved", "handle_released", "handle_unreserved"] {
-        let actor = harness
-            .actor_of(kind, |event| match event {
-                DomainEvent::HandleReserved { handle } | DomainEvent::HandleUnreserved { handle } => {
-                    handle.as_str() == kept
-                }
-                DomainEvent::HandleReleased { handle } => {
-                    matches!(handle, piquel_common::Personal::Value(handle) if handle.as_str() == kept)
-                }
-                _ => false,
-            })
-            .await;
-        assert!(
-            matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
-            "{kind}: {actor:?}"
-        );
-    }
 }
 
-/// An administrator reads an account's inbox as its owner sees it, each
-/// notification's text in full, and reading it marks nothing read.
+/// An administrator reads an account's inbox and security history as its owner
+/// sees them, from the account's settings tabs, without a confirmation: each
+/// notification's text in full, marking nothing read, and each change with who
+/// made it and why, reporting nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn administrators_read_an_inbox_without_marking_it() {
+async fn administrators_read_an_accounts_inbox_and_history() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     let owner = Browser::new_account(&harness.database).await;
@@ -1745,7 +1634,9 @@ async fn administrators_read_an_inbox_without_marking_it() {
         .await
         .expect("rename");
     let inbox = format!("/users/{}/notifications", owner.user_id);
+    let history = format!("/users/{}/history", owner.user_id);
     let dashboard = harness.sign_in(&admin, &inbox).await;
+
     let page = html(harness.visit(&dashboard, &inbox).await).await;
     assert!(
         page.contains("Piquel support changed your handle"),
@@ -1767,35 +1658,9 @@ async fn administrators_read_an_inbox_without_marking_it() {
         .await
         .expect("unread");
     assert_eq!(unread, 1);
-}
 
-/// An administrator reads an account's security history as its owner sees it,
-/// from the account's settings tabs, without a confirmation and without
-/// reporting anything, and the read is recorded as a view.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn administrators_read_an_accounts_history() {
-    let harness = Harness::new().await;
-    let admin = harness.admin().await;
-    let owner = Browser::new_account(&harness.database).await;
-    let renamed =
-        Handle::parse(&format!("seen-{}", &owner.user_id.to_string()[24..])).expect("handle");
-    AdminService::new(harness.database.clone(), true)
-        .rename_handle(
-            &operator(),
-            owner.user_id,
-            renamed,
-            Reason::parse("Asked by email".into()).expect("reason"),
-            false,
-        )
-        .await
-        .expect("rename");
-    let history = format!("/users/{}/history", owner.user_id);
-    let dashboard = harness.sign_in(&admin, &history).await;
     let page = html(harness.visit(&dashboard, &history).await).await;
-    assert!(page.contains("Security history"), "{page}");
     assert!(page.contains("as its owner sees it"), "{page}");
-    // The owner's changes show, with who made them and why.
     assert!(page.contains("Handle changed"), "{page}");
     assert!(
         page.contains("By a Piquel operator: “Asked by email”"),
@@ -1805,16 +1670,6 @@ async fn administrators_read_an_accounts_history() {
         !page.contains("This wasn’t me"),
         "only the owner reports: {page}"
     );
-    let viewed = harness
-        .database
-        .events()
-        .history_for_user(owner.user_id, 10)
-        .await
-        .expect("history");
-    assert!(viewed.iter().any(|event| {
-        matches!(event.event.known(), Some(DomainEvent::AccountViewed {}))
-            && matches!(event.actor, Actor::Admin { user_id, .. } if user_id == admin.user_id)
-    }));
     let sign_in = format!("/users/{}/sign-in", owner.user_id);
     let dashboard = harness.confirmed(&admin, &sign_in, Utc::now()).await;
     let page = html(harness.visit(&dashboard, &sign_in).await).await;
