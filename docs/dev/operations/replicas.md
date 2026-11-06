@@ -55,7 +55,8 @@ Jobs run through one runner (`apps/auth-service/src/jobs/mod.rs`):
 - **Exclusive jobs** hold a PostgreSQL advisory lock while they run, so one
   replica at a time runs each, and the others skip that run. They include
   expired-state cleanup and the purge of deleted accounts, every five minutes,
-  and audit sealing, every five seconds.
+  audit sealing, every five seconds, and the audit chain's verification, once
+  none was recorded for six hours.
 - **Signing key rotation** runs on every replica each minute, in a transaction
   that takes a transaction-level advisory lock if it's free, so one replica at a
   time advances it. The `keys` commands wait for the same lock.
@@ -64,6 +65,9 @@ A run that fails or panics is logged, and retried at the next interval. On
 shutdown, once in-flight requests drain, running jobs get 10 seconds to finish,
 and cleanup stops after its current batch. Then they are cancelled, which
 closes their connection and releases their lock.
+
+Jobs raise alerts for administrators when something keeps going wrong: see
+[respond to an alert](administration.md#respond-to-an-alert) for each.
 
 ## Migrations
 

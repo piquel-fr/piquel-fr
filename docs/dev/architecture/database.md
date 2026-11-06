@@ -599,3 +599,5 @@ Recording a verification of the audit chain raises `audit_chain_broken` when it
 found the chain broken, and clears it when it found the chain intact. A
 verification with keys given with `--key`, such as another environment's,
 changes neither.
+The sealer raises `checkpoint_refused` when it refuses to sign a checkpoint over
+events that no longer match, and clears it once they match again.

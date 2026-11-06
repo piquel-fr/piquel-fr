@@ -3,6 +3,7 @@
 use super::*;
 use crate::{
     AdminError, AdminService, AuthConfig,
+    alerts::Alerts,
     config::AuditConfig,
     tests::{Replicas, operator},
 };
@@ -384,7 +385,8 @@ async fn recomputed_hashes_do_not_match_signed_checkpoints() {
 }
 
 /// The sealer recomputes the events sealed since the latest checkpoint before
-/// signing the next one, and refuses to sign a chain that no longer matches.
+/// signing the next one, and refuses to sign a chain that no longer matches,
+/// raising an alert that says where, which a checkpoint signed later clears.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn checkpoints_never_sign_a_chain_that_does_not_match() {
@@ -395,14 +397,43 @@ async fn checkpoints_never_sign_a_chain_that_does_not_match() {
     fixture
         .tamper(Tamper::EditPayload(7, serde_json::json!({})))
         .await;
+    let at = ChainBreak {
+        position: 7,
+        problem: ChainProblem::EventChanged,
+    };
     assert!(matches!(
         fixture.sealer.checkpoint(&mut lock).await,
-        Err(AuditError::Broken(ChainBreak {
-            position: 7,
-            problem: ChainProblem::EventChanged
-        }))
+        Err(AuditError::Broken(broken)) if broken == at
     ));
     lock.release().await.expect("release");
+    let mut tx = fixture.database.begin().await.expect("transaction");
+    let alert = tx
+        .alerts()
+        .current(AlertKind::CheckpointRefused)
+        .await
+        .expect("current")
+        .and_then(|current| current.alert);
+    tx.commit().await.expect("commit");
+    assert_eq!(alert, Some(Alert::CheckpointRefused(at.clone())));
+
+    // Once the events match again, the next checkpoint clears it.
+    let intact = Fixture::sealed_six().await;
+    let mut tx = intact.database.begin().await.expect("transaction");
+    let context = EventContext::system(JobName::AuditSealer);
+    Alerts::new(&mut tx, &context)
+        .raise(Alert::CheckpointRefused(at))
+        .await
+        .expect("raise");
+    tx.commit().await.expect("commit");
+    intact.seal().await;
+    let mut tx = intact.database.begin().await.expect("transaction");
+    let current = tx
+        .alerts()
+        .current(AlertKind::CheckpointRefused)
+        .await
+        .expect("current");
+    tx.commit().await.expect("commit");
+    assert_eq!(current, None);
     let latest = fixture
         .database
         .audit()
@@ -946,6 +977,11 @@ async fn sealing_goes_on_when_a_checkpoint_fails() {
     fixture
         .tamper(Tamper::EditPayload(7, serde_json::json!({})))
         .await;
+    // The first refusal raises its alert, an event of its own; later ones only
+    // see it again. Raise and seal it before counting.
+    let refused = fixture.sealer.pass(&mut lock, None).await;
+    assert!(matches!(refused, Err(AuditError::Broken(_))), "{refused:?}");
+    fixture.seal_with(&mut lock).await;
     fixture.sealer = fixture.sealer.sealing(2, EventContent::UNTAGGED);
     let database = fixture.database.clone();
     let mut tx = database.begin().await.expect("transaction");

@@ -1895,19 +1895,13 @@ async fn alerts_take_updates_from_the_dashboard() {
     use piquel_common::{
         admin::{ChainBreak, ChainProblem},
         alerts::{Alert, AlertKind},
-        events::{EventContext, JobName, RequestOrigin},
+        events::{EventContext, JobName},
     };
     let harness = Harness::isolated().await;
     let admin = harness.admin().await;
     // A position to find on the page.
     let position = Utc::now().timestamp_micros().unsigned_abs();
-    let context = EventContext {
-        actor: Actor::System {
-            job: JobName::AuditVerification,
-        },
-        origin: RequestOrigin::default(),
-        reason: None,
-    };
+    let context = EventContext::system(JobName::AuditVerification);
     let mut tx = harness.database.begin().await.expect("transaction");
     let alert = Alert::AuditChainBroken(ChainBreak {
         position,

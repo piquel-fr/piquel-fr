@@ -206,6 +206,9 @@ old key stop working once the new key replaces it.
   theirs, and reports it, which signs out their other sessions.
   `auth-service audit list --kind compromise_reported` lists these reports.
 - `auth-service admin list` lists an administrator nobody granted.
+- An alert says **The audit chain is broken** or **The audit chain's
+  checkpoints stopped**: someone changed the history (see
+  [respond to an alert](administration.md#respond-to-an-alert)).
 
 ### What to do
 

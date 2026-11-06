@@ -288,7 +288,9 @@ so keep every key that signed a checkpoint still in the database.
   the schema owner's rights can edit them and recompute their hashes, and the
   next checkpoint signs the edited history. Before signing, the sealer
   recomputes the events since the latest checkpoint, so edits that leave the
-  stored hashes as they were, and recent deletions, are refused instead.
+  stored hashes as they were, and recent deletions, are refused instead. A
+  refusal raises the `checkpoint_refused` alert, which clears once the sealer
+  finds the events matching again.
 - **Open sessions.** Rotating the runtime role's password does not end the
   sessions already open with it, and one of them could set the role's password
   and settings again. So after a compromise, as the schema owner, first stop
