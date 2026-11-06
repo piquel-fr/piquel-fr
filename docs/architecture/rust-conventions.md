@@ -18,8 +18,9 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   references), `email` (address normalization), `events` (domain events) and
   `sqlx` (column decoding, enabled only by the database crate).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
-  comparison, PKCE, RS256 signing, key sets, AES-256-GCM sealing of keys at rest
-  and Ed25519 signed notes, for audit checkpoints.
+  comparison, PKCE, RS256 signing, key sets, AES-256-GCM sealing of keys at rest,
+  Ed25519 signed notes, for audit checkpoints, and SCRAM-SHA-256 verifiers of
+  database passwords.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
   [sdk.md](sdk.md): token validation, typed scopes, login and the JWKS cache auth
   also uses for Google; its `axum` feature adds extractors, a bearer layer and
@@ -57,7 +58,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   database crate.
 
 Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet`,
-`KeyEncryptionKey` and `NoteKey` instead of calling `openssl`, `sha2` or `rand`
+`KeyEncryptionKey`, `NoteKey` and `ScramVerifier` instead of calling `openssl`, `sha2` or `rand`
 directly. Environment reads go through `Variable`.
 Keep cryptographic implementations in the crypto crate so they can be audited together.
 

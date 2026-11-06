@@ -290,6 +290,8 @@ migration that drops a listed table, or a new table that needs an exception,
 updates the script in the same change. Narrowing a grant on an existing table is a
 contract step: the previous release keeps running as the same role during a
 deploy, so revoke only once no deployed release needs the privilege. Provisioning refuses a role that is the owner or a superuser.
+It sets the password as a SCRAM-SHA-256 verifier (`ScramVerifier`), so the server
+and its logs never see the password itself, even in a statement that fails.
 The role cannot change the schema, disable triggers, change
 `session_replication_role` or run programs on the server. It still takes the
 advisory locks `try_exclusive` uses, and may create temporary tables.

@@ -308,3 +308,22 @@ fn note_keys_reject_malformed_seeds_and_names() {
             .starts_with("NoteKey { verifier")
     );
 }
+
+/// A verifier matches the one `PostgreSQL` 18 derived for the same password and
+/// salt, in the form it stores, and each new one has a salt of its own.
+#[test]
+fn scram_verifiers_match_postgresql() {
+    const DERIVED: &str = "SCRAM-SHA-256$4096:HGPlm+ubr/bvXpBiFegrkQ==$\
+        NEDv+VmjbTTxr+dxm9sg/T4xlN2P4gWRZ38pcY186lk=:\
+        UfRHbtxHcFNIlFKAArF+Ly0FCicrMmo3Y/ZpQdQEnlM=";
+    let salt = base64::engine::general_purpose::STANDARD
+        .decode("HGPlm+ubr/bvXpBiFegrkQ==")
+        .expect("salt")
+        .try_into()
+        .expect("16 bytes");
+    let verifier = ScramVerifier::with_salt("pencil", salt).expect("verifier");
+    assert_eq!(verifier.to_string(), DERIVED);
+    let fresh = ScramVerifier::new("pencil").expect("verifier").to_string();
+    assert!(fresh.starts_with("SCRAM-SHA-256$4096:"));
+    assert_ne!(fresh, DERIVED);
+}

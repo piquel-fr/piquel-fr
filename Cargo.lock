@@ -2212,6 +2212,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "piquel-common",
+ "piquel-crypto",
  "piquel-telemetry",
  "serde",
  "serde_json",
