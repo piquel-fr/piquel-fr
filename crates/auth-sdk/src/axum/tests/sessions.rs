@@ -328,7 +328,7 @@ fn sessions_without_a_refresh_token_end_with_their_access_token() {
 async fn revocations_give_up_after_their_deadline() {
     let endpoint = TokenEndpoint::start(Duration::ZERO).await;
     // An injected client without a timeout of its own.
-    let http = Http::new(reqwest::Client::new());
+    let http = Http::plain(reqwest::Client::builder());
     let app = login_app(&endpoint.issuer_with(&clock(), http));
     let session = sign_in(&app, USER).await;
     endpoint.revocations_hang.store(true, Ordering::SeqCst);

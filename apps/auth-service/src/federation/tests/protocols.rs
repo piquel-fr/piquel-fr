@@ -17,6 +17,24 @@ impl TestApp {
     }
 }
 
+/// A key cache fetching `path` from `router`, served over TLS on localhost, since the
+/// SDK fetches keys only over https.
+async fn tls_keys(router: Router, path: &str) -> KeyCache {
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("mock TLS listener");
+    let url = format!(
+        "https://localhost:{}{path}",
+        tcp.local_addr().expect("address").port()
+    );
+    let certificate = crate::tests::TlsListener::serve(tcp, router);
+    KeyCache::new(
+        url.parse().expect("mock key URL"),
+        reqwest::Client::builder().add_root_certificate(certificate),
+    )
+    .expect("mock key cache")
+}
+
 /// Google's code-exchange response yields the identity its ID token vouches for,
 /// which needs no email. `google_signed_tokens_are_verified` covers the token's
 /// checks.
@@ -89,17 +107,7 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
         .expect("signed token");
     let keys = rsa.jwks().clone();
     let mock = Router::new().route("/keys", get(move || async move { Json(keys) }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("mock listener");
-    let url = format!(
-        "http://{}/keys?client=secret",
-        listener.local_addr().expect("address")
-    );
-    let task = tokio::spawn(async move {
-        axum::serve(listener, mock).await.expect("mock server");
-    });
-    let cache = KeyCache::new(url.parse().expect("mock key URL"), reqwest::Client::new());
+    let cache = tls_keys(mock, "/keys?client=secret").await;
     let jws = piquel_auth::Jws::parse(&token).expect("JWS");
     let request = tracing::info_span!("request");
     cache
@@ -107,7 +115,6 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
         .instrument(request)
         .await
         .expect("verified");
-    task.abort();
 
     let spans = capture.spans();
     let request = spans
@@ -128,7 +135,7 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
     for expected in [
         "http.request.method=GET",
         "http.response.status_code=200",
-        "server.address=127.0.0.1",
+        "server.address=localhost",
     ] {
         assert!(
             attributes.iter().any(|a| a == expected),
@@ -159,10 +166,9 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
 #[tokio::test]
 async fn google_signed_tokens_are_verified() {
     let rsa = Rs256Key::generate("google-test").expect("RSA key");
-    let IdentityStrategy::Google(mut protocol) =
-        ProviderEndpoints::new(Provider::Google, &reqwest::Client::new())
-            .expect("Google facts")
-            .identity
+    let IdentityStrategy::Google(mut protocol) = ProviderEndpoints::new(Provider::Google)
+        .expect("Google facts")
+        .identity
     else {
         panic!("Google must use signed ID tokens");
     };

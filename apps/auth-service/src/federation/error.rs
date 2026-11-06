@@ -187,4 +187,7 @@ pub enum FederationConfigError {
     /// A provider's built-in endpoint is not a URL.
     #[error("a built-in provider endpoint is not a URL")]
     ProviderEndpoint(#[source] url::ParseError),
+    /// A provider's signing key cache could not be built.
+    #[error("could not initialize a provider's signing key cache")]
+    Keys(#[source] piquel_auth::KeyError),
 }

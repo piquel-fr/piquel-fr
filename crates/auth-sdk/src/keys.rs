@@ -213,6 +213,10 @@ pub enum KeyError {
     /// is unknown.
     #[error("signing keys could not be fetched recently")]
     Unavailable,
+    /// The key set URL does not use `https`, so keys would cross the network in the
+    /// clear.
+    #[error("signing keys at {0} must be fetched over https")]
+    InsecureUrl(Url),
 }
 
 impl KeyError {
@@ -221,6 +225,7 @@ impl KeyError {
     pub const fn code(&self) -> SdkError {
         match self {
             Self::Network(_) | Self::Unavailable => SdkError::category(ErrorCategory::Network),
+            Self::InsecureUrl(_) => SdkError::category(ErrorCategory::Keys),
             Self::InvalidDocument(_) => {
                 SdkError::new(ErrorCategory::Keys, ErrorReason::InvalidDocument)
             }
@@ -427,7 +432,9 @@ struct KeyCacheInner {
 ///   [`TokenError::UnknownKey`].
 /// - Keys are fetched at most once every 30 seconds, whatever the reason.
 /// - Keys stay fresh for the response's `max-age`, bounded to 30 seconds through 24
-///   hours, or one hour without one.
+///   hours, or one hour without one; `no-store` or `no-cache` keeps them 30 seconds.
+/// - Every fetch is `https`, follows no redirect, and gives up after 10 seconds,
+///   whatever the client builder says.
 /// - A failed fetch keeps the last good keys.
 ///
 /// ```no_run
@@ -437,8 +444,8 @@ struct KeyCacheInner {
 /// // One cache per issuer, shared by every request: clones share keys and fetch spacing.
 /// let keys = KeyCache::new(
 ///     "https://www.googleapis.com/oauth2/v3/certs".parse()?,
-///     reqwest::Client::new(),
-/// );
+///     reqwest::Client::builder(),
+/// )?;
 /// let jws = Jws::parse(token)?;
 /// let algorithm = jws.require_algorithm(&[Algorithm::Rs256])?;
 /// keys.verify(&jws, algorithm).await?;
@@ -460,16 +467,30 @@ impl fmt::Debug for KeyCache {
 }
 
 impl KeyCache {
-    /// Keys fetched from `jwks_uri` with `http`, on first use.
-    #[must_use]
-    pub fn new(jwks_uri: Url, http: reqwest::Client) -> Self {
-        Self::fetched(jwks_uri, Http::new(http), Arc::new(SystemClock))
+    /// Keys fetched from `jwks_uri` on first use, with a client built from `http`,
+    /// for proxies or extra trusted roots. The SDK's transport policy applies whatever
+    /// `http` sets: `https` only, no redirects and a 10-second deadline.
+    ///
+    /// # Errors
+    /// [`KeyError::InsecureUrl`] unless `jwks_uri` uses `https`, and
+    /// [`KeyError::Network`] if the client cannot be built.
+    pub fn new(jwks_uri: Url, http: reqwest::ClientBuilder) -> Result<Self, KeyError> {
+        Self::with_clock(jwks_uri, http, SystemClock)
     }
 
     /// Like [`Self::new`], with an injected clock.
-    #[must_use]
-    pub fn with_clock(jwks_uri: Url, http: reqwest::Client, clock: impl Clock) -> Self {
-        Self::fetched(jwks_uri, Http::new(http), Arc::new(clock))
+    ///
+    /// # Errors
+    /// See [`Self::new`].
+    pub fn with_clock(
+        jwks_uri: Url,
+        http: reqwest::ClientBuilder,
+        clock: impl Clock,
+    ) -> Result<Self, KeyError> {
+        if jwks_uri.scheme() != "https" {
+            return Err(KeyError::InsecureUrl(jwks_uri));
+        }
+        Ok(Self::fetched(jwks_uri, Http::build(http)?, Arc::new(clock)))
     }
 
     /// Keys that never change and are never fetched, for tests and pinned keys.

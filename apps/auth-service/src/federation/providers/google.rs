@@ -78,8 +78,8 @@ pub(in crate::federation) struct GoogleProtocol {
 }
 
 impl ProviderEndpoints {
-    /// Google's protocol facts; `client` fetches its signing keys.
-    pub(super) fn google(client: &reqwest::Client) -> Result<Self, FederationConfigError> {
+    /// Google's protocol facts, with a cache of its signing keys.
+    pub(super) fn google() -> Result<Self, FederationConfigError> {
         Ok(Self {
             issuer: "https://accounts.google.com",
             authorization: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -88,8 +88,9 @@ impl ProviderEndpoints {
             identity: IdentityStrategy::Google(GoogleProtocol {
                 keys: KeyCache::new(
                     Url::parse(KEYS_URL).map_err(FederationConfigError::ProviderEndpoint)?,
-                    client.clone(),
-                ),
+                    FederationApplication::http_client(),
+                )
+                .map_err(FederationConfigError::Keys)?,
                 issuers: &["https://accounts.google.com", "accounts.google.com"],
             }),
         })

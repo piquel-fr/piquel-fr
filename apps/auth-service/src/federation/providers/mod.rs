@@ -121,19 +121,15 @@ pub(super) struct ProviderEndpoints {
 }
 
 impl ProviderEndpoints {
-    /// Looks up a provider's facts, defined in its module. `client` makes any
-    /// requests the facts need, such as fetching signing keys. A new `Provider` fails
-    /// to compile here until it has a module.
+    /// Looks up a provider's facts, defined in its module. A new `Provider` fails to
+    /// compile here until it has a module.
     ///
     /// # Errors
-    /// Fails if a built-in endpoint does not parse.
-    pub(super) fn new(
-        provider: Provider,
-        client: &reqwest::Client,
-    ) -> Result<Self, FederationConfigError> {
+    /// Fails if a built-in endpoint does not parse, or a key cache cannot be built.
+    pub(super) fn new(provider: Provider) -> Result<Self, FederationConfigError> {
         match provider {
             Provider::GitHub => Ok(Self::github()),
-            Provider::Google => Self::google(client),
+            Provider::Google => Self::google(),
         }
     }
 }

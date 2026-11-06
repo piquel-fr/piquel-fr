@@ -118,24 +118,16 @@ impl fmt::Debug for Issuer {
 /// Configures discovery: an HTTP client and a clock.
 ///
 /// ```no_run
-/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-/// use std::time::Duration;
-///
-/// // Auth's endpoints never redirect, so a redirect is refused.
-/// let http = reqwest::Client::builder()
-///     .timeout(Duration::from_secs(5))
-///     .redirect(reqwest::redirect::Policy::none())
-///     .build()?;
+/// # async fn run(proxy: reqwest::Proxy) -> Result<(), Box<dyn std::error::Error>> {
 /// let issuer = piquel_auth::Issuer::builder()
-///     .http_client(http)
+///     .http_client(reqwest::Client::builder().proxy(proxy))
 ///     .discover("https://auth.piquel.fr")
 ///     .await?;
 /// # Ok(()) }
 /// ```
-#[derive(Clone)]
 pub struct IssuerBuilder {
-    /// Client for every request, or `None` for the default.
-    http: Option<reqwest::Client>,
+    /// Builds the client for every request, or `None` for the default.
+    http: Option<reqwest::ClientBuilder>,
     /// Time source for every check.
     clock: Arc<dyn Clock>,
 }
@@ -151,10 +143,12 @@ impl Default for IssuerBuilder {
 }
 
 impl IssuerBuilder {
-    /// Sends every request through `http`, for timeouts, proxies or extra trusted
-    /// roots. Disable redirects on it: no auth endpoint redirects.
+    /// Sends every request through a client built from `http`, for proxies or extra
+    /// trusted roots. The SDK's transport policy applies whatever `http` sets: `https`
+    /// only, no redirects, since no auth endpoint redirects and a 307 would resend a
+    /// code or token elsewhere, and a 10-second deadline on every request.
     #[must_use]
-    pub fn http_client(mut self, http: reqwest::Client) -> Self {
+    pub fn http_client(mut self, http: reqwest::ClientBuilder) -> Self {
         self.http = Some(http);
         self
     }
@@ -173,10 +167,7 @@ impl IssuerBuilder {
     /// See [`DiscoveryError`].
     pub async fn discover(self, issuer: &str) -> Result<Issuer, DiscoveryError> {
         let url = Issuer::metadata_url(issuer)?;
-        let http = match self.http {
-            Some(client) => Http::new(client),
-            None => Http::default_client()?,
-        };
+        let http = Http::build(self.http.unwrap_or_else(reqwest::Client::builder))?;
         let reply = http.get(&url, Authorization::None).await?.ok(&url)?;
         let metadata = Issuer::check_metadata(issuer, &reply.body)?;
         Ok(Issuer::new(metadata, http, self.clock))

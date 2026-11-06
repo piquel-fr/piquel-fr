@@ -45,11 +45,7 @@ impl LoginApp {
         let origin = format!("https://localhost:{port}");
         let flow = Flow::at(&origin, true, false).await;
         let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
-        let http = reqwest::Client::builder()
-            .add_root_certificate(certificate)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("HTTP client");
+        let http = reqwest::Client::builder().add_root_certificate(certificate);
         let clock = ManualClock(Arc::new(std::sync::Mutex::new(Utc::now())));
         let issuer = piquel_auth::Issuer::builder()
             .http_client(http)

@@ -14,7 +14,7 @@ impl TestApp {
                 id: TokenId::new(),
                 user_id,
                 provider: piquel_common::Provider::GitHub,
-                issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
+                issuer: ProviderEndpoints::new(Provider::GitHub)
                     .expect("GitHub facts")
                     .issuer
                     .into(),
@@ -62,7 +62,7 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
             .database
             .federation()
             .find_active(
-                ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
+                ProviderEndpoints::new(Provider::GitHub)
                     .expect("GitHub facts")
                     .issuer,
                 &test.subject
