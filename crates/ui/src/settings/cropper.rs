@@ -149,15 +149,22 @@ impl Cropper {
             self.centre(&self.y, &self.height),
         );
         let image = self.image.clone();
+        // Nothing to place while no image shows, or while the stage has no size,
+        // as when its dialog closes: the square would not survive it.
         expr!({
-            let _width = width.get() * scale;
-            let _left = side.get() / 2.0 - x * scale;
-            let _top = side.get() / 2.0 - y * scale;
-            // The policy allows no inline style, but sets it through the CSSOM.
-            raw!(
-                "((image) => { ${kept_x}.set(${x}); ${kept_y}.set(${y}); image.style.width = String(${_width}) + 'px'; image.style.transform = 'translate(' + String(${_left}) + 'px, ' + String(${_top}) + 'px)'; })(document.getElementById(String(${image})))",
-                ()
-            )
+            if width.get() != 0.0 {
+                if side.get() != 0.0 {
+                    let _width = width.get() * scale;
+                    let _left = side.get() / 2.0 - x * scale;
+                    let _top = side.get() / 2.0 - y * scale;
+                    // The policy allows no inline style, but sets it through the
+                    // CSSOM.
+                    let _placed = raw!(
+                        "((image) => { ${kept_x}.set(${x}); ${kept_y}.set(${y}); image.style.width = String(${_width}) + 'px'; image.style.transform = 'translate(' + String(${_left}) + 'px, ' + String(${_top}) + 'px)'; })(document.getElementById(String(${image})))",
+                        ()
+                    );
+                }
+            }
         })
     }
 
