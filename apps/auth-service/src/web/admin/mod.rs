@@ -723,7 +723,6 @@ impl AdminApplication {
             .unwrap_or_default();
         let picture = admin.and_then(|admin| Self::picture(cx, admin.picture));
         let administrator = admin.map(|admin| Who {
-            user: None,
             name: admin.handle.as_str(),
             handle: admin.handle.as_str(),
             picture: picture.as_deref(),

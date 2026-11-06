@@ -70,7 +70,6 @@ pub async fn administrator_list<'a>(
             <ul class="list">
                 for row in rows {
                     let who = Who {
-                        user: None,
                         name: row.administrator.handle.as_str(),
                         handle: row.administrator.handle.as_str(),
                         picture: row.picture.as_deref(),

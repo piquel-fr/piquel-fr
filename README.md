@@ -697,6 +697,12 @@ explains how to choose a requirement and handle the challenge.
   offer an explicit Google Password Manager option for devices with Google services,
   never chosen automatically; a standard passkey or security key stays the default.
   Authentication supports the browser account picker and a handle fallback.
+- Every account page tells the browser's password manager, by the WebAuthn Signal
+  API, the account's current handle and display name, and the credential ID of
+  every passkey that still signs in: the passkeys sign-in itself checks. Where the
+  browser supports it, its passkeys then show a new handle, and one removed in the
+  settings disappears from it instead of failing at sign-in. A security key keeps
+  its copy, which only fails.
 - An account's handle is its public identifier and login name, released as
   `preferred_username`: 3–32 characters of `[a-z0-9-]`, without a leading, trailing
   or double hyphen, so it is a valid DNS label. Signup trims and lowercases it, and

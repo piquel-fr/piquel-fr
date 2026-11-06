@@ -3,6 +3,7 @@
 
 use super::{PasskeyApplication, PasskeyError, PasskeyName};
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use piquel_common::{
     PasskeyId,
     events::{DomainEvent, RevocationReason},
@@ -45,6 +46,21 @@ impl AccountService {
         viewer.authorize(&self.database).await?;
         let passkeys = self.database.passkeys().list_active(viewer.user()).await?;
         Ok(passkeys.into_iter().map(Into::into).collect())
+    }
+
+    /// The credential ID, in unpadded base64url, of every passkey that signs in
+    /// to the owner's account: all its unrevoked ones, the rows sign-in checks
+    /// an assertion against. The account's pages tell the password manager,
+    /// which forgets the account's passkeys this does not list.
+    pub(crate) async fn accepted_passkeys(
+        &self,
+        owner: &Owner,
+    ) -> Result<Vec<String>, AccountError> {
+        let keys = self.database.passkeys().list_active(owner.user()).await?;
+        Ok(keys
+            .iter()
+            .map(|key| URL_SAFE_NO_PAD.encode(&key.credential_id))
+            .collect())
     }
 
     /// Changes a passkey's label. A name grants nothing, so the owner needs no

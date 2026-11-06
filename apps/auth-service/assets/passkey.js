@@ -288,36 +288,43 @@ class Passkeys {
       .replace(/=+$/, '');
   }
   /**
-   * Tells the browser's password manager the current handle and display name of the
-   * account whose ID is `id`, so its passkeys show them after a change (the WebAuthn
-   * Signal API). Does nothing where unsupported.
-   * @param {{ id: string; name: string; displayName: string }} account
+   * Tells the browser's password manager, by the WebAuthn Signal API, of the account
+   * whose ID is `id`: its current handle and display name, so its passkeys show them
+   * after a change, and `accepted`, the credential IDs of every passkey that still
+   * signs in to it, so it forgets the account's others, such as one removed. It
+   * forgets every passkey of the account `accepted` does not list, so the server
+   * lists them all, and without the list nothing is said of them. Does nothing where
+   * unsupported.
+   * @param {{ id: string; name: string; displayName: string; accepted?: string[] }} account
    * @returns {void}
    */
-  static signal({ id, name, displayName }) {
+  static signal({ id, name, displayName, accepted }) {
     /**
-     * @typedef {(details: {
-     *   rpId: string;
-     *   userId: string;
-     *   name: string;
-     *   displayName: string;
-     * }) => Promise<void>} SignalCurrentUserDetails
+     * @typedef {{
+     *   signalCurrentUserDetails?: (details: {
+     *     rpId: string;
+     *     userId: string;
+     *     name: string;
+     *     displayName: string;
+     *   }) => Promise<void>;
+     *   signalAllAcceptedCredentials?: (credentials: {
+     *     rpId: string;
+     *     userId: string;
+     *     allAcceptedCredentialIds: string[];
+     *   }) => Promise<void>;
+     * }} Signals
      */
-    const credentials = /** @type {{ signalCurrentUserDetails?: SignalCurrentUserDetails }} */ (
-      /** @type {unknown} */ (PublicKeyCredential)
-    );
+    const signals = /** @type {Signals} */ (/** @type {unknown} */ (PublicKeyCredential));
     // Passkeys carry the account ID's 16 bytes as their user handle.
     const bytes = Uint8Array.from(id.replace(/-/g, '').match(/../g) ?? [], (byte) =>
       parseInt(byte, 16)
     );
-    credentials
-      .signalCurrentUserDetails?.({
-        rpId: window.location.hostname,
-        userId: Passkeys.#encode(bytes.buffer),
-        name,
-        displayName
-      })
-      .catch(() => undefined);
+    const account = { rpId: window.location.hostname, userId: Passkeys.#encode(bytes.buffer) };
+    signals.signalCurrentUserDetails?.({ ...account, name, displayName }).catch(() => undefined);
+    if (accepted)
+      signals
+        .signalAllAcceptedCredentials?.({ ...account, allAcceptedCredentialIds: accepted })
+        .catch(() => undefined);
   }
   /**
    * The credential descriptor `value` encodes.
@@ -364,7 +371,9 @@ class Passkeys {
  *   starts hidden, and shows once the browser can write to the clipboard.
  * - an element marked `data-passkey-user`, the signed-in account's ID, tells the
  *   password manager the account's current `data-passkey-name` and
- *   `data-passkey-display-name`, so its passkeys show them after a change.
+ *   `data-passkey-display-name`, so its passkeys show them after a change, and
+ *   `data-passkey-credentials`, the space-separated credential IDs of every passkey
+ *   that still signs in to it, so it forgets the others.
  * - an element marked `data-replace-url` makes its value the page's address: a page
  *   answering a form with what only it may show, such as a secret, then reloads by
  *   `GET`, never posting the form again.
@@ -531,7 +540,8 @@ function wire(document) {
     Passkeys.signal({
       id: account.passkeyUser,
       name: account.passkeyName ?? '',
-      displayName: account.passkeyDisplayName ?? ''
+      displayName: account.passkeyDisplayName ?? '',
+      accepted: account.passkeyCredentials?.split(' ').filter(Boolean)
     });
   if (Passkeys.available())
     for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (

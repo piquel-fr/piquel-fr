@@ -57,6 +57,80 @@ export async function addPasskeys(
   return { cdp, authenticatorId };
 }
 
+/** What a page told the password manager of an account's passkeys. */
+type AcceptedCredentials = {
+  rpId: string;
+  /** The account's user handle, in unpadded base64url. */
+  userId: string;
+  /** The credential ID of every passkey that still signs in, in unpadded base64url. */
+  allAcceptedCredentialIds: string[];
+  /** Why Chromium refused the signal, if it did. */
+  refused?: string;
+};
+
+/**
+ * Records, on every page `context` loads from now on, what it tells the password
+ * manager by `PublicKeyCredential.signalAllAcceptedCredentials`, once Chromium's
+ * own has answered, so a call Chromium refuses says why.
+ */
+export async function recordAcceptedCredentials(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    type Signal = (options: AcceptedCredentials) => Promise<void>;
+    const credentials = PublicKeyCredential as unknown as {
+      signalAllAcceptedCredentials?: Signal;
+    };
+    const own = credentials.signalAllAcceptedCredentials?.bind(PublicKeyCredential);
+    const told: AcceptedCredentials[] = [];
+    (window as unknown as { told: AcceptedCredentials[] }).told = told;
+    credentials.signalAllAcceptedCredentials = async (options) => {
+      const call = { ...options, allAcceptedCredentialIds: [...options.allAcceptedCredentialIds] };
+      try {
+        await own?.(options);
+      } catch (error) {
+        call.refused = String(error);
+        throw error;
+      } finally {
+        told.push(call);
+      }
+    };
+  });
+}
+
+/**
+ * Expects the page `page` shows to have told the password manager, once its
+ * passkey script ran, that the passkeys the authenticators `authenticatorIds`
+ * hold, and only those, still sign in, under their own RP ID and user handle.
+ */
+export async function expectAccepted(
+  page: Page,
+  cdp: CDPSession,
+  ...authenticatorIds: string[]
+): Promise<void> {
+  const held = (
+    await Promise.all(
+      authenticatorIds.map((authenticatorId) =>
+        cdp.send('WebAuthn.getCredentials', { authenticatorId })
+      )
+    )
+  ).flatMap(({ credentials }) => credentials);
+  const base64url = (value: string) => Buffer.from(value, 'base64').toString('base64url');
+  // Waits for the call, which the page makes once its passkey script runs.
+  const told = await (
+    await page.waitForFunction(() =>
+      (window as unknown as { told?: AcceptedCredentials[] }).told?.at(-1)
+    )
+  ).jsonValue();
+  if (!told) throw new Error('The page told the password manager nothing.');
+  expect(held.length).toBeGreaterThan(0);
+  expect({ ...told, allAcceptedCredentialIds: told.allAcceptedCredentialIds.toSorted() }).toEqual({
+    rpId: held[0].rpId,
+    userId: base64url(held[0].userHandle ?? ''),
+    allAcceptedCredentialIds: held
+      .map((credential) => base64url(credential.credentialId))
+      .toSorted()
+  });
+}
+
 /**
  * Runs `command`, a deployment's CLI named by an environment variable such as
  * `E2E_GRANT_ADMIN`, with `args` appended, and returns what it printed.

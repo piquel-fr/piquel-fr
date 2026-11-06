@@ -4,7 +4,9 @@ isolated database: tests create accounts and credentials. CI runs it against the
 debug binary `just rust build` makes, behind Caddy over HTTPS, as configured below.
 
 `settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
-passkeys, a passkey ceremony that fails, the passkey confirmation the passkey
+passkeys, which each page then tells the password manager, listing exactly the
+passkeys the virtual authenticators hold that still sign in, a passkey ceremony
+that fails, the passkey confirmation the passkey
 script runs, devices, an email link's token and signing out. It also removes a
 connected app, which then asks for consent again; reports a passkey in the
 security history as not the owner's, which signs out another device holding the

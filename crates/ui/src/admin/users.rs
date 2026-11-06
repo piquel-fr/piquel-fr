@@ -30,7 +30,6 @@ impl UserRow<'_> {
     /// The account, as an avatar shows it.
     pub(crate) fn who(&self) -> Who<'_> {
         Who {
-            user: None,
             name: &self.user.display_name,
             handle: self.user.handle.as_str(),
             picture: self.picture.as_deref(),
@@ -162,7 +161,6 @@ pub async fn user_page<'a>(
 ) -> Result<impl View> {
     let user = &detail.user;
     let who = Who {
-        user: None,
         name: &user.display_name,
         handle: user.handle.as_str(),
         picture,
