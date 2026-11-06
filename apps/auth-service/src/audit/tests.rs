@@ -2,16 +2,20 @@
 //! schema of its own, since the chain covers every event of its database.
 use super::*;
 use crate::{
-    AdminError, AdminService,
+    AdminError, AdminService, AuthConfig,
+    config::AuditConfig,
     tests::{Replicas, operator},
 };
-use chrono::SubsecRound;
+use chrono::{SubsecRound, TimeDelta};
 use piquel_common::{
     Personal, Provider,
+    config::Origin,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
 };
 use piquel_crypto::NoteKey;
-use piquel_repository::{DatabaseTransaction, EventFilter, ExclusiveConnection, LockKey, Tamper};
+use piquel_repository::{
+    Checkpoint, DatabaseTransaction, EventFilter, ExclusiveConnection, LockKey, Tamper,
+};
 use std::{sync::Arc, time::Duration};
 
 /// A migrated schema of its own on `TEST_DATABASE_URL`, with a sealer that signs
@@ -22,7 +26,10 @@ struct Fixture {
     /// Seals, and signs with a key of its own.
     sealer: Sealer,
     /// Verifies the sealer's checkpoints.
-    keys: AuditKeys,
+    keys: Arc<AuditKeys>,
+    /// The audit configuration of a service at `https://auth.example`, signing
+    /// with the sealer's key.
+    audit: AuditConfig,
     /// Events recorded so far, to tell them apart.
     recorded: u32,
 }
@@ -36,12 +43,31 @@ impl Fixture {
             .await
             .expect("isolated database");
         let key = NoteKey::generate("auth.example/audit").expect("audit key");
+        let keys = Arc::new(AuditKeys::given(&key.verifier().to_string()).expect("keys"));
+        let audit = AuditConfig::new(&Self::origin(), key).expect("audit configuration");
         Self {
             database,
-            keys: AuditKeys::given(&key.verifier().to_string()).expect("keys"),
-            sealer: Sealer::eager(Arc::new(key)),
+            keys,
+            sealer: Sealer::eager(&audit),
+            audit,
             recorded: 0,
         }
+    }
+
+    /// The origin of the service the fixture's key is named after.
+    fn origin() -> Origin {
+        "https://auth.example".parse().expect("origin")
+    }
+
+    /// The whole service over the fixture's schema and audit key, whose security
+    /// layer sets every response's caching. The schema is the fixture's own, so no
+    /// other test shares its rate budgets.
+    async fn router(&self) -> axum::Router {
+        let mut config = AuthConfig::test(&Self::origin());
+        config.audit = self.audit.clone();
+        config
+            .test_router(self.database.clone(), ([192, 0, 2, 1], 1).into())
+            .await
     }
 
     /// Records one event, with personal data, in `tx`.
@@ -89,7 +115,7 @@ impl Fixture {
     async fn seal_with(&self, lock: &mut ExclusiveConnection) {
         tokio::time::timeout(Duration::from_secs(30), async {
             while self.unsealed().await > 0 {
-                if Sealer::seal(lock).await.expect("seal") == 0 {
+                if self.sealer.seal(lock).await.expect("seal") == 0 {
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
             }
@@ -153,6 +179,37 @@ impl Fixture {
             .map(|broken| (broken.position, broken.problem))
     }
 
+    /// Stores a checkpoint of the stored head at `position`, signed by another
+    /// key and dated `ahead` of now, as someone with auth's database role but not
+    /// its audit key can: a trigger allows up to a minute.
+    async fn forge_checkpoint(&self, position: u64, ahead: TimeDelta) {
+        let head = self
+            .database
+            .audit()
+            .chain(position - 1, 1)
+            .await
+            .expect("chain")[0]
+            .sealed
+            .link;
+        let time = (Utc::now() + ahead).trunc_subsecs(0);
+        let text = CheckpointText {
+            origin: "auth.example/audit".into(),
+            head,
+            time,
+        };
+        let other = NoteKey::generate("auth.example/audit").expect("another key");
+        self.database
+            .audit()
+            .insert_checkpoint(&Checkpoint {
+                position,
+                head: head.hash,
+                created_at: time,
+                note: other.sign(&text.render()).expect("forged note"),
+            })
+            .await
+            .expect("a checkpoint the database cannot check");
+    }
+
     /// Applies `tamper`.
     async fn tamper(&self, tamper: Tamper) {
         self.database.audit().tamper(tamper).await.expect("tamper");
@@ -184,10 +241,13 @@ async fn events_are_sealed_in_safe_order_and_checkpointed() {
     fixture.seal().await;
 
     let chain = database.audit().chain(0, 10).await.expect("chain");
-    let positions: Vec<_> = chain.iter().map(|event| event.link.position).collect();
+    let positions: Vec<_> = chain
+        .iter()
+        .map(|event| event.sealed.link.position)
+        .collect();
     assert_eq!(positions, [1, 2]);
-    let [first, second] =
-        [&chain[0], &chain[1]].map(|event| serde_json::to_value(&event.content).expect("content"));
+    let [first, second] = [&chain[0], &chain[1]]
+        .map(|event| serde_json::to_value(&event.sealed.content).expect("content"));
     assert!(
         first["occurred_at"].as_str() < second["occurred_at"].as_str(),
         "the open transaction's earlier event comes first"
@@ -204,9 +264,10 @@ async fn events_are_sealed_in_safe_order_and_checkpointed() {
     assert_eq!(verification.latest_checkpoint, verification.newest);
     let latest = database
         .audit()
-        .latest_checkpoint()
+        .newest_checkpoints(None, 1)
         .await
         .expect("checkpoint")
+        .pop()
         .expect("a checkpoint");
     let text = fixture
         .keys
@@ -304,7 +365,7 @@ async fn recomputed_hashes_do_not_match_signed_checkpoints() {
     let chain = fixture.database.audit().chain(0, 10).await.expect("chain");
     let mut head = ChainLink::GENESIS;
     for event in &chain {
-        head = head.extend(&event.content).expect("link");
+        head = head.extend(&event.sealed.content).expect("link");
         fixture
             .tamper(Tamper::SetHash(head.position, head.hash))
             .await;
@@ -338,10 +399,10 @@ async fn checkpoints_never_sign_a_chain_that_does_not_match() {
     let latest = fixture
         .database
         .audit()
-        .latest_checkpoint()
+        .newest_checkpoints(None, 1)
         .await
         .expect("latest");
-    assert_eq!(latest.map(|latest| latest.position), Some(6));
+    assert_eq!(latest.first().map(|latest| latest.position), Some(6));
 }
 
 /// Pruning needs a checkpoint, refuses a chain broken at or before it, records
@@ -492,7 +553,6 @@ async fn the_audit_page_shows_the_newest_recorded_verification() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn checkpoints_are_published() {
-    use crate::AuthConfig;
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
@@ -500,11 +560,7 @@ async fn checkpoints_are_published() {
     use tower::ServiceExt;
 
     let fixture = Fixture::sealed_six().await;
-    // The whole service, whose security layer sets every response's caching. The
-    // schema is the fixture's own, so no other test shares its rate budgets.
-    let router = AuthConfig::test(&"https://auth.example".parse().expect("origin"))
-        .test_router(fixture.database.clone(), ([192, 0, 2, 1], 1).into())
-        .await;
+    let router = fixture.router().await;
     let get = async |path: &str| {
         let response = router
             .clone()
@@ -529,6 +585,19 @@ async fn checkpoints_are_published() {
     assert_eq!(page.as_array().map(Vec::len), Some(1));
     assert_eq!(page[0]["position"], 6);
     assert_eq!(page[0]["note"], latest);
+    let response = router
+        .oneshot(
+            Request::get(format!("/audit/checkpoints?after={}", u64::MAX))
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "no position is that far"
+    );
 }
 
 /// Checkpoint text renders and parses back, and nothing else parses.
@@ -589,4 +658,275 @@ fn committed_keys_are_per_environment() {
             AuditKeys::for_server(&origin.parse().expect("origin"), own.verifier()).expect("keys");
         assert_eq!(keys.source, source, "{origin}");
     }
+}
+
+/// A checkpoint whose signature does not verify, as someone with auth's database
+/// role but not the audit key could add, is never served, and postpones nothing
+/// though dated ahead: the sealer signs the next one from the newest that
+/// verifies, and verification still reports the forged one.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn forged_checkpoints_are_passed_over_and_not_served() {
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    let mut fixture = Fixture::sealed_six().await;
+    fixture.record(1).await;
+    let mut lock = fixture.lock().await;
+    fixture.seal_with(&mut lock).await;
+    // Dated ahead, so a sealer that counted its interval from the newest stored
+    // checkpoint would wait for it.
+    fixture.forge_checkpoint(7, TimeDelta::seconds(30)).await;
+    let response = fixture
+        .router()
+        .await
+        .oneshot(
+            Request::get("/audit/checkpoints/latest")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let latest = String::from_utf8(body.to_vec()).expect("UTF-8");
+    let text = fixture.keys.verifiers.open(&latest).expect("a signed note");
+    assert!(text.contains("\nposition 6\n"), "{text}");
+
+    fixture
+        .sealer
+        .checkpoint(&mut lock)
+        .await
+        .expect("checkpoint");
+    let newest = fixture.database.audit().newest_checkpoints(None, 1).await;
+    assert_eq!(
+        newest.expect("checkpoints")[0].position,
+        7,
+        "the forged checkpoint holds the head until a new event"
+    );
+    lock.release().await.expect("release");
+    fixture.record(1).await;
+    fixture.seal().await;
+    let newest = fixture.database.audit().newest_checkpoints(None, 1).await;
+    let newest = newest.expect("checkpoints").remove(0);
+    assert_eq!(newest.position, 8);
+    fixture.keys.verifiers.open(&newest.note).expect("signed");
+    assert_eq!(
+        fixture.broken().await,
+        Some((7, ChainProblem::CheckpointSignature))
+    );
+}
+
+/// A forged checkpoint over a tampered event, as someone with auth's database
+/// role can seal one, is never built on: the sealer recomputes from the newest
+/// checkpoint that verifies and refuses to sign the broken chain.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn forged_checkpoints_are_never_built_on() {
+    let mut fixture = Fixture::sealed_six().await;
+    fixture.record(1).await;
+    let mut lock = fixture.lock().await;
+    fixture.seal_with(&mut lock).await;
+    fixture
+        .tamper(Tamper::EditPayload(7, serde_json::json!({})))
+        .await;
+    fixture.forge_checkpoint(7, TimeDelta::zero()).await;
+    fixture.record(1).await;
+    fixture.seal_with(&mut lock).await;
+    assert!(matches!(
+        fixture.sealer.checkpoint(&mut lock).await,
+        Err(AuditError::Broken(ChainBreak {
+            position: 7,
+            problem: ChainProblem::EventChanged
+        }))
+    ));
+    lock.release().await.expect("release");
+}
+
+/// The sealer checks the order of the first event after the checkpoint it
+/// recomputes from against the event that checkpoint signed, so an event sealed
+/// out of order right after a checkpoint is never signed.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn checkpoints_never_sign_events_out_of_order() {
+    let mut fixture = Fixture::sealed_six().await;
+    fixture.record(1).await;
+    let mut lock = fixture.lock().await;
+    fixture.seal_with(&mut lock).await;
+    fixture.tamper(Tamper::SwapTransactions(6, 7)).await;
+    assert!(matches!(
+        fixture.sealer.checkpoint(&mut lock).await,
+        Err(AuditError::Broken(ChainBreak {
+            position: 7,
+            problem: ChainProblem::OutOfOrder
+        }))
+    ));
+    lock.release().await.expect("release");
+}
+
+/// A checkpoint that fails does not stop sealing: the pass seals every batch,
+/// then returns the error. Five events in batches of two take one pass, or two
+/// if another test's transaction holds some back; sealing a batch per pass
+/// would take three.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn sealing_goes_on_when_a_checkpoint_fails() {
+    let mut fixture = Fixture::sealed_six().await;
+    fixture.record(1).await;
+    let mut lock = fixture.lock().await;
+    fixture.seal_with(&mut lock).await;
+    fixture
+        .tamper(Tamper::EditPayload(7, serde_json::json!({})))
+        .await;
+    fixture.sealer = fixture.sealer.sealing(2, EventContent::UNTAGGED);
+    let database = fixture.database.clone();
+    let mut tx = database.begin().await.expect("transaction");
+    for _ in 0..5 {
+        fixture.record_in(&mut tx).await;
+    }
+    tx.commit().await.expect("commit");
+    let mut passes = 0;
+    while fixture.unsealed().await > 0 && passes < 3 {
+        let pass = fixture.sealer.pass(&mut lock, None).await;
+        assert!(matches!(pass, Err(AuditError::Broken(_))), "{pass:?}");
+        passes += 1;
+    }
+    lock.release().await.expect("release");
+    assert_eq!(fixture.unsealed().await, 0);
+    assert!(passes <= 2, "{passes} passes");
+}
+
+/// More checkpoints that do not verify than the sealer looks past, as removing a
+/// key that signed for days leaves, do not stop signing: it recomputes the chain
+/// and signs above them.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn signing_resumes_above_too_many_untrusted_checkpoints() {
+    let mut fixture = Fixture::new().await;
+    let database = fixture.database.clone();
+    let mut tx = database.begin().await.expect("transaction");
+    for _ in 0..1_002 {
+        fixture.record_in(&mut tx).await;
+    }
+    tx.commit().await.expect("commit");
+    let mut lock = fixture.lock().await;
+    fixture.seal_with(&mut lock).await;
+    for position in 1..=1_001 {
+        fixture.forge_checkpoint(position, TimeDelta::zero()).await;
+    }
+    fixture
+        .sealer
+        .checkpoint(&mut lock)
+        .await
+        .expect("checkpoint");
+    lock.release().await.expect("release");
+    let newest = fixture.database.audit().newest_checkpoints(None, 1).await;
+    let newest = newest.expect("checkpoints").remove(0);
+    assert_eq!(newest.position, 1_002);
+    fixture.keys.verifiers.open(&newest.note).expect("signed");
+}
+
+/// After a checkpoint fails, the sealer tries again only once the interval has
+/// passed, so a broken chain is not recomputed on every pass.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_failed_checkpoint_is_retried_after_the_interval() {
+    let every = Duration::from_millis(1_500);
+    let mut fixture = Fixture::sealed_six().await;
+    fixture.sealer = fixture
+        .sealer
+        .checkpointing_every(TimeDelta::from_std(every).expect("interval"));
+    fixture.record(1).await;
+    let mut lock = fixture.lock().await;
+    fixture.seal_with(&mut lock).await;
+    fixture
+        .tamper(Tamper::EditPayload(7, serde_json::json!({})))
+        .await;
+    // The checkpoint at 6 was just signed, and checkpoints have whole seconds.
+    tokio::time::sleep(every * 2).await;
+    let broken = |result: &Result<(), AuditError>| matches!(result, Err(AuditError::Broken(_)));
+    assert!(broken(&fixture.sealer.checkpoint(&mut lock).await));
+    assert!(fixture.sealer.checkpoint(&mut lock).await.is_ok(), "waits");
+    tokio::time::sleep(every).await;
+    assert!(
+        broken(&fixture.sealer.checkpoint(&mut lock).await),
+        "tries again"
+    );
+    lock.release().await.expect("release");
+}
+
+/// A backlog of full batches does not postpone checkpoints: the sealer checks
+/// whether one is due after every batch, so with no interval, no two are more
+/// than a batch apart. Other tests' transactions may cut a batch short.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn checkpoints_keep_their_interval_while_batches_stay_full() {
+    let mut fixture = Fixture::new().await;
+    fixture.sealer = fixture.sealer.sealing(2, EventContent::UNTAGGED);
+    // One transaction, so all five become ready to seal at once.
+    let database = fixture.database.clone();
+    let mut tx = database.begin().await.expect("transaction");
+    for _ in 0..5 {
+        fixture.record_in(&mut tx).await;
+    }
+    tx.commit().await.expect("commit");
+    let mut lock = fixture.lock().await;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while fixture.unsealed().await > 0 {
+            fixture.sealer.pass(&mut lock, None).await.expect("pass");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("every committed event is sealed");
+    lock.release().await.expect("release");
+    let checkpoints = fixture
+        .database
+        .audit()
+        .checkpoints(0, 10)
+        .await
+        .expect("checkpoints");
+    let positions: Vec<_> = std::iter::once(0)
+        .chain(checkpoints.iter().map(|checkpoint| checkpoint.position))
+        .collect();
+    assert_eq!(positions.last(), Some(&5));
+    assert!(
+        positions.windows(2).all(|pair| pair[1] - pair[0] <= 2),
+        "{positions:?}"
+    );
+}
+
+/// Events sealed in format 2 name it in their canonical form, and events sealed
+/// before, untagged, keep hashing without it; one chain holds both and verifies.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_chain_format_is_per_event() {
+    let mut fixture = Fixture::new().await;
+    fixture.record(1).await;
+    fixture.seal().await;
+    fixture.sealer = fixture.sealer.sealing(1_000, EventContent::NEWEST_FORMAT);
+    fixture.record(1).await;
+    fixture.seal().await;
+    let chain = fixture.database.audit().chain(0, 10).await.expect("chain");
+    let canonical = chain
+        .iter()
+        .map(|event| serde_json::to_value(&event.sealed.content).expect("content"))
+        .collect::<Vec<_>>();
+    assert_eq!(canonical[0].get("format"), None);
+    assert_eq!(canonical[1]["format"], 2);
+    assert_eq!(fixture.verify().await.broken, None);
+}
+
+/// Histories list events in the order they were recorded in, which the chain
+/// does not cover, so verification checks it against the chain.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn verification_checks_the_recorded_order() {
+    let fixture = Fixture::sealed_six().await;
+    fixture.tamper(Tamper::SwapTransactions(4, 5)).await;
+    assert_eq!(fixture.broken().await, Some((5, ChainProblem::OutOfOrder)));
 }

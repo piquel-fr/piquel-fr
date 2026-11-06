@@ -66,8 +66,8 @@ REVOKE ALL ON _sqlx_migrations FROM %1$I;
 -- History is append-only. An event is inserted with only the columns auth
 -- writes, so its transaction, time, sequence and chain columns keep their
 -- defaults; a migration adding a column auth writes adds it here. Sealing sets an
--- event's chain position and hash, which triggers allow only while they are
--- unset, and only right after the position before. Checkpoints are only added,
+-- event's chain position, hash and format, which triggers allow only while they
+-- are unset, and only right after the position before. Checkpoints are only added,
 -- and a trigger refuses one that is not of a sealed event's hash, or is dated in
 -- the future; auth checks their signatures. Only the schema owner prunes, so
 -- moves the anchor.
@@ -75,7 +75,7 @@ REVOKE INSERT, UPDATE, DELETE ON domain_events FROM %1$I;
 GRANT INSERT (
     id, kind, version, payload, actor, subject_user_id, client_id, session_id, trace_id
 ) ON domain_events TO %1$I;
-GRANT UPDATE (chain_position, chain_hash) ON domain_events TO %1$I;
+GRANT UPDATE (chain_position, chain_hash, chain_format) ON domain_events TO %1$I;
 REVOKE UPDATE, DELETE ON audit_checkpoints FROM %1$I;
 REVOKE INSERT, UPDATE, DELETE ON audit_anchor FROM %1$I;
 -- Personal data is erased but never rewritten: it is inserted only with an

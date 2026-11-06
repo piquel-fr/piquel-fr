@@ -1,7 +1,7 @@
 //! Publishes signed checkpoints, so anyone can keep copies the server cannot
 //! change and later check that the history still extends them.
 
-use super::{Chain, ChainPoint};
+use super::{AuditKeys, Chain, ChainPoint};
 use crate::{
     routes::audit,
     security::{ApiError, CacheClass, Cached},
@@ -16,6 +16,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use piquel_repository::{ChainLink, Checkpoint, Database};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Public, cacheable checkpoint routes. Checkpoints hold only positions and
 /// hashes, so serving them reveals nothing but how many events were recorded.
@@ -23,12 +24,15 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct AuditApplication {
     /// Where checkpoints are stored.
     database: Database,
+    /// Verifies the latest checkpoint before it is served.
+    keys: Arc<AuditKeys>,
 }
 
 /// The query of [`audit::CHECKPOINTS`].
 #[derive(Deserialize)]
 struct CheckpointQuery {
-    /// Only checkpoints after this position; all of them when absent.
+    /// Only checkpoints after this position; all of them when absent. Positions
+    /// fit in a signed 64-bit integer.
     #[serde(default)]
     after: u64,
 }
@@ -69,9 +73,10 @@ impl AuditApplication {
         max_age: std::time::Duration::from_secs(60),
     };
 
-    /// Builds the routes over `database`.
-    pub(crate) const fn new(database: Database) -> Self {
-        Self { database }
+    /// Builds the routes over `database`, serving only a latest checkpoint `keys`
+    /// verify.
+    pub(crate) const fn new(database: Database, keys: Arc<AuditKeys>) -> Self {
+        Self { database, keys }
     }
 
     /// Returns the checkpoint routes with this application as state.
@@ -82,14 +87,18 @@ impl AuditApplication {
             .with_state(self)
     }
 
-    /// The newest checkpoint's signed note, as `text/plain`.
+    /// The signed note of the newest checkpoint that verifies, as `text/plain`.
+    /// Newer ones that do not are never served; `audit verify` reports them.
     async fn latest(State(app): State<Self>) -> Result<Response, ApiError> {
         let checkpoint = app
-            .database
-            .audit()
-            .latest_checkpoint()
-            .await?
-            .ok_or_else(|| ApiError::not_found("no checkpoint has been signed yet"))?;
+            .keys
+            .newest_trusted(&mut app.database.audit())
+            .await
+            .map_err(ApiError::internal)?
+            .trusted
+            .ok_or_else(|| {
+                ApiError::not_found("no checkpoint that verifies has been signed yet")
+            })?;
         Ok(Cached(
             Self::CACHE,
             (
@@ -105,6 +114,11 @@ impl AuditApplication {
         State(app): State<Self>,
         Query(query): Query<CheckpointQuery>,
     ) -> Result<Response, ApiError> {
+        if i64::try_from(query.after).is_err() {
+            return Err(ApiError::bad_request(
+                "after must be at most 9223372036854775807",
+            ));
+        }
         let checkpoints: Vec<PublishedCheckpoint> = app
             .database
             .audit()

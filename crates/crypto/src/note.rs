@@ -25,6 +25,8 @@ const SEED_BYTES: usize = 32;
 const PUBLIC_KEY_BYTES: usize = 32;
 /// Byte length of a key ID.
 const KEY_ID_BYTES: usize = 4;
+/// Byte length of an Ed25519 signature.
+const ED25519_SIGNATURE_BYTES: usize = 64;
 
 /// An Ed25519 key that signs notes under its name, e.g. `auth.piquel.fr/audit`.
 pub struct NoteKey {
@@ -172,13 +174,15 @@ impl NoteVerifier {
         }
     }
 
-    /// Whether `signature` is this key's Ed25519 signature of `text`.
+    /// Whether `signature` is this key's Ed25519 signature of `text`. Any other
+    /// failure of the cryptographic provider is an error, not an invalid signature.
     fn verifies(&self, text: &str, signature: &[u8]) -> Result<bool, CryptoError> {
+        // No Ed25519 signature has another length.
+        if signature.len() != ED25519_SIGNATURE_BYTES {
+            return Ok(false);
+        }
         let key = PKey::public_key_from_raw_bytes(&self.public, Id::ED25519)?;
-        // OpenSSL reports a malformed signature as an error rather than `false`.
-        Ok(Verifier::new_without_digest(&key)?
-            .verify_oneshot(signature, text.as_bytes())
-            .unwrap_or(false))
+        Ok(Verifier::new_without_digest(&key)?.verify_oneshot(signature, text.as_bytes())?)
     }
 }
 
@@ -254,6 +258,15 @@ impl NoteVerifiers {
                 .cloned()
                 .collect(),
         )
+    }
+
+    /// These keys and `verifier`, unless it is listed already.
+    #[must_use]
+    pub fn with(mut self, verifier: &NoteVerifier) -> Self {
+        if !self.0.contains(verifier) {
+            self.0.push(verifier.clone());
+        }
+        self
     }
 
     /// Whether no key is listed.

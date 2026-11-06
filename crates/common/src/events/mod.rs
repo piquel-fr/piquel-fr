@@ -652,6 +652,8 @@ impl AuditVerification {
                 | ChainProblem::CheckpointSignature
                 | ChainProblem::CheckpointMalformed
                 | ChainProblem::CheckpointBeyondChain => {}
+                // Releases before it cannot decode it.
+                ChainProblem::OutOfOrder => return 2,
             }
         }
         match self.keys {

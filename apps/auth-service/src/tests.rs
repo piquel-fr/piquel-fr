@@ -112,9 +112,11 @@ impl AuthConfig {
                 policies: PolicyLinks::on(&WEB_ORIGIN.parse().expect("web origin")),
             },
             key_encryption_key: Arc::new(key_encryption_key()),
-            audit: AuditConfig {
-                key: Arc::new(NoteKey::generate("auth.piquel.fr/audit").expect("audit key")),
-            },
+            audit: AuditConfig::new(
+                origin,
+                NoteKey::generate("auth.piquel.fr/audit").expect("audit key"),
+            )
+            .expect("audit keys"),
             trusted_proxies: vec![],
             requests_per_minute: REQUESTS_PER_MINUTE,
         }

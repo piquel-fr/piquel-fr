@@ -1,7 +1,7 @@
 //! Focused persistence and security contract tests.
 
 use super::{Database, DatabaseConfig, Limit, MIGRATOR, RuntimeRole, Scope};
-use crate::{DatabaseConnectionError, DatabaseError, LockKey};
+use crate::{DatabaseConnectionError, DatabaseError, EventContent, LockKey};
 use sqlx::{PgConnection, Postgres, postgres::PgArguments, query::Query};
 use std::time::Duration;
 use uuid::Uuid;
@@ -306,14 +306,18 @@ async fn runtime_role_has_only_row_privileges() {
     // Sealing locks unsealed events and sets their chain columns, nothing else.
     let mut seal = runtime.begin().await.expect("begin");
     seal.audit()
-        .unsealed(1)
+        .unsealed(1, EventContent::UNTAGGED)
         .await
         .expect("lock unsealed events");
     seal.rollback().await.expect("rollback");
-    sqlx::query("UPDATE domain_events SET chain_hash = chain_hash WHERE false")
-        .execute(&runtime.pool)
-        .await
-        .expect("seal");
+    sqlx::query(
+        "UPDATE domain_events
+        SET chain_position = chain_position, chain_hash = chain_hash, chain_format = chain_format
+        WHERE false",
+    )
+    .execute(&runtime.pool)
+    .await
+    .expect("seal");
     runtime
         .maintenance()
         .purge_expired_auth_state(1000)

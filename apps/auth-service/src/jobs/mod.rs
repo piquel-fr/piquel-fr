@@ -94,7 +94,7 @@ impl Jobs {
         jobs.exclusive(Cleanup, database.clone());
         AccountPurge::observe();
         jobs.exclusive(AccountPurge, database.clone());
-        jobs.exclusive(Sealer::new(config.audit.key.clone()), database.clone());
+        jobs.exclusive(Sealer::new(&config.audit), database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
         jobs.spawn(|shutdown| store.run(reloaded, shutdown));
         let logout = BackchannelLogoutSender::new(

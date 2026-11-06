@@ -23,6 +23,7 @@ pub(crate) use piquel_common::admin::{
 };
 pub(crate) use routes::AuditApplication;
 pub(crate) use sealer::Sealer;
+pub(crate) use verify::TrustedCheckpoint;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -82,6 +83,17 @@ pub enum AuditError {
     /// No checkpoint was signed at the position to prune through.
     #[error("no checkpoint was signed at position {0}; prune through a checkpoint's position")]
     NoCheckpoint(u64),
+    /// An event was sealed in a format this release does not know, by a newer one.
+    #[error(
+        "the event at position {position} was sealed in chain format {format}, which this \
+         release does not know; use a newer release"
+    )]
+    UnknownFormat {
+        /// The event's position.
+        position: u64,
+        /// Its format.
+        format: i16,
+    },
 }
 
 /// How the chain extends: each event's hash covers the hash before it and its
@@ -91,6 +103,10 @@ trait Chain: Sized {
     const GENESIS: Self;
 
     /// The link of `content`, sealed right after this one.
+    ///
+    /// # Errors
+    /// Returns [`AuditError::UnknownFormat`] for a format newer than
+    /// [`EventContent::NEWEST_FORMAT`], or [`AuditError::Canonical`].
     fn extend(&self, content: &EventContent) -> Result<Self, AuditError>;
 
     /// This link as verification reports it.
@@ -116,6 +132,12 @@ impl Chain for ChainLink {
 
     fn extend(&self, content: &EventContent) -> Result<Self, AuditError> {
         let position = self.position + 1;
+        if content.format() > EventContent::NEWEST_FORMAT {
+            return Err(AuditError::UnknownFormat {
+                position,
+                format: content.format(),
+            });
+        }
         let canonical = serde_json_canonicalizer::to_vec(&CanonicalEvent { position, content })
             .map_err(AuditError::Canonical)?;
         let mut input = self.hash.to_vec();
@@ -231,6 +253,21 @@ impl AuditKeys {
             }),
             keys => keys,
         }
+    }
+
+    /// The keys the server trusts the checkpoints it builds on and publishes with:
+    /// [`Self::for_server`]'s, and always its `own`, which signs them. Without it,
+    /// an uncommitted key would make the sealer distrust, and re-sign, its own
+    /// checkpoints; `audit verify` still reports them against the committed keys.
+    ///
+    /// # Errors
+    /// Returns [`AuditError::Keys`] if the committed file is malformed.
+    pub(crate) fn for_sealer(origin: &Origin, own: &NoteVerifier) -> Result<Self, AuditError> {
+        let keys = Self::for_server(origin, own)?;
+        Ok(Self {
+            verifiers: keys.verifiers.with(own),
+            ..keys
+        })
     }
 
     /// The name of the audit key of the environment at `origin`, which is also its

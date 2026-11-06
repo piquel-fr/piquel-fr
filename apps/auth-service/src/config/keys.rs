@@ -2,7 +2,7 @@
 //! token digest keys, the link keys derived from them, and the audit checkpoint
 //! key.
 
-use crate::{emails::VerificationKeys, recovery::RecoveryLinks};
+use crate::{AuditKeys, emails::VerificationKeys, recovery::RecoveryLinks};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use piquel_common::config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable};
 use piquel_crypto::{CryptoError, Digest, NoteKey, NoteVerifier, Secret};
@@ -235,6 +235,9 @@ impl LinkKeys {
 pub struct AuditConfig {
     /// Signs checkpoints as `<auth host>/audit`.
     pub(crate) key: Arc<NoteKey>,
+    /// Verifies the checkpoints the sealer builds on and auth publishes as the
+    /// latest: the environment's committed keys and this one.
+    pub(crate) keys: Arc<AuditKeys>,
 }
 
 impl AuditConfig {
@@ -259,9 +262,23 @@ impl AuditConfig {
         let hex = secret
             .utf8()
             .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;
-        let key = NoteKey::from_hex_seed(&crate::AuditKeys::name(origin), hex)
+        let key = NoteKey::from_hex_seed(&AuditKeys::name(origin), hex)
             .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;
-        Ok(Self { key: Arc::new(key) })
+        Self::new(origin, key)
+    }
+
+    /// Signs with `key` for the environment at `origin`.
+    ///
+    /// # Errors
+    /// Fails only if the committed audit keys, compiled in, are malformed.
+    pub(crate) fn new(origin: &Origin, key: NoteKey) -> Result<Self, ConfigurationError> {
+        let keys = AuditKeys::for_sealer(origin, key.verifier()).map_err(|source| {
+            AUDIT_KEY_PROVIDER.error("needs well-formed committed audit keys", source)
+        })?;
+        Ok(Self {
+            key: Arc::new(key),
+            keys: Arc::new(keys),
+        })
     }
 
     /// The name and public key that verify checkpoints, to commit to

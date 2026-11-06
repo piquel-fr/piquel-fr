@@ -263,6 +263,19 @@ fn notes_open_only_with_a_valid_listed_signature() {
         verifiers.open(&note.replace("position 1", "position 2")),
         Err(CryptoError::NoteSignature)
     ));
+    // Garbage under the listed key's ID, of a signature's length or another, is an
+    // invalid signature, not a provider failure.
+    let base64 = base64::engine::general_purpose::STANDARD;
+    let (text, line) = note.split_once("\n\n").expect("split");
+    let (name, signature) = line.trim_end().rsplit_once(' ').expect("signature line");
+    let id = base64.decode(signature).expect("base64")[..4].to_vec();
+    for length in [64, 10] {
+        let garbage = base64.encode([id.clone(), vec![7; length]].concat());
+        assert!(matches!(
+            verifiers.open(&format!("{text}\n\n{name} {garbage}\n")),
+            Err(CryptoError::NoteSignature)
+        ));
+    }
     for malformed in [
         "position 1\n",
         "position 1\n\n",
