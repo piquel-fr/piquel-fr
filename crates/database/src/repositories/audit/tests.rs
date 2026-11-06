@@ -140,3 +140,29 @@ async fn sealed_history_is_guarded() {
     );
     tx.rollback().await.expect("rollback");
 }
+
+/// Personal data is recorded only with its event, never attached to an event of
+/// an earlier transaction. That event is committed, so in a schema of its own.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn personal_data_is_recorded_only_with_its_event() {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let database = Database::isolated(
+        DatabaseConfig::new(&url, 1, Duration::from_secs(5)).expect("configuration"),
+    )
+    .await
+    .expect("isolated database");
+    let mut connection = database.pool.acquire().await.expect("connection");
+    let id = Uuid::now_v7();
+    assert_eq!(attempt(&mut connection, INSERT, id).await, Ok(()), "event");
+    assert_eq!(
+        attempt(
+            &mut connection,
+            "INSERT INTO event_personal_data (event_id) VALUES ($1)",
+            id
+        )
+        .await,
+        Err("23000".to_owned()),
+        "attached to an earlier transaction's event"
+    );
+}

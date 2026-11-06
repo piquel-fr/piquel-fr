@@ -351,7 +351,7 @@ async fn runtime_role_has_only_row_privileges() {
         );
     }
     assert_personal_data_only_erases(&runtime).await;
-    assert_history_is_never_attached_or_forged(&runtime, &owner).await;
+    assert_history_is_never_forged(&runtime).await;
     runtime.pool.close().await;
 
     under_provisioning_lock(&owner, &format!("DROP OWNED BY {name}; DROP ROLE {name}")).await;
@@ -641,20 +641,11 @@ async fn assert_personal_data_only_erases(runtime: &Database) {
     }
 }
 
-/// `runtime` records personal data only with its event, in the same transaction,
-/// so it cannot rewrite an older event's by deleting and inserting it again. A
-/// checkpoint it inserts must sign a sealed event's hash, and an event it inserts
-/// must be JSON auth can read back, or sealing would fail on it.
-async fn assert_history_is_never_attached_or_forged(runtime: &Database, owner: &Database) {
-    let mut earlier = runtime.pool.begin().await.expect("begin");
-    let event = insert_event(&mut earlier).await;
-    earlier.commit().await.expect("commit");
-    let attach = sqlx::query("INSERT INTO event_personal_data (event_id) VALUES ($1)").bind(event);
-    assert_eq!(
-        refusal(runtime, attach).await,
-        "23000",
-        "attached to an older event"
-    );
+/// A checkpoint `runtime` inserts must sign a sealed event's hash, and an event it
+/// inserts must be JSON auth can read back, or sealing would fail on it.
+/// `personal_data_is_recorded_only_with_its_event` covers attaching personal data
+/// to an older event, which needs a committed event, so a schema of its own.
+async fn assert_history_is_never_forged(runtime: &Database) {
     for payload in [
         r#"{"n": 1e400}"#.to_owned(),
         format!("{}{}", "[".repeat(100), "]".repeat(100)),
@@ -676,10 +667,4 @@ async fn assert_history_is_never_attached_or_forged(runtime: &Database, owner: &
         "23000",
         "a forged checkpoint"
     );
-    // Nothing seals the shared schema, so the event is still unsealed.
-    sqlx::query("DELETE FROM domain_events WHERE id = $1")
-        .bind(event)
-        .execute(&owner.pool)
-        .await
-        .expect("delete the event");
 }
