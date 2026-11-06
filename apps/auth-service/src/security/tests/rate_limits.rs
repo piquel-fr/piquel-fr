@@ -71,6 +71,14 @@ async fn budgets_are_separate_and_unknown_paths_do_not_consume_them() {
         .await;
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.headers()[header::RETRY_AFTER], "60");
+    // UserInfo calls never block code exchanges.
+    assert_eq!(
+        fixture
+            .request(Method::POST, "/oauth/token", None, false)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
     let bucket = Digest::sha256(format!("token:{}", fixture.peer.ip()).as_bytes());
     for _ in 0..REQUESTS_PER_MINUTE {
         fixture

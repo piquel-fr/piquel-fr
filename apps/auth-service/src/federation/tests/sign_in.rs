@@ -51,6 +51,7 @@ impl TestApp {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn callback_email_collision_never_links_and_known_subject_never_bootstraps_a_missing_key() {
     let observed = format!("{}@example.com", TokenId::new());
+    let original = format!("{}@example.com", TokenId::new());
     let test = TestApp::with_email(Some(&observed)).await;
     let email_owner = test.user(Some(&observed), true).await;
     let response = test.callback().await;
@@ -70,7 +71,7 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
             .expect("identity")
             .is_none()
     );
-    let subject_owner = test.user(None, false).await;
+    let subject_owner = test.user(Some(&original), false).await;
     test.link(subject_owner).await;
     let response = test.callback().await;
     assert_eq!(
@@ -96,17 +97,20 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         session.passkey_confirmed_at.is_none(),
         "social sign-in never confirms a passkey"
     );
-    assert_eq!(
-        test.app
-            .database
-            .emails()
-            .find_active_verified(&observed)
-            .await
-            .expect("observed email")
-            .expect("owner")
-            .user_id,
-        email_owner
-    );
+    // Signing in moves neither account's verified address.
+    for (address, owner) in [(&observed, email_owner), (&original, subject_owner)] {
+        assert_eq!(
+            test.app
+                .database
+                .emails()
+                .find_active_verified(address)
+                .await
+                .expect("email lookup")
+                .expect("owner")
+                .user_id,
+            owner
+        );
+    }
 }
 
 /// Social sign-in re-authenticates the browser's own unconfirmed session in place,

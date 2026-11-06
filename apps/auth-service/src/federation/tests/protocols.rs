@@ -177,18 +177,43 @@ async fn google_signed_tokens_are_verified() {
     assert!(verify(&valid).await.is_ok());
     let untrusted = Rs256Key::generate("google-test").expect("untrusted key");
     let token = untrusted.sign(TokenType::Id, &valid).expect("signed token");
-    assert!(
+    assert_eq!(
         GoogleClaims::verify(&token, &protocol, "client", "nonce")
             .await
-            .is_err()
+            .map_err(|error| error.to_string())
+            .err()
+            .as_deref(),
+        Some("Google ID token failed verification")
     );
-    for (field, value) in [
-        ("nonce", serde_json::json!("other")),
-        ("iat", serde_json::json!(Utc::now().timestamp() + 3600)),
+    // Expiry has no leeway: a token that expired a second ago is refused.
+    for (field, value, error) in [
+        (
+            "nonce",
+            serde_json::json!("other"),
+            "Google ID token nonce does not match this sign-in attempt",
+        ),
+        (
+            "iat",
+            serde_json::json!(Utc::now().timestamp() + 3600),
+            "Google ID token is issued in the future",
+        ),
+        (
+            "exp",
+            serde_json::json!(Utc::now().timestamp() - 1),
+            "Google ID token has expired",
+        ),
     ] {
         let mut claims = valid.clone();
         claims[field] = value;
-        assert!(verify(&claims).await.is_err(), "{field}");
+        assert_eq!(
+            verify(&claims)
+                .await
+                .map_err(|error| error.to_string())
+                .err()
+                .as_deref(),
+            Some(error),
+            "{field}"
+        );
     }
     for field in ["iss", "aud", "exp", "sub"] {
         let mut claims = valid.clone();
