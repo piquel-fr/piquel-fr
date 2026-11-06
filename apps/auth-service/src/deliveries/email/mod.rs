@@ -5,7 +5,8 @@
 //! verified or removed, or a recovery used or undone, in the meantime receives
 //! nothing, and derives the link's token again from the ID, under the key that
 //! made its stored digest, so it is stored nowhere and survives a change of token
-//! digest key. Notices carry the address they go to.
+//! digest key. A notification's email carries the address it goes to and the
+//! notification, and says what the inbox says.
 //!
 //! Every attempt sends the same content, with the delivery's ID as `Message-ID`.
 //! SMTP is at least once like the queue: if the connection breaks after the relay
@@ -132,7 +133,6 @@ impl<M: Mailer> EmailSender<M> {
         user_id: UserId,
         message: &EmailMessage,
     ) -> Result<Option<Content>, DeliveryError> {
-        let history = self.origin.join(settings::HISTORY);
         Ok(Some(match message {
             EmailMessage::VerifyAddress { email_id } => {
                 let pending = self
@@ -161,14 +161,6 @@ impl<M: Mailer> EmailSender<M> {
                     hours: VERIFICATION_LIFETIME.num_hours(),
                 }
             }
-            EmailMessage::PrimaryAddressChanged { address } => Content::PrimaryAddressChanged {
-                address: address.clone(),
-                history,
-            },
-            EmailMessage::AddressRemoved { address } => Content::AddressRemoved {
-                address: address.clone(),
-                history,
-            },
             EmailMessage::RecoveryLink {
                 recovery_id,
                 email_id,
@@ -196,21 +188,19 @@ impl<M: Mailer> EmailSender<M> {
                     undo: self.recovery_links.undo_url(*recovery_id).into(),
                 }
             }
-            EmailMessage::RecoveryRevoked {
+            EmailMessage::Notification {
                 address,
+                notification_id,
+                notification,
                 recovery_id,
-                kept,
-            } => Content::RecoveryRevoked {
+            } => Content::Notification {
                 address: address.clone(),
-                undo: kept.then(|| self.recovery_links.undo_url(*recovery_id).into()),
-            },
-            EmailMessage::Recovered {
-                address,
-                recovery_id,
-            } => Content::Recovered {
-                address: address.clone(),
-                undo: self.recovery_links.undo_url(*recovery_id).into(),
-                days: recovery::PROBATION.num_days(),
+                subject: notification.subject(),
+                body: notification.body(),
+                page: self
+                    .origin
+                    .join(&settings::NOTIFICATION.replace("{id}", &notification_id.to_string())),
+                undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
             },
         }))
     }
@@ -294,20 +284,6 @@ enum Content {
         /// How many hours the link works.
         hours: i64,
     },
-    /// The notice to a previous primary address.
-    PrimaryAddressChanged {
-        /// The previous primary address.
-        address: String,
-        /// The account's security history.
-        history: String,
-    },
-    /// The notice to a removed address.
-    AddressRemoved {
-        /// The removed address.
-        address: String,
-        /// The account's security history.
-        history: String,
-    },
     /// A recovery's link, to the account's primary address.
     RecoveryLink {
         /// The primary address.
@@ -322,22 +298,18 @@ enum Content {
         /// it.
         undo: String,
     },
-    /// The notice to each verified address that support revoked passkeys and
-    /// started a recovery whose link it printed.
-    RecoveryRevoked {
-        /// The address.
+    /// A notification of the account's.
+    Notification {
+        /// The address it goes to.
         address: String,
-        /// The recovery's undo page, while a kept passkey can cancel it.
+        /// Its subject, which the email's is.
+        subject: &'static str,
+        /// What it says.
+        body: String,
+        /// Its page in the inbox.
+        page: String,
+        /// The undo page of the recovery it is about, while a passkey can undo it.
         undo: Option<String>,
-    },
-    /// The notice to each verified address that a recovery enrolled a passkey.
-    Recovered {
-        /// The address.
-        address: String,
-        /// The recovery's undo page, where an older passkey undoes it.
-        undo: String,
-        /// How many days the recovery can be undone.
-        days: i64,
     },
 }
 
@@ -346,11 +318,8 @@ impl Content {
     fn address(&self) -> &str {
         match self {
             Self::VerifyAddress { address, .. }
-            | Self::PrimaryAddressChanged { address, .. }
-            | Self::AddressRemoved { address, .. }
             | Self::RecoveryLink { address, .. }
-            | Self::RecoveryRevoked { address, .. }
-            | Self::Recovered { address, .. } => address,
+            | Self::Notification { address, .. } => address,
         }
     }
 
@@ -358,11 +327,8 @@ impl Content {
     const fn subject(&self) -> &'static str {
         match self {
             Self::VerifyAddress { .. } => "Confirm your email address for Piquel",
-            Self::PrimaryAddressChanged { .. } => "Your Piquel primary email address changed",
-            Self::AddressRemoved { .. } => "Your email address was removed from Piquel",
             Self::RecoveryLink { .. } => "Recover your Piquel account",
-            Self::RecoveryRevoked { .. } => "Piquel support is recovering your account",
-            Self::Recovered { .. } => "A recovery added a passkey to your Piquel account",
+            Self::Notification { subject, .. } => subject,
         }
     }
 }

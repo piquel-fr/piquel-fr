@@ -395,6 +395,11 @@ while the history keeps it, with "This wasn’t me" where the history allows a
 report. A notification holds no personal data, so it reads the same after its
 event's personal data is erased or the event is pruned.
 
+Each notification is also emailed: a recovery's to every verified address, a
+replaced or removed address's to that address, and any other to the primary
+verified address. The email says what the inbox says, and links the
+notification's page.
+
 The owner marks one unread, or every one read, in settings or through
 `POST /account/notifications/{id}/read`, `…/{id}/unread` and
 `/account/notifications/read`. `GET /account/notifications`, `…/{id}` and
@@ -415,7 +420,8 @@ client IP at most 10, and one mailbox, whatever the case and `+` tag of its
 address, receives at most 3. An address another active account verified cannot be
 verified again; adding it is allowed, so adding reveals nothing. The email names
 the account the address would join, and a browser signed in to another account
-cannot confirm it. An address that stops being primary, or is removed, is told.
+cannot confirm it. An address that stops being primary, or is removed, is told,
+as every notification is emailed: see [Notifications](#notifications).
 Signing up or linking with GitHub or Google imports the provider's address into an
 account without a verified one, recorded in its history as imported. It arrives
 verified only where the provider hosts the mailbox, Gmail and the account's

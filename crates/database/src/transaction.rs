@@ -2,7 +2,10 @@
 
 use crate::{
     DatabaseError,
-    repositories::deliveries::{Channels, Registered},
+    repositories::{
+        deliveries::{Channels, Registered},
+        notifications::Notified,
+    },
     telemetry::Committed,
 };
 use piquel_common::{
@@ -59,12 +62,15 @@ impl<'a> DatabaseTransaction<'a> {
         event: DomainEvent,
     ) -> Result<(), DatabaseError> {
         let id = self.events().insert(context, subject, &event).await?;
-        if let Some((user, notification)) = subject.zip(event.notification(&context.actor)) {
-            self.notifications()
+        let notified = match subject.zip(event.notification(&context.actor)) {
+            Some((user, notification)) => self
+                .notifications()
                 .insert(user, Some(id), &notification)
-                .await?;
-        }
-        C::fan_out(self, id, subject, &event).await?;
+                .await?
+                .map(|id| Notified { id, notification }),
+            None => None,
+        };
+        C::fan_out(self, id, subject, &event, notified.as_ref()).await?;
         self.recorded.push(Committed {
             id,
             actor: HistoryActor::from(&context.actor),

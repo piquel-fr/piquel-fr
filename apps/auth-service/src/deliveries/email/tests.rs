@@ -8,7 +8,12 @@ use crate::{
     security::RequestContext,
     tests::{AUTH_ORIGIN, Browser, Replicas, verified_address},
 };
-use piquel_common::{AccountStatus, EmailId, Handle, PasskeyId, RecoveryId, config::Origin};
+use piquel_common::{
+    AccountStatus, EmailId, Handle, NotificationId, PasskeyId, RecoveryId,
+    config::Origin,
+    events::{Actor, DomainEvent, EventContext, RequestOrigin},
+    notifications::Notification,
+};
 use piquel_crypto::Secret;
 use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser};
 use std::{
@@ -18,6 +23,16 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+
+/// `notification`'s email to Ada, about the recovery `recovery_id`, if any.
+fn notification(notification: Notification, recovery_id: Option<RecoveryId>) -> EmailMessage {
+    EmailMessage::Notification {
+        address: "ada@example.com".into(),
+        notification_id: NotificationId::new(),
+        notification,
+        recovery_id,
+    }
+}
 
 /// A relay that keeps every message. The first send can be ambiguous: the relay
 /// keeps the message, but the connection breaks before its reply arrives.
@@ -169,12 +184,8 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     let expected = (format!("<{id}@piquel.fr>"), "ada@example.com".to_owned());
     assert_eq!(outbox.headers(), [expected.clone(), expected]);
 
-    let notice = EmailMessage::PrimaryAddressChanged {
-        address: "ada@example.com".into(),
-    };
-    let removed = EmailMessage::AddressRemoved {
-        address: "ada@example.com".into(),
-    };
+    let notice = notification(Notification::PrimaryEmailChanged, None);
+    let removed = notification(Notification::EmailRemoved, None);
     for message in [&verify, &notice, &removed] {
         sender.assert_renders(user_id, message).await;
     }
@@ -397,10 +408,10 @@ async fn a_recovery_link_is_sent_while_it_works() {
     assert!(content.is_none(), "no link once used");
 }
 
-/// The link email and the notice that a recovery enrolled a passkey link to its
-/// undo page, where a passkey from before it undoes it; the notice of a
-/// `--revoke` start does only while a kept passkey can, and otherwise points to
-/// support.
+/// The link email and the notification that a recovery enrolled a passkey link
+/// to its undo page, where a passkey from before it undoes it; the notification
+/// of a `--revoke` start does only while a kept passkey can. Each notification's
+/// email links its page in the inbox.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn recovery_notices_link_to_the_undo_page() {
@@ -415,36 +426,116 @@ async fn recovery_notices_link_to_the_undo_page() {
         recovery_id,
         email_id,
     };
-    let recovered = EmailMessage::Recovered {
+    let recovered = EmailMessage::Notification {
         address: address.clone(),
-        recovery_id,
+        notification_id: NotificationId::new(),
+        notification: Notification::Recovered,
+        recovery_id: Some(recovery_id),
     };
-    let revoked = |kept| EmailMessage::RecoveryRevoked {
+    // The channel names the recovery only while a kept passkey can undo it.
+    let revoked = |kept: bool| EmailMessage::Notification {
         address: address.clone(),
-        recovery_id,
-        kept,
+        notification_id: NotificationId::new(),
+        notification: Notification::AccountSecured { kept },
+        recovery_id: kept.then_some(recovery_id),
     };
     let undo_page = format!("https://auth.piquel.fr/recover/undo#recovery={recovery_id}");
 
     let content = sender.content(user_id, &link).await.expect("content");
     assert!(matches!(content, Some(Content::RecoveryLink { undo, .. }) if undo == undo_page));
-    let content = sender.content(user_id, &recovered).await.expect("content");
-    assert!(matches!(
-        content,
-        Some(Content::Recovered { undo, days, .. })
-            if undo == undo_page && days == PROBATION.num_days()
-    ));
-    for (kept, expected) in [(true, Some(undo_page.clone())), (false, None)] {
-        let content = sender
-            .content(user_id, &revoked(kept))
-            .await
-            .expect("content");
+    for (message, expected) in [
+        (&recovered, Some(undo_page.clone())),
+        (&revoked(true), Some(undo_page.clone())),
+        (&revoked(false), None),
+    ] {
+        let content = sender.content(user_id, message).await.expect("content");
         assert!(
-            matches!(content, Some(Content::RecoveryRevoked { undo, .. }) if undo == expected),
-            "kept: {kept}"
+            matches!(&content, Some(Content::Notification { undo, page, .. })
+                if *undo == expected && page.starts_with("https://auth.piquel.fr/settings/notifications/")),
+            "{message:?}"
         );
     }
     for message in [&recovered, &revoked(true), &revoked(false)] {
         sender.assert_renders(user_id, message).await;
     }
+}
+
+/// A notification is emailed to the addresses its kind names, each once, with
+/// what the notification says: support's change to the primary verified
+/// address only, a removal to the removed address, and a completed recovery to
+/// every verified address, with its undo page. An account without a verified
+/// address gets the notification and no email.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn notifications_are_emailed_to_the_addresses_their_kind_names() {
+    let database = Replicas::database().await;
+    let user_id = account(&database).await;
+    let primary =
+        verified_address(&database, user_id, &format!("{user_id}@example.com"), true).await;
+    let other = verified_address(
+        &database,
+        user_id,
+        &format!("other-{user_id}@example.com"),
+        false,
+    )
+    .await;
+    let record = async |user: UserId, event: DomainEvent| {
+        let context = EventContext {
+            actor: Actor::Cli {
+                os_user: "operator".into(),
+                host: "host".into(),
+            },
+            origin: RequestOrigin::default(),
+            reason: None,
+        };
+        let mut tx = database.begin().await.expect("transaction");
+        tx.record(&context, Some(user), event)
+            .await
+            .expect("record");
+        tx.commit().await.expect("commit");
+    };
+    // The kinds of the notifications emailed to `email`, oldest first.
+    let emailed = async |email: EmailId| -> Vec<(String, bool)> {
+        let destination = format!("account {user_id}, address {email}");
+        let payloads = database.deliveries().payloads(&destination).await;
+        payloads
+            .expect("payloads")
+            .iter()
+            .filter(|payload| payload["type"] == "notification")
+            .map(|payload| {
+                let kind = payload["notification"]["kind"].as_str().expect("kind");
+                (kind.to_owned(), payload.get("recovery_id").is_some())
+            })
+            .collect()
+    };
+
+    record(user_id, DomainEvent::AccountEnabled {}).await;
+    record(user_id, DomainEvent::EmailRemoved { email_id: other }).await;
+    record(
+        user_id,
+        DomainEvent::RecoveryCompleted {
+            recovery_id: RecoveryId::new(),
+            passkey_id: PasskeyId::new(),
+        },
+    )
+    .await;
+    let enabled = ("account_enabled".to_owned(), false);
+    let removed = ("email_removed".to_owned(), false);
+    let recovered = ("recovered".to_owned(), true);
+    assert_eq!(emailed(primary).await, [enabled, recovered.clone()]);
+    assert_eq!(emailed(other).await, [removed, recovered]);
+
+    let unaddressed = account(&database).await;
+    record(unaddressed, DomainEvent::AccountEnabled {}).await;
+    let unread = database.notifications().unread(unaddressed).await;
+    assert_eq!(unread.expect("unread"), 1, "the inbox has it");
+    let queued = database.deliveries().list(None, Some("email"), 1000).await;
+    let to = format!("account {unaddressed},");
+    assert!(
+        !queued
+            .expect("deliveries")
+            .iter()
+            .any(|delivery| delivery.destination.starts_with(&to)),
+        "no email without a verified address"
+    );
 }
