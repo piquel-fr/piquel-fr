@@ -23,12 +23,13 @@ pub use exclusive::{ExclusiveConnection, LockKey};
 #[cfg(any(test, feature = "test-util"))]
 pub use repositories::audit::Tamper;
 pub use repositories::{
-    AccountDeletionRepository, AdministratorRepository, AnnouncementRepository, AuditRepository,
-    DashboardRepository, DeliveryRepository, EmailRepository, EventRepository,
+    AccountDeletionRepository, AdministratorRepository, AlertRepository, AnnouncementRepository,
+    AuditRepository, DashboardRepository, DeliveryRepository, EmailRepository, EventRepository,
     FederationRepository, HandleRepository, MaintenanceRepository, NotificationRepository,
     OidcRepository, PasskeyRepository, PictureRepository, RecoveryRepository, SecurityRepository,
     SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
+    alerts::StoredAlert,
     announcements::{DraftedAnnouncement, Recipients},
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},

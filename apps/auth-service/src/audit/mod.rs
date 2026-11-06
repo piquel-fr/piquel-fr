@@ -213,6 +213,7 @@ impl CheckpointText {
 }
 
 /// The keys checkpoint signatures are verified against, and where they came from.
+#[derive(Clone)]
 pub struct AuditKeys {
     /// The verifier keys.
     verifiers: NoteVerifiers,

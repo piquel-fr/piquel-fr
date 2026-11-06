@@ -9,12 +9,16 @@
 //! - `client-spans`: `SendTraced`, a client span around each `reqwest` request.
 //! - `config`: environment variables, validated origins and secret references.
 //! - `email`: email address normalization.
-//! - `events`: the domain events auth records.
+//! - `events`: the domain events auth records, the notifications they give
+//!   owners, and the alerts administrators are shown.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
 
 /// The views of administration: what the admin dashboard shows and the CLI prints.
 #[cfg(feature = "admin")]
 pub mod admin;
+/// What needs an administrator's attention.
+#[cfg(feature = "events")]
+pub mod alerts;
 /// Client spans around outbound `reqwest` requests.
 #[cfg(feature = "client-spans")]
 mod client_span;
@@ -431,6 +435,7 @@ uuid_id!(
     AnnouncementId,
     "Identifier of an announcement administrators sent to accounts, by email and in their settings."
 );
+uuid_id!(AlertId, "Identifier of an alert administrators are shown.");
 
 /// The W3C Trace Context ID of a request's trace: 16 bytes, not all zero, written
 /// as 32 lower-case hex digits. Telemetry assigns one to every request and job run;

@@ -124,6 +124,10 @@ fn event_kinds_match_their_serde_tags() {
     let passkey_id = PasskeyId::new();
     let client_id: ClientId = "client".parse().expect("client ID");
     let origin: clients::RelatedOrigin = "https://app.example".parse().expect("origin");
+    let alert = alerts::Alert::AuditChainBroken(admin::ChainBreak {
+        position: 1,
+        problem: admin::ChainProblem::EventChanged,
+    });
     let imported = serde_json::from_value(json!({
         "action": "passkey.login", "outcome": "success", "metadata": {}
     }))
@@ -315,6 +319,14 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::AnnouncementSent {
             announcement_id: AnnouncementId::new(),
             recipients: 2,
+        },
+        DomainEvent::AlertRaised {
+            alert_id: AlertId::new(),
+            alert: alert.clone(),
+        },
+        DomainEvent::AlertCleared {
+            alert_id: AlertId::new(),
+            alert,
         },
         DomainEvent::Imported(imported),
     ];

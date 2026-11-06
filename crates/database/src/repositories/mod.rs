@@ -125,16 +125,19 @@ repositories! {
     pictures: PictureRepository;
     /// The notifications of each account's inbox, and whether they were read.
     notifications: NotificationRepository;
+    /// The alerts administrators are shown.
+    alerts: AlertRepository;
     /// Announcements to accounts and their recipients.
     announcements: AnnouncementRepository;
 }
 
 /// How decoding `{"kind": …}` alone as a stored, `kind`-tagged enum fails, which
-/// tells whether this release knows the kind: a [`DomainEvent`] or a
+/// tells whether this release knows the kind: a [`DomainEvent`], an [`Alert`] or a
 /// [`Notification`] a newer release wrote reads as unknown, not as corrupt. Only
 /// serde's derive knows the variant names, and it reports an unknown one through
 /// [`serde::de::Error::unknown_variant`].
 ///
+/// [`Alert`]: piquel_common::alerts::Alert
 /// [`DomainEvent`]: piquel_common::events::DomainEvent
 /// [`Notification`]: piquel_common::notifications::Notification
 #[derive(Debug, thiserror::Error)]
@@ -356,6 +359,8 @@ impl From<Bytes32> for [u8; 32] {
 
 /// Administrator rights and the lock that serializes their changes.
 pub(crate) mod administrators;
+/// The alerts administrators are shown.
+pub(crate) mod alerts;
 /// Announcements, their drafts and their recipients.
 pub(crate) mod announcements;
 /// The audit chain, its checkpoints and its anchor.
