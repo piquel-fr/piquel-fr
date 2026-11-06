@@ -948,7 +948,7 @@ Commands:
 Change the display name, which applications receive as `name` once they refresh the profile.
 
 ```text
-auth-service account name set --reason <REASON> <NAME>
+auth-service account <USER> name set --reason <REASON> <NAME>
 ```
 
 Arguments:
@@ -978,7 +978,7 @@ Commands:
 List the active passkeys.
 
 ```text
-auth-service account passkeys list [OPTIONS]
+auth-service account <USER> passkeys list [OPTIONS]
 ```
 
 Options:
@@ -990,7 +990,7 @@ Options:
 Rename a passkey.
 
 ```text
-auth-service account passkeys rename --reason <REASON> <PASSKEY> <NAME>
+auth-service account <USER> passkeys rename --reason <REASON> <PASSKEY> <NAME>
 ```
 
 Arguments:
@@ -1007,7 +1007,7 @@ Options:
 Remove a passkey and sign the account out everywhere. One passkey always remains.
 
 ```text
-auth-service account passkeys revoke [OPTIONS] --reason <REASON> <PASSKEY>
+auth-service account <USER> passkeys revoke [OPTIONS] --reason <REASON> <PASSKEY>
 ```
 
 Arguments:
@@ -1037,7 +1037,7 @@ Commands:
 List the linked providers.
 
 ```text
-auth-service account identities list [OPTIONS]
+auth-service account <USER> identities list [OPTIONS]
 ```
 
 Options:
@@ -1049,7 +1049,7 @@ Options:
 Unlink a provider and sign the account out everywhere.
 
 ```text
-auth-service account identities unlink [OPTIONS] --reason <REASON> <PROVIDER>
+auth-service account <USER> identities unlink [OPTIONS] --reason <REASON> <PROVIDER>
 ```
 
 Arguments:
@@ -1080,7 +1080,7 @@ Commands:
 List the addresses, primary first.
 
 ```text
-auth-service account emails list [OPTIONS]
+auth-service account <USER> emails list [OPTIONS]
 ```
 
 Options:
@@ -1092,7 +1092,7 @@ Options:
 Make a verified address the primary one, which applications receive. The previous one is told.
 
 ```text
-auth-service account emails primary --reason <REASON> <EMAIL>
+auth-service account <USER> emails primary --reason <REASON> <EMAIL>
 ```
 
 Arguments:
@@ -1108,7 +1108,7 @@ Options:
 Remove an address, which is told if it was verified. The primary address goes last.
 
 ```text
-auth-service account emails remove --reason <REASON> <EMAIL>
+auth-service account <USER> emails remove --reason <REASON> <EMAIL>
 ```
 
 Arguments:
@@ -1138,7 +1138,7 @@ Commands:
 List the active sessions, most recently active first.
 
 ```text
-auth-service account sessions list [OPTIONS]
+auth-service account <USER> sessions list [OPTIONS]
 ```
 
 Options:
@@ -1150,7 +1150,7 @@ Options:
 Sign one session out, with its applications' refresh tokens.
 
 ```text
-auth-service account sessions revoke --reason <REASON> <SESSION>
+auth-service account <USER> sessions revoke --reason <REASON> <SESSION>
 ```
 
 Arguments:
@@ -1166,7 +1166,7 @@ Options:
 Sign every session out, with their applications' refresh tokens.
 
 ```text
-auth-service account sessions revoke-all [OPTIONS] --reason <REASON>
+auth-service account <USER> sessions revoke-all [OPTIONS] --reason <REASON>
 ```
 
 Options:
@@ -1192,7 +1192,7 @@ Commands:
 List the apps, by name.
 
 ```text
-auth-service account apps list [OPTIONS]
+auth-service account <USER> apps list [OPTIONS]
 ```
 
 Options:
@@ -1204,7 +1204,7 @@ Options:
 Remove an app's access: its refresh grants end and it asks for consent again. The account's sessions stay signed in.
 
 ```text
-auth-service account apps remove --reason <REASON> <CLIENT>
+auth-service account <USER> apps remove --reason <REASON> <CLIENT>
 ```
 
 Arguments:
@@ -1233,7 +1233,7 @@ Commands:
 Show the picture's ID, path on auth and when it was uploaded.
 
 ```text
-auth-service account picture show [OPTIONS]
+auth-service account <USER> picture show [OPTIONS]
 ```
 
 Options:
@@ -1245,7 +1245,7 @@ Options:
 Remove the picture, such as one that impersonates someone.
 
 ```text
-auth-service account picture remove --reason <REASON>
+auth-service account <USER> picture remove --reason <REASON>
 ```
 
 Options:
@@ -1283,7 +1283,7 @@ Commands:
 List the notifications, newest first.
 
 ```text
-auth-service account notifications list [OPTIONS]
+auth-service account <USER> notifications list [OPTIONS]
 ```
 
 Options:
@@ -1296,7 +1296,7 @@ Options:
 Show one notification, with its security history entry while kept.
 
 ```text
-auth-service account notifications show [OPTIONS] <NOTIFICATION>
+auth-service account <USER> notifications show [OPTIONS] <NOTIFICATION>
 ```
 
 Arguments:
