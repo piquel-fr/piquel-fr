@@ -101,8 +101,7 @@ impl SecurityFixture {
     /// Builds a test policy with exact browser origins and unique client buckets.
     /// A public client calls back to `https://external.example`.
     async fn new() -> Self {
-        let database = Self::database(5, std::time::Duration::from_secs(5)).await;
-        database.run_migrations().await.expect("migrations");
+        let database = crate::tests::Replicas::database().await;
         database
             .oidc()
             .create_client(

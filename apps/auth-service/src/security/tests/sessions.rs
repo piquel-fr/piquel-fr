@@ -1,9 +1,9 @@
 //! Session lookup, passkey confirmation age and session locking against logout.
 
 use super::*;
-use piquel_common::{Handle, TokenId};
+use crate::tests::{Browser, Replicas, until_blocked};
 use piquel_crypto::Secret;
-use piquel_repository::{InsertSession, InsertUser};
+use piquel_repository::InsertSession;
 
 /// A session lookup failure stays a server error rather than becoming an anonymous session.
 #[tokio::test]
@@ -78,35 +78,15 @@ fn confirmation_age_is_fixed_from_its_timestamp() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn confirmed_changes_serialize_with_logout() {
-    let database = SecurityFixture::database(5, std::time::Duration::from_secs(5)).await;
-    database.run_migrations().await.expect("migrations");
-    let user_id = UserId::new();
-    let mut tx = database.begin().await.expect("transaction");
-    tx.users()
-        .insert(&InsertUser {
-            id: user_id,
-            handle: Handle::parse(&format!("lock-{}", &TokenId::new().to_string()[24..]))
-                .expect("handle"),
-            display_name: "Lock test".into(),
-        })
-        .await
-        .expect("user");
-    let secret = Session::create(
-        &mut tx,
-        RequestContext::TEST,
-        user_id,
-        AuthenticationMethod::Passkey.into(),
-    )
-    .await
-    .expect("session");
-    tx.commit().await.expect("commit");
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let (user_id, id) = (browser.user_id, browser.session_id);
     let session = database
         .sessions()
-        .find_active_by_browser_secret(secret.digest().as_bytes())
+        .find_by_id(id)
         .await
         .expect("lookup")
         .expect("session");
-    let id = session.id;
     let mut change = database.begin().await.expect("change transaction");
     let locked = Session::lock(&mut change, &session).await.expect("lock");
     <Confirmed>::check(&locked).expect("passkey sign-in confirms");
@@ -129,8 +109,8 @@ async fn confirmed_changes_serialize_with_logout() {
             logout.commit().await.map(|()| revoked)
         }
     });
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert!(!logout.is_finished(), "logout must wait for the change");
+    // The logout waits for the change.
+    until_blocked(&mut change, 1).await;
     change.commit().await.expect("commit change");
     assert_eq!(logout.await.expect("logout task").expect("logout"), [id]);
     let mut change = database.begin().await.expect("change transaction");
@@ -145,21 +125,10 @@ async fn confirmed_changes_serialize_with_logout() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn session_lock_rechecks_expiry_after_waiting() {
-    let database = SecurityFixture::database(5, std::time::Duration::from_secs(5)).await;
-    database.run_migrations().await.expect("migrations");
-    let user_id = UserId::new();
+    let database = Replicas::database().await;
+    let user_id = Browser::new_account(&database).await.user_id;
     let now = Utc::now();
-    let mut tx = database.begin().await.expect("transaction");
-    tx.users()
-        .insert(&InsertUser {
-            id: user_id,
-            handle: Handle::parse(&format!("lock-{}", &TokenId::new().to_string()[24..]))
-                .expect("handle"),
-            display_name: "Lock test".into(),
-        })
-        .await
-        .expect("user");
-    let session = tx
+    let session = database
         .sessions()
         .insert(&InsertSession {
             id: SessionId::new(),
@@ -174,7 +143,6 @@ async fn session_lock_rechecks_expiry_after_waiting() {
         })
         .await
         .expect("session");
-    tx.commit().await.expect("commit");
     let mut holder = database.begin().await.expect("holder transaction");
     holder
         .users()

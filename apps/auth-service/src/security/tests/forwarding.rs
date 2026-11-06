@@ -2,7 +2,9 @@
 
 use super::*;
 
-/// Only configured ingress peers may supply a single forwarded client address.
+/// Only configured ingress peers may supply the forwarded client address, which
+/// they must send. `forwarded_address_parser_requires_one_address_and_preserves_causes`
+/// covers what the header may hold.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn forwarded_addresses_require_an_explicit_trusted_peer() {
@@ -21,16 +23,7 @@ async fn forwarded_addresses_require_an_explicit_trusted_peer() {
         fixture.policy.client_ip(&request).expect("trusted header"),
         "192.0.2.7".parse::<IpAddr>().expect("IP")
     );
-    request
-        .headers_mut()
-        .append("x-forwarded-for", HeaderValue::from_static("192.0.2.8"));
-    assert!(fixture.policy.client_ip(&request).is_err());
     request.headers_mut().remove("x-forwarded-for");
-    assert!(fixture.policy.client_ip(&request).is_err());
-    request.headers_mut().insert(
-        "x-forwarded-for",
-        HeaderValue::from_static("192.0.2.7, 192.0.2.8"),
-    );
     assert!(fixture.policy.client_ip(&request).is_err());
 }
 

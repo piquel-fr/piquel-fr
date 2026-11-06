@@ -1,22 +1,10 @@
 //! Job runner failure isolation and exclusivity across runners.
 use super::*;
-use piquel_repository::DatabaseConfig;
+use crate::tests::Replicas;
 use std::sync::{
     Mutex,
     atomic::{AtomicU32, Ordering},
 };
-
-/// Connects to the disposable database the `#[ignore]`d tests run against.
-async fn database() -> Database {
-    let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
-        .required()
-        .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
-    Database::connect(
-        DatabaseConfig::new(&url, 2, Duration::from_secs(5)).expect("database configuration"),
-    )
-    .await
-    .expect("database")
-}
 
 /// Panics on its first run and counts every run.
 struct PanicsOnce(Arc<AtomicU32>);
@@ -44,7 +32,7 @@ impl ExclusiveJob for PanicsOnce {
 async fn a_panicking_run_releases_its_lock_and_the_job_runs_again() {
     let runs = Arc::new(AtomicU32::new(0));
     let mut jobs = Jobs::new();
-    jobs.exclusive(PanicsOnce(Arc::clone(&runs)), database().await);
+    jobs.exclusive(PanicsOnce(Arc::clone(&runs)), Replicas::database().await);
     tokio::time::timeout(Duration::from_secs(5), async {
         while runs.load(Ordering::SeqCst) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -145,7 +133,7 @@ impl ExclusiveJob for Held {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn runners_never_overlap_and_a_dropped_holder_hands_over() {
-    let database = database().await;
+    let database = Replicas::database().await;
     let log = Arc::new(Log::default());
     let mut runners = [0, 1].map(|runner| {
         let mut jobs = Jobs::new();

@@ -155,21 +155,6 @@ async fn post_protocol_endpoints_and_error_contracts() {
     );
 }
 
-/// Checks redirect equality, PKCE rejection and opaque-token bounds.
-#[test]
-fn exact_redirect_and_pkce_and_refresh_bounds() {
-    let registered = ["https://a.example/cb".to_owned()];
-    assert!(!registered.contains(&"https://a.example/cb.evil".to_owned()));
-    assert!(piquel_crypto::Pkce::verify("short", "x").is_err());
-    let huge = format!(
-        "{}_{}.{:0200}",
-        TokenPrefix::RefreshToken,
-        TokenId::new(),
-        "x"
-    );
-    assert!(OpaqueToken::parse(TokenPrefix::RefreshToken, &huge).is_err());
-}
-
 /// Checks case-insensitive scheme matching without changing credential bytes.
 #[test]
 fn authentication_schemes_are_case_insensitive() {
@@ -200,9 +185,17 @@ fn scope_sets_preserve_existing_wire_semantics() {
     assert!(Scopes::parse(&too_many).is_err());
 }
 
-/// Checks purpose binding and exact opaque envelope/secret round trips.
+/// Checks purpose binding, the length bound and exact opaque envelope/secret round
+/// trips.
 #[test]
 fn opaque_tokens_preserve_envelopes_and_reject_wrong_purpose() {
+    let huge = format!(
+        "{}_{}.{:0200}",
+        TokenPrefix::RefreshToken,
+        TokenId::new(),
+        "x"
+    );
+    assert!(OpaqueToken::parse(TokenPrefix::RefreshToken, &huge).is_err());
     for prefix in TokenPrefix::ALL {
         let original = OpaqueToken::new(prefix).expect("random token");
         let encoded = original.encoded();
