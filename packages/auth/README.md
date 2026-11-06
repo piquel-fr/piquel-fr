@@ -82,11 +82,18 @@ tokens.idToken?.claims.sub;
   the browser carries only a `request_uri`, as clients registered with
   `--require-par` need. A `stepUp` requirement, such as one `parseChallenge` read
   back, is sent as `acr_values` and `max_age`, and `complete` fails unless the ID
-  token meets it.
+  token meets it. An `idTokenHint`, the signed-in user's ID token, is sent as
+  `id_token_hint`, so auth signs in that account only, and `complete` fails unless
+  the new ID token names the same user (`subject_mismatch`), revoking the refused
+  grant.
 - `complete` checks `state`, `iss`, `error` and `code` before the code goes
   anywhere, then validates the ID token against the pending login.
 - `refresh`, `revoke`, `userinfo` and `logoutUrl` cover the rest of a session, and
-  `logoutToken` validates a back-channel logout token auth posted.
+  `logoutToken` validates a back-channel logout token auth posted. `refresh` and
+  `userinfo` take the claims of the sign-in's ID token: a refreshed ID token must
+  keep its `sub` (`subject_mismatch`), `auth_time` and `acr`, with no `nonce` but its
+  own (`authentication_changed`, OIDC Core §12.2), and `UserInfo` must name its
+  `sub` (`subject_mismatch`).
 
 A confidential client authenticates with HTTP Basic, and a public one sends its
 `client_id`.
@@ -138,9 +145,10 @@ export async function fetch(request: Request): Promise<Response> {
   `state`, so logins started in several tabs usually all complete; one that lands in
   a taken slot replaces the login there. `session()` refreshes an access token about to expire, and concurrent
   requests may each refresh. Auth's `invalid_grant` ends the session, so one auth
-  ended stops within an access token's 5 minutes; any other failure keeps it while
-  its access token is valid, and then answers 503 until auth answers again. A sign-in
-  without a refresh token lasts as long as its access token.
+  ended stops within an access token's 5 minutes, as does a refreshed ID token
+  naming another user or sign-in; any other failure keeps it while its access token
+  is valid, and then answers 503 until auth answers again. A sign-in without a
+  refresh token lasts as long as its access token.
 - **`respond`** adds what `session()` recorded: the refreshed session, an ended
   session's deletion, and the spent step-up marker, with `Cache-Control: no-store`
   when it sets the session. A response without them loses those updates: the next
@@ -154,7 +162,8 @@ export async function fetch(request: Request): Promise<Response> {
 - **Logout** revokes the session's refresh token at auth, clears the cookies and
   redirects to RP-initiated logout. When auth cannot revoke it within five seconds,
   logout answers 502 and keeps the cookie, for the user to try again. A sign-in
-  revokes the session it replaces, and answers 502 the same way.
+  revokes the session it replaces once its code is redeemed, and answers 502 the
+  same way; the code is spent then, so its new grant is revoked too.
 - **Cross-site writes**: `SameSite=Lax` keeps the cookie off other sites' posts, but
   not off a sibling's under the same domain. So `session()` answers a request that is
   not `GET`, `HEAD`, `OPTIONS` or `TRACE` with a 403 response, before reading the
@@ -175,7 +184,10 @@ export async function fetch(request: Request): Promise<Response> {
 - **Step-up**: `user.require(requirement)` and `user.stepUp(challenge)`, for an API's
   `insufficient_user_authentication` challenge read with `parseChallenge`, redirect
   through login with `acr_values` and `max_age`, back to the same page. That return
-  is the retry: asked again, they answer 403 instead of another redirect.
+  is the retry: asked again, they answer 403 instead of another redirect. A step-up
+  must sign in the session's user: one that comes back as another account, or
+  beside another account's session, fails with 400, keeping the session and
+  revoking the refused grant.
 
 The `CookieKey` must be the same on every replica; changing it signs every user out.
 `CookieKey.generate()` makes a random one, for development and tests.
@@ -226,7 +238,8 @@ const notes = await session.fetch('https://notes.example/notes');
   the login was granted `offline_access`; without a refresh token, an expired one
   throws `invalid_token` (`expired`), and `restore` signs in again. A resource
   answering `insufficient_user_authentication` sends the browser to auth with the
-  challenge's `acr_values` and `max_age`, back to the same page; if the resource
+  challenge's `acr_values` and `max_age` and the ID token as `id_token_hint`, back to
+  the same page, where a sign-in as another account fails; if the resource
   still refuses within a minute of that return, `fetch` throws instead of leaving
   again. A router's `load` runs before the address changes, so it passes the page it
   loads: `session.fetch(resource, init, { returnTo })`. A cross-origin resource must

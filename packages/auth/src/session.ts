@@ -14,7 +14,11 @@ import { Scopes } from './scope.ts';
  * writes this shape, which `tests/sdk-vectors/sessions` pins. Times are Unix seconds.
  */
 const loginData = json.object({
-  /** The validated claims of the sign-in's ID token, or of the latest refresh that returned one. */
+  /**
+   * The validated claims of the sign-in's ID token, or of the latest refresh that
+   * returned one, which kept the sign-in's `sub`, `auth_time` and `acr`, and its
+   * `nonce` even when it returned none (OIDC Core §12.2).
+   */
   claims: idTokenClaims,
   /** The latest access token. */
   access_token: json.string,
@@ -59,19 +63,18 @@ export class StoredLogin {
   }
 
   /**
-   * This session after a refresh returned `tokens`. An absent ID token or refresh
-   * token keeps the current one. `undefined` if a new ID token names another user or
-   * issuer (OIDC Core §12.2).
+   * This session after a refresh returned `tokens`, which `Client.refresh` checked
+   * against its claims (OIDC Core §12.2). An absent ID token or refresh token keeps
+   * the current one, and a new ID token without a `nonce` keeps the sign-in's, which
+   * the next refresh is checked against.
    */
-  refreshed(tokens: Tokens): StoredLogin | undefined {
+  refreshed(tokens: Tokens): StoredLogin {
     const { idToken, refreshToken } = tokens;
-    if (idToken !== undefined && !idToken.sameUser(this.claims)) return undefined;
-    return StoredLogin.#of(
-      idToken?.claims ?? this.claims,
-      tokens,
-      refreshToken ?? this.refreshToken,
-      this.data.ends_at
-    );
+    const claims = { ...(idToken?.claims ?? this.claims) };
+    if (claims.nonce === undefined && this.claims.nonce !== undefined) {
+      claims.nonce = this.claims.nonce;
+    }
+    return StoredLogin.#of(claims, tokens, refreshToken ?? this.refreshToken, this.data.ends_at);
   }
 
   /** The session of `claims` with the access token of `tokens`, ending at Unix second `endsAt`. */
@@ -139,6 +142,8 @@ export type PendingAuthorization = {
   returnTo: string;
   /** Whether the login steps up, so the return to `returnTo` is its retry. */
   stepUp: boolean;
+  /** The user a step-up started from, whom its new sign-in must name too. */
+  subject?: string;
   /**
    * When the login expires, in milliseconds since the epoch, checked as well as the
    * cookie's `Max-Age`, which a copied cookie escapes.
@@ -151,5 +156,6 @@ export const pendingAuthorization: json.Decoder<PendingAuthorization> = json.obj
   login: pendingLogin,
   returnTo: json.string,
   stepUp: json.boolean,
+  subject: json.optional(json.string),
   expiresAt: json.integer(0, Number.MAX_SAFE_INTEGER)
 });

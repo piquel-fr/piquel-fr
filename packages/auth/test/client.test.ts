@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { Issuer, type ClientConfig } from '../src/index.ts';
+import { Issuer, type ClientConfig, type IdTokenClaims } from '../src/index.ts';
 import {
   DISCOVERY_URL,
   DOCUMENT,
@@ -19,11 +19,13 @@ const PAR_URL = `${ISSUER}/oauth/par`;
 const REQUEST_URI = 'urn:ietf:params:oauth:request_uri:pushed';
 const REVOCATION_URL = (DOCUMENT as { revocation_endpoint: string }).revocation_endpoint;
 const ID = vector('tokens', 'id-valid');
+/** The claims of the vectors' ID token, as a sign-in validated them. */
+const SIGNED_IN = (ID.expected as { ok: IdTokenClaims }).ok;
 const PUBLIC: ClientConfig = { clientId: 'notes-web', redirectUri: REDIRECT_URI };
 
 /** A client of the vectors' issuer at the vectors' time; `routes` add or replace endpoints. */
 async function client(
-  routes: Record<string, () => Response> = {},
+  routes: Record<string, (init: RequestInit) => Response> = {},
   config: ClientConfig = PUBLIC,
   document: object = DOCUMENT as object
 ) {
@@ -90,7 +92,7 @@ test('a confidential client authenticates with HTTP Basic, a public one sends it
     { [TOKEN_URL]: refused },
     { ...PUBLIC, clientSecret: 'a secret/+' }
   );
-  await outcome(() => confidential.client.refresh('prt_v1_old'));
+  await outcome(() => confidential.client.refresh('prt_v1_old', SIGNED_IN));
   // The secret stays out of the client's printable state.
   assert.ok(!JSON.stringify(confidential.client).includes('a secret'));
   assert.ok(!('clientSecret' in confidential.client.config));
@@ -100,7 +102,7 @@ test('a confidential client authenticates with HTTP Basic, a public one sends it
   assert.deepEqual(basic.form, { grant_type: 'refresh_token', refresh_token: 'prt_v1_old' });
 
   const publicClient = await client({ [TOKEN_URL]: refused });
-  await outcome(() => publicClient.client.refresh('prt_v1_old'));
+  await outcome(() => publicClient.client.refresh('prt_v1_old', SIGNED_IN));
   const form = sent(publicClient.fetch, TOKEN_URL);
   assert.equal(form.headers.get('authorization'), null);
   assert.equal(form.form.client_id, 'notes-web');
@@ -113,7 +115,7 @@ test('a refused request keeps its OAuth error; any other answer is a network err
   const broken = await client({
     [TOKEN_URL]: () => new Response('<h1>Bad gateway</h1>', { status: 502 })
   });
-  assert.deepEqual(await outcome(() => broken.client.refresh('prt_v1_old')), {
+  assert.deepEqual(await outcome(() => broken.client.refresh('prt_v1_old', SIGNED_IN)), {
     error: { code: 'network' }
   });
   const unpushed = await client({
@@ -173,4 +175,54 @@ test('a login completes with an ID token validated against the pending login', a
     }
   );
   assert.equal(fetch.count(TOKEN_URL), requests);
+});
+
+test('a hinted login sends its ID token, and completes only for the user it names', async () => {
+  const response = {
+    access_token: 'at',
+    token_type: 'Bearer',
+    expires_in: 300,
+    scope: 'openid',
+    id_token: ID.input.token,
+    refresh_token: 'prt_v1_new'
+  };
+  const { client: login, fetch } = await client({
+    [TOKEN_URL]: () => Response.json(response),
+    [REVOCATION_URL]: () => new Response(null, { status: 200 })
+  });
+  const callback = new URLSearchParams({ code: 'pac_v1_code', state: 'af0ifjsldkj', iss: ISSUER });
+  const signIn = { state: 'af0ifjsldkj', nonce: String(ID.input.nonce) };
+  const hint = (await login.complete({ ...(await login.authorize()).pending, ...signIn }, callback))
+    .idToken;
+  assert.ok(hint);
+  for (const [sub, completes] of [
+    ['01936f3e-8c00-7000-8000-000000000009', false],
+    [SIGNED_IN.sub, true]
+  ] as const) {
+    const { pending } = await login.authorize({ idTokenHint: hint });
+    assert.equal(sent(fetch, PAR_URL).form.id_token_hint, ID.input.token);
+    assert.equal(pending.subject, SIGNED_IN.sub);
+    // The vectors' token names one user: pin the login to another to refuse it.
+    const result = await outcome(() =>
+      login.complete({ ...pending, ...signIn, subject: sub }, callback)
+    );
+    assert.equal('ok' in result, completes, sub);
+    if (!completes) {
+      assert.deepEqual(result, { error: { code: 'invalid_token', reason: 'subject_mismatch' } });
+    }
+    assert.equal(fetch.count(REVOCATION_URL), 1, `only the refused grant is revoked, ${sub}`);
+  }
+});
+
+test('UserInfo must name the signed-in user', async () => {
+  const { client: reading } = await client({
+    [(DOCUMENT as { userinfo_endpoint: string }).userinfo_endpoint]: (init) => {
+      const mine = new Headers(init.headers).get('authorization') === 'Bearer mine';
+      return Response.json({ sub: mine ? SIGNED_IN.sub : 'someone-else' });
+    }
+  });
+  assert.equal((await reading.userinfo('mine', SIGNED_IN)).sub, SIGNED_IN.sub);
+  assert.deepEqual(await outcome(() => reading.userinfo('theirs', SIGNED_IN)), {
+    error: { code: 'invalid_token', reason: 'subject_mismatch' }
+  });
 });

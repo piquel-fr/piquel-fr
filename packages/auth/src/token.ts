@@ -221,9 +221,38 @@ export class IdToken extends AuthenticatedToken<IdTokenClaims> {
     return new IdToken(claims, token, context);
   }
 
-  /** @internal Whether `other` names the same user at the same issuer, as a refresh's ID token must (OIDC Core §12.2). */
-  sameUser(other: Pick<IdTokenClaims, 'sub' | 'iss'>): boolean {
-    return other.sub === this.claims.sub && other.iss === this.claims.iss;
+  /**
+   * Requires this token to name the user `expected`, or throws `invalid_token`
+   * (`subject_mismatch`).
+   */
+  requireSubject(expected: string): void {
+    if (this.claims.sub !== expected) {
+      throw AuthError.subjectMismatch('the token', this.claims.sub, expected);
+    }
+  }
+
+  /**
+   * Requires this ID token, from a refresh, to carry over the sign-in `signedIn`
+   * describes (OIDC Core §12.2): the same `sub` (`subject_mismatch`), the same
+   * `auth_time` and `acr`, and no `nonce` but the sign-in's (`authentication_changed`).
+   * Its `iss`, `aud` and `azp` already passed the same checks as the sign-in's.
+   */
+  requireRefreshOf(signedIn: IdTokenClaims): void {
+    this.requireSubject(signedIn.sub);
+    const { auth_time, acr, nonce } = this.claims;
+    const changed =
+      auth_time !== signedIn.auth_time
+        ? 'auth_time'
+        : acr !== signedIn.acr
+          ? 'acr'
+          : nonce !== undefined && nonce !== signedIn.nonce
+            ? 'nonce'
+            : undefined;
+    if (changed === undefined) return;
+    throw AuthError.invalidToken(
+      'authentication_changed',
+      `a refreshed ID token changes the original authentication's ${changed}`
+    );
   }
 }
 

@@ -211,8 +211,8 @@ A sign-in stays tied to its user and its authentication afterwards too (OIDC Cor
 without `nonce` or `max_age`, then requires it to carry the sign-in over: the same
 `sub` (`subject_mismatch`), the same `auth_time` and `acr`, and no `nonce` but the
 sign-in's (`authentication_changed`). `UserInfo` must name the ID token's `sub`
-(`subject_mismatch`). The Rust SDK checks these, taking the sign-in's ID token
-claims in `refresh` and `userinfo`; `@piquel/auth` does not yet.
+(`subject_mismatch`). Both SDKs check these, taking the sign-in's ID token claims
+in `refresh` and `userinfo`.
 
 The SDK never sends the `audience` parameter auth accepts today; auth then uses the
 client's default resource. They will send `resource` (RFC 8707) once auth supports
