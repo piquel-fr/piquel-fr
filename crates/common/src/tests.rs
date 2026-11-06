@@ -87,7 +87,7 @@ fn trace_ids_are_lower_case_hex() {
 }
 
 /// `DomainEvent::kind` is the serde tag each variant is stored under, for every
-/// variant: one serde knows of and this test does not build fails it.
+/// variant: a variant serde knows that this list doesn't build fails the test.
 #[cfg(feature = "events")]
 #[test]
 #[expect(
