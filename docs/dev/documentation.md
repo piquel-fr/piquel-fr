@@ -136,7 +136,7 @@ does what its guide does, then saves each page with `shoot` from
 
 - `handle('alice')` gives a new handle, which every image shows as `alice`.
 - `shoot(page, '<section>/<name>', area)` saves the window, 1280 by 800 pixels,
-  or only the element `area`, as `docs/images/<section>/<name>.png`. It first
+  in the dark theme, or only the element `area`, as `docs/images/<section>/<name>.png`. It first
   replaces what changes from run to run: handles, the preview's hosts, IDs,
   dates, addresses and trace IDs.
 
