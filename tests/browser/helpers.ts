@@ -163,15 +163,13 @@ export async function signUp(
 }
 
 /**
- * Adds a passkey named `name` from `page`'s sign-in methods, made by a second
- * authenticator: the first, `authenticatorId`, holds the account's passkey
- * already, so it stops answering. Answers the second authenticator's ID.
+ * A second authenticator, which answers the next ceremonies: the first,
+ * `authenticatorId`, holds the account's passkey already, so it stops answering.
+ * Answers the second authenticator's ID.
  */
-export async function addSecondPasskey(
-  page: Page,
+export async function secondAuthenticator(
   cdp: CDPSession,
-  authenticatorId: string,
-  name: string
+  authenticatorId: string
 ): Promise<string> {
   await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: false });
   const second = await cdp.send('WebAuthn.addVirtualAuthenticator', {
@@ -184,12 +182,26 @@ export async function addSecondPasskey(
       automaticPresenceSimulation: true
     }
   });
+  return second.authenticatorId;
+}
+
+/**
+ * Adds a passkey named `name` from `page`'s sign-in methods, made by a
+ * {@link secondAuthenticator}. Answers that authenticator's ID.
+ */
+export async function addSecondPasskey(
+  page: Page,
+  cdp: CDPSession,
+  authenticatorId: string,
+  name: string
+): Promise<string> {
+  const second = await secondAuthenticator(cdp, authenticatorId);
   await page.goto('/settings/sign-in');
   await page.getByText('Add a passkey', { exact: true }).click();
   await page.getByLabel('New passkey name', { exact: true }).fill(name);
   await page.getByRole('button', { name: 'Create the passkey', exact: true }).click();
   await expect(page.getByText('The passkey was added.')).toBeVisible();
-  return second.authenticatorId;
+  return second;
 }
 
 /** A page in a browser of its own, with a passkey authenticator. */

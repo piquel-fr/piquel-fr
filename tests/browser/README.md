@@ -6,16 +6,13 @@ debug binary `just rust build` makes, behind Caddy over HTTPS, as configured bel
 `settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
 passkeys, which each page then tells the password manager, listing exactly the
 passkeys the virtual authenticators hold that still sign in, a passkey ceremony
-that fails, the passkey confirmation the passkey
-script runs, devices, an email link's token and signing out. It also removes a
-connected app, which then asks for consent again; reports a passkey in the
-security history as not the owner's, which signs out another device holding the
-same passkey and offers to remove it.
+that fails, the passkey confirmation the passkey script runs, an email link's
+token and signing out, which a sign-in from the devices page comes back to.
 
 `profile.spec.ts` uses the Profile tab's dialogs, which open with no script: it
 uploads a picture, which the tab, the sidebar and the top bar load under the
-pages' Content-Security-Policy, closes the notice saying so, changes the display
-name, and removes the picture. Then the picture script's crop: a chosen image
+pages' Content-Security-Policy, closes the notice saying so, and removes the
+picture. Then the picture script's crop: a chosen image
 shows at its centred square, and zooming in and dragging it change the square the
 form sends.
 
@@ -26,34 +23,22 @@ no passkey for is refused in the form. Every spec signs up through `/register`.
 account by typing its handle, and restores it: signing in with its passkey offers to
 restore it instead of a session, and restoring signs in.
 
-`developers.spec.ts` registers a confidential app in the developer console: a
-setting refused beside its input, a name with a reserved brand refused, the
-back-channel logout URI its overview shows once registered, the secret shown once,
-in an answer no cache keeps and nowhere in the URL, history or storage, and the app
-then signing a user in, through a consent page naming its host and its owner, who
-did not verify it, and redeeming the code with its secret. Its app runs on `https://console-e2e.test`,
-which the test serves as `oidc.spec.ts` does its client. A second test rotates an
-app's secret with no grace, which leaves only the new one redeeming codes,
-changes its back-channel logout URI in its settings, which refuse an `http://`
-one beside its input, and clears it, then disables the app, which auth then
-refuses to sign anyone in to until it is enabled, and deletes it.
+`developers.spec.ts` registers a confidential app in the developer console: the
+secret shown once, in an answer no cache keeps and nowhere in the URL, history or
+storage, whose reload, by `GET`, posts nothing again, and the app then signing a
+user in through its consent page and redeeming the code with its secret. Its app
+runs on `https://console-e2e.test`, which the test serves as `oidc.spec.ts` does its
+client. A second test rotates an app's secret with no grace, which leaves only the
+new one redeeming codes, then disables the app, which auth then refuses to sign
+anyone in to until it is enabled, and deletes it.
 
 `oidc.spec.ts` signs in through `browser-e2e`, a public, untrusted client at
 `https://browser-e2e.test` that may request `openid`, `profile` and `email`. No
 server runs it: the test serves its pages through DevTools, so the client's fetches
 to auth are genuinely cross-origin, under auth's real CORS policy. It checks
 consent, posted once on a double click, the `iss` on each authorization response,
-a PKCE exchange, an ID-token signature verified with JWKS and WebCrypto, userinfo,
-code replay rejection, a `prompt=none` request using remembered consent, and a
-step-up re-authentication. Passkey-only accounts must not acquire email claims.
-`related-origins.spec.ts` signs in on a client application's own page with a
-passkey, through `browser-e2e-inline`, a trusted client approved as a related
-origin. Its page, served like `browser-e2e`'s, gets the code as JSON, with no auth
-cookie, and redeems it with its PKCE verifier; replaying the ceremony fails. With
-auth on `localhost`, as in CI, the page is at `https://localhost:4443`, on auth's
-own host, where browsers need no list. Elsewhere it is at
-`https://related-e2e.test`, another site, so the browser reads auth's
-`/.well-known/webauthn` first.
+a PKCE exchange and userinfo from the client's page, and a `prompt=none` request
+using remembered consent. Passkey-only accounts must not acquire email claims.
 
 `sdk.spec.ts` signs in with the TypeScript SDK's login client, driven from Node,
 through `browser-e2e-sdk`, a trusted public client registered with `--require-par`
@@ -72,12 +57,17 @@ in `E2E_SERVER_CLIENT_SECRET`, and is skipped without it. Back-channel logout ne
 public address auth can post to, so unit tests cover it instead.
 
 `browser-client.spec.ts` runs the TypeScript SDK's browser client, built, in the
-page of `browser-e2e-inline`, which imports it from `/sdk/`: a redirect sign-in that
-a reload restores with `prompt=none`, leaving no token in `localStorage`,
-`sessionStorage` or cookies; a passkey sign-in that never leaves the page; and the
-passkey sign-in's fallbacks to auth's pages, `prompt=consent` with the request auth
-left unclaimed, a failed passkey prompt with a fresh one, and a browser without
-related origins. `just web test-browser` builds the package first.
+page of `browser-e2e-inline`, a trusted client approved as a related origin, which
+imports it from `/sdk/`: a redirect sign-in that a reload restores with
+`prompt=none`, leaving no token in `localStorage`, `sessionStorage` or cookies; a
+passkey sign-in that never leaves the page or gets an auth cookie; and the passkey
+sign-in's fallbacks to auth's pages, `prompt=consent` with the request auth left
+unclaimed, a failed passkey prompt with a fresh one, and a browser without related
+origins. With auth on `localhost`, as in CI, the page is at
+`https://localhost:4443`, on auth's own host, where browsers need no list.
+Elsewhere it is at `https://related-e2e.test`, another site, so the browser reads
+auth's `/.well-known/webauthn` first. `just web test-browser` builds the package
+first.
 
 `just web browser-client` registers the four clients with the auth database
 configured in the environment, as CI does, the last with the secret in
@@ -103,7 +93,7 @@ configuration: every signup runs it. Previews allow registration without one.
 receives the deployment's email, as CI's does over plain SMTP on its loopback
 address, `AUTH_SMTP_URL=smtp://127.0.0.1:1025`. The tests that confirm an
 address or follow a recovery link read the email there, and are skipped without
-it. A run sends three confirmation links, and auth sends at most ten an hour to
+it. A run sends two confirmation links, and auth sends at most ten an hour to
 one IP address, so reruns against one deployment wait between batches.
 
 `CHROMIUM_EXECUTABLE` can select an existing Chromium installation.
@@ -123,25 +113,14 @@ change's page is opened directly, and disables an account, whose settings page t
 loses its session; signing out of the dashboard keeps the Piquel session, and
 signed out of both, a passkey sign-in on auth goes on to the dashboard. CI's
 dashboard is on auth's host, `localhost`, so its dialog may use auth's RP ID with
-no list, as `related-origins.spec.ts`'s page does; a preview's has a host of its
+no list, as `browser-client.spec.ts`'s page does; a preview's has a host of its
 own, so there the browser checks auth's `/.well-known/webauthn` first, which lists
 the dashboard's origin. Another lists an account's events without
 the administrator's view of it until "Show views", which keeps the account filter,
-and hides it again with "Hide views". Its other tests grant administrator
-rights from a search and revoke them, each change moving on the audit chain,
-which stays intact; create an invitation, whose link signs one account up once,
-and revoke another, which then signs nobody up, when `E2E_INVITE` is set; approve
-an origin for `browser-e2e-sdk`'s pages from its client page, which
-`/.well-known/webauthn` then lists, and remove it; register a confidential client,
-its secret shown once on a page reached by `GET`, so reloading it shows the secret
-no more, suspend it, rotate its secret, which reloading rotates no more, and delete
-it; and, with `E2E_MAIL_URL`, change an account's passkeys,
-addresses and connected apps on its owner's behalf, whose history shows each
-reason, and start a recovery whose link is mailed, then undo it. Support also
-renames a handle, which an owner may change only 30 days after signup: the new
-one signs in at once, and the old one no longer does. Another reads an account's
-security history, rotates a signing key and revokes it again, filters the
-delivery queue, and reserves a handle and removes the reservation again. The
+and hides it again with "Hide views". Another grants administrator rights from a
+search, which then opens the dashboard to the account, and revokes them; and, with
+`E2E_MAIL_URL`, one changes an account's passkeys and addresses, each confirmed
+from its mailed link, on its owner's behalf, whose history shows each reason. The
 top bar keeps its crumb, search box and avatar apart at every window size. Set
 `E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command
 that grants administrator rights to the handle appended to it, e.g. `just auth

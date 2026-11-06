@@ -7,8 +7,9 @@ import { addPasskeys, authUrl, serveClient, signUp } from './helpers';
 
 /**
  * The `browser-e2e-inline` trusted public client, approved for passkey sign-in on its
- * own pages, as in `related-origins.spec.ts`: on auth's own host with auth on
- * `localhost`, as in CI, and on another site elsewhere.
+ * own pages. On `localhost`, as in CI, it is on auth's own host, where browsers need
+ * no list. Elsewhere, as on a preview, it is another site, so the browser reads
+ * auth's `/.well-known/webauthn` before signing.
  */
 const client =
   new URL(authUrl).hostname === 'localhost' ? 'https://localhost:4443' : 'https://related-e2e.test';
