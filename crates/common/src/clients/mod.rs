@@ -48,7 +48,6 @@ pub const RESERVED_BRANDS: &[&str] = &[
     "discord",
     "paypal",
     "amazon",
-    "twitter",
 ];
 /// Starts every client ID auth generates.
 const GENERATED_ID_PREFIX: &str = "c_";
