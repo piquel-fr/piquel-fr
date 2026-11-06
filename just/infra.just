@@ -8,7 +8,7 @@ preview *args:
 
 # Delete this worktree's preview with its database.
 preview-delete *args:
-    piquelctl preview delete piquel-fr "$(git branch --show-current)" {{ args }} --yes
+    piquelctl --timeout 5m preview delete piquel-fr "$(git branch --show-current)" {{ args }} --yes
 
 # Point auth at it with OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 and
 # OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=local.

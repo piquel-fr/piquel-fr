@@ -19,6 +19,15 @@ and asked again (see [step-up authentication](step-up.md)).
 | `/developers/clients/{id}/settings` | Session; Confirmed for every change | Changes the settings, disables or enables the app, and deletes it |
 | `/developers/clients/{id}/secrets` | Confirmed to rotate | A confidential app's secrets, with when each was made and stops working, never their values. A new secret shows in the answer, only this once; earlier ones keep working for the grace period you choose (none, an hour, a day, a week or 30 days) |
 
+Registering an app asks for its name, whether it has a backend that can keep a
+secret, and where Piquel may send users back:
+
+![The Register an app form, for a browser app called Notes](../../images/apps/new-app.png)
+
+Its overview then shows what an OpenID Connect library needs:
+
+![The overview of the registered app Notes: issuer, discovery URL, client ID, client authentication and scopes](../../images/apps/app-overview.png)
+
 An app that is not yours, or was deleted, answers `404`, the same as an ID that
 never existed. A secret is never in a URL, a cookie or the browser's storage, and,
 with the page's script, reloading the page that showed it does not post the form

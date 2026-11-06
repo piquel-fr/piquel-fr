@@ -25,8 +25,25 @@ check:
 serve *args:
     @mdbook serve {{ args }}
 
-# Rewrite the generated reference pages: the configuration variables and the
-# auth-service commands, from the code that defines them. `just test` fails while
-# they are stale.
+# The configuration variables and the auth-service commands, from the code that
+# defines them. `just test` fails while they are stale.
+# Rewrite the generated reference pages.
 reference:
     @UPDATE_DOCS_REFERENCE=1 cargo nextest run --locked -p auth-service -p piquel-web -E 'test(reference_is_current)'
+
+# Each run deploys this checkout to a fresh preview of its own, the `docs` slot,
+# takes the screenshots there, and deletes it: a new database every run keeps the
+# pages the same. Only images whose page changed are rewritten. ARGS go on to
+# Playwright, such as a spec's name. See docs/dev/documentation.md.
+# Retake the documentation's screenshots in docs/images.
+screenshots *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch=$(git branch --show-current)
+    just preview-delete --slot docs 2>/dev/null || true
+    trap 'just preview-delete --slot docs' EXIT
+    just preview --slot docs
+    url() { piquelctl preview url piquel-fr "$branch" --slot docs --route "$1"; }
+    E2E_AUTH_URL=$(url auth) E2E_ADMIN_URL=$(url admin) \
+        E2E_GRANT_ADMIN="piquelctl preview exec piquel-fr $branch --slot docs auth -- auth-service admin grant" \
+        pnpm exec playwright test --project docs --update-snapshots=changed {{ args }}
