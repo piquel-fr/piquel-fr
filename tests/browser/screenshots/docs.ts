@@ -27,7 +27,7 @@ const shownHosts: [string, string][] = [
 
 /**
  * Saves `page` as `docs/images/<name>.png`: the element `area`, or the window,
- * 1280 by 800 pixels. It first replaces, in the page's text, every handle from
+ * 1280 by 800 pixels, in the dark theme the `docs` project asks for. It first replaces, in the page's text, every handle from
  * `handle` with its name, the deployment's hosts with production's, IDs with fixed
  * ones, and every date with the same one, so the image changes only when the page
  * does. Run with `--update-snapshots=changed`, an image is rewritten only then.
