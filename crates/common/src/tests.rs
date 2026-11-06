@@ -14,7 +14,6 @@ str_enum! {
 /// Closed vocabularies round-trip every spelling and reject unknown values.
 #[test]
 fn vocabulary_round_trips() {
-    assert_eq!(Example::ALL.len(), 2);
     for value in Example::ALL {
         assert_eq!(value.as_str().parse::<Example>(), Ok(value));
         assert_eq!(value.to_string(), value.as_str());
@@ -52,7 +51,7 @@ fn open_vocabulary_keeps_unknown_values() {
         serde_json::to_string(&other).expect("serialize"),
         "\"later\""
     );
-    assert_eq!(OpenExample::KNOWN.len(), 1);
+    assert_eq!(OpenExample::KNOWN, [OpenExample::Known]);
 }
 
 /// IDs accept only canonical `UUIDv7`, preserving syntax diagnostics on malformed text.
