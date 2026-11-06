@@ -589,8 +589,8 @@ supported.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
 rotating refresh tokens, revocation, RP-initiated and back-channel logout. A code
 is tried once: a redemption by another client, with another `redirect_uri` or a
-wrong `code_verifier` uses it up and records `code_redemption_failed`, so trying
-again is a replay. Every step of an authorization checks the client's registration
+wrong `code_verifier` expires it and records `code_redemption_failed`, so it
+can't be tried again. Every step of an authorization checks the client's registration
 as it is then, under a share lock when it issues a code or tokens: a client
 disabled, suspended or changed meanwhile gets nothing it no longer allows. Access tokens are
 intended for the configured client audience. Only requested claims are released;

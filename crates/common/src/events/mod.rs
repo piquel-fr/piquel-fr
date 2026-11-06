@@ -174,8 +174,8 @@ pub enum DomainEvent {
         /// The client that redeemed the code.
         client_id: ClientId,
     },
-    /// A client's redemption of an authorization code failed, which used the code
-    /// up: redeeming it again is a [`Self::CodeReplayed`].
+    /// A client's redemption of an authorization code failed, which expired the
+    /// code: it cannot be redeemed again.
     CodeRedemptionFailed {
         /// The client that redeemed the code.
         client_id: ClientId,

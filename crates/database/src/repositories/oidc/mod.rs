@@ -146,8 +146,9 @@ pub struct InsertAuthorizationCode {
     pub expires_at: DateTime<Utc>,
 }
 
-/// A code taken by [`OidcRepository::consume_code`]. The caller still checks
-/// the client, redirect URI and PKCE verifier against it.
+/// A code locked by [`OidcRepository::lock_code`] or taken by
+/// [`OidcRepository::consume_code`]. The caller checks the client, redirect URI and
+/// PKCE verifier against the locked code before consuming it.
 #[derive(Clone, Debug)]
 pub struct ConsumedAuthorizationCode {
     /// Code identifier, recorded on the refresh family the exchange creates.
@@ -437,8 +438,9 @@ impl OidcRepository<'_> {
     /// Redeeming an already consumed code with its secret, as the authenticated
     /// `client_id` it was issued to, is a replay (RFC 6749 section 4.1.2): the
     /// refresh families issued from the code are revoked in this transaction, which
-    /// the caller commits even though the exchange fails. The caller still checks
-    /// the returned code's client, so `client_id` only scopes replay detection.
+    /// the caller commits even though the exchange fails. The caller checks the
+    /// code's client under [`Self::lock_code`] first, so `client_id` only scopes
+    /// replay detection.
     ///
     /// # Errors
     ///
@@ -494,6 +496,63 @@ impl OidcRepository<'_> {
                 },
             ),
         }
+    }
+
+    /// The unconsumed, unexpired code matching `id` and one of `digests`, its row
+    /// locked until the transaction ends, so the caller checks its client, redirect
+    /// and verifier before [`Self::consume_code`] or [`Self::expire_code`] decides
+    /// it, and no other redemption of it runs meanwhile. Lock the account first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn lock_code(
+        &mut self,
+        id: TokenId,
+        digests: &[Vec<u8>],
+    ) -> Result<Option<ConsumedAuthorizationCode>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                ConsumedAuthorizationCode,
+                r#"SELECT
+                    id AS "id: TokenId", client_id AS "client_id: ClientId",
+                    user_id AS "user_id: UserId",
+                    session_id AS "session_id: SessionId", redirect_uri, pkce_challenge,
+                    nonce, scopes AS "scopes: JsonArray<String>", audience,
+                    authentication AS "authentication: SessionAuthentication"
+                FROM authorization_codes
+                WHERE id = $1
+                AND secret_digest = ANY($2)
+                AND consumed_at IS NULL
+                AND expires_at > now()
+                FOR UPDATE"#,
+                id.as_uuid(),
+                digests,
+            )
+        )
+    }
+
+    /// Expires code `id`, locked with [`Self::lock_code`], so a code whose
+    /// redemption failed is never redeemed: `-infinity` is past for every
+    /// transaction, however early it began. Consuming it instead would record its
+    /// client as holding tokens from the session, and so tell it of the session's
+    /// logout, though nothing was issued.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn expire_code(&mut self, id: TokenId) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE authorization_codes SET expires_at = '-infinity' WHERE id = $1",
+                id.as_uuid(),
+            )
+        )?;
+        Ok(())
     }
 
     /// Revokes the refresh families issued from an already consumed code and

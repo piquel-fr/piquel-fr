@@ -21,7 +21,7 @@ use thiserror::Error;
 pub(crate) struct ClientPolicy(StoredOidcClient);
 
 /// What a client's current registration no longer allows.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error)]
 pub(crate) enum PolicyRefusal {
     /// The client is unknown, disabled, suspended or deleted.
     #[error("the client is no longer registered and enabled")]

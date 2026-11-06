@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    id AS \"id: TokenId\", client_id AS \"client_id: ClientId\",\n                    user_id AS \"user_id: UserId\",\n                    session_id AS \"session_id: SessionId\", redirect_uri, pkce_challenge,\n                    nonce, scopes AS \"scopes: JsonArray<String>\", audience,\n                    authentication AS \"authentication: SessionAuthentication\"\n                FROM authorization_codes\n                WHERE id = $1\n                AND secret_digest = ANY($2)\n                AND consumed_at IS NULL\n                AND expires_at > now()\n                FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "redirect_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "pkce_challenge",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "nonce",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "scopes: JsonArray<String>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "audience",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "authentication: SessionAuthentication",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c2caf3e062bcf46312ba760ccaf9f58f30a3de8c66102f5d3fd92f3339872cc9"
+}

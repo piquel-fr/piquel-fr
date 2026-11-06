@@ -52,7 +52,7 @@ pub(super) struct TokenForm {
 }
 
 impl TokenForm {
-    /// Whether this form redeems the consumed `code` for the authenticated
+    /// Whether this form redeems the locked `code` for the authenticated
     /// `client_id`: the code was issued to it, for this `redirect_uri`, and this
     /// `code_verifier` matches its PKCE challenge. Answers why it does not, with
     /// the rejection.
@@ -293,8 +293,8 @@ impl OidcApplication {
     /// redirect and PKCE binding, that the client's current policy still allows it,
     /// and that an untrusted client still has the user's consent, then records the
     /// grant. A replayed code has its refresh family revoked and committed before
-    /// the rejection; a code redeemed with the wrong client, redirect or verifier is
-    /// used up, and recorded, before it.
+    /// the rejection; a code redeemed with the wrong client, redirect or verifier
+    /// expires, and is recorded, before it.
     async fn exchange_code(
         &self,
         form: TokenForm,
@@ -318,19 +318,24 @@ impl OidcApplication {
                 .await?
                 .ok_or_else(|| OAuthCode::InvalidGrant.reject(ACCOUNT_DISABLED))?;
         }
-        let code = match tx.oidc().consume_code(opaque.id, &digests, client_id).await {
-            Ok(code) => code,
-            Err(error) => return Err(Self::code_rejection(tx, context, client_id, error).await),
-        };
-        // A failed redemption still uses the code up, and is recorded: a code is
-        // tried once, and trying it again is a replay.
-        if let Err((reason, error)) = form.redeems(&code, client_id) {
+        // Checked with the code locked, before it is consumed: a failed redemption
+        // still uses the code up, and is recorded, so a code is tried once. It
+        // expires rather than being consumed, so its client is not taken to hold
+        // tokens from the session.
+        if let Some(code) = tx.oidc().lock_code(opaque.id, &digests).await?
+            && let Err((reason, error)) = form.redeems(&code, client_id)
+        {
+            tx.oidc().expire_code(code.id).await?;
             let failed = DomainEvent::CodeRedemptionFailed {
                 client_id: client_id.clone(),
                 reason,
             };
             return Err(Self::commit_rejection(tx, context, code.user_id, [failed], error).await);
         }
+        let code = match tx.oidc().consume_code(opaque.id, &digests, client_id).await {
+            Ok(code) => code,
+            Err(error) => return Err(Self::code_rejection(tx, context, client_id, error).await),
+        };
         let user = tx
             .users()
             .find_active_by_id_for_update(code.user_id)
