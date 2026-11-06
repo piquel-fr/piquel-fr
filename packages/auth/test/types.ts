@@ -1,5 +1,5 @@
 /** Type tests: `tsc -p packages/auth/test` checks these lines, and nothing runs them. */
-import { type AccessToken, type Issuer, defineScopes } from '../src/index.ts';
+import { AccessToken, type IdToken, type Issuer, defineScopes } from '../src/index.ts';
 
 const notes = defineScopes('notes:read', 'notes:write');
 type Notes = (typeof notes.all)[number];
@@ -14,8 +14,16 @@ declare function absent(value: undefined): void;
 
 /** Needs a token proven to hold notes:write. */
 declare function write(token: AccessToken<Notes, 'notes:write'>): void;
+/** Needs a validated ID token. */
+declare function signedIn(token: IdToken): void;
 
-export async function checks(issuer: Issuer, compact: string, either: Notes, request: Request) {
+export async function checks(
+  issuer: Issuer,
+  compact: string,
+  either: Notes,
+  request: Request,
+  id: IdToken
+) {
   const resource = issuer.resource({ identifier: 'notes-api', scopes: notes });
   const token = await resource.validate(compact);
   // `authenticate` requires and proves the scopes it is given.
@@ -42,6 +50,15 @@ export async function checks(issuer: Issuer, compact: string, either: Notes, req
   token.require('notes:read', either);
   // @ts-expect-error a union-typed scope proves nothing
   if (token.has(either)) write(token);
+
+  // Only validation makes a token: its constructor is private, and its builder internal.
+  // @ts-expect-error a token is never built by hand
+  new AccessToken(token.claims, undefined, { clock: Date.now }, token.subject);
+  const { claims, subject, scopes, extra } = token.require('notes:write');
+  // @ts-expect-error a plain object holding a token's fields is not a validated token
+  write({ claims, subject, scopes, extra });
+  // @ts-expect-error nor is one holding an ID token's
+  signedIn({ claims: id.claims, token: id.token });
 
   // Application claims take their type from the resource's reader, through narrowing.
   const tenants = issuer.resource({

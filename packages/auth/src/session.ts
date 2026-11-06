@@ -116,7 +116,7 @@ export class StoredLogin {
 
   /** Scopes granted to the access token. */
   get scopes(): Scopes {
-    return Scopes.parse(this.data.scopes) ?? Scopes.of([]);
+    return Scopes.parse(this.data.scopes) ?? Scopes.checked([]);
   }
 
   /** The refresh token, which only the SDK redeems. */

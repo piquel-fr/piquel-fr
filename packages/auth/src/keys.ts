@@ -155,6 +155,7 @@ const jwk: json.Decoder<Jwk> = json.object({
   alg: json.optional(json.oneOf(ALGORITHMS)),
   e: json.string,
   kid: json.string,
+  key_ops: json.optional(json.array(json.string)),
   kty: json.oneOf(KEY_TYPES),
   n: json.string,
   use: json.optional(json.oneOf(KEY_USES))
@@ -225,7 +226,8 @@ export class KeySet {
   /**
    * Parses a key set, from its JSON text or the parsed document. Keys this SDK cannot
    * use are skipped, as RFC 7517 §5 asks: an unknown `kty` or `alg`, a `use` other
-   * than `sig`, no `kid`, or material that is not base64url. Throws `keys` errors when
+   * than `sig`, `key_ops` without `verify` (§4.3), no `kid`, or material that is not
+   * base64url. Throws `keys` errors when
    * the document is not a key set (`invalid_document`), or two usable keys share a
    * `kid` (`duplicate_key_id`).
    */
@@ -258,6 +260,7 @@ export class KeySet {
       } catch {
         continue;
       }
+      if (key.key_ops !== undefined && !key.key_ops.includes('verify')) continue;
       if (base64.decode(key.n) === undefined || base64.decode(key.e) === undefined) continue;
       if (keys.some((usable) => usable.kid === key.kid)) {
         throw new AuthError(

@@ -156,7 +156,7 @@ export class AccessToken<
     super(claims, context);
     this.extra = extra;
     this.subject = subject;
-    this.scopes = Scopes.parse(claims.scope) ?? Scopes.of([]);
+    this.scopes = Scopes.parse(claims.scope) ?? Scopes.checked([]);
   }
 
   /**
@@ -200,7 +200,7 @@ export class AccessToken<
       return this as unknown as AccessToken<Declared, Proven | T[number], Extra>;
     }
     throw new AuthError(
-      { code: 'insufficient_scope', scope: Scopes.of(scopes).toString() },
+      { code: 'insufficient_scope', scope: Scopes.checked(scopes).toString() },
       `the token lacks a scope of ${scopes.join(' ')}`
     ).forResource(this.context.resourceMetadata);
   }
