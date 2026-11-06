@@ -216,6 +216,7 @@ impl Rs256Key {
         let public = PublicKey::from_jwk(Jwk {
             alg: Some(Algorithm::Rs256),
             e: URL_SAFE_NO_PAD.encode(rsa.e().to_vec()),
+            key_ops: None,
             kid: kid.clone(),
             kty: KeyType::Rsa,
             n: URL_SAFE_NO_PAD.encode(rsa.n().to_vec()),

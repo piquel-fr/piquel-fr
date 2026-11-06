@@ -59,12 +59,8 @@ impl Login {
             max_age: query.max_age,
         };
         // Without a refresh token, a session could not learn that auth ended it.
-        let scopes = login
-            .scopes
-            .iter()
-            .chain([Scope::OfflineAccess.as_str()])
-            .map(str::to_owned)
-            .collect();
+        let mut scopes = login.scopes.clone();
+        scopes.insert(Scope::OfflineAccess);
         let request = AuthorizeRequest {
             scopes,
             step_up,
@@ -201,10 +197,11 @@ impl Login {
             Ok(tokens) => tokens,
             Err(error) => {
                 tracing::debug!(error = %ErrorChain(&error), "sign-in failed");
-                let status = if error.code().code == ErrorCategory::Network {
-                    StatusCode::BAD_GATEWAY
-                } else {
-                    StatusCode::BAD_REQUEST
+                // The issuer's failures, unreachable or with unusable keys, are not the
+                // browser's: answer 502, as the bearer path answers 503.
+                let status = match error.code().code {
+                    ErrorCategory::Network | ErrorCategory::Keys => StatusCode::BAD_GATEWAY,
+                    _ => StatusCode::BAD_REQUEST,
                 };
                 return (status, format!("Sign-in failed: {error}.")).into_response();
             }

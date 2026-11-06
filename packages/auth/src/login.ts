@@ -745,7 +745,9 @@ export class Login {
       tokens = await this.client.complete(pending.login, callback);
     } catch (error) {
       if (!(error instanceof AuthError)) throw error;
-      return Login.text(error.code === 'network' ? 502 : 400, `Sign-in failed: ${error.message}.`);
+      // The issuer's failures, unreachable or with unusable keys, are not the browser's.
+      const upstream = error.code === 'network' || error.code === 'keys';
+      return Login.text(upstream ? 502 : 400, `Sign-in failed: ${error.message}.`);
     }
     // `complete` fails without an ID token, so this only narrows the type.
     const login = StoredLogin.start(tokens, this.now() + this.#lifetime);

@@ -103,7 +103,7 @@ impl fmt::Display for Resource {
 ///     .resource(Resource::new("notes-api")?)
 ///     .with_claims::<Tenant>();
 /// let token = notes.validate::<Scopes>(token).await?;
-/// println!("{} for tenant {}", token.scopes, token.extra.tenant);
+/// println!("{} for tenant {}", token.scopes(), token.extra().tenant);
 /// # Ok(()) }
 /// ```
 pub struct ResourceValidator<X = ()> {
@@ -198,7 +198,7 @@ impl<X: DeserializeOwned> ResourceValidator<X> {
     ///
     /// let notes_api = issuer.resource(piquel_auth::Resource::new("notes-api")?);
     /// match notes_api.validate::<notes::Read>(token).await {
-    ///     Ok(token) => println!("{:?} may read notes", token.subject),
+    ///     Ok(token) => println!("{:?} may read notes", token.subject()),
     ///     Err(error) => {
     ///         // Answer with the challenge, or 503 when the keys are unavailable.
     ///         let challenge = error.challenge().map(|challenge| challenge.to_string());

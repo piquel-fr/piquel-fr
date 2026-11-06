@@ -406,7 +406,7 @@ export class Client {
     const tokens: Tokens = {
       accessToken: response.access_token,
       expiresAt: this.issuer.clock() + response.expires_in * 1000,
-      scopes: Scopes.parse(response.scope) ?? Scopes.of([])
+      scopes: Scopes.parse(response.scope) ?? Scopes.checked([])
     };
     if (response.id_token !== undefined) {
       tokens.idToken = await this.issuer.tokens.idToken(

@@ -13,7 +13,7 @@ use super::{
         BACKCHANNEL_LOGOUT_EVENT, Confirmation, IdTokenClaims, LogoutEvents, LogoutTokenClaims,
         ProfileClaims, UserInfo,
     },
-    jwt::{Algorithm, Claim, Jwk, JwkSet, KeyId, KeyType, KeyUse, TokenType},
+    jwt::{Algorithm, Claim, Jwk, JwkSet, KeyId, KeyOperation, KeyType, KeyUse, TokenType},
     metadata::ServerMetadata,
     oauth::{
         ClientAuthMethod, CodeChallengeMethod, ErrorCode, ErrorDescription, ErrorResponse,
@@ -111,7 +111,7 @@ closed!(
     ErrorCategory,
     ErrorReason,
 );
-open!(ErrorCode, BearerError);
+open!(ErrorCode, BearerError, KeyOperation);
 builtin!(
     "string" =>
     ClientId,
@@ -240,6 +240,7 @@ fn generate() -> String {
         .add::<Jwk>()
         .add::<KeyType>()
         .add::<KeyUse>()
+        .add::<KeyOperation>()
         // oauth
         .add::<GrantType>()
         .add::<ResponseType>()

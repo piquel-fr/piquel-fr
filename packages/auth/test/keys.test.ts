@@ -113,6 +113,13 @@ test('a set with a duplicate kid is rejected and the previous set stays in use',
   assert.equal(server.served, 3);
 });
 
+test('a key whose key_ops does not list verify is skipped', () => {
+  const [key] = (jwks('rotation-before') as { keys: object[] }).keys;
+  const set = (key_ops: string[]) => KeySet.parse({ keys: [{ ...key, key_ops }] }).kids;
+  assert.deepEqual(set(['verify']), ['key-2025']);
+  assert.deepEqual(set(['wrapKey']), []);
+});
+
 test('a weak RSA key verifies nothing, however its modulus is written', async () => {
   const weak = vector('tokens', 'access-weak-key').input;
   const [key] = (weak.jwks as { keys: { n: string }[] }).keys;

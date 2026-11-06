@@ -14,7 +14,7 @@ use piquel_common::{
     ErrorChain,
     protocol::{
         challenge::{BearerChallenge, BearerError},
-        oauth::{ErrorDescription, ErrorResponse},
+        oauth::{ErrorDescription, ErrorResponse, InvalidScope},
     },
 };
 use piquel_crypto::CryptoError;
@@ -117,6 +117,9 @@ pub(crate) enum OAuthError {
     /// The address of the page the browser goes on to could not be written.
     #[error("a page's address could not be written")]
     PageAddress(#[from] QueryError),
+    /// A grant read back from the database holds an invalid scope.
+    #[error("a stored grant holds an invalid scope")]
+    StoredScopes(#[from] InvalidScope),
 }
 
 impl OAuthError {
@@ -203,7 +206,8 @@ impl OAuthError {
             | Self::Keys(_)
             | Self::Url(_)
             | Self::CookieHeader(_)
-            | Self::PageAddress(_)) => error,
+            | Self::PageAddress(_)
+            | Self::StoredScopes(_)) => error,
         }
     }
 }
@@ -239,7 +243,8 @@ impl OAuthError {
             | Self::Crypto(_)
             | Self::Url(_)
             | Self::CookieHeader(_)
-            | Self::PageAddress(_) => {
+            | Self::PageAddress(_)
+            | Self::StoredScopes(_) => {
                 ApiError::log_error(self);
                 (
                     OAuthCode::ServerError,
@@ -290,7 +295,8 @@ impl From<OAuthError> for ApiError {
             error @ (OAuthError::Crypto(_)
             | OAuthError::Url(_)
             | OAuthError::CookieHeader(_)
-            | OAuthError::PageAddress(_)) => Self::internal(error),
+            | OAuthError::PageAddress(_)
+            | OAuthError::StoredScopes(_)) => Self::internal(error),
         }
     }
 }

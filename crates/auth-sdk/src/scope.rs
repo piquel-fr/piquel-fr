@@ -3,18 +3,23 @@
 
 use piquel_common::protocol::oauth::Scopes;
 
-/// One scope, declared with [`scopes!`](crate::scopes).
-pub trait Scope: Copy + Default + Send + Sync + 'static {
+/// One scope, declared with [`scopes!`](crate::scopes), which checks its name at
+/// compile time.
+pub trait Scope: ScopeSet {
     /// The scope's wire name, such as `notes:read`.
     const NAME: &'static str;
 }
 
 /// Scopes a token must hold. Implemented by every [`Scope`], by tuples of scope sets
 /// such as `(notes::Read, notes::Write)`, by each [`scopes!`](crate::scopes) module's
-/// `All`, and by [`Scopes`], which requires nothing and keeps the granted list.
+/// `All`, and by [`Scopes`], which requires nothing.
+///
+/// A scope set is never a value: an [`AccessToken<S>`](crate::AccessToken) is the
+/// proof that a validated token holds `S`. The trait is sealed, so whether a token
+/// holds a set is always this SDK's check, every name granted.
 ///
 /// ```
-/// use piquel_auth::{ScopeSet, Scopes};
+/// use piquel_auth::ScopeSet;
 ///
 /// piquel_auth::scopes! {
 ///     /// Scopes of the notes API.
@@ -24,73 +29,87 @@ pub trait Scope: Copy + Default + Send + Sync + 'static {
 ///     }
 /// }
 ///
-/// let granted: Scopes = "openid notes:read notes:write".parse()?;
-/// // Proofs: a marker, a tuple, the whole module, or the granted list itself.
-/// assert!(notes::Read::from_granted(&granted).is_some());
-/// assert!(<(notes::Read, notes::Write)>::from_granted(&granted).is_some());
-/// assert!(notes::All::from_granted(&granted).is_some());
-/// assert_eq!(Scopes::from_granted(&granted), Some(granted.clone()));
+/// let granted = "openid notes:read".parse()?;
+/// assert!(notes::Read::holds(&granted));
+/// assert!(!<(notes::Read, notes::Write)>::holds(&granted));
 /// // What a challenge names when the scopes are missing.
 /// assert_eq!(<(notes::Write, notes::Read)>::required().to_string(), "notes:read notes:write");
+/// assert_eq!(notes::All::required().to_string(), "notes:read notes:write");
 /// # Ok::<(), piquel_auth::protocol::oauth::InvalidScope>(())
 /// ```
-pub trait ScopeSet: Sized + Send + Sync + 'static {
-    /// Appends the names of every required scope to `names`.
-    fn collect(names: &mut Vec<&'static str>);
-
-    /// Proof that `granted` holds every required scope, or `None`.
-    fn from_granted(granted: &Scopes) -> Option<Self>;
+pub trait ScopeSet: sealed::Names + Send + Sync + 'static {
+    /// Whether `granted` holds every required scope.
+    #[must_use]
+    fn holds(granted: &Scopes) -> bool {
+        let mut names = Vec::new();
+        Self::collect(&mut names);
+        names.into_iter().all(|name| granted.contains(name))
+    }
 
     /// Every required scope, as named in challenges and metadata.
     #[must_use]
     fn required() -> Scopes {
         let mut names = Vec::new();
         Self::collect(&mut names);
-        names.into_iter().map(str::to_owned).collect()
+        // `scopes!` checks its names at compile time; a name declared by hand that is
+        // not a scope token is never granted, and is left out here.
+        Scopes::try_from_iter(names.into_iter().filter(|name| Scopes::is_token(name)))
+            .unwrap_or_default()
     }
 }
 
-impl<T: Scope> ScopeSet for T {
-    fn collect(names: &mut Vec<&'static str>) {
-        names.push(T::NAME);
+impl<T: sealed::Names + Send + Sync + 'static> ScopeSet for T {}
+
+/// The names a [`ScopeSet`] requires. In a private module, so no other crate can
+/// implement [`ScopeSet`] and change how a set is checked.
+mod sealed {
+    use super::Declared;
+    use piquel_common::protocol::oauth::Scopes;
+
+    /// Lists the names a scope set requires.
+    pub trait Names {
+        /// Appends the names of every required scope to `names`.
+        fn collect(names: &mut Vec<&'static str>);
     }
 
-    fn from_granted(granted: &Scopes) -> Option<Self> {
-        granted.contains(T::NAME).then(T::default)
-    }
-}
-
-impl ScopeSet for Scopes {
-    fn collect(_: &mut Vec<&'static str>) {}
-
-    fn from_granted(granted: &Scopes) -> Option<Self> {
-        Some(granted.clone())
-    }
-}
-
-/// Implements [`ScopeSet`] for tuples, requiring every member.
-macro_rules! tuple_scope_sets {
-    ($(($($member:ident),+)),+ $(,)?) => {$(
-        impl<$($member: ScopeSet),+> ScopeSet for ($($member,)+) {
-            fn collect(names: &mut Vec<&'static str>) {
-                $($member::collect(names);)+
-            }
-
-            fn from_granted(granted: &Scopes) -> Option<Self> {
-                Some(($($member::from_granted(granted)?,)+))
-            }
+    impl<T: Declared> Names for T {
+        fn collect(names: &mut Vec<&'static str>) {
+            names.extend(T::NAMES);
         }
-    )+};
+    }
+
+    impl Names for Scopes {
+        fn collect(_: &mut Vec<&'static str>) {}
+    }
+
+    /// Implements [`Names`] for tuples, requiring every member.
+    macro_rules! tuple_names {
+        ($(($($member:ident),+)),+ $(,)?) => {$(
+            impl<$($member: Names),+> Names for ($($member,)+) {
+                fn collect(names: &mut Vec<&'static str>) {
+                    $($member::collect(names);)+
+                }
+            }
+        )+};
+    }
+
+    tuple_names!(
+        (A),
+        (A, B),
+        (A, B, C),
+        (A, B, C, D),
+        (A, B, C, D, E),
+        (A, B, C, D, E, F),
+    );
 }
 
-tuple_scope_sets!(
-    (A),
-    (A, B),
-    (A, B, C),
-    (A, B, C, D),
-    (A, B, C, D, E),
-    (A, B, C, D, E, F),
-);
+/// The scope names a [`scopes!`](crate::scopes) type requires. Not part of the
+/// public API: only the macro implements it, and the check stays the SDK's.
+#[doc(hidden)]
+pub trait Declared: Send + Sync + 'static {
+    /// The names, checked at compile time by the macro.
+    const NAMES: &'static [&'static str];
+}
 
 /// Declares an application's scopes once, as types.
 ///
@@ -107,14 +126,13 @@ tuple_scope_sets!(
 /// use piquel_auth::{Scope, ScopeSet};
 /// assert_eq!(notes::Read::NAME, "notes:read");
 /// assert_eq!(notes::All::required().to_string(), "notes:read notes:write");
-/// let granted = "openid notes:read".parse().unwrap();
-/// assert!(<(notes::Read, notes::Write)>::from_granted(&granted).is_none());
 /// ```
 ///
-/// This generates the module with a zero-sized marker per scope implementing
-/// [`Scope`], and `All`, the [`ScopeSet`] of every scope in the module. Scope names
-/// are checked against RFC 6749 §3.3 at compile time, and requiring a scope the
-/// module does not declare fails to compile. `All` is reserved as a scope name.
+/// This generates the module with a marker type per scope implementing [`Scope`], and
+/// `All`, the [`ScopeSet`] of every scope in the module. Markers have no values: they
+/// name scopes in types such as `AccessToken<notes::Read>`. Scope names are checked
+/// against RFC 6749 §3.3 at compile time, and requiring a scope the module does not
+/// declare fails to compile. `All` is reserved as a scope name.
 #[macro_export]
 macro_rules! scopes {
     (
@@ -129,11 +147,15 @@ macro_rules! scopes {
                 #[doc = concat!("The `", $name, "` scope.")]
                 #[doc = ""]
                 $(#[$scope_meta])*
-                #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-                pub struct $scope;
+                #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+                pub enum $scope {}
 
                 impl $crate::Scope for $scope {
                     const NAME: &'static str = $name;
+                }
+
+                impl $crate::__private::Declared for $scope {
+                    const NAMES: &'static [&'static str] = &[$name];
                 }
 
                 const _: () = assert!(
@@ -143,17 +165,11 @@ macro_rules! scopes {
             )+
 
             /// Every scope this module declares.
-            #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-            pub struct All;
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+            pub enum All {}
 
-            impl $crate::ScopeSet for All {
-                fn collect(names: &mut ::std::vec::Vec<&'static str>) {
-                    $(names.push($name);)+
-                }
-
-                fn from_granted(granted: &$crate::__private::Scopes) -> ::std::option::Option<Self> {
-                    ($(granted.contains($name))&&+).then_some(Self)
-                }
+            impl $crate::__private::Declared for All {
+                const NAMES: &'static [&'static str] = &[$($name),+];
             }
         }
     };

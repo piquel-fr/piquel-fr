@@ -122,6 +122,11 @@ export type Subject = { kind: 'user'; id: string } | { kind: 'client'; id: strin
 
 /** Names the scopes an {@link AccessToken} is proven to hold; exists only in types. */
 declare const proven: unique symbol;
+/**
+ * Brands an {@link IdToken} or a {@link LogoutToken}, so no other object types as one,
+ * an access token included; exists only in types.
+ */
+declare const brand: unique symbol;
 
 /**
  * `S` when it names one scope, `never` when it is a union: a value typed
@@ -156,7 +161,7 @@ export class AccessToken<
     super(claims, context);
     this.extra = extra;
     this.subject = subject;
-    this.scopes = Scopes.parse(claims.scope) ?? Scopes.of([]);
+    this.scopes = Scopes.parse(claims.scope) ?? Scopes.checked([]);
   }
 
   /**
@@ -200,7 +205,7 @@ export class AccessToken<
       return this as unknown as AccessToken<Declared, Proven | T[number], Extra>;
     }
     throw new AuthError(
-      { code: 'insufficient_scope', scope: Scopes.of(scopes).toString() },
+      { code: 'insufficient_scope', scope: Scopes.checked(scopes).toString() },
       `the token lacks a scope of ${scopes.join(' ')}`
     ).forResource(this.context.resourceMetadata);
   }
@@ -208,6 +213,7 @@ export class AccessToken<
 
 /** A validated ID token, kept with its compact form for logout's `id_token_hint`. */
 export class IdToken extends AuthenticatedToken<IdTokenClaims> {
+  declare readonly [brand]: 'id';
   /** The token as issued. */
   readonly token: string;
 
@@ -261,6 +267,7 @@ export type LogoutTarget = { kind: 'session'; sid: string } | { kind: 'subject';
 
 /** A validated back-channel logout token (OIDC Back-Channel Logout 1.0 §2.6). */
 export class LogoutToken {
+  declare readonly [brand]: 'logout';
   /** The validated claims. */
   readonly claims: LogoutTokenClaims;
   /** What the token ends: its `sid` when it names one, else every session of its `sub`. */

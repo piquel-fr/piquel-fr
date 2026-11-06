@@ -359,9 +359,8 @@ async fn step_ups_stay_on_the_signed_in_account() {
 async fn hinted_logins_complete_only_for_the_hinted_user() {
     let endpoint = TokenEndpoint::start(Duration::ZERO).await;
     let client = client(&endpoint.issuer(&clock()));
-    let hint: crate::IdToken =
-        serde_json::from_value(json!({ "claims": id_claims(USER), "raw": "id-0" }))
-            .expect("ID token");
+    let claims = serde_json::from_value(id_claims(USER)).expect("ID token claims");
+    let hint = crate::IdToken::unchecked(claims, "id-0");
     let request = crate::AuthorizeRequest {
         id_token_hint: Some(hint),
         ..crate::AuthorizeRequest::default()
