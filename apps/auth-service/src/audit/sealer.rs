@@ -2,10 +2,15 @@
 
 use super::{AuditChain, AuditError, AuditKeys, Chain, CheckpointText, TrustedCheckpoint};
 use crate::{
+    alerts::Alerts,
     config::AuditConfig,
     jobs::{ExclusiveJob, Shutdown},
 };
 use chrono::{SubsecRound, TimeDelta, Utc};
+use piquel_common::{
+    alerts::{Alert, AlertKind},
+    events::{EventContext, JobName},
+};
 use piquel_crypto::NoteKey;
 use piquel_repository::{
     ChainLink, Checkpoint, EventContent, ExclusiveConnection, LockKey, SealedEvent,
@@ -139,6 +144,9 @@ impl Sealer {
     /// After a failure, nothing is tried until [`Self::checkpoint_every`] has
     /// passed.
     ///
+    /// Refusing raises the [`Alert::CheckpointRefused`] alert, and the next
+    /// recomputation that matches clears it.
+    ///
     /// # Errors
     /// Returns [`AuditError::Broken`], signing nothing, if the events sealed since
     /// that checkpoint no longer match their hashes.
@@ -207,9 +215,16 @@ impl Sealer {
             return Ok(());
         }
         let (head, broken) = AuditChain::walk(&mut tx, start, |_| None).await?;
+        let context = EventContext::system(JobName::AuditSealer);
+        let mut alerts = Alerts::new(&mut tx, &context);
         if let Some(broken) = broken {
+            alerts
+                .raise(Alert::CheckpointRefused(broken.clone()))
+                .await?;
+            tx.commit().await?;
             return Err(AuditError::Broken(broken));
         }
+        alerts.clear(AlertKind::CheckpointRefused).await?;
         let text = CheckpointText {
             origin: self.key.verifier().name().to_owned(),
             head,

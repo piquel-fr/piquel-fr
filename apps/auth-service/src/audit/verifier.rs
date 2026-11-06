@@ -4,7 +4,7 @@
 use super::{AuditChain, AuditError, AuditKeys, AuditVerification};
 use crate::jobs::{ExclusiveJob, Shutdown};
 use chrono::{TimeDelta, Utc};
-use piquel_common::events::{Actor, EventContext, JobName, RequestOrigin};
+use piquel_common::events::{EventContext, JobName};
 use piquel_repository::{ExclusiveConnection, LockKey};
 use std::time::Duration;
 
@@ -36,13 +36,7 @@ impl Verifier {
             return Ok(None);
         }
         let verification = AuditChain::verify_in(connection.begin().await?, &self.keys).await?;
-        let context = EventContext {
-            actor: Actor::System {
-                job: JobName::AuditVerification,
-            },
-            origin: RequestOrigin::default(),
-            reason: None,
-        };
+        let context = EventContext::system(JobName::AuditVerification);
         AuditChain::record(connection.begin().await?, &context, &verification).await?;
         Ok(Some(verification))
     }

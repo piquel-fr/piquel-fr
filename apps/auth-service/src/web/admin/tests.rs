@@ -1688,19 +1688,13 @@ async fn alerts_are_acknowledged_from_the_dashboard() {
     use piquel_common::{
         admin::{ChainBreak, ChainProblem},
         alerts::{Alert, AlertKind},
-        events::{EventContext, JobName, RequestOrigin},
+        events::{EventContext, JobName},
     };
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     // The test database outlives a run, so each raises an alert of its own.
     let position = Utc::now().timestamp_micros().unsigned_abs();
-    let context = EventContext {
-        actor: Actor::System {
-            job: JobName::AuditVerification,
-        },
-        origin: RequestOrigin::default(),
-        reason: None,
-    };
+    let context = EventContext::system(JobName::AuditVerification);
     let mut tx = harness.database.begin().await.expect("transaction");
     let alert = Alert::AuditChainBroken(ChainBreak {
         position,
