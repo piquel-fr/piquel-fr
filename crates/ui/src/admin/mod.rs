@@ -273,6 +273,8 @@ pub async fn dashboard_frame<'a>(
             area_home: dashboard.home,
             groups: &groups,
             who: dashboard.administrator,
+            // Only the account's own pages on auth tell the password manager.
+            signal: None,
             me: dashboard.administrator.map(|_| dashboard.me),
             trail: &trail,
             page: dashboard.title,

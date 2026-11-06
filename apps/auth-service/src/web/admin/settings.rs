@@ -170,7 +170,6 @@ pub(super) async fn profile(cx: &Cx, body: Body) -> Result<Response> {
         .map_or("", |refused| refused.form.reason.as_str());
     let page = &App::here(cx);
     let who = Who {
-        user: None,
         name: &profile.display_name,
         handle: profile.handle.as_str(),
         picture: picture.as_deref(),

@@ -14,7 +14,7 @@ use crate::{
     security::BrowserCookie,
     tests::{
         Browser, OWN_PAGE, Replicas, WEB_ORIGIN, change, cookie, html, location, parameter, policy,
-        redirect, register, registration,
+        redirect, register, registration, unusable_passkey,
     },
 };
 use axum::{
@@ -22,10 +22,12 @@ use axum::{
     http::{Method, Request, StatusCode, header},
     response::Response,
 };
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use piquel_common::{
-    ClientId,
+    ClientId, PasskeyId,
     clients::{ClientKind, ClientOwner, ClientRegistration},
 };
+use piquel_repository::InsertPasskey;
 use piquel_ui::{DeviceChange, Section};
 use serde::Serialize;
 use tower::ServiceExt;
@@ -497,6 +499,97 @@ async fn account_pages_refuse_forms_they_do_not_know() {
             page.contains("This page was out of date. Try again."),
             "{page}"
         );
+    }
+}
+
+/// Every account page tells the password manager every passkey that signs in to
+/// the account, which forgets the account's passkeys a page does not list: all
+/// its unrevoked ones, however many and whatever their bytes, and none other,
+/// neither a removed one nor another account's. An account without any lists
+/// none, so its password manager keeps none either.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn account_pages_tell_the_password_manager_every_passkey() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let app = browser
+        .register_app(
+            &database,
+            ClientKind::Confidential,
+            "https://signal.example",
+        )
+        .await;
+    let mut pages: Vec<_> = super::settings::TABS
+        .iter()
+        .map(|(_, path)| (*path).to_owned())
+        .chain(account_pages(&app).into_iter().map(|(path, _)| path))
+        .collect();
+    pages.sort();
+    pages.dedup();
+    let told = async |path: &str| {
+        let response = browser.visit(&replicas.a, path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let page = html(response).await;
+        assert_eq!(
+            value_after(&page, r#"data-passkey-user=""#),
+            browser.user_id.to_string(),
+            "{path}"
+        );
+        let mut told: Vec<_> = value_after(&page, r#"data-passkey-credentials=""#)
+            .split(' ')
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .collect();
+        told.sort();
+        told
+    };
+    assert_eq!(told(settings::HOME).await, Vec::<String>::new());
+
+    // Credential IDs of the shortest and longest lengths WebAuthn allows, and
+    // bytes base64url writes as `-` and `_`.
+    let passkey = |user_id, length: usize, byte: u8| {
+        let mut credential_id = PasskeyId::new().as_uuid().as_bytes().to_vec();
+        credential_id.resize(length, byte);
+        InsertPasskey {
+            credential_id,
+            ..unusable_passkey(user_id)
+        }
+    };
+    let mut accepted = Vec::new();
+    for (index, length) in [16, 17, 18, 64, 255, 1023]
+        .into_iter()
+        .cycle()
+        .take(12)
+        .enumerate()
+    {
+        let key = passkey(browser.user_id, length, [0xfb, 0xff][index % 2]);
+        database.passkeys().insert(&key).await.expect("passkey");
+        accepted.push(key);
+    }
+    let removed = accepted.remove(3);
+    assert!(
+        database
+            .passkeys()
+            .revoke(removed.id, browser.user_id)
+            .await
+            .expect("revoke")
+    );
+    let other = Browser::new_account(&database).await;
+    database
+        .passkeys()
+        .insert(&passkey(other.user_id, 32, 0xff))
+        .await
+        .expect("another account's passkey");
+
+    let mut expected: Vec<_> = accepted
+        .iter()
+        .map(|key| URL_SAFE_NO_PAD.encode(&key.credential_id))
+        .collect();
+    expected.sort();
+    assert_eq!(expected.len(), 11);
+    for path in &pages {
+        assert_eq!(told(path).await, expected, "{path}");
     }
 }
 

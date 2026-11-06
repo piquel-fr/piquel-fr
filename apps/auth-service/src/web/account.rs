@@ -433,6 +433,7 @@ impl WebApplication {
             Err(error) => return Err(error.into()),
         };
         let administrator = self.account.is_administrator(&viewer).await?;
+        let accepted = self.account.accepted_passkeys(&viewer).await?;
         let session = reader.owner().session_id();
         let confirmed = reader.owner().was_passkey_confirmed();
         // The preference forms come back here by GET, which a page answering a
@@ -451,7 +452,6 @@ impl WebApplication {
         };
         let picture = profile.picture.map(routes::pictures::of);
         let who = Who {
-            user: Some(reader.owner().user()),
             name: &profile.display_name,
             handle: profile.handle.as_str(),
             picture: picture.as_deref(),
@@ -475,6 +475,7 @@ impl WebApplication {
             piquel_ui::account(
                 nav: nav,
                 who: who,
+                signal: accepted.signal(),
                 trail: trail,
                 title: title,
                 home: page::settings::HOME,

@@ -4,6 +4,8 @@ import {
   addSecondPasskey,
   authorization,
   consent,
+  expectAccepted,
+  recordAcceptedCredentials,
   serveClient,
   signUp
 } from './helpers';
@@ -11,12 +13,16 @@ import {
 /** Runs against auth's own settings pages, with Chromium's virtual passkey authenticator. */
 test('settings on auth: passkeys, devices, an email link and signing out', async ({ browser }) => {
   const context = await browser.newContext();
+  await recordAcceptedCredentials(context);
   const page = await context.newPage();
   const { cdp, authenticatorId } = await addPasskeys(context, page);
   let assertions = 0;
   cdp.on('WebAuthn.credentialAsserted', () => (assertions += 1));
   const username = `settings-${Date.now().toString(36)}`;
   await signUp(page, username, 'First passkey');
+  // Each page tells the password manager every passkey that still signs in, so it
+  // forgets the others: it lists the passkeys the authenticators hold, as they do.
+  await expectAccepted(page, cdp, authenticatorId);
   // The settings open on the overview; the sidebar leads to the sign-in methods.
   await page.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
   await expect(page).toHaveURL('/settings/sign-in');
@@ -56,6 +62,7 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await page.getByRole('button', { name: 'Create the passkey', exact: true }).click();
   await expect(page.getByText('The passkey was added.')).toBeVisible();
   await expect(page.getByText('Second passkey', { exact: true })).toBeVisible();
+  await expectAccepted(page, cdp, authenticatorId, second.authenticatorId);
 
   // The session confirmed with a passkey moments ago, so the page asks for no new
   // confirmation. Mark the form as a page with a lapsed one would, to run it.
@@ -72,6 +79,8 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await page.getByRole('button', { name: 'Confirm removal', exact: true }).click();
   await expect(page.getByText('The passkey was removed.')).toBeVisible();
   await expect(page.getByText('Second passkey', { exact: true })).toHaveCount(0);
+  // Only the first authenticator's passkey still signs in.
+  await expectAccepted(page, cdp, authenticatorId);
   // The passkey script confirmed with a passkey before posting.
   expect(assertions).toBeGreaterThan(asserted);
 

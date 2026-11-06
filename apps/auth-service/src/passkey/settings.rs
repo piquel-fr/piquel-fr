@@ -3,12 +3,35 @@
 
 use super::{PasskeyApplication, PasskeyError, PasskeyName};
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use piquel_common::{
-    PasskeyId,
+    PasskeyId, UserId,
     events::{DomainEvent, RevocationReason},
     protocol::api,
 };
+use piquel_ui::PasskeySignal;
 use webauthn_rs::prelude::*;
+
+/// Every passkey that signs in to an account, which its pages tell the
+/// password manager: it forgets the account's passkeys this does not list, so
+/// one missing would be lost there. Only [`AccountService::accepted_passkeys`]
+/// makes one, from the very rows sign-in checks assertions against.
+#[derive(Debug)]
+pub(crate) struct AcceptedPasskeys {
+    user: UserId,
+    /// Their credential IDs, in unpadded base64url.
+    credentials: Vec<String>,
+}
+
+impl AcceptedPasskeys {
+    /// What the account's pages tell the password manager.
+    pub(crate) fn signal(&self) -> PasskeySignal<'_> {
+        PasskeySignal {
+            user: self.user,
+            credentials: &self.credentials,
+        }
+    }
+}
 
 /// Passkey settings any administrator may also change: listing, renaming and
 /// removing. Only the owner adds a passkey, since it is a way to sign in.
@@ -45,6 +68,23 @@ impl AccountService {
         viewer.authorize(&self.database).await?;
         let passkeys = self.database.passkeys().list_active(viewer.user()).await?;
         Ok(passkeys.into_iter().map(Into::into).collect())
+    }
+
+    /// Every passkey that signs in to the account: all its unrevoked ones, the
+    /// rows sign-in checks an assertion against.
+    pub(crate) async fn accepted_passkeys(
+        &self,
+        viewer: &Viewer,
+    ) -> Result<AcceptedPasskeys, AccountError> {
+        viewer.authorize(&self.database).await?;
+        let keys = self.database.passkeys().list_active(viewer.user()).await?;
+        Ok(AcceptedPasskeys {
+            user: viewer.user(),
+            credentials: keys
+                .iter()
+                .map(|key| URL_SAFE_NO_PAD.encode(&key.credential_id))
+                .collect(),
+        })
     }
 
     /// Changes a passkey's label. A name grants nothing, so the owner needs no
