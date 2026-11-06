@@ -252,8 +252,8 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
   const before = await newest();
 
   // Rights are granted from a search, each result confirming in its own dialog.
+  // Verifying confirmed the dashboard, so the search shows its results at once.
   await admin.goto(`${adminUrl}/administrators/grant?q=grantee-${suffix}`);
-  await confirmThroughAuth(admin);
   await admin
     .getByRole('button', { name: `Grant administrator rights: @grantee-${suffix}`, exact: true })
     .click();
