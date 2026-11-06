@@ -30,5 +30,6 @@ it to `None`) only with a documented reason next to its arm, as `PurgeUser` and
 `PruneAuditChain` have.
 
 Generated files are committed; regenerate them with `just db prepare` (SQLx
-cache), `just sdk-vectors` and `just sdk-types`. `just validate` is the local
+cache), `just sdk-vectors`, `just sdk-types` and `just docs reference` (the CLI
+and configuration references). `just validate` is the local
 check, and `just docs` checks the documentation.
