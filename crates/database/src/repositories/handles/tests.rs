@@ -106,6 +106,13 @@ async fn a_purged_accounts_handle_stays_taken_until_released() {
     };
     assert!(purge().await);
     assert!(!purge().await, "the account is gone");
+    let holder = database
+        .handles()
+        .holder(&account.handle)
+        .await
+        .expect("lookup")
+        .expect("the handle stays");
+    assert_eq!(holder.user_id, None, "without an owner");
     let refused = reuse().await;
     assert!(
         matches!(refused, Err(DatabaseError::Conflict(_))),

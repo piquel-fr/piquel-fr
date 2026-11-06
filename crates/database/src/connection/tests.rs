@@ -67,6 +67,22 @@ fn transport_is_verified_tls_a_local_socket_or_explicit_plaintext() {
             "{url}"
         );
     }
+    // Accepting a URL is not enough: the transport it asked for is the one used.
+    let options = |url| {
+        DatabaseConfig::new(url, 1, Duration::from_secs(1))
+            .expect("accepted")
+            .options
+    };
+    assert!(matches!(
+        options("postgres://db.example/piquel?sslmode=disable").get_ssl_mode(),
+        sqlx::postgres::PgSslMode::Disable
+    ));
+    assert_eq!(
+        options("postgres://localhost/piquel?host=/run/postgresql")
+            .get_socket()
+            .map(std::path::PathBuf::as_path),
+        Some(std::path::Path::new("/run/postgresql"))
+    );
 }
 
 /// Startup failures name the scheme or pool bound at fault, keep the parser's
