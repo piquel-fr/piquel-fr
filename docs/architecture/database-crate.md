@@ -159,8 +159,9 @@ Important invariants:
   The exchange checks that binding with the code locked (`lock_code`); a failed
   check expires the code at `-infinity` instead of consuming it, so it can't be
   tried again and `oidc_session_clients` never records its client.
-  Refresh tokens rotate transactionally, remain bound to their client/session,
-  and reuse revokes the family.
+  Refresh tokens remain bound to their client/session. A public client's rotate
+  transactionally and reuse revokes the family; a confidential client keeps its
+  own, and its refresh writes nothing but still holds the rotation's locks.
 - Each refresh family records the code it was redeemed from. Redeeming that code
   again with its secret, as the same client, revokes the family and records the
   replay; a wrong secret or client revokes nothing. The browser session stays
@@ -318,7 +319,7 @@ families and records one `SessionRevoked` per session, whose fan-out queues the
 back-channel logout tokens of the clients that received tokens from it
 (`oidc_session_clients`, which a trigger fills whenever any release redeems a
 code). The repository method underneath is private to the crate,
-so no revocation can skip the event. Refresh rotations are too frequent to be
+so no revocation can skip the event. Refreshes are too frequent to be
 events. `Imported` holds the rows of `security_audit_log`, the log events replaced,
 verbatim; only migrations write it, and its fields are private, so it can only be
 read back. `repositories/events/` stores events: the personal data split below,

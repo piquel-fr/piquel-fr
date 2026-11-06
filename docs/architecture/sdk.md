@@ -230,9 +230,9 @@ the SHA-256 of each session key, so reading the backend does not give access to
 sessions. The SDK ships an in-memory backend for development and tests, and a check
 applications run against their own backend.
 
-Auth rotates refresh tokens and revokes the whole family on reuse, so concurrent
-refreshes of one session are serialized through a lease the SDK keeps in the session
-record, shared by every replica through the backend's compare-and-swap. Leases
+Auth rotates a public client's refresh tokens and revokes the whole family on
+reuse, so concurrent refreshes of one session are serialized through a lease the
+SDK keeps in the session record, shared by every replica through the backend's compare-and-swap. Leases
 expire by wall-clock time, so replicas need synchronized clocks; a lease lasts a
 minute, and its holder must refresh and save before it expires, or give it back.
 The lease is taken only at the session version the request read, so a request that
@@ -243,7 +243,8 @@ refresh may have reached auth without its answer being saved (a timeout, a lost
 response, a lease that expired unreleased), the stored token may be spent, so the
 session ends and the user signs in again rather than risk a reuse that would revoke
 the family. `invalid_grant` ends the session too. Any other error answer from auth
-keeps it, as does a refresh that could not connect to auth.
+keeps it, as does a refresh that could not connect to auth. A confidential client
+keeps its refresh token across refreshes, so for it the lease guards nothing.
 
 `SameSite=Lax` keeps the session cookie off other sites' posts, but not off a
 sibling site's under the same domain: any `*.piquel.fr` page could post to an app as

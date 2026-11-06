@@ -58,8 +58,8 @@ pub use repositories::{
     },
     signing_keys::{InsertSigningKey, SigningKeyState, SigningKeyType, StoredSigningKey},
     tokens::{
-        InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
-        RotatedRefreshToken, StoredGrant,
+        InsertRefreshFamily, InsertRefreshToken, RedeemedRefreshToken, RefreshRedemption,
+        RefreshRedemptionError, RevokedFamily, StoredGrant,
     },
     users::{InsertUser, StoredUser},
 };

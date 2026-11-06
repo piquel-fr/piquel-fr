@@ -1,14 +1,15 @@
-//! Transactional refresh-token families, rotation and replay revocation.
+//! Transactional refresh-token families, their redemption and replay revocation.
 
 use super::{JsonArray, RepositoryExecutor, TokenRepository};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_common::{ClientId, SessionId, TokenId, UserId};
+use piquel_common::{ClientId, SessionId, TokenId, UserId, clients::ClientKind};
 use serde::Serialize;
 use sqlx::types::Json;
 use thiserror::Error;
 
-/// A new refresh token family: one grant whose tokens rotate on each use.
+/// A new refresh token family: one grant and its tokens, a single one unless
+/// [`RefreshRedemption::Rotate`] replaces it on each use.
 #[derive(Clone, Debug)]
 pub struct InsertRefreshFamily {
     /// Family identifier.
@@ -46,11 +47,36 @@ pub struct InsertRefreshToken {
     pub expires_at: DateTime<Utc>,
 }
 
-/// The grant behind a refresh token consumed by
-/// [`TokenRepository::consume_for_rotation`].
+/// What redeeming a refresh token does to it, set by the client's kind.
+///
+/// Rotation detects a stolen bearer token: whichever of the thief and the client
+/// redeems second replays a consumed token and revokes the family. A confidential
+/// client's token is useless without its secret, so it needs no rotation
+/// (RFC 9700 §4.14), and its refresh becomes a read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefreshRedemption {
+    /// Marks the token consumed. The caller adds its replacement to the family
+    /// before committing.
+    Rotate,
+    /// Leaves the token valid: the refresh writes nothing.
+    Keep,
+}
+
+impl From<ClientKind> for RefreshRedemption {
+    /// Public clients rotate; confidential clients keep their token.
+    fn from(kind: ClientKind) -> Self {
+        match kind {
+            ClientKind::Public => Self::Rotate,
+            ClientKind::Confidential => Self::Keep,
+        }
+    }
+}
+
+/// The grant behind a refresh token redeemed by
+/// [`TokenRepository::redeem_refresh`].
 #[derive(Clone, Debug)]
-pub struct RotatedRefreshToken {
-    /// Family to issue the replacement token in.
+pub struct RedeemedRefreshToken {
+    /// Family the token belongs to, and its replacement when it rotates.
     pub family_id: TokenId,
     /// Account the grant belongs to.
     pub user_id: UserId,
@@ -92,9 +118,9 @@ pub struct RevokedFamily {
     pub user_id: UserId,
 }
 
-/// Why a refresh token could not be rotated.
+/// Why a refresh token could not be redeemed.
 #[derive(Debug, Error)]
-pub enum RefreshRotationError {
+pub enum RefreshRedemptionError {
     /// The database failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -175,17 +201,20 @@ impl TokenRepository<'_> {
     }
 
     /// Locks the token's account, session, family and client in a fixed order.
-    async fn lock_rotation(
+    async fn lock_refresh(
         &mut self,
         id: TokenId,
         digests: &[Vec<u8>],
         client: &str,
-    ) -> Result<(), RefreshRotationError> {
-        // All state locks must outlive rotation, replacement insertion and commit.
+    ) -> Result<(), RefreshRedemptionError> {
+        // All state locks must outlive the redemption, token issuance and commit,
+        // even when nothing is written: they make the refresh wait for a logout,
+        // disablement or recovery undo, then fail on what it committed.
         if matches!(self.executor, RepositoryExecutor::Pool(_)) {
-            return Err(
-                DatabaseError::Operation("refresh rotation requires a transaction".into()).into(),
-            );
+            return Err(DatabaseError::Operation(
+                "refresh redemption requires a transaction".into(),
+            )
+            .into());
         }
         // Look up immutable ownership without locks, then acquire locks explicitly.
         // Account mutations take user -> session -> family; logout takes session ->
@@ -205,7 +234,7 @@ impl TokenRepository<'_> {
                 client,
             )
         )?
-        .ok_or(RefreshRotationError::Invalid)?;
+        .ok_or(RefreshRedemptionError::Invalid)?;
         // The user key never changes: NO KEY UPDATE permits concurrent session
         // foreign-key checks while we wait for its session lock.
         run!(
@@ -220,7 +249,7 @@ impl TokenRepository<'_> {
                 owner.user_id,
             )
         )?
-        .ok_or(RefreshRotationError::Invalid)?;
+        .ok_or(RefreshRedemptionError::Invalid)?;
         run!(
             self,
             fetch_optional,
@@ -234,7 +263,7 @@ impl TokenRepository<'_> {
                 owner.session_id,
             )
         )?
-        .ok_or(RefreshRotationError::Invalid)?;
+        .ok_or(RefreshRedemptionError::Invalid)?;
         run!(
             self,
             fetch_optional,
@@ -247,7 +276,7 @@ impl TokenRepository<'_> {
                 owner.family_id,
             )
         )?
-        .ok_or(RefreshRotationError::Invalid)?;
+        .ok_or(RefreshRedemptionError::Invalid)?;
         // Shared policy locks let independent accounts refresh concurrently while
         // still serializing client-policy updates until token issuance commits.
         run!(
@@ -258,7 +287,7 @@ impl TokenRepository<'_> {
                 client,
             )
         )?
-        .ok_or(RefreshRotationError::Invalid)?;
+        .ok_or(RefreshRedemptionError::Invalid)?;
         Ok(())
     }
 
@@ -278,25 +307,28 @@ impl TokenRepository<'_> {
         Ok(())
     }
 
-    /// Consumes a refresh token for rotation and returns its grant.
+    /// Redeems a refresh token, consuming it if `redemption` rotates it, and
+    /// returns its grant. A replayed (consumed) token revokes its family whatever
+    /// the redemption.
     ///
-    /// Must run in a transaction kept open through replacement-token insertion
-    /// and commit: the rotation locks the token's account, session, family and
-    /// client until then.
+    /// Must run in a transaction kept open through token issuance, insertion of
+    /// a rotated token's replacement, and commit: the redemption locks the
+    /// token's account, session, family and client until then.
     ///
     /// # Errors
     ///
-    /// Returns [`RefreshRotationError::Replay`] or
-    /// [`RefreshRotationError::Policy`] after revoking the family,
-    /// [`RefreshRotationError::Invalid`] if the token is not usable, or
-    /// [`RefreshRotationError::Database`] if a query fails or this repository
+    /// Returns [`RefreshRedemptionError::Replay`] or
+    /// [`RefreshRedemptionError::Policy`] after revoking the family,
+    /// [`RefreshRedemptionError::Invalid`] if the token is not usable, or
+    /// [`RefreshRedemptionError::Database`] if a query fails or this repository
     /// is not bound to a transaction.
-    pub async fn consume_for_rotation(
+    pub async fn redeem_refresh(
         &mut self,
         id: TokenId,
         digests: &[Vec<u8>],
         client: &str,
-    ) -> Result<RotatedRefreshToken, RefreshRotationError> {
+        redemption: RefreshRedemption,
+    ) -> Result<RedeemedRefreshToken, RefreshRedemptionError> {
         /// Decodes a JSONB column of the grant, naming it if invalid.
         fn decode<T: serde::de::DeserializeOwned>(
             column: &str,
@@ -307,7 +339,7 @@ impl TokenRepository<'_> {
                 source: source.into(),
             })
         }
-        self.lock_rotation(id, digests, client).await?;
+        self.lock_refresh(id, digests, client).await?;
         let row = run!(
             self,
             fetch_optional,
@@ -338,11 +370,11 @@ impl TokenRepository<'_> {
                 client,
             )
         )?
-        .ok_or(RefreshRotationError::Invalid)?;
+        .ok_or(RefreshRedemptionError::Invalid)?;
         let (family_id, user_id) = (row.family_id, row.user_id);
         if row.consumed_at.is_some() {
             self.revoke_family(family_id).await?;
-            return Err(RefreshRotationError::Replay { user_id, family_id });
+            return Err(RefreshRedemptionError::Replay { user_id, family_id });
         }
         // The grant's JSON is decoded only after the replay check, so a replayed
         // token revokes its family even if that JSON is invalid.
@@ -354,22 +386,23 @@ impl TokenRepository<'_> {
             && scopes.iter().all(|scope| allowed_scopes.contains(scope));
         if !policy_valid {
             self.revoke_family(family_id).await?;
-            return Err(RefreshRotationError::Policy { user_id, family_id });
+            return Err(RefreshRedemptionError::Policy { user_id, family_id });
         }
-        if run!(
-            self,
-            execute,
-            sqlx::query!(
-                "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL",
-                id.as_uuid(),
-            )
-        )?
-        .rows_affected()
-            != 1
+        if redemption == RefreshRedemption::Rotate
+            && run!(
+                self,
+                execute,
+                sqlx::query!(
+                    "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL",
+                    id.as_uuid(),
+                )
+            )?
+            .rows_affected()
+                != 1
         {
-            return Err(RefreshRotationError::Invalid);
+            return Err(RefreshRedemptionError::Invalid);
         }
-        Ok(RotatedRefreshToken {
+        Ok(RedeemedRefreshToken {
             family_id,
             user_id,
             client_id: row.client_id,
@@ -461,7 +494,7 @@ impl TokenRepository<'_> {
     }
 
     /// Locks the live families of `clients` until the transaction ends, in ID
-    /// order. A rotation locks its family before its client, so a change that
+    /// order. A refresh locks its family before its client, so a change that
     /// locks the client and then writes its families, such as a deletion, takes
     /// these first; otherwise each could hold the lock the other waits for.
     ///

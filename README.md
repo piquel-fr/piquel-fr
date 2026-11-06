@@ -587,7 +587,7 @@ come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
 Client-hosted request objects (`request` and `request_uri` from RFC 9101) are not
 supported.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
-rotating refresh tokens, revocation, RP-initiated and back-channel logout. A code
+refresh tokens, revocation, RP-initiated and back-channel logout. A code
 is tried once: a redemption by another client, with another `redirect_uri` or a
 wrong `code_verifier` expires it and records `code_redemption_failed`, so it
 can't be tried again. Every step of an authorization checks the client's registration
@@ -596,7 +596,12 @@ disabled, suspended or changed meanwhile gets nothing it no longer allows. Acces
 intended for the configured client audience. Only requested claims are released;
 passkey-only accounts have no email claim. Browser clients should keep tokens in
 memory and use SSO again after reload. Refresh permission is off unless explicitly
-enabled and `offline_access` is allowed/requested. Consent is remembered per user,
+enabled and `offline_access` is allowed/requested. A public client's refresh token
+rotates: each refresh answers with a new one, and presenting a spent one revokes
+the whole grant, so a stolen copy is caught as soon as both are used. A confidential
+client keeps its token, and a refresh answers with none: without the client's
+secret the token is useless, so it needs no rotation (RFC 9700 §4.14), and a
+refresh writes nothing. Consent is remembered per user,
 client and scope; explicitly trusted clients bypass consent. The consent page
 names the host the app sends the browser back to and the signed-in account, which
 can switch to another, and labels an app an account registered as unverified,
@@ -757,8 +762,9 @@ explains how to choose a requirement and handle the challenge.
   no change, and another passkey of the account can undo the recovery on
   `/recover/undo` (see
   [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)).
-- Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation
-  detects reuse and stops when its central session expires or is revoked. Ending a
+- Sessions last at most 30 days. Access tokens last five minutes. Refresh tokens
+  stop when their central session expires or is revoked; a public client's rotate
+  and detect reuse. Ending a
   session tells the clients that registered a back-channel logout URI, which end
   their own sessions; already issued access tokens stay valid until they expire.
 - Browser state and opaque secrets are random, and hashed where lookup is needed.

@@ -15,7 +15,8 @@ use piquel_common::{
     events::{JobName, RequestOrigin},
 };
 use piquel_repository::{
-    Database, InsertExternalIdentity, InsertPasskey, InsertVerifiedEmail, RefreshRotationError,
+    Database, InsertExternalIdentity, InsertPasskey, InsertVerifiedEmail, RefreshRedemption,
+    RefreshRedemptionError,
 };
 use serde_json::json;
 
@@ -330,9 +331,9 @@ async fn deleting_ends_every_session_and_grant() {
     let mut tx = fixture.database.begin().await.expect("transaction");
     assert!(matches!(
         tx.tokens()
-            .consume_for_rotation(token, &[digest], client.as_str())
+            .redeem_refresh(token, &[digest], client.as_str(), RefreshRedemption::Rotate)
             .await,
-        Err(RefreshRotationError::Invalid)
+        Err(RefreshRedemptionError::Invalid)
     ));
     assert!(
         Session::create(

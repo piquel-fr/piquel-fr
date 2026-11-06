@@ -313,8 +313,11 @@ on a disabled account (U4a)
   restores nothing it revoked (`support_undoes_and_takes_the_last_passkey`).
 - **U6.** A consent, code exchange or refresh that waited for the account lock
   while an undo ran doesn't survive it: each re-reads its session under the lock
-  (`oidc::tests::authorization::a_consent_whose_session_ended_while_waiting_is_not_saved`, and
-  the code exchange's and rotation's own session checks).
+  (`oidc::tests::authorization::a_consent_whose_session_ended_while_waiting_is_not_saved`,
+  `oidc::tests::tokens::a_refresh_that_waits_for_an_undo_or_disablement_issues_nothing`,
+  and the code exchange's own session check). A refresh holds the lock until it
+  commits, even a confidential client's, which writes nothing
+  (`db: a_kept_token_writes_nothing_and_holds_its_locks_until_commit`).
 
 What undo doesn't reach: what the link holder did inside apps that don't ask for
 `phr` (app data, accounts of their own inside an app, app sessions of clients
