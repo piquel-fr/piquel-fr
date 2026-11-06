@@ -199,16 +199,15 @@ pub enum KeyError {
     /// Two usable keys share a `kid`, so a token's key would be ambiguous.
     #[error("two signing keys share the key ID {0:?}")]
     DuplicateKeyId(String),
-    /// No verifier can be built from the key `kid` names for the token's algorithm:
-    /// the issuer's key set is at fault, not the token. RSA material that is too weak
-    /// or malformed still fails as [`TokenError::BadSignature`], as every SDK does.
+    /// The key `kid` names cannot verify signatures: the issuer's key set is at
+    /// fault, not the token.
     #[error("signing key {kid:?} cannot verify signatures")]
     UnusableKey {
         /// The key's ID.
         kid: String,
-        /// Why no verifier could be built from it.
+        /// What is wrong with it.
         #[source]
-        source: jsonwebtoken::errors::Error,
+        source: KeyDefect,
     },
     /// The last fetch failed and the next is not due yet, so whether the key exists
     /// is unknown.
@@ -235,7 +234,30 @@ impl KeyError {
     }
 }
 
-/// One usable signing key.
+/// Why a signing key cannot verify signatures, as every SDK judges it.
+#[derive(Debug, Error)]
+pub enum KeyDefect {
+    /// The RSA modulus, not counting leading zero bytes, is under 2048 or over 8192
+    /// bits.
+    #[error("its RSA modulus is {0} bits, outside 2048 to 8192")]
+    ModulusSize(usize),
+    /// The RSA exponent is not 65537, the one every SDK's runtime verifies with.
+    #[error("its RSA exponent is not 65537")]
+    Exponent,
+    /// No verifier can be built from it for the token's algorithm.
+    #[error("no verifier can be built from it")]
+    Verifier(#[source] jsonwebtoken::errors::Error),
+}
+
+/// Shortest RSA modulus a key may have, in bits (RFC 7518 §3.3).
+const MIN_MODULUS_BITS: usize = 2048;
+/// Longest RSA modulus a key may have, in bits, as aws-lc verifies.
+const MAX_MODULUS_BITS: usize = 8192;
+/// The only RSA exponent a key may have, big-endian: 65537. Cloudflare Workers imports
+/// only 3, 17 and 65537, so a wider rule would let SDKs disagree on a key.
+const EXPONENT: [u8; 3] = [1, 0, 1];
+
+/// One signing key a set lists for verification.
 #[derive(Clone)]
 struct Key {
     /// Key ID matched against token headers.
@@ -244,6 +266,46 @@ struct Key {
     alg: Option<Algorithm>,
     /// Public key material.
     decoding: DecodingKey,
+    /// The modulus's size in bits, not counting leading zero bytes.
+    modulus_bits: usize,
+    /// Whether the exponent is 65537.
+    exponent_valid: bool,
+}
+
+impl Key {
+    /// The key with modulus `n` and exponent `e`, big-endian bytes. Leading zero bytes
+    /// are dropped, so a padded key verifies as it does in every SDK.
+    fn new(kid: String, alg: Option<Algorithm>, n: &[u8], e: &[u8]) -> Self {
+        let significant = |bytes: &[u8]| {
+            let start = bytes
+                .iter()
+                .position(|byte| *byte != 0)
+                .unwrap_or(bytes.len());
+            bytes[start..].to_vec()
+        };
+        let (n, e) = (significant(n), significant(e));
+        let modulus_bits = n.first().map_or(0, |first| {
+            n.len() * 8 - usize::try_from(first.leading_zeros()).unwrap_or(0)
+        });
+        Self {
+            kid,
+            alg,
+            decoding: DecodingKey::from_rsa_raw_components(&n, &e),
+            modulus_bits,
+            exponent_valid: e == EXPONENT,
+        }
+    }
+
+    /// What keeps this key from verifying, if anything.
+    const fn defect(&self) -> Option<KeyDefect> {
+        if self.modulus_bits < MIN_MODULUS_BITS || self.modulus_bits > MAX_MODULUS_BITS {
+            Some(KeyDefect::ModulusSize(self.modulus_bits))
+        } else if self.exponent_valid {
+            None
+        } else {
+            Some(KeyDefect::Exponent)
+        }
+    }
 }
 
 /// The usable keys of a JSON Web Key Set.
@@ -298,17 +360,16 @@ impl KeySet {
             else {
                 continue;
             };
-            let Ok(decoding) = DecodingKey::from_rsa_components(&jwk.n, &jwk.e) else {
+            let (Ok(n), Ok(e)) = (
+                URL_SAFE_NO_PAD.decode(&jwk.n),
+                URL_SAFE_NO_PAD.decode(&jwk.e),
+            ) else {
                 continue;
             };
             if keys.iter().any(|key| key.kid == jwk.kid) {
                 return Err(KeyError::DuplicateKeyId(jwk.kid));
             }
-            keys.push(Key {
-                kid: jwk.kid,
-                alg: jwk.alg,
-                decoding,
-            });
+            keys.push(Key::new(jwk.kid, jwk.alg, &n, &e));
         }
         Ok(Self { keys })
     }
@@ -450,7 +511,8 @@ impl KeyCache {
     ///
     /// # Errors
     /// [`TokenError::UnknownKey`] when no usable key matches, [`TokenError::Keys`]
-    /// when keys were needed but could not be fetched or the key cannot verify, and
+    /// when keys were needed but could not be fetched, or the key cannot verify
+    /// ([`KeyError::UnusableKey`]), and
     /// [`TokenError::BadSignature`] when the signature does not verify.
     pub async fn verify(&self, jws: &Jws<'_>, algorithm: Algorithm) -> Result<(), TokenError> {
         let kid = jws
@@ -468,13 +530,17 @@ impl KeyCache {
         // The aws-lc-rs provider is named explicitly instead of through
         // jsonwebtoken's process default, which an application enabling another
         // backend would make ambiguous.
-        let verifier =
-            (DEFAULT_PROVIDER.verifier_factory)(&name, &key.decoding).map_err(|source| {
-                TokenError::Keys(KeyError::UnusableKey {
-                    kid: kid.to_owned(),
-                    source,
-                })
-            })?;
+        let unusable = |source| {
+            TokenError::Keys(KeyError::UnusableKey {
+                kid: kid.to_owned(),
+                source,
+            })
+        };
+        if let Some(defect) = key.defect() {
+            return Err(unusable(defect));
+        }
+        let verifier = (DEFAULT_PROVIDER.verifier_factory)(&name, &key.decoding)
+            .map_err(|source| unusable(KeyDefect::Verifier(source)))?;
         verifier
             .verify(jws.signing_input.as_bytes(), &jws.signature)
             .map_err(TokenError::BadSignature)

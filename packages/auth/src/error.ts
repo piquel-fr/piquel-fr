@@ -43,7 +43,7 @@ export type AuthErrorDetail =
     }
   | {
       code: Extract<ErrorCategory, 'keys'>;
-      reason: Extract<ErrorReason, 'invalid_document' | 'duplicate_key_id'>;
+      reason: Extract<ErrorReason, 'invalid_document' | 'duplicate_key_id' | 'unusable_key'>;
     }
   | { code: Extract<ErrorCategory, 'invalid_token'>; reason: TokenReason }
   /** `scope` is every scope the request needs, space-separated. */

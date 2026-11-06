@@ -118,7 +118,7 @@ pub use client::{
 };
 pub use http::NetworkError;
 pub use issuer::{DiscoveryError, Issuer, IssuerBuilder};
-pub use keys::{Jws, JwsHeader, KeyCache, KeyError, KeySet};
+pub use keys::{Jws, JwsHeader, KeyCache, KeyDefect, KeyError, KeySet};
 pub use resource::{Resource, ResourceError, ResourceValidator};
 pub use scope::{Scope, ScopeSet};
 pub use token::{

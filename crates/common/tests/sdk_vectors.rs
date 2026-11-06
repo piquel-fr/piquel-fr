@@ -543,7 +543,8 @@ impl Vectors {
             ),
             Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
         );
-        // The Rust SDK's verifier refuses RSA keys under 2048 bits, so every SDK must.
+        // A key too weak to verify is the issuer's fault, not the token's: every SDK
+        // refuses it before checking the signature.
         let weak = PKey::private_key_from_pem(self.weak_pem.as_bytes()).expect("weak test key");
         let weak = weak.rsa().expect("RSA test key");
         let weak_jwks = json!({ "keys": [{
@@ -556,12 +557,42 @@ impl Vectors {
         });
         self.token(
             "access-weak-key",
-            "a token signed with a 1024-bit RSA key is rejected",
+            "a 1024-bit RSA key verifies nothing: the key set is at fault",
             access_case(
                 Self::sign_with(&self.weak_pem, &weak_header, &access),
                 &weak_jwks,
             ),
-            Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        // The old key with each of `members`, `n` or `e`, replaced by `component(bytes)`.
+        let old_key = self.jwks(&[OLD_KID]);
+        let altered = |members: &[&str], component: &dyn Fn(Vec<u8>) -> Vec<u8>| {
+            let mut jwks = old_key.clone();
+            for member in members {
+                let value = jwks["keys"][0][member].as_str().expect("key member");
+                let bytes = URL_SAFE_NO_PAD.decode(value).expect("base64url");
+                jwks["keys"][0][member] = json!(URL_SAFE_NO_PAD.encode(component(bytes)));
+            }
+            jwks
+        };
+        self.token(
+            "access-small-exponent",
+            "an RSA key whose exponent is not 65537 verifies nothing: the key set is at fault",
+            access_case(valid.clone(), &altered(&["e"], &|_| vec![3])),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        self.token(
+            "access-zero-modulus",
+            "an RSA modulus of zero bytes alone verifies nothing: the key set is at fault",
+            access_case(valid.clone(), &altered(&["n"], &|_| vec![0; 257])),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        let padded = altered(&["n", "e"], &|bytes| [vec![0], bytes].concat());
+        self.token(
+            "access-padded-key",
+            "leading zero bytes in a key's n and e change nothing",
+            access_case(valid.clone(), &padded),
+            Expected::ok(&access),
         );
         let mut incomplete = serde_json::to_value(&access).expect("serialize claims");
         incomplete

@@ -1,0 +1,28 @@
+{
+  "description": "an RSA modulus of zero bytes alone verifies nothing: the key set is at fault",
+  "now": 1767225600,
+  "input": {
+    "audience": "https://notes.example.com",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "access",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI1IiwidHlwIjoiYXQrand0In0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMTkzNmYzZS04YzAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJhdWQiOiJodHRwczovL25vdGVzLmV4YW1wbGUuY29tIiwiY2xpZW50X2lkIjoibm90ZXMtd2ViIiwianRpIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwic2NvcGUiOiJub3RlczpyZWFkIG9wZW5pZCBwcm9maWxlIiwiaWF0IjoxNzY3MjI1NTQwLCJleHAiOjE3NjcyMjU4NDAsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImF1dGhfdGltZSI6MTc2NzIyMjAwMCwiYW1yIjpbInBvcCIsIm1mYSIsInVzZXIiXSwiYWNyIjoicGhyIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRhIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsInBpY3R1cmUiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20vcGljdHVyZXMvMDE5OWEwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwicHJvZmlsZV92ZXJzaW9uIjoxfQ.cUgLsOpF7TuZQx-5iUAbq-onDYeXD-OqZ0BNsLrR5-ubYzLXG9sfOfDJN29qAnUfEJIRc44-EsaNKSiB6T6I_X0TaUND5upImFu7WJRwVi55mDwfRZs4OPEDLVwcLdq3Nk9vxMt42jH76W8Ophr-eEqbVs5ZfZHm0bAPKlA-tPt5krw-tVkPkSLfQE7jMlYFemGALXmTDTouylp4b1fHO2QkG34HRVrAZPkuEbNBTWzRGgMKVwigXpYk4BgQPb8Ekf6tUASsZ3eN9uhoklLsMT59ycQm4Aw9mUzCAcd6Om3AdGMTfTyKQuk7ZSFg-lNpxAeAyRe8cfGwhVlYMBgzGA"
+  },
+  "expected": {
+    "error": {
+      "code": "keys",
+      "reason": "unusable_key"
+    }
+  }
+}
