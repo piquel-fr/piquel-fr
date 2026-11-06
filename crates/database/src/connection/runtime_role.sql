@@ -1,5 +1,6 @@
 -- Renders the script `Database::provision` runs as the schema owner after
--- migrations. It creates the runtime role $1, or resets it, with the password $2,
+-- migrations. It creates the runtime role $1, or resets it, with the SCRAM
+-- verifier $2 as its password (see `ScramVerifier`),
 -- and grants it row access to the app tables and nothing else. `RuntimeRole`
 -- only accepts plain identifiers, so the name is safe inside the DO block. The
 -- advisory lock $3 serializes overlapping runs, whose catalog updates conflict.
