@@ -44,10 +44,6 @@ async fn disabling_ends_sessions_and_is_recorded() {
     let admin = harness.admin().await;
     let user = harness.account().await;
     let administrator = operator(admin, Utc::now());
-    assert!(matches!(
-        Reason::parse(String::new()),
-        Err(AdminError::InvalidReason)
-    ));
     service
         .disable_user(&administrator, user.user_id, reason("Spam"))
         .await

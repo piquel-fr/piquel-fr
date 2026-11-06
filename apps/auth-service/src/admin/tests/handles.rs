@@ -4,28 +4,11 @@ use super::*;
 use crate::handles::HandlesError;
 use piquel_common::HandleError;
 
-/// A handle rename records its reason with the change, as personal data the
-/// owner sees in their history.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn handle_renames_record_their_reason() {
-    let harness = Harness::new().await;
-    let suffix = &TokenId::new().to_string()[24..];
-    let account = harness.named(&format!("before-{suffix}")).await;
-    let after = Handle::parse(&format!("after-{suffix}")).expect("handle");
-    harness
-        .service()
-        .rename_handle(&cli(), account, after, reason("Impersonation"), false)
-        .await
-        .expect("rename");
-    let latest = harness.database.events().history_for_user(account, 1).await;
-    let latest = latest.expect("history");
-    assert_eq!(latest[0].reason.as_deref(), Some("Impersonation"));
-}
-
 /// Operators rename without the cooldown, but not to a taken, retired, look-alike,
-/// reserved or unchanged handle. A released handle stays its former owner's until
-/// an operator releases it; `handle check` lists reserved handles operators assign.
+/// reserved or unchanged handle, and the rename records their reason, as personal
+/// data the owner sees in their history. A released handle stays its former
+/// owner's until an operator releases it; `handle check` lists reserved handles
+/// operators assign.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn operators_rename_and_release_handles() {
@@ -66,21 +49,19 @@ async fn operators_rename_and_release_handles() {
     rename(second, handle("renamed"), false)
         .await
         .expect("rename");
-    let renamed = harness
-        .database
-        .users()
-        .find_by_id(second)
-        .await
-        .expect("lookup")
-        .expect("user");
+    let renamed = harness.database.users().find_by_id(second).await;
+    let renamed = renamed.expect("lookup").expect("user");
     assert_eq!(renamed.handle, handle("renamed"));
     assert_eq!(renamed.profile_version, 2);
+    let latest = harness.database.events().history_for_user(second, 1).await;
+    let latest = &latest.expect("history")[0];
+    assert_eq!(latest.reason.as_deref(), Some("Renamed"));
     assert_eq!(
-        harness.events(second).await[..1],
-        [DomainEvent::HandleChanged {
+        latest.event.known(),
+        Some(&DomainEvent::HandleChanged {
             old: Personal::Value(handle("second").to_string()),
             new: Personal::Value(handle("renamed")),
-        }]
+        })
     );
     // The old handle stays the second account's: the first cannot take it, but
     // its owner can, at once, as operators skip the cooldown.

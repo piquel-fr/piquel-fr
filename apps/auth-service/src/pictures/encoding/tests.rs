@@ -146,28 +146,15 @@ fn what_is_not_a_raster_image_is_refused() {
     ));
 }
 
-/// An image too wide, or of too many pixels, is refused from its header, however
-/// small it compresses: decoding it could allocate without bound.
+/// An image too wide, of too many pixels, of no pixels on a side, or whose 16-bit
+/// pixels would decode past the allocation limit, is refused from its header,
+/// however small it compresses and whatever square it keeps: decoding it could
+/// allocate without bound.
 #[test]
-fn an_oversize_image_is_refused_before_decoding() {
-    for (width, height) in [(9000, 1), (6000, 6000)] {
-        let upload = encoded(&GrayImage::new(width, height).into(), ImageFormat::Png);
-        assert!(
-            matches!(
-                Jpeg::from_upload(&upload, None),
-                Err(PictureError::Dimensions)
-            ),
-            "{width}x{height}"
-        );
-    }
-}
-
-/// An image declaring a side of no pixels is refused before decoding, with or
-/// without a square to keep: it has none.
-#[test]
-fn an_image_with_no_pixels_on_a_side_is_refused() {
+fn an_out_of_bounds_image_is_refused_before_decoding() {
+    let png = |image: DynamicImage| encoded(&image, ImageFormat::Png);
     // A GIF whose screen is 0 by 1 pixels, holding one 1 by 1 frame.
-    let gif = [
+    let empty_gif = [
         &b"GIF89a"[..],
         &[0, 0, 1, 0, 0, 0, 0],
         &[0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0],
@@ -179,10 +166,28 @@ fn an_image_with_no_pixels_on_a_side_is_refused() {
         y: 0,
         size: 1,
     };
-    for crop in [None, Some(square)] {
+    let deep = image::ImageBuffer::<Rgba<u16>, _>::new(3600, 3600);
+    for (case, upload, crop) in [
+        ("too wide", png(GrayImage::new(9000, 1).into()), None),
+        (
+            "too many pixels",
+            png(GrayImage::new(6000, 6000).into()),
+            None,
+        ),
+        ("no pixels on a side", empty_gif.clone(), None),
+        ("no pixels to crop", empty_gif, Some(square)),
+        (
+            "over the allocation limit",
+            png(DynamicImage::ImageRgba16(deep)),
+            None,
+        ),
+    ] {
         assert!(
-            matches!(Jpeg::from_upload(&gif, crop), Err(PictureError::Dimensions)),
-            "{crop:?}"
+            matches!(
+                Jpeg::from_upload(&upload, crop),
+                Err(PictureError::Dimensions)
+            ),
+            "{case}"
         );
     }
 }
@@ -194,18 +199,6 @@ fn a_thin_strip_is_cropped_before_it_is_scaled() {
     let upload = encoded(&RgbImage::new(8000, 3).into(), ImageFormat::Png);
     let (_, image) = stored(&upload);
     assert_eq!(image.dimensions(), (SIDE, SIDE));
-}
-
-/// A 16-bit image within the pixel limit is refused when its decoded size is over
-/// the allocation limit, before it is decoded.
-#[test]
-fn an_image_over_the_allocation_limit_is_refused() {
-    let image = image::ImageBuffer::<Rgba<u16>, _>::new(3600, 3600);
-    let upload = encoded(&DynamicImage::ImageRgba16(image), ImageFormat::Png);
-    assert!(matches!(
-        Jpeg::from_upload(&upload, None),
-        Err(PictureError::Dimensions)
-    ));
 }
 
 /// An upload over the size limit is refused before it is read.

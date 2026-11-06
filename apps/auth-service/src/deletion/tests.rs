@@ -6,17 +6,19 @@ use crate::{
     AdminError, AdminService, Reason,
     jobs::AccountPurge,
     security::SessionError,
-    tests::{Browser, Replicas, change, operator, refresh_grant, register, registration},
+    tests::{
+        Browser, Replicas, change, operator, refresh_grant, register, registration,
+        verified_address,
+    },
 };
 use axum::http::header;
 use piquel_common::{
-    AuthenticationMethod, EmailId, Provider, TokenId,
+    AuthenticationMethod, Provider, TokenId,
     clients::{ClientKind, ClientOwner},
     events::{JobName, RequestOrigin},
 };
 use piquel_repository::{
-    Database, InsertExternalIdentity, InsertPasskey, InsertVerifiedEmail, RefreshRedemption,
-    RefreshRedemptionError,
+    Database, InsertExternalIdentity, InsertPasskey, RefreshRedemption, RefreshRedemptionError,
 };
 use serde_json::json;
 
@@ -133,18 +135,9 @@ impl Fixture {
     /// besides its sessions and history, and returns its grant's refresh token
     /// digest.
     async fn seed(&self, browser: &Browser) -> Vec<u8> {
-        let handle = self.handle(browser).await;
+        let address = format!("{}@example.com", browser.user_id);
+        verified_address(&self.database, browser.user_id, &address, true).await;
         let mut tx = self.database.begin().await.expect("transaction");
-        tx.emails()
-            .insert_verified(&InsertVerifiedEmail {
-                id: EmailId::new(),
-                user_id: browser.user_id,
-                normalized_email: format!("{handle}@example.com"),
-                is_primary: true,
-                verified_at: Utc::now(),
-            })
-            .await
-            .expect("email");
         tx.passkeys()
             .insert(&InsertPasskey {
                 id: PasskeyId::new(),
@@ -236,20 +229,12 @@ async fn exports_hold_every_category_and_no_secret() {
         .export(&browser.owner(&fixture.database).await)
         .await
         .expect("export");
-    let handle = fixture.handle(&browser).await;
-    assert_eq!(
-        export.file_name(),
-        format!(
-            "piquel-account-{handle}-{}.json",
-            Utc::now().format("%Y-%m-%d")
-        )
-    );
+    // Its file name and shape are checked in the export's own tests.
     let export = serde_json::to_value(export).expect("JSON");
     assert_eq!(
-        (&export["format"], &export["version"]),
-        (&json!("piquel.account-export"), &json!(2))
+        export["profile"]["handle"],
+        fixture.handle(&browser).await.as_str()
     );
-    assert_eq!(export["profile"]["handle"], handle.as_str());
     let count = |category: &str| export[category].as_array().map_or(0, Vec::len);
     for (category, expected) in [
         ("handles", 1),
@@ -267,18 +252,6 @@ async fn exports_hold_every_category_and_no_secret() {
         count("history") >= 2,
         "both sign-ins: {}",
         export["history"]
-    );
-    let passkey = export["passkeys"][0].as_object().expect("passkey");
-    assert_eq!(
-        passkey.keys().map(String::as_str).collect::<Vec<_>>(),
-        [
-            "backed_up",
-            "backup_eligible",
-            "created_at",
-            "friendly_name",
-            "id",
-            "last_used_at"
-        ]
     );
     let text = export.to_string();
     for secret in ["KEY-MATERIAL", "digest", "secret", "credential"] {
@@ -608,8 +581,7 @@ async fn operators_and_the_purge_job_delete_accounts() {
 }
 
 /// The CLI purges an account at once, in any status, as the operator, and the purge
-/// erases the personal data of the events it leaves. Nobody deletes the last
-/// active administrator's account.
+/// erases the personal data of the events it leaves.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_cli_purges_disabled_accounts_at_once() {

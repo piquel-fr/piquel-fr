@@ -178,17 +178,21 @@ impl Replicas {
 
     /// Connects a new pool to the migrated test database.
     pub(crate) async fn database() -> Database {
+        let database = Database::connect(Self::database_config(5))
+            .await
+            .expect("database");
+        database.run_migrations().await.expect("migrations");
+        database
+    }
+
+    /// A pool of up to `connections` to the test database, such as a fixture
+    /// passes to [`Database::isolated`] for a schema of its own.
+    pub(crate) fn database_config(connections: u32) -> DatabaseConfig {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
-        let database = Database::connect(
-            DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5))
-                .expect("database configuration"),
-        )
-        .await
-        .expect("database");
-        database.run_migrations().await.expect("migrations");
-        database
+        DatabaseConfig::new(&url, connections, std::time::Duration::from_secs(5))
+            .expect("database configuration")
     }
 }
 

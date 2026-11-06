@@ -2,15 +2,18 @@
 //! what it changes.
 
 use super::*;
-use crate::security::{RequestContext, Session};
-use crate::tests::until_blocked;
+use crate::security::RequestContext;
+use crate::tests::{AUTH_ORIGIN, Browser, Replicas, until_blocked};
 use chrono::{Duration, Utc};
 use piquel_common::{
     AccountStatus, AuthenticationMethod, Handle, Personal, SessionId, TokenId, UserId,
     admin::EventSearch, config::Origin, events::DomainEvent, protocol::step_up::StepUpRequirement,
 };
-use piquel_repository::{Database, DatabaseConfig, DatabaseTransaction, InsertUser};
+use piquel_repository::{Database, DatabaseTransaction, InsertUser};
 use std::mem::discriminant;
+
+/// The operator of CLI-side changes.
+pub(crate) use crate::tests::operator as cli;
 
 mod accounts;
 mod administrators;
@@ -49,26 +52,18 @@ pub(crate) struct Harness {
 impl Harness {
     /// Connects to the migrated test database.
     pub(crate) async fn new() -> Self {
-        let database = Database::connect(Self::config()).await.expect("database");
-        database.run_migrations().await.expect("migrations");
-        Self { database }
+        Self {
+            database: Replicas::database().await,
+        }
     }
 
     /// Connects to a schema of its own, for a scenario that must know every
     /// administrator, which the shared database's other tests keep adding.
     async fn isolated() -> Self {
-        let database = Database::isolated(Self::config())
+        let database = Database::isolated(Replicas::database_config(5))
             .await
             .expect("isolated database");
         Self { database }
-    }
-
-    /// The test database's configuration.
-    fn config() -> DatabaseConfig {
-        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
-            .required()
-            .expect("TEST_DATABASE_URL must name a disposable PostgreSQL database");
-        DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5)).expect("config")
     }
 
     /// Creates an account with the handle `handle`, without a session.
@@ -95,21 +90,10 @@ impl Harness {
     pub(crate) async fn signed_in(&self, method: AuthenticationMethod) -> Account {
         let suffix = TokenId::new().to_string();
         let user_id = self.named(&format!("admin-{}", &suffix[24..])).await;
-        let mut tx = self.database.begin().await.expect("transaction");
-        let secret = Session::create(&mut tx, RequestContext::TEST, user_id, method.into())
-            .await
-            .expect("session");
-        let session_id = tx
-            .sessions()
-            .find_active_by_browser_secret(secret.digest().as_bytes())
-            .await
-            .expect("lookup")
-            .expect("session")
-            .id;
-        tx.commit().await.expect("commit");
+        let browser = Browser::sign_in_with(&self.database, user_id, method).await;
         Account {
             user_id,
-            session_id,
+            session_id: browser.session_id,
         }
     }
 
@@ -146,17 +130,9 @@ impl Harness {
     }
 }
 
-/// The operator of CLI-side changes.
-pub(crate) fn cli() -> Operator {
-    Operator::Cli {
-        os_user: "tester".into(),
-        host: "test".into(),
-    }
-}
-
 /// Auth's origin, which invitations link to.
 fn origin() -> Origin {
-    "https://auth.piquel.fr".parse().expect("origin")
+    AUTH_ORIGIN.parse().expect("origin")
 }
 
 /// `admin` signed in to the dashboard, as its session cookie finds them, with a
