@@ -14,6 +14,8 @@ mod sealer;
 /// Focused tests for sealing, verification and pruning.
 #[cfg(test)]
 mod tests;
+/// The verifier job.
+mod verifier;
 /// Chain verification, and the checks before pruning.
 mod verify;
 
@@ -23,6 +25,7 @@ pub(crate) use piquel_common::admin::{
 };
 pub(crate) use routes::AuditApplication;
 pub(crate) use sealer::Sealer;
+pub(crate) use verifier::Verifier;
 pub(crate) use verify::TrustedCheckpoint;
 
 use base64::{Engine, engine::general_purpose::STANDARD};

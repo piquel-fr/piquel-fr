@@ -2,8 +2,8 @@
 //! workers every replica runs (see `crate::deliveries`).
 
 use crate::{
-    AuthConfig, KeyStore, SigningKeys, StartupError,
-    audit::Sealer,
+    AuditKeys, AuthConfig, KeyStore, SigningKeys, StartupError,
+    audit::{Sealer, Verifier},
     deletion::{DeletionError, Deletions},
     deliveries::{BackchannelLogoutSender, EmailSender, OutboundClient},
 };
@@ -80,10 +80,12 @@ pub struct Jobs {
 impl Jobs {
     /// Starts every job on `database`: signing key rotation in `store` and the
     /// reloads of this replica's `keys`, audit chain sealing with `config`'s audit
-    /// key, and the delivery workers of every channel, configured by `config`.
+    /// key and its verification, and the delivery workers of every channel,
+    /// configured by `config`.
     ///
     /// # Errors
-    /// Fails if the outbound HTTP client cannot initialize.
+    /// Fails if the committed audit keys are malformed, or the outbound HTTP
+    /// client cannot initialize.
     pub fn start(
         database: &Database,
         config: &AuthConfig,
@@ -95,6 +97,9 @@ impl Jobs {
         AccountPurge::observe();
         jobs.exclusive(AccountPurge, database.clone());
         jobs.exclusive(Sealer::new(&config.audit), database.clone());
+        let audit_keys = AuditKeys::for_server(&config.passkey.origin, config.audit.verifier())
+            .map_err(StartupError::AuditKeys)?;
+        jobs.exclusive(Verifier::new(audit_keys), database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
         jobs.spawn(|shutdown| store.run(reloaded, shutdown));
         let logout = BackchannelLogoutSender::new(

@@ -10,7 +10,7 @@ use chrono::{SubsecRound, TimeDelta};
 use piquel_common::{
     Personal, Provider,
     config::Origin,
-    events::{Actor, DomainEvent, EventContext, RequestOrigin},
+    events::{Actor, DomainEvent, EventContext, JobName, RequestOrigin},
 };
 use piquel_crypto::NoteKey;
 use piquel_repository::{
@@ -571,6 +571,41 @@ async fn the_audit_page_shows_the_newest_recorded_verification() {
         pruning(&page(&pruned, Some(0)).await),
         [(3, Pruning::Pruned { anchor: 3 }), (6, Pruning::Prunable)]
     );
+}
+
+/// The verifier job verifies the chain when no verification was recorded lately,
+/// and records what it found as itself, which then holds off its next pass.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_verifier_verifies_when_no_verification_is_recent() {
+    let fixture = Fixture::sealed_six().await;
+    let verifier = Verifier::new(AuditKeys {
+        verifiers: fixture.keys.verifiers.clone(),
+        source: fixture.keys.source,
+    });
+    let mut lock = fixture
+        .database
+        .try_exclusive(LockKey::AuditVerification)
+        .await
+        .expect("lock")
+        .expect("no other test verifies");
+    let intact = fixture.verify().await;
+    assert_eq!(verifier.pass(&mut lock).await.expect("pass"), Some(intact));
+    let newest = fixture
+        .database
+        .events()
+        .newest_audit_verification()
+        .await
+        .expect("newest")
+        .expect("recorded");
+    assert_eq!(
+        newest.actor,
+        Actor::System {
+            job: JobName::AuditVerification
+        }
+    );
+    assert_eq!(verifier.pass(&mut lock).await.expect("pass"), None);
+    lock.release().await.expect("release");
 }
 
 /// The newest checkpoint is served as its signed note, and the list pages through

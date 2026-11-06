@@ -160,8 +160,9 @@ async fn chain_card<'a>(page: &'a AuditPage, uncommitted: bool) -> Result<impl V
                     <p class="help">
                         "This is the newest verification the audit log records, not a check made now: \
                          events sealed since were not checked, and someone with auth's database role could \
-                         record a forged result. Verifying recomputes the whole history, as \
-                         auth-service audit verify does, and records what it finds."
+                         record a forged result. Auth verifies on its own once no one has for six hours. Verifying \
+                         recomputes the whole history, as auth-service audit verify does, and records \
+                         what it finds."
                     </p>
                     <div class="row actions"><button class="secondary">"Verify now"</button></div>
                 </form>

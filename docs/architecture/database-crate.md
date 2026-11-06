@@ -218,6 +218,11 @@ accounts that keep failing never hold back the others. After each run the job se
 `piquel.auth.account_purge.failing`, the accounts that failed 3 times in a row.
 The purge's queries use indexes, including the actor's user ID in
 `domain_events`, so its cost does not grow with everyone's history.
+The audit verifier (`LockKey::AuditVerification`) checks every ten minutes, and
+verifies the whole chain once the newest recorded verification is six hours old
+(see [audit-history.md](../security/audit-history.md)). Its lock is not the
+sealer's, and its read-only snapshot holds no transaction ID, so it never holds
+sealing back.
 Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-util` feature. `just db test` runs them in a
