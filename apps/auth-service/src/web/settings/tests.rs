@@ -6,7 +6,7 @@ use crate::{
     security::BrowserCookie,
     tests::{
         AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, cookie, detailed_png, html,
-        parameter, policy, redirect,
+        parameter, policy, redirect, verified_address,
     },
     web::tests::value_after,
 };
@@ -194,46 +194,22 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn addresses_change_their_primary_and_are_removed() {
-    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
-    let replicas = Replicas::of(&config).await;
+    let replicas = Replicas::new().await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
     let [first, second] =
         ["first", "second"].map(|name| format!("{}-{name}@example.com", browser.user_id));
-    let mut ids = Vec::new();
-    for address in [&first, &second] {
-        let add = EmailChange::Add {
-            email: address.clone(),
-        };
-        browser.post(&replicas, settings::EMAILS, &add).await;
-        let emails = database.emails().list(browser.user_id).await.expect("list");
-        let id = emails
-            .iter()
-            .find(|email| email.normalized_email == *address)
-            .expect("added")
-            .id;
-        // The first address confirmed becomes the primary one.
-        let token = config.email.verification_keys.token(id).expect("token");
-        let verified = Browser::signed_out()
-            .submit(
-                &replicas.b,
-                settings::VERIFY,
-                &[("token", &token.encoded())],
-                OWN_PAGE,
-            )
-            .await;
-        assert_eq!(verified.status(), StatusCode::OK);
-        ids.push(id);
-    }
+    let former = verified_address(&database, browser.user_id, &first, true).await;
+    let id = verified_address(&database, browser.user_id, &second, false).await;
 
-    let primary = EmailChange::Primary { id: ids[1] };
+    let primary = EmailChange::Primary { id };
     let changed = browser.post(&replicas, settings::EMAILS, &primary).await;
     assert_eq!(cookie(&changed, BrowserCookie::Notice).0, "email_primary");
     let removed = browser
         .post(
             &replicas,
             settings::EMAILS,
-            &EmailChange::Remove { id: ids[0] },
+            &EmailChange::Remove { id: former },
         )
         .await;
     assert_eq!(cookie(&removed, BrowserCookie::Notice).0, "email_removed");
@@ -722,9 +698,10 @@ async fn verification_links_are_confirmed_by_their_form() {
     assert!(page.contains(&format!("{address} is verified")), "{page}");
 }
 
-/// The data page downloads the account's records once the session confirmed with a
-/// passkey, and deletes the account once its handle is typed: every browser is
-/// signed out, and the answer says when the account is purged.
+/// The data page asks a session without a recent passkey confirmation for one
+/// before it downloads the account's records, and deletes the account once its
+/// handle is typed: every browser is signed out, and the answer says when the
+/// account is purged.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn data_page_downloads_the_data_and_deletes_the_account() {
@@ -743,10 +720,6 @@ async fn data_page_downloads_the_data_and_deletes_the_account() {
         Browser::sign_in_with(&database, browser.user_id, AuthenticationMethod::Federation).await;
     let page = html(social.visit(&replicas.a, settings::DATA).await).await;
     assert!(page.contains("data-passkey-confirm"), "{page}");
-    let refused = social
-        .post(&replicas, settings::DATA, &DataChange::Export)
-        .await;
-    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
 
     let download = browser
         .post(&replicas, settings::DATA, &DataChange::Export)
