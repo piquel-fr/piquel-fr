@@ -138,9 +138,12 @@ impl Cropper {
         }))
     }
 
-    /// Places the image so the square shows under the circle.
+    /// Places the image so the square shows under the circle, and keeps the
+    /// square's centre where it stays inside the image, so zooming back in
+    /// starts from where it shows.
     fn place(&self) -> Expr<()> {
         let (width, side, scale) = (self.width.clone(), self.side.clone(), self.scale());
+        let (kept_x, kept_y) = (self.x.clone(), self.y.clone());
         let (x, y) = (
             self.centre(&self.x, &self.width),
             self.centre(&self.y, &self.height),
@@ -152,7 +155,7 @@ impl Cropper {
             let _top = side.get() / 2.0 - y * scale;
             // The policy allows no inline style, but sets it through the CSSOM.
             raw!(
-                "((image) => { image.style.width = String(${_width}) + 'px'; image.style.transform = 'translate(' + String(${_left}) + 'px, ' + String(${_top}) + 'px)'; })(document.getElementById(String(${image})))",
+                "((image) => { ${kept_x}.set(${x}); ${kept_y}.set(${y}); image.style.width = String(${_width}) + 'px'; image.style.transform = 'translate(' + String(${_left}) + 'px, ' + String(${_top}) + 'px)'; })(document.getElementById(String(${image})))",
                 ()
             )
         })

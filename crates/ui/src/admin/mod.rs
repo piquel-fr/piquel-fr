@@ -250,6 +250,9 @@ struct Gate {
     usable: Signal<bool>,
     /// The change the dialog is open for, as [`Browser::go_on`] takes it.
     change: Signal<String>,
+    /// How many times the dialog opened: a ceremony goes on only with the change
+    /// of the opening it started in.
+    opening: Signal<usize>,
     /// What the ceremony's start answered, once it did.
     started: Signal<String>,
     /// Whether the ceremony runs.
@@ -274,6 +277,7 @@ impl Gate {
             form_time: confirmation.form_time as f64 * 1000.0,
             usable: signal(cx, || false),
             change: signal(cx, String::new),
+            opening: signal(cx, || 0usize),
             started: signal(cx, String::new),
             busy: signal(cx, || false),
             error: signal(cx, String::new),
@@ -300,7 +304,7 @@ impl Gate {
             self.change.clone(),
             self.started.clone(),
         );
-        let (busy, error) = (self.busy.clone(), self.error.clone());
+        let (busy, error, opening) = (self.busy.clone(), self.error.clone(), self.opening.clone());
         let (until, form_time, now) = (self.until, self.form_time, Browser::since_load());
         let (show, hide, shown) = (
             Browser::show(Self::DIALOG),
@@ -339,7 +343,9 @@ impl Gate {
                     };
                     if now + ahead >= until {
                         e.prevent_default();
-                        change.set(clicked.to_owned());
+                        change.set(clicked);
+                        opening.increment();
+                        let mine = opening.get();
                         started.set("".to_owned());
                         busy.set(false);
                         error.set("".to_owned());
@@ -348,7 +354,7 @@ impl Gate {
                         // A ceremony that does not start, such as when the session
                         // ended, goes on at once: the change's page then confirms on
                         // auth's handoff page.
-                        if change.get() == clicked {
+                        if opening.get() == mine {
                             if begun.is_ok() {
                                 started.set(begun.unwrap());
                             } else if shown {
@@ -371,20 +377,20 @@ impl Gate {
             self.change.clone(),
             self.started.clone(),
         );
-        let (busy, error) = (self.busy.clone(), self.error.clone());
+        let (busy, error, opening) = (self.busy.clone(), self.error.clone(), self.opening.clone());
         let (hide, shown) = (Browser::hide(Self::DIALOG), Browser::shown(Self::DIALOG));
         let run = Browser::ceremony(None, &self.run, &expr!(started.get()));
         let start = Browser::ceremony(None, &self.start, &Expr::from(String::new()));
         let go_on = Browser::go_on(&expr!(change.get()));
         expr!(async |_e: Event| {
-            let confirming = change.get();
+            let mine = opening.get();
             busy.set(true);
             error.set("".to_owned());
             let outcome = raw!("await ${run}", Ok::<String, Refusal>(String::new()));
             // A dialog closed meanwhile, or opened for another change, confirms
             // nothing.
             if shown {
-                if change.get() == confirming {
+                if opening.get() == mine {
                     if outcome.is_ok() {
                         let _hidden = hide;
                         let _went = go_on;
@@ -403,12 +409,14 @@ impl Gate {
                                 raw!("await ${start}", Ok::<String, Refusal>(String::new()));
                             // One that does not start again goes on at once, as in
                             // `intercept`.
-                            if change.get() == confirming {
-                                if again.is_ok() {
-                                    started.set(again.unwrap());
-                                } else {
-                                    let _hidden = hide;
-                                    let _went = go_on;
+                            if shown {
+                                if opening.get() == mine {
+                                    if again.is_ok() {
+                                        started.set(again.unwrap());
+                                    } else {
+                                        let _hidden = hide;
+                                        let _went = go_on;
+                                    }
                                 }
                             }
                         }
@@ -418,10 +426,15 @@ impl Gate {
         })
     }
 
-    /// Whether the dialog's button is disabled: while the ceremony runs.
+    /// Whether the dialog's button is disabled: while the ceremony runs, and until
+    /// it started, so a click goes on with that start rather than another.
     fn busy(&self) -> Expr<bool> {
-        let busy = self.busy.clone();
-        expr!(busy.get())
+        let (busy, started) = (self.busy.clone(), self.started.clone());
+        expr!(if busy.get() {
+            true
+        } else {
+            started.get().is_empty()
+        })
     }
 
     /// The dialog's button's label.
