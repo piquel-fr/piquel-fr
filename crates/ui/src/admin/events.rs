@@ -386,6 +386,16 @@ impl EventRow<'_> {
             DomainEvent::AuditHistoryPruned { through, deleted } => Description::new(format!(
                 "Audit history pruned through position {through}: {deleted} events deleted"
             )),
+            DomainEvent::AuditChainVerified(verification) => {
+                Description::new(match &verification.broken {
+                    None => "Audit chain verified: intact".to_owned(),
+                    Some(broken) => format!(
+                        "Audit chain verified: broken at position {}: {}",
+                        broken.position, broken.problem
+                    ),
+                })
+                .with("events checked", verification.events_checked)
+            }
             DomainEvent::Imported(audit) => {
                 Description::new(format!("{} ({})", audit.action(), audit.outcome()))
             }

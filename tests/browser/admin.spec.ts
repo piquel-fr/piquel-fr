@@ -213,7 +213,12 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
   const admin = await administrator(browser, `granter-${suffix}`);
   const user = await signedUp(browser, `grantee-${suffix}`);
 
-  // The chain's newest position, once every event so far is sealed, within seconds.
+  // The chain's newest position, once every event so far is sealed, within
+  // seconds, after verifying that the chain is intact. The page verifies only
+  // when asked, and records the verification as an event of its own. Its form, as
+  // every form of the dashboard, asks to confirm with a passkey first, unless the
+  // dashboard was confirmed recently.
+  const confirmation = admin.getByRole('dialog', { name: "Confirm it's you" });
   const newest = async () => {
     await expect
       .poll(
@@ -224,17 +229,31 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
         { timeout: 15_000 }
       )
       .toBe('0');
-    await expect(admin.getByText('Intact', { exact: true })).toBeVisible();
-    await expect(admin.getByText('Broken', { exact: true })).toHaveCount(0);
     // A point of the chain reads as its position, then its hash.
     const point = await admin.locator('dt:text-is("Newest") + dd').textContent();
+    const verified = admin.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' && new URL(response.url()).pathname === '/audit'
+    );
+    await admin.getByRole('button', { name: 'Verify now', exact: true }).click();
+    // Once verified, the dialog never opens: its wait then fails, unheard.
+    await Promise.race([verified, confirmation.waitFor().catch(() => undefined)]);
+    if (await confirmation.isVisible()) {
+      await confirmation
+        .getByRole('button', { name: 'Confirm with a passkey', exact: true })
+        .click();
+    }
+    await verified;
+    await expect(admin).toHaveURL(`${adminUrl}/audit`);
+    await expect(admin.getByText('Intact at last check', { exact: true })).toBeVisible();
+    await expect(admin.getByText('Broken at last check', { exact: true })).toHaveCount(0);
     return Number(point?.split(' ')[0]);
   };
   const before = await newest();
 
   // Rights are granted from a search, each result confirming in its own dialog.
+  // Verifying confirmed the dashboard, so the search shows its results at once.
   await admin.goto(`${adminUrl}/administrators/grant?q=grantee-${suffix}`);
-  await confirmThroughAuth(admin);
   await admin
     .getByRole('button', { name: `Grant administrator rights: @grantee-${suffix}`, exact: true })
     .click();

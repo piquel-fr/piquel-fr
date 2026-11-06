@@ -259,7 +259,7 @@ just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit list --user alice --kind session_revoked
 just auth audit list --user alice --views # with administrators' views of the account
-just auth audit verify                    # recompute the tamper-evident chain
+just auth audit verify                    # recompute the tamper-evident chain, and record what it found
 just auth account alice passkeys list     # the account's settings, as its owner sees them
 just auth account alice name set "Alice B" --reason "Asked by email"
 just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"

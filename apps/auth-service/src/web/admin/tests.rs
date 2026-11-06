@@ -677,18 +677,27 @@ async fn the_crumb_leads_through_the_tab() {
     assert!(page.contains("<b>security history</b>"), "{page}");
 }
 
-/// The audit page shows the chain as `audit verify` reports it, and says that
-/// pruning is the database owner's, from the command line.
+/// The audit page's form verifies as `audit verify` does and comes back to the
+/// page, which then shows that verification, and the page says that pruning is
+/// the database owner's, from the command line. The database is shared, so other
+/// tests may have verified already: the isolated audit tests show that loading the
+/// page verifies nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_audit_page_shows_the_chain_and_leaves_pruning_to_the_owner() {
+async fn the_audit_page_verifies_on_request_and_leaves_pruning_to_the_owner() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     let dashboard = harness.sign_in(&admin, "/audit").await;
     let page = html(harness.visit(&dashboard, "/audit").await).await;
     assert!(page.contains("Audit history"), "{page}");
-    assert!(page.contains("Events checked"), "{page}");
     assert!(page.contains("needs the database owner"), "{page}");
+    let url = format!("{DASHBOARD}/audit");
+    let verified = dashboard
+        .submit(&harness.dashboard, &url, &[], OWN_PAGE)
+        .await;
+    assert_eq!(redirect(&verified), "/audit");
+    let page = html(harness.visit(&dashboard, "/audit").await).await;
+    assert!(page.contains("Events checked"), "{page}");
 }
 
 /// Only an administrator signed in with a passkey is handed off: anyone else is

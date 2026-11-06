@@ -140,6 +140,7 @@ impl DomainEvent {
             | Self::DeliveryCancelled { .. }
             | Self::SigningKeyChanged { .. }
             | Self::AuditHistoryPruned { .. }
+            | Self::AuditChainVerified(_)
             // A read may be a misclick or a confidential inquiry; the owner sees
             // changes, each with its reason, not what an administrator looked at.
             | Self::AccountViewed {}

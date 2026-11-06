@@ -64,10 +64,7 @@ impl AdminOperation {
                     .verify_audit_chain(operator, &committed_keys())
                     .await
                     .map(drop),
-                service
-                    .audit_page(operator, &committed_keys(), None)
-                    .await
-                    .map(drop),
+                service.audit_page(operator, None).await.map(drop),
             ],
             // Pruning checks its operator before anything else too.
             Self::PruneAuditChain => vec![

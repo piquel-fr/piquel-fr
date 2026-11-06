@@ -409,8 +409,10 @@ pub struct GrantAdministrator {
 }
 
 /// The result of verifying the audit chain, as `auth-service audit verify` prints
-/// it and the dashboard's audit page shows it. Verification stops at the first
-/// problem.
+/// it and the audit log records it, as [`DomainEvent::AuditChainVerified`], for
+/// the dashboard's audit page to show. Verification stops at the first problem.
+///
+/// [`DomainEvent::AuditChainVerified`]: crate::events::DomainEvent::AuditChainVerified
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditVerification {
     /// The first position that does not match, or `None` if the chain is intact.
@@ -529,16 +531,39 @@ impl std::fmt::Display for VerificationKeys {
     }
 }
 
-/// One page of the audit page's checkpoints, oldest first, after the anchor, with
-/// the verification they are judged by.
+/// The dashboard's audit page: the chain as stored, the newest verification the
+/// audit log records, and one page of checkpoints, oldest first, after the anchor.
+/// Reading it recomputes nothing, so it costs the same however long the history.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditPage {
-    /// The chain's state.
-    pub verification: AuditVerification,
-    /// The checkpoints.
+    /// The chain as stored, not verified.
+    pub chain: StoredChain,
+    /// The newest verification recorded, if any.
+    pub verified: Option<RecordedVerification>,
+    /// The checkpoints, judged by `verified`.
     pub checkpoints: Vec<AuditCheckpoint>,
     /// The position to continue after, when there may be more.
     pub next: Option<u64>,
+}
+
+/// The audit chain as stored, read without recomputing or checking anything.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredChain {
+    /// The checkpoint the chain was last pruned through, which it extends.
+    pub anchor: Option<ChainPoint>,
+    /// The newest sealed event, or the anchor once every sealed event was pruned.
+    pub newest: Option<ChainPoint>,
+    /// Events not sealed yet.
+    pub unsealed: u64,
+}
+
+/// A verification of the audit chain, and when the audit log recorded it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedVerification {
+    /// When it was recorded, just after it finished.
+    pub at: DateTime<Utc>,
+    /// What it found.
+    pub verification: AuditVerification,
 }
 
 /// A signed checkpoint, and whether the chain may be pruned through it.
@@ -553,11 +578,12 @@ pub struct AuditCheckpoint {
 }
 
 /// Whether the chain may be pruned through a checkpoint, by the rules `audit
-/// prune` applies.
+/// prune` applies, as far as a verification shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Pruning {
-    /// It may: the anchor precedes it and the chain verifies through it.
+    /// It may: the anchor precedes it, and the verification found no break at or
+    /// before it.
     Prunable,
     /// The chain was already pruned through it or a later checkpoint.
     Pruned {
@@ -566,6 +592,23 @@ pub enum Pruning {
     },
     /// The chain breaks at or before it.
     Broken(ChainBreak),
+}
+
+impl Pruning {
+    /// Whether the chain, pruned through `anchor` and found `broken` by a
+    /// verification, may be pruned through the checkpoint at `position`. `audit
+    /// prune` judges by a verification it just made, and the dashboard's audit page
+    /// by the newest one recorded.
+    #[must_use]
+    pub fn of(anchor: Option<&ChainPoint>, broken: Option<&ChainBreak>, position: u64) -> Self {
+        match (anchor, broken) {
+            (Some(anchor), _) if anchor.position >= position => Self::Pruned {
+                anchor: anchor.position,
+            },
+            (_, Some(broken)) if broken.position <= position => Self::Broken(broken.clone()),
+            _ => Self::Prunable,
+        }
+    }
 }
 
 crate::str_enum! {

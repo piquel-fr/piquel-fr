@@ -19,7 +19,7 @@ mod verify;
 
 pub(crate) use piquel_common::admin::{
     AuditCheckpoint, AuditPage, AuditVerification, ChainBreak, ChainPoint, ChainProblem, Pruning,
-    VerificationKeys,
+    RecordedVerification, StoredChain, VerificationKeys,
 };
 pub(crate) use routes::AuditApplication;
 pub(crate) use sealer::Sealer;
@@ -192,7 +192,7 @@ pub struct AuditKeys {
     /// The verifier keys.
     verifiers: NoteVerifiers,
     /// Where they came from, as the verification reports it.
-    source: VerificationKeys,
+    pub(crate) source: VerificationKeys,
 }
 
 impl AuditKeys {
