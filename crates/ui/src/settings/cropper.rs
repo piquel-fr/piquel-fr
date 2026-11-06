@@ -4,7 +4,7 @@
 //! inputs. Without scripts they stay empty, and auth keeps the centred square.
 
 use super::profile::{CROP_SIZE, CROP_X, CROP_Y, PICTURE_FIELD, PICTURE_TYPES};
-use crate::browser::Browser;
+use crate::browser::{AsyncHandler, Browser};
 use topcoat::{
     Result,
     context::Cx,
@@ -113,13 +113,16 @@ impl Cropper {
         expr!(if rounded > 1.0 { rounded } else { 1.0 })
     }
 
-    /// What the form's input sends of `value`: nothing while no image shows.
+    /// What the form's input sends of `value`: nothing while no image shows, or
+    /// the stage has no size yet.
     fn sent(&self, value: &Expr<f64>) -> Expr<String> {
-        let (width, text) = (self.width.clone(), Browser::text(value));
-        expr!(if width.get() > 0.0 {
-            text
-        } else {
+        let (width, side, text) = (self.width.clone(), self.side.clone(), Browser::text(value));
+        expr!(if width.get() == 0.0 {
             "".to_owned()
+        } else if side.get() == 0.0 {
+            "".to_owned()
+        } else {
+            text
         })
     }
 
@@ -170,16 +173,17 @@ impl Cropper {
     }
 
     /// The image's `@load` handler, which starts on its centred square, at no
-    /// zoom.
-    fn loaded(&self) -> Expr<impl FnOnce(Event) + use<>> {
+    /// zoom, once the cropper shows and its stage has a size.
+    fn loaded(&self) -> Expr<impl AsyncHandler + use<>> {
         let (width, height, zoom) = (self.width.clone(), self.height.clone(), self.zoom.clone());
-        let (x, y, image, place) = (
+        let (x, y, side, place) = (
             self.x.clone(),
             self.y.clone(),
-            self.image.clone(),
+            self.side.clone(),
             self.place(),
         );
-        expr!(|_e: Event| {
+        let (image, stage) = (self.image.clone(), self.stage.clone());
+        expr!(async |_e: Event| {
             width.set(raw!(
                 "cx.hydrate(document.getElementById(String(${image})).naturalWidth)",
                 0.0
@@ -191,6 +195,12 @@ impl Cropper {
             x.set(width.get() / 2.0);
             y.set(height.get() / 2.0);
             zoom.set(1.0);
+            // The cropper shows once the page applies the width.
+            raw!("await Promise.resolve()", ());
+            side.set(raw!(
+                "cx.hydrate(document.getElementById(String(${stage})).clientWidth)",
+                0.0
+            ));
             let _placed = place;
         })
     }
