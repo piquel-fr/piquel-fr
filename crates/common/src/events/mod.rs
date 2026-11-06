@@ -11,7 +11,7 @@ mod context;
 mod history;
 /// The values event payloads carry beside IDs.
 mod payload;
-/// User agent classification on real browser headers.
+/// User agent classification on real browser headers, and stored job names.
 #[cfg(test)]
 mod tests;
 
