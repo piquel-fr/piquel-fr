@@ -1,7 +1,24 @@
 //! Signup from pending provider evidence, committed only with a first passkey.
 
 use super::*;
-use piquel_common::events::DomainEvent;
+use piquel_common::events::{Actor, DomainEvent};
+
+impl TestApp {
+    /// Attaches the pending signup `pending` names, found by the browser's `headers`,
+    /// to `user`'s new account, as a signup from `ip` does.
+    async fn attach(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        ip: std::net::IpAddr,
+        pending: TokenId,
+        headers: &HeaderMap,
+        user: UserId,
+    ) -> Result<Option<ProviderPicture>, FederationError> {
+        let actor = security::RequestContext::TEST.actor(Actor::Anonymous);
+        FederationApplication::attach_signup(tx, &actor, &self.email, ip, pending, headers, user)
+            .await
+    }
+}
 
 /// Signup must create its first passkey and cannot claim an existing account’s email.
 #[tokio::test]
@@ -21,10 +38,8 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let user = test.user(None, false).await;
     let mut tx = test.app.database.begin().await.expect("tx");
     assert!(
-        FederationApplication::attach_signup(
+        test.attach(
             &mut tx,
-            &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
-            &test.email,
             security::RequestContext::TEST.client_ip,
             pending.id,
             &headers,
@@ -37,10 +52,8 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let mut tx = test.app.database.begin().await.expect("tx");
     test.key(&mut tx, user).await;
     assert!(
-        FederationApplication::attach_signup(
+        test.attach(
             &mut tx,
-            &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
-            &test.email,
             security::RequestContext::TEST.client_ip,
             pending.id,
             &HeaderMap::new(),
@@ -49,10 +62,8 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
         .await
         .is_err()
     );
-    FederationApplication::attach_signup(
+    test.attach(
         &mut tx,
-        &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
-        &test.email,
         security::RequestContext::TEST.client_ip,
         pending.id,
         &headers,
@@ -77,10 +88,8 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let (pending, headers) = test.pending(None, Some(&email)).await;
     let mut tx = test.app.database.begin().await.expect("tx");
     assert!(
-        FederationApplication::attach_signup(
+        test.attach(
             &mut tx,
-            &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
-            &test.email,
             security::RequestContext::TEST.client_ip,
             pending.id,
             &headers,
@@ -113,19 +122,10 @@ async fn signup_imports_the_provider_address_verified_only_where_the_provider_is
         let user = test.user(None, true).await;
         // A client IP of its own, so no other test shares its verification limit.
         let ip = std::net::IpAddr::V6(std::net::Ipv6Addr::from(user.as_uuid().as_u128()));
-        let actor = security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous);
         let mut tx = test.app.database.begin().await.expect("tx");
-        FederationApplication::attach_signup(
-            &mut tx,
-            &actor,
-            &test.email,
-            ip,
-            pending.id,
-            &headers,
-            user,
-        )
-        .await
-        .expect("signup");
+        test.attach(&mut tx, ip, pending.id, &headers, user)
+            .await
+            .expect("signup");
         tx.commit().await.expect("commit");
 
         let emails = test.app.database.emails().list(user).await.expect("emails");
@@ -208,12 +208,9 @@ async fn signup_skips_an_address_an_account_being_deleted_holds() {
         })
         .await;
     let user = test.user(None, true).await;
-    let actor = security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous);
     let mut tx = test.app.database.begin().await.expect("tx");
-    FederationApplication::attach_signup(
+    test.attach(
         &mut tx,
-        &actor,
-        &test.email,
         security::RequestContext::TEST.client_ip,
         pending.id,
         &headers,

@@ -453,11 +453,12 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
-/// A new picture bumps the profile version, and the next token carries its URL on
-/// auth's origin as `picture`.
+/// A new picture and a rename each bump the profile version, and the next token
+/// carries them: the picture's URL on auth's origin as `picture`, and the new
+/// `preferred_username`.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn pictures_reach_the_next_token() {
+async fn profile_changes_reach_the_next_token() {
     let flow = Flow::new(true, true).await;
     let code = flow.code(PROFILE_REFRESH_SCOPES).await;
     let (tokens, claims) = flow
@@ -467,13 +468,22 @@ async fn pictures_reach_the_next_token() {
         )
         .await;
     assert_eq!(claims.get("picture"), None, "no picture yet");
+    let database = &flow.app.database;
     let picture = piquel_common::PictureId::new();
-    flow.app
-        .database
+    database
         .pictures()
         .set(flow.user_id, picture, b"jpeg")
         .await
         .expect("picture");
+    let renamed =
+        Handle::parse(&format!("renamed-{}", &flow.user_id.to_string()[24..])).expect("handle");
+    let mut tx = database.begin().await.expect("transaction");
+    assert!(
+        tx.rename_handle(flow.user_id, &renamed)
+            .await
+            .expect("rename")
+    );
+    tx.commit().await.expect("commit");
     let (_, refreshed) = flow
         .id_token(
             flow.refresh(tokens["refresh_token"].as_str().expect("refresh token"))
@@ -482,9 +492,10 @@ async fn pictures_reach_the_next_token() {
         .await;
     let issuer = refreshed["iss"].as_str().expect("issuer");
     assert_eq!(refreshed["picture"], format!("{issuer}/pictures/{picture}"));
+    assert_eq!(refreshed["preferred_username"], renamed.as_str());
     assert_eq!(
         refreshed["profile_version"],
-        claims["profile_version"].as_u64().expect("version") + 1
+        claims["profile_version"].as_u64().expect("version") + 2
     );
 }
 
@@ -506,44 +517,4 @@ fn the_picture_needs_the_profile_scope() {
     };
     assert_eq!(released("openid email"), None);
     assert_eq!(released("openid profile"), claims.picture);
-}
-
-/// A rename bumps the profile version, and the next token carries the new
-/// `preferred_username`.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn renames_reach_the_next_token() {
-    let flow = Flow::new(true, true).await;
-    let code = flow.code(PROFILE_REFRESH_SCOPES).await;
-    let (tokens, claims) = flow
-        .id_token(
-            flow.exchange(&code, Flow::verifier(), flow.basic.as_deref())
-                .await,
-        )
-        .await;
-    let database = &flow.app.database;
-    let user = database
-        .users()
-        .find_by_id(flow.user_id)
-        .await
-        .expect("lookup")
-        .expect("user");
-    assert_eq!(claims["preferred_username"], user.handle.as_str());
-    let renamed =
-        Handle::parse(&format!("renamed-{}", &flow.user_id.to_string()[24..])).expect("handle");
-    let mut tx = database.begin().await.expect("transaction");
-    assert!(
-        tx.rename_handle(flow.user_id, &renamed)
-            .await
-            .expect("rename")
-    );
-    tx.commit().await.expect("commit");
-    let (_, refreshed) = flow
-        .id_token(
-            flow.refresh(tokens["refresh_token"].as_str().expect("refresh token"))
-                .await,
-        )
-        .await;
-    assert_eq!(refreshed["preferred_username"], renamed.as_str());
-    assert_eq!(refreshed["profile_version"], user.profile_version + 1);
 }

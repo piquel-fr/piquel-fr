@@ -2,16 +2,14 @@
 
 use super::*;
 
-/// An administrator removes an account's app with the owner's own operation: its
-/// refresh grant ends, and the removal is recorded as the administrator's, with
-/// the reason they gave.
+/// An administrator removes an account's app with the owner's own operation, which
+/// `removing_an_app_ends_its_access` covers: the removal is recorded as the
+/// administrator's, with the reason they gave.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn an_administrator_removes_an_app_with_a_reason() {
     let flow = Flow::new(false, false).await;
-    let code = flow.code(REFRESH_SCOPES).await;
-    let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
-    let refresh = tokens["refresh_token"].as_str().expect("refresh token");
+    flow.code(Scope::OpenId.as_str()).await;
     let harness = crate::admin::tests::Harness {
         database: flow.app.database.clone(),
     };
@@ -26,7 +24,6 @@ async fn an_administrator_removes_an_app_with_a_reason() {
         .remove_app(&subject, &flow.client.id)
         .await
         .expect("remove");
-    Flow::assert_invalid_grant(flow.refresh(refresh).await).await;
     let history = flow
         .app
         .database

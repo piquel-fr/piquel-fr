@@ -22,7 +22,7 @@ use axum::{
 };
 use piquel_common::{Handle, PasskeyId};
 use piquel_crypto::Secret;
-use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser, InsertVerifiedEmail};
+use piquel_repository::{DatabaseTransaction, InsertUser, InsertVerifiedEmail};
 use tower::ServiceExt;
 
 /// Isolated database fixture with replaceable provider endpoints and unique subjects.
@@ -62,16 +62,7 @@ impl TestApp {
     }
     /// Creates unique provider evidence with an optional verified primary address.
     async fn with_email(email: Option<&str>) -> Self {
-        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
-            .required()
-            .expect("TEST_DATABASE_URL must name an isolated migrated PostgreSQL database");
-        let database = Database::connect(
-            DatabaseConfig::new(&url, 5, StdDuration::from_secs(5))
-                .expect("database configuration"),
-        )
-        .await
-        .expect("database");
-        database.run_migrations().await.expect("migrations");
+        let database = crate::tests::Replicas::database().await;
         let subject = u64::from_be_bytes(
             piquel_crypto::Secret::generate()
                 .expect("random")

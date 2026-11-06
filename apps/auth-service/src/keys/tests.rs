@@ -237,41 +237,28 @@ async fn rotation_takes_each_step_once_on_schedule() {
     tx.rollback().await.expect("rollback");
 }
 
-/// At each step of the schedule, of two concurrent ticks, the one that takes the
-/// lock takes the step, and the other skips the tick instead of waiting, so no
-/// step happens twice.
+/// Of two concurrent ticks, the one that takes the lock takes the step, and the
+/// other skips the tick instead of waiting, so no step happens twice.
+/// `rotation_takes_each_step_once_on_schedule` covers the steps themselves.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn concurrent_ticks_take_each_step_once() {
-    use SigningKeyState::{Active, Next, Retired, Retiring};
     let (store, database) = store().await;
     let mut first = database.begin().await.expect("transaction");
     clear(&mut first).await;
     let mut second = database.begin().await.expect("transaction");
-    let start = Utc::now();
-    let published = start + ROTATION_PERIOD;
-    let activated = published + PRE_PUBLICATION;
-    let retired = activated + RETIRING_WINDOW;
-    for (at, expected) in [
-        (start, &[Active][..]),
-        (published, &[Active, Next]),
-        (activated, &[Retiring, Active]),
-        (retired, &[Retired, Active]),
-        (retired + RETIRED_WINDOW, &[Active]),
-    ] {
-        let (ran_first, ran_second) = tokio::join!(
-            store.tick_in(&mut first, at),
-            store.tick_in(&mut second, at)
-        );
-        assert!(ran_first.expect("first tick"));
-        assert!(!ran_second.expect("second tick"), "the lock is held");
-        let states: Vec<_> = states(&mut first)
-            .await
-            .into_iter()
-            .map(|(_, state)| state)
-            .collect();
-        assert_eq!(states, expected, "at {at}");
-    }
+    let now = Utc::now();
+    let (ran_first, ran_second) = tokio::join!(
+        store.tick_in(&mut first, now),
+        store.tick_in(&mut second, now)
+    );
+    assert!(ran_first.expect("first tick"));
+    assert!(!ran_second.expect("second tick"), "the lock is held");
+    let states = states(&mut first).await;
+    assert!(
+        matches!(states[..], [(_, SigningKeyState::Active)]),
+        "{states:?}"
+    );
     second.rollback().await.expect("rollback");
     first.rollback().await.expect("rollback");
 }

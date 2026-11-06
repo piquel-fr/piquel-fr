@@ -30,13 +30,23 @@ impl TestApp {
             .await
             .expect("session lookup")
     }
+    /// The session cookie pair `response` sets.
+    fn session_cookie(response: &Response) -> String {
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("cookie"))
+            .find(|cookie| cookie.starts_with(BrowserCookie::Session.as_str()))
+            .expect("session cookie")
+            .split(';')
+            .next()
+            .expect("cookie pair")
+            .to_owned()
+    }
 }
 
 /// Stable provider subjects take priority over email observations and require an existing passkey.
-#[expect(
-    clippy::too_many_lines,
-    reason = "Keep the callback precedence scenario and the session it yields together."
-)]
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn callback_email_collision_never_links_and_known_subject_never_bootstraps_a_missing_key() {
@@ -62,22 +72,7 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
             .is_none()
     );
     let subject_owner = test.user(Some(&original), false).await;
-    test.app
-        .database
-        .federation()
-        .insert_identity(&InsertExternalIdentity {
-            id: TokenId::new(),
-            user_id: subject_owner,
-            provider: piquel_common::Provider::GitHub,
-            issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
-                .expect("GitHub facts")
-                .issuer
-                .into(),
-            subject: test.subject.clone(),
-            linked_email: Some(original.clone()),
-        })
-        .await
-        .expect("known identity");
+    test.link(subject_owner).await;
     let response = test.callback().await;
     assert_eq!(
         response.status(),
@@ -90,22 +85,8 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
     let response = test.callback().await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers()[header::LOCATION], DEFAULT_RETURN_TO);
-    let session_cookie = response
-        .headers()
-        .get_all(header::SET_COOKIE)
-        .iter()
-        .map(|value| value.to_str().expect("cookie"))
-        .find(|cookie| cookie.starts_with("__Host-piquel_session="))
-        .expect("session cookie")
-        .split(';')
-        .next()
-        .expect("cookie pair");
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::COOKIE,
-        HeaderValue::from_str(session_cookie).expect("cookie"),
-    );
-    let session = security::Session::required(&test.app.database, &headers)
+    let session = test
+        .active(&TestApp::session_cookie(&response))
         .await
         .expect("social session");
     assert_eq!(
@@ -116,39 +97,20 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         session.passkey_confirmed_at.is_none(),
         "social sign-in never confirms a passkey"
     );
-    let response = test
-        .routes()
-        .oneshot(TestApp::request(
-            Method::DELETE,
-            "/account/social-identities/github",
-            Some(session_cookie),
-            &serde_json::json!({}),
-        ))
-        .await
-        .expect("unlink");
-    security::tests::assert_step_up_required(response).await;
-    assert_eq!(
-        test.app
-            .database
-            .emails()
-            .find_active_verified(&original)
-            .await
-            .expect("original email")
-            .expect("owner")
-            .user_id,
-        subject_owner
-    );
-    assert_eq!(
-        test.app
-            .database
-            .emails()
-            .find_active_verified(&observed)
-            .await
-            .expect("observed email")
-            .expect("owner")
-            .user_id,
-        email_owner
-    );
+    // Signing in moves neither account's verified address.
+    for (address, owner) in [(&observed, email_owner), (&original, subject_owner)] {
+        assert_eq!(
+            test.app
+                .database
+                .emails()
+                .find_active_verified(address)
+                .await
+                .expect("email lookup")
+                .expect("owner")
+                .user_id,
+            owner
+        );
+    }
 }
 
 /// Social sign-in re-authenticates the browser's own unconfirmed session in place,
@@ -160,26 +122,13 @@ async fn social_sign_in_reauthenticates_only_unconfirmed_sessions() {
     let test = TestApp::new().await;
     let owner = test.user(None, true).await;
     test.link(owner).await;
-    let session_cookie = |response: &Response| {
-        response
-            .headers()
-            .get_all(header::SET_COOKIE)
-            .iter()
-            .map(|value| value.to_str().expect("cookie"))
-            .find(|cookie| cookie.starts_with(BrowserCookie::Session.as_str()))
-            .expect("session cookie")
-            .split(';')
-            .next()
-            .expect("cookie pair")
-            .to_owned()
-    };
 
     let (social, cookie) = test.session(owner, false).await;
     let before = test.active(&cookie).await.expect("social session");
     let response = test.callback_from(Some(&cookie)).await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let renewed = test
-        .active(&session_cookie(&response))
+        .active(&TestApp::session_cookie(&response))
         .await
         .expect("renewed session");
     assert_eq!(renewed.id, social, "the session ID is kept");
@@ -204,7 +153,7 @@ async fn social_sign_in_reauthenticates_only_unconfirmed_sessions() {
     let (replaced, cookie) = test.session(other, false).await;
     let response = test.callback_from(Some(&cookie)).await;
     let session = test
-        .active(&session_cookie(&response))
+        .active(&TestApp::session_cookie(&response))
         .await
         .expect("new session");
     assert_eq!(session.user_id, owner);

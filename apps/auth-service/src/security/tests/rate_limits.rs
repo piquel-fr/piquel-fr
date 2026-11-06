@@ -41,12 +41,14 @@ async fn rate_limit_deadline_includes_a_blocked_database_query() {
         StatusCode::ACCEPTED
     );
 }
-/// Unknown paths do not drain budgets and login remains available after token exhaustion.
+/// Unknown paths do not drain budgets. Each budget is spent on its own: exhausted
+/// reads get a retry delay and exhausted token requests are refused, while sign-in
+/// and the account stay available.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
+async fn budgets_are_separate_and_unknown_paths_do_not_consume_them() {
     let fixture = SecurityFixture::new().await;
-    for _ in 0..125 {
+    for _ in 0..REQUESTS_PER_MINUTE + 5 {
         assert_eq!(
             fixture
                 .request(Method::GET, "/login/nonexistent", None, false)
@@ -55,41 +57,6 @@ async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
             StatusCode::NOT_FOUND
         );
     }
-    let bucket = Digest::sha256(format!("token:{}", fixture.peer.ip()).as_bytes());
-    for _ in 0..120 {
-        fixture
-            .policy
-            .database
-            .security()
-            .allow_request(bucket.as_bytes(), 120, std::time::Duration::from_mins(1))
-            .await
-            .expect("fill token budget");
-    }
-    assert_eq!(
-        fixture
-            .request(Method::POST, "/oauth/token", None, false)
-            .await
-            .status(),
-        StatusCode::TOO_MANY_REQUESTS
-    );
-    assert_eq!(
-        fixture
-            .request(
-                Method::POST,
-                "/webauthn/authenticate/start",
-                Some("https://auth.piquel.fr"),
-                true
-            )
-            .await
-            .status(),
-        StatusCode::ACCEPTED
-    );
-}
-/// Reads spend their budget and then get a retry delay, without draining other budgets.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn reads_exhaust_their_own_budget() {
-    let fixture = SecurityFixture::new().await;
     for _ in 0..REQUESTS_PER_MINUTE {
         assert_eq!(
             fixture
@@ -104,14 +71,52 @@ async fn reads_exhaust_their_own_budget() {
         .await;
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.headers()[header::RETRY_AFTER], "60");
+    // UserInfo calls never block code exchanges.
     assert_eq!(
         fixture
-            .request(Method::GET, passkey::LIST, None, false)
+            .request(Method::POST, "/oauth/token", None, false)
             .await
             .status(),
         StatusCode::ACCEPTED
     );
+    let bucket = Digest::sha256(format!("token:{}", fixture.peer.ip()).as_bytes());
+    for _ in 0..REQUESTS_PER_MINUTE {
+        fixture
+            .policy
+            .database
+            .security()
+            .allow_request(
+                bucket.as_bytes(),
+                REQUESTS_PER_MINUTE,
+                std::time::Duration::from_mins(1),
+            )
+            .await
+            .expect("fill token budget");
+    }
+    assert_eq!(
+        fixture
+            .request(Method::POST, "/oauth/token", None, false)
+            .await
+            .status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    for (method, path, origin, csrf) in [
+        (
+            Method::POST,
+            "/webauthn/authenticate/start",
+            Some("https://auth.piquel.fr"),
+            true,
+        ),
+        (Method::GET, passkey::LIST, None, false),
+    ] {
+        assert_eq!(
+            fixture.request(method, path, origin, csrf).await.status(),
+            StatusCode::ACCEPTED,
+            "{path}"
+        );
+    }
 }
+
 /// One client's budget is shared across replicas: alternating between them, the
 /// request after the budget is still rejected.
 #[tokio::test]

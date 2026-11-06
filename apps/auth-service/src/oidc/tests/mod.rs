@@ -3,7 +3,10 @@
 use super::*;
 use crate::config::TokenDigestKey;
 use crate::security::{BrowserCookie, RequestContext, Session};
-use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter, until_blocked};
+use crate::tests::{
+    AUTH_ORIGIN, Browser, Replicas, TlsListener, location, parameter, until_blocked,
+    verified_address,
+};
 use crate::{AuthConfig, federation::FederationApplication, web::WebApplication};
 use axum::{
     body::{Body, to_bytes},
@@ -18,7 +21,6 @@ use piquel_common::{
     protocol::claims::{Acr, IdTokenClaims},
 };
 use piquel_crypto::{KeySet, Rs256Key};
-use piquel_repository::{DatabaseConfig, InsertUser, InsertVerifiedEmail};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -62,49 +64,10 @@ impl Flow {
 
     /// Like [`Self::new`], for an issuer at `origin`.
     async fn at(origin: &str, confidential: bool, trusted: bool) -> Self {
-        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
-            .required()
-            .expect("TEST_DATABASE_URL must name a disposable PostgreSQL database");
-        let db = Database::connect(
-            DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5))
-                .expect("valid local test database configuration"),
-        )
-        .await
-        .expect("connect to the disposable PostgreSQL database");
-        db.run_migrations()
-            .await
-            .expect("apply test database migrations");
-        let user_id = UserId::new();
-        let mut tx = db.begin().await.expect("begin test account transaction");
-        tx.users()
-            .insert(&InsertUser {
-                id: user_id,
-                handle: Handle::parse(&format!("oidc-{}", &user_id.to_string()[24..]))
-                    .expect("handle"),
-                display_name: "OIDC Test".into(),
-            })
-            .await
-            .expect("insert test account");
-        tx.emails()
-            .insert_verified(&InsertVerifiedEmail {
-                id: piquel_common::EmailId::new(),
-                user_id,
-                normalized_email: format!("{user_id}@example.com"),
-                is_primary: true,
-                verified_at: Utc::now(),
-            })
-            .await
-            .expect("insert verified test email");
-        let cookie = Session::create(
-            &mut tx,
-            RequestContext::TEST,
-            user_id,
-            AuthenticationMethod::Passkey.into(),
-        )
-        .await
-        .expect("create test browser session");
-        let cookie = format!("{}={}", BrowserCookie::Session.as_str(), cookie.encoded());
-        tx.commit().await.expect("commit test account transaction");
+        let db = Replicas::database().await;
+        let browser = Browser::new_account(&db).await;
+        let (user_id, cookie) = (browser.user_id, browser.cookie);
+        verified_address(&db, user_id, &format!("{user_id}@example.com"), true).await;
         let client = ClientRegistration {
             kind: if confidential {
                 ClientKind::Confidential
