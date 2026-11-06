@@ -416,37 +416,65 @@ async fn pruning_refuses_broken_chains_and_leaves_a_working_anchor() {
     assert_eq!(pruned.len(), 2);
 }
 
-/// The dashboard's audit page judges each checkpoint by `audit prune`'s rules:
-/// from a break on, none may be pruned through, and once pruned, the page starts
-/// after the anchor.
+/// The dashboard's audit page verifies nothing: it shows the newest verification
+/// recorded, so a break shows only once an operator verifies again, and judges each
+/// checkpoint by `audit prune`'s rules against that verification. Once pruned, the
+/// page starts after the anchor.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_audit_page_says_where_pruning_is_allowed() {
-    let pruning = async |fixture: &Fixture, after| {
+async fn the_audit_page_shows_the_newest_recorded_verification() {
+    let page = async |fixture: &Fixture, after| {
         AuditChain::new(fixture.database.clone())
-            .page(&fixture.keys, after)
+            .page(after)
             .await
             .expect("page")
-            .checkpoints
-            .into_iter()
-            .map(|checkpoint| (checkpoint.point.position, checkpoint.pruning))
+    };
+    let pruning = |page: &AuditPage| {
+        page.checkpoints
+            .iter()
+            .map(|checkpoint| (checkpoint.point.position, checkpoint.pruning.clone()))
             .collect::<Vec<_>>()
     };
+    let verify = async |fixture: &Fixture| {
+        AdminService::new(fixture.database.clone(), false)
+            .verify_audit_chain(&operator(), &fixture.keys)
+            .await
+            .expect("verification")
+    };
     let broken = Fixture::sealed_six().await;
+    let unverified = page(&broken, None).await;
+    assert_eq!(unverified.verified, None);
     assert_eq!(
-        pruning(&broken, None).await,
-        [(3, Pruning::Prunable), (6, Pruning::Prunable)]
+        unverified.chain.newest.map(|newest| newest.position),
+        Some(6)
     );
+    let intact = verify(&broken).await;
     broken
         .tamper(Tamper::EditPayload(5, serde_json::json!({})))
         .await;
+    let stale = page(&broken, None).await;
+    assert_eq!(
+        pruning(&stale),
+        [(3, Pruning::Prunable), (6, Pruning::Prunable)]
+    );
+    assert_eq!(
+        stale.verified.map(|verified| verified.verification),
+        Some(intact)
+    );
+    let found = verify(&broken).await;
     let at = ChainBreak {
         position: 5,
         problem: ChainProblem::EventChanged,
     };
+    assert_eq!(found.broken.as_ref(), Some(&at));
+    let reverified = page(&broken, None).await;
     assert_eq!(
-        pruning(&broken, None).await,
+        pruning(&reverified),
         [(3, Pruning::Prunable), (6, Pruning::Broken(at))]
+    );
+    assert_eq!(
+        reverified.verified.map(|verified| verified.verification),
+        Some(found)
     );
 
     let pruned = Fixture::sealed_six().await;
@@ -454,9 +482,12 @@ async fn the_audit_page_says_where_pruning_is_allowed() {
         .prune_audit_chain(&operator(), &pruned.keys, 3)
         .await
         .expect("prune");
-    assert_eq!(pruning(&pruned, None).await, [(6, Pruning::Prunable)]);
     assert_eq!(
-        pruning(&pruned, Some(0)).await,
+        pruning(&page(&pruned, None).await),
+        [(6, Pruning::Prunable)]
+    );
+    assert_eq!(
+        pruning(&page(&pruned, Some(0)).await),
         [(3, Pruning::Pruned { anchor: 3 }), (6, Pruning::Prunable)]
     );
 }

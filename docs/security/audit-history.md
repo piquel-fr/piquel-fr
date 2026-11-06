@@ -154,11 +154,17 @@ auth-service audit verify --key preview-key.pub
 `--output json` prints the same result as JSON. Run from a trusted build, the
 CLI is the authoritative check: a compromised server could answer anything.
 
-The admin dashboard's Audit tab shows the same verification, through the same
-`AdminService` operation. It verifies the whole history on every load, within the
-dashboard's 30-second request deadline, so on a very long unpruned history use the
-CLI. It checks against the environment's committed key, or,
-on a preview, which commits none, against the server's own key, and says so.
+Every verification is recorded as an `audit_chain_verified` event, with the
+operator and what it found. The admin dashboard's Audit tab shows the newest one
+and when it was made, beside the chain as stored, so loading it costs the same
+however long the history. It recomputes nothing until an administrator presses
+**Verify now**, which runs the same `AdminService` operation as the CLI, within
+the dashboard's 30-second request deadline, so on a very long unpruned history
+use the CLI. It checks against the environment's committed key, or, on a
+preview, which commits none, against the server's own key, and says so. Someone
+with auth's database role can record a verification that says the chain is
+intact, as they can any event, so the tab tells you what the last check found,
+not that the chain is intact now: verify again before relying on it.
 
 To detect truncation, also compare the published checkpoints with copies kept
 elsewhere; see [Limits](#limits).
@@ -185,8 +191,9 @@ deployed environment, only the `migrate` job gets the owner's credentials, by
 design, and piqueld runs jobs only before a rollout, so pruning there is not
 supported yet: it needs a one-off job with those credentials. Until then, history
 is kept. The dashboard therefore never prunes. Its Audit tab lists the
-checkpoints after the anchor, says by the same rules whether the chain may be
-pruned through each, and shows the command that would.
+checkpoints after the anchor, says by the same rules, against the newest recorded
+verification, whether the chain may be pruned through each, and shows the command
+that would. The command verifies again first.
 
 ## Rotating the audit key
 

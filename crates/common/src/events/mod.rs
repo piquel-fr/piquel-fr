@@ -27,6 +27,7 @@ pub use payload::{
 use crate::{
     AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
     PictureId, Provider, RecoveryId, SessionId, TokenId,
+    admin::AuditVerification,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
     protocol::jwt::KeyId,
@@ -385,6 +386,9 @@ pub enum DomainEvent {
         /// How many events were deleted.
         deleted: u64,
     },
+    /// The audit chain was verified, by `auth-service audit verify` or from the
+    /// dashboard, with what that found. It concerns no account.
+    AuditChainVerified(AuditVerification),
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -411,6 +415,7 @@ impl DomainEvent {
                 inline: Some(InlineSignIn { origin, .. }),
                 ..
             } => origin.version(),
+            Self::AuditChainVerified(verification) => verification.version(),
             _ => Self::FIRST_VERSION,
         }
     }
@@ -482,6 +487,7 @@ impl DomainEvent {
             | Self::AccountRestored {}
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
+            | Self::AuditChainVerified(_)
             | Self::Imported(_) => None,
         }
     }
@@ -545,6 +551,7 @@ impl DomainEvent {
             | Self::AccountRestored {}
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
+            | Self::AuditChainVerified(_)
             | Self::Imported(_) => None,
         }
     }
@@ -608,6 +615,7 @@ impl DomainEvent {
             Self::AccountRestored {} => "account_restored",
             Self::AccountPurged {} => "account_purged",
             Self::AuditHistoryPruned { .. } => "audit_history_pruned",
+            Self::AuditChainVerified(_) => "audit_chain_verified",
             Self::Imported(_) => "imported",
         }
     }
