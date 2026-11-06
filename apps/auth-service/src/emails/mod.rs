@@ -8,7 +8,7 @@
 //!
 //! The token is never stored, not even in the delivery that sends it: it is
 //! derived from the address's ID with [`VerificationKeys`], once here to store its
-//! digest, and again by the email sender. See `docs/architecture/delivery-queue.md`.
+//! digest, and again by the email sender. See `docs/dev/architecture/delivery-queue.md`.
 use crate::{
     account::{AccountError, AccountService, ConfirmedOwner, Owner, Subject, Viewer},
     config::{EmailConfig, LinkKeys},

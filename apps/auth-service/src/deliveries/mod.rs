@@ -6,7 +6,7 @@
 //! a worker that stops after sending but before recording lets its lease expire,
 //! and the delivery is sent again. Workers count each attempt's outcome, and every
 //! replica measures each channel's backlog for the queue's gauges. See
-//! `docs/architecture/delivery-queue.md`.
+//! `docs/dev/architecture/delivery-queue.md`.
 
 /// Back-channel logout tokens, [`BackchannelLogoutSender`].
 mod backchannel;

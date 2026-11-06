@@ -3,8 +3,8 @@
 The TypeScript SDK for [auth.piquel.fr](https://auth.piquel.fr). It is ESM only and
 has no runtime dependencies: it uses `fetch` and WebCrypto, so it runs in browsers,
 Node 22+, Bun and Cloudflare Workers. It follows the
-[SDK design](../../docs/architecture/sdk.md) and passes the shared
-[test vectors](../../tests/sdk-vectors/README.md), as the Rust SDK does.
+[SDK design](https://github.com/piquel-fr/piquel-fr/blob/main/docs/dev/architecture/sdk.md) and passes the shared
+[test vectors](https://github.com/piquel-fr/piquel-fr/blob/main/tests/sdk-vectors/README.md), as the Rust SDK does.
 
 ## Resource servers
 
@@ -226,8 +226,8 @@ const notes = await session.fetch('https://notes.example/notes');
   so a page whose request asked for it does not ask again within a minute of that
   restore's return.
 - `signInWithPasskey` signs in on the page itself, through WebAuthn related
-  origins, for a trusted client whose origin auth approved (see auth's README,
-  "Passkey sign-in on an application's own pages"). When it needs auth's pages, it
+  origins, for a trusted client whose origin auth approved (see
+  [passkey sign-in on your own pages](https://github.com/piquel-fr/piquel-fr/blob/main/docs/user/apps/passkey-sign-in.md)). When it needs auth's pages, it
   sends the browser there with the pushed request: the same one when auth left it
   unclaimed (the browser lacks related origins, or start answered
   `interaction_required`), and a fresh one after any other failure, since auth may

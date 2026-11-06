@@ -4,9 +4,9 @@ Recovery binds a new passkey to an existing account: the same `UserId` and the
 same `sub`. It never moves data or changes identity. Piquel has one recovery
 path today, run by support: an operator at the terminal, or an administrator
 from the dashboard. This document states its policy as built, as testable
-invariants, each naming the test that pins it. It is part
-of [#85](https://github.com/piquel-fr/piquel-fr/issues/85), which also designs
-self-service recovery; [What is left](#what-is-left) lists the rest.
+invariants, each naming the test that pins it. Self-service recovery is
+designed in [#85](https://github.com/piquel-fr/piquel-fr/issues/85) but not
+built; [limits](#limits) lists what is missing.
 
 Recovery is the weakest link of a passkey-first system. Phishing-resistant
 passkeys mean little if someone can talk their way around them, so the most
@@ -406,7 +406,7 @@ cannot shadow `account_recoveries`
 
 ## Threat model
 
-The operator path, against #85's threats.
+The operator path, against the threats [#85](https://github.com/piquel-fr/piquel-fr/issues/85) lists.
 
 | Threat | What the operator path does |
 | --- | --- |
@@ -414,35 +414,31 @@ The operator path, against #85's threats.
 | Channel takeover | The link goes to the primary (L2), so a hijacked mailbox gets it; the evidence policy never relies on that mailbox alone. The link holder can't change addresses, add a way in or redirect the next link (P1, L2). Every verified address hears of it (C2), and so does the owner the next time they sign in with an older passkey (C3). A social identity is never a recovery method. |
 | Social engineering of the operator | The main way to attack this design. A plain recovery gets the attacker a probation sign-in at most, which the owner's older passkey undoes (U1) or support does (U5), and support can't be talked into removing older passkeys meanwhile (U1a), nor into outlasting the undo by disabling the account (U4a). A `--revoke` recovery takes the owner's own undo away, so it needs a higher bar of evidence, and it notifies every verified address at once, so a kept passkey can cancel it (S5). A second recovery needs the first undone (S2), the listing shows earlier attempts (S6), and administrators are never recovered or made mid-recovery (A1). |
 | Stolen older passkey | It grants everything with or without a recovery (X1). Support recovers with `--revoke` (S5). |
-| Insider or database access | Database access is the root of trust (see [NIST](#nist-sp-800-63b-4)): an operator can do anything. CLI changes record `Actor::Cli` with `$USER` and the host, and the reason; the owner sees that an operator acted. Tamper evidence is #31. |
+| Insider or database access | Database access is the root of trust (see [NIST](#nist-sp-800-63b-4)): an operator can do anything. CLI changes record `Actor::Cli` with `$USER` and the host, and the reason; the owner sees that an operator acted, and the [audit history](audit-history.md) makes the record tamper-evident. |
 | Close-proximity attacker | As for a mailbox: a probation sign-in, notices to every address, the sign-in prompt, and undo by an older passkey. |
-| Harassment | Only support starts recoveries, and each mails one link to one address. Dedicated recovery rate limits (#86) are not built yet. |
+| Harassment | Only support starts recoveries, and each mails one link to one address. Dedicated recovery rate limits ([#86](https://github.com/piquel-fr/piquel-fr/issues/86)) are not built yet. |
 | Lockout | The path exists for it. With only the recovered passkey, the owner can't change security settings or add a second passkey for 15 days; if they lose the recovered passkey meanwhile, support undoes the recovery and starts another (U5, S2). |
 
-## Decisions that replace #85's sketch
+## Design choices
 
-- **Immediate recovery with a 15-day probation, not a 7-day wait.** A wait adds no
-  evidence; it only gives the owner time to object. The operator path serves an
-  owner who is locked out now, so it signs them in at once. For 15 days, the
-  owner can undo it with a passkey from before it, which is stronger than
-  noticing an email.
-- **#85's restriction, at the credential.** #85 sketched sessions from the
-  recovered passkey reporting an AAL1-grade `acr`, and a restriction checked in
-  `Confirmed`. This path does it where the passkey is accepted: the recovered
-  passkey never confirms, so it reports `acr` Social and every confirmation gate
-  refuses it, the admin dashboard and relying parties included. It needs no new `acr`
+- **Immediate recovery with a 15-day probation, not a waiting period.** A wait
+  adds no evidence; it only gives the owner time to object. The operator path
+  serves an owner who is locked out now, so it signs them in at once. For 15
+  days, the owner can undo it with a passkey from before it, which is stronger
+  than noticing an email.
+- **The restriction lives on the credential.** The recovered passkey never
+  confirms, so it reports `acr` Social and every confirmation gate refuses it,
+  the admin dashboard and relying parties included. This needs no new `acr`
   value, which older releases and SDKs would not know.
-- **A fixed undo.** The sketch rolled back the recovered passkey, sessions,
-  refresh families and consents. That is the whole list here too, because the
-  probation leaves nothing else to take back. A consent is withdrawn whatever
-  its age, which needs no record of when it was given.
+- **A fixed undo.** Undoing takes back the recovered passkey, sessions, refresh
+  families and consents: the probation leaves nothing else to take back. A
+  consent is withdrawn whatever its age, which needs no record of when it was
+  given.
 - **No account is recovered while it holds administrator rights,** and none
-  becomes an administrator mid-recovery. The sketch let the CLI recover
-  administrators.
-
-Other differences: the recovered passkey is recorded on the recovery
-(`account_recoveries.passkey_id`) and in its `RecoveryCompleted` event, not in a
-`recovered_by` column on the passkey; the link lives 24 hours from its start.
+  becomes an administrator mid-recovery.
+- The recovered passkey is recorded on the recovery
+  (`account_recoveries.passkey_id`) and in its `RecoveryCompleted` event, and the
+  link lives 24 hours from its start.
 
 ## NIST SP 800-63B-4
 
@@ -540,14 +536,14 @@ Mid-recovery, nobody may remove an older passkey (U1a). A request to remove
 link. If the owner is confirmed, undo the recovery and start again with
 `--revoke`.
 
-## What is left
+## Limits
 
-From #85, not built by this path:
+Not built yet, from [#85](https://github.com/piquel-fr/piquel-fr/issues/85):
 
 - Self-service recovery: a saved recovery key plus an issued email code, the
   NIST-compliant path, with its pages. It would create the same
   `account_recoveries` row with other evidence, and get the same probation.
 - Passkey backup-state warnings and prompts for a second passkey, in settings
   and the security center: prevention first.
-- Dedicated rate limits on recovery endpoints (#86); only the general per-IP
+- Dedicated rate limits on recovery endpoints ([#86](https://github.com/piquel-fr/piquel-fr/issues/86)); only the general per-IP
   request budget covers them today.

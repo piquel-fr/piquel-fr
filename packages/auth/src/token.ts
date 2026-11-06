@@ -300,7 +300,7 @@ export class LogoutToken {
   }
 }
 
-/** @internal Validates an issuer's tokens, running the checks of docs/architecture/sdk.md in order. */
+/** @internal Validates an issuer's tokens, running the checks of docs/dev/architecture/sdk.md in order. */
 export class TokenValidator {
   readonly #issuer: string;
   readonly #algorithms: readonly Algorithm[];

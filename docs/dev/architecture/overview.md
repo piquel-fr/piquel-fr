@@ -12,7 +12,7 @@ is authentication, with its account settings, and the admin dashboard.
 
 The crates under `crates/` (`piquel-common`, `piquel-crypto`, `piquel-auth`, the
 Rust SDK, `piquel-repository`, `piquel-telemetry` and `piquel-ui`) are described
-in [rust-conventions.md](rust-conventions.md#crates).
+in [rust-conventions.md](../rust-conventions.md#crates).
 
 Prettier and type-aware ESLint cover all web code from the root configuration, as
 rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
@@ -55,7 +55,8 @@ consume standard OIDC. Any account registers its own clients in the developer
 console, at `/developers`, and operators manage clients with
 `auth-service client`.
 
-[surfaces.md](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
-admin.piquel.fr each serve. Build/configuration and testing instructions are in
-the root README; every task runs through `just`. Deployment uses piqueld (`infra/README.md`). The Rust SDK for
-applications follows [sdk.md](sdk.md).
+[Surfaces](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
+admin.piquel.fr each serve. Every task runs through `just`: see
+[getting started](../getting-started.md) and [testing](../testing.md).
+Deployment uses piqueld ([deploying](../operations/deploying.md)). The SDKs for
+applications follow the [SDK design](sdk.md).

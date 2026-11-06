@@ -2,7 +2,7 @@
 # piquel.fr on piqueld. The environments below are the application's only ones:
 # staging builds `main` on every push, production only receives releases
 # promoted from staging, and previews deploy branches or local worktrees. See
-# infra/README.md.
+# docs/dev/operations/deploying.md.
 api_version = "piqueld.dev/v1alpha1"
 kind = "Application"
 
@@ -21,14 +21,15 @@ branch = "main"
 # instead of competing for another one's. Neither do `smtp_secret`, the stored
 # Resend key an environment sends with, and `email_from`: production sends as
 # piquel.fr with its own key, staging and previews as dev.piquel.fr with
-# another, so their mail never spends production's reputation. See "Email" in
-# infra/README.md.
+# another, so their mail never spends production's reputation. See
+# docs/dev/operations/email.md.
 [spec.variables]
 invite_required = "true"
 # Previews sign audit checkpoints with a generated key. Staging and production
-# use stored keys whose verifier keys are committed in docs/security/audit-key.pub.
+# use stored keys whose verifier keys are committed in docs/dev/security/audit-key.pub.
 audit_key = "audit-key"
-# See "Running several replicas" in infra/README.md before raising it.
+# See "Running several replicas" in docs/dev/operations/deploying.md before
+# raising it.
 auth_replicas = 1
 # Where auth, with the admin dashboard it serves, and piquel.fr's web server
 # send telemetry: the `telemetry` application's collector, imported below.
@@ -38,8 +39,8 @@ otlp_endpoint = "http://collector.telemetry:4318"
 # secret is then mounted but never read, so environments without the provider
 # mount the unused placeholder. Production and staging each have their own OAuth
 # apps, whose secrets are stored by hand; previews have none, since providers
-# only redirect back to the callback URLs registered with them. See "Sign-in
-# providers" in infra/README.md.
+# only redirect back to the callback URLs registered with them. See
+# docs/dev/operations/sign-in-providers.md.
 github_client_id = ""
 github_secret = "no-provider-secret"
 google_client_id = ""
@@ -95,8 +96,9 @@ invite_required = "false"
 otlp_endpoint = ""
 
 # piquel.fr, its own web server: the homepage and the policies. It redirects
-# every other path, with its query, to the same one on auth, so links sent
-# before the settings moved still work. See "Web" in infra/README.md.
+# every other path, with its query, to the same one on auth, so links to
+# piquel.fr's settings paths keep working. See "piquel.fr" in
+# docs/dev/operations/deploying.md.
 [[spec.routes]]
 name = "web"
 hostname = "${{ vars.web_host }}"
@@ -161,21 +163,25 @@ generate = { type = "random", bytes = 32, encoding = "base64url" }
 
 # The current token digest key: it digests refresh tokens, codes and pending
 # logins, and email verification and recovery links derive from it. Change it
-# only as "Changing the token digest key" in README.md describes.
+# only as "Changing the token digest key" in docs/dev/operations/signing-keys.md
+# describes.
 [[spec.secrets]]
 name = "token-digest-key"
 generate = { type = "random", bytes = 32, encoding = "base64url" }
 
 # The signing key before keys moved to the database. The `signing-key-import`
 # job imports it. It was the token digest key until `token-digest-key` took
-# over, and stays accepted until digests under it expire (see infra/README.md).
+# over, and stays accepted until digests under it expire. Once
+# `auth-service keys digest-usage` lists only `current` keys, remove this
+# secret together with its mount, `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` and the
+# `signing-key-import` job.
 [[spec.secrets]]
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
 
 # The Ed25519 seed that signs a preview's audit checkpoints, apart from the OIDC
 # signing key so the two rotate independently. Staging and production mount
-# stored seeds instead. See docs/security/audit-history.md.
+# stored seeds instead. See docs/dev/security/audit-history.md.
 [[spec.secrets]]
 name = "audit-key"
 generate = { type = "random", bytes = 32, encoding = "hex" }
@@ -264,14 +270,14 @@ target = "/run/secrets/signing-key"
 name = "${{ vars.audit_key }}"
 target = "/run/secrets/audit-key"
 
-# Set by hand with `piquelctl app secret`, not generated: see "Email" in
-# infra/README.md.
+# Set by hand with `piquelctl app secret`, not generated: see
+# docs/dev/operations/email.md.
 [[spec.services.secrets]]
 name = "${{ vars.smtp_secret }}"
 target = "/run/secrets/smtp-password"
 
 # Stored by hand like the Resend key, or the unused placeholder where the
-# provider is off: see "Sign-in providers" in infra/README.md.
+# provider is off: see docs/dev/operations/sign-in-providers.md.
 [[spec.services.secrets]]
 name = "${{ vars.github_secret }}"
 target = "/run/secrets/github-client-secret"

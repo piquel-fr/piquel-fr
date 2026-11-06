@@ -230,7 +230,7 @@ impl LinkKeys {
 }
 
 /// The key that signs audit checkpoints: an Ed25519 key of its own, so it rotates
-/// independently of the OIDC signing keys. See `docs/security/audit-history.md`.
+/// independently of the OIDC signing keys. See `docs/dev/security/audit-history.md`.
 #[derive(Clone)]
 pub struct AuditConfig {
     /// Signs checkpoints as `<auth host>/audit`.
@@ -282,7 +282,7 @@ impl AuditConfig {
     }
 
     /// The name and public key that verify checkpoints, to commit to
-    /// `docs/security/audit-key.pub`.
+    /// `docs/dev/security/audit-key.pub`.
     #[must_use]
     pub fn verifier(&self) -> &NoteVerifier {
         self.key.verifier()

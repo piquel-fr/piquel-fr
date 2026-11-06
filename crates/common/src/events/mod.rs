@@ -414,7 +414,7 @@ impl DomainEvent {
     /// The payload version stored with the event. A change an older release could
     /// not decode, such as a new variant of an enum inside a payload, gets the next
     /// version of that kind, written only by the events that use it, so older
-    /// releases still read the others. See `docs/architecture/database-crate.md`.
+    /// releases still read the others. See `docs/dev/architecture/database.md`.
     #[must_use]
     pub const fn version(&self) -> i16 {
         match self {

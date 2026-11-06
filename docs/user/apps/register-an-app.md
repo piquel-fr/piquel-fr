@@ -1,14 +1,15 @@
-# Managing your own OIDC clients
+# Registering an app
 
 Any account can register OIDC clients for its own applications in the developer
 console, at `auth.piquel.fr/developers` (`piquel.fr/developers` redirects there).
 Operators manage first-party clients with `auth-service client` instead (see
-"OIDC clients" in the README), and those never appear in the console.
+[OIDC clients](../../dev/operations/clients.md)), and those never appear in the
+console.
 
 The console's pages are auth's own, under its session cookie. "Confirmed" means a
 passkey confirmation of the session from the last five minutes. A page asks for it
 before it posts a change that needs one, and a change posted without one is refused
-and asked again (see [step-up authentication](step-up-authentication.md)).
+and asked again (see [step-up authentication](step-up.md)).
 
 | Page | Needs | Does |
 | --- | --- | --- |
@@ -34,7 +35,7 @@ again.
 | Scopes | Any of `openid`, `profile`, `email` and `offline_access`; `openid profile email` by default |
 | Refresh tokens | Whether the app may receive refresh tokens when it requests `offline_access`; off by default |
 | Pushed requests | Whether the app must push its authorization requests to `/oauth/par` (RFC 9126), so none of their parameters travel through the browser; off by default |
-| Back-channel logout URI | Where auth tells the app that a user's session ended ([back-channel logout](../../README.md#back-channel-logout)), under the same rules as redirect URIs; none by default. The SDKs serve it beside their login routes, e.g. at `https://app.example/auth/backchannel-logout`, for an app that gives them a logout handler; without one, its sessions end at their next refresh, within five minutes. Auth posts only to HTTPS URIs with public addresses |
+| Back-channel logout URI | Where auth tells the app that a user's session ended ([back-channel logout](back-channel-logout.md)), under the same rules as redirect URIs; none by default. The SDKs serve it beside their login routes, e.g. at `https://app.example/auth/backchannel-logout`, for an app that gives them a logout handler; without one, its sessions end at their next refresh, within five minutes. Auth posts only to HTTPS URIs with public addresses |
 
 Auth chooses the ID, `c_` followed by 20 random characters, so nobody can claim a
 name like `piquel-admin`. Your apps are never trusted: users always see the

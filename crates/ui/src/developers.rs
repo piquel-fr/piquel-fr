@@ -28,7 +28,7 @@ const RUST_SDK: &str = "https://github.com/piquel-fr/piquel-fr/tree/main/crates/
 const TYPESCRIPT_SDK: &str = "https://github.com/piquel-fr/piquel-fr/tree/main/packages/auth";
 /// The guide to asking for a passkey before sensitive actions.
 const STEP_UP_GUIDE: &str =
-    "https://github.com/piquel-fr/piquel-fr/blob/main/docs/guides/step-up-authentication.md";
+    "https://github.com/piquel-fr/piquel-fr/blob/main/docs/user/apps/step-up.md";
 
 /// What an app's page says when the account has no such app.
 pub const MISSING: &str = "This app does not exist, or it is not yours.";

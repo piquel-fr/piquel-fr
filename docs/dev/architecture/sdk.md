@@ -3,7 +3,7 @@
 Applications integrate with auth.piquel.fr through its Rust SDK, `piquel-auth`, its
 TypeScript SDK, `@piquel/auth`, or any OpenID Connect library. Both SDKs follow this
 document and pass the shared vectors in
-[`tests/sdk-vectors`](../../tests/sdk-vectors/README.md); an SDK in another language
+[`tests/sdk-vectors`](https://github.com/piquel-fr/piquel-fr/blob/main/tests/sdk-vectors/README.md); an SDK in another language
 would do the same, so every SDK accepts and rejects the same tokens and challenges.
 The Rust SDK is the reference implementation, and the TypeScript SDK mirrors its
 behavior and names.
@@ -286,7 +286,7 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
   refresh whose session would not fit serves its request and leaves the cookie as
   it was, for the next request to refresh again. A typical session takes some
   2.5 KB; a long profile, many scopes, or access tokens that copy the profile
-  (#279) make it larger.
+  ([#279](https://github.com/piquel-fr/piquel-fr/issues/279)) make it larger.
 - **Refresh.** The login routes take only confidential clients, whose refresh
   tokens auth does not rotate, and every login requests `offline_access`, which the
   client's registration must allow. A request
@@ -346,7 +346,7 @@ sooner handles back-channel logout.
 
 Changing the cookie key signs every user out of the app, but ends no grant at auth.
 Whoever holds a leaked key can open captured cookies and read their refresh tokens,
-which stay valid until auth's session ends and no longer rotate (#384), so only the
+which stay valid until auth's session ends and do not rotate, so only the
 client secret then stands between them and new tokens. So after a leak, change the
 key and rotate the client secret with no grace period too: `just auth client
 rotate-secret <id> --grace 0`, or "at once" on the app's Secrets tab in the

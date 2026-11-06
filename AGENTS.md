@@ -10,6 +10,7 @@ This repository contains everything under the piquel.fr domain:
 - `packages/auth`: the TypeScript SDK.
 - `infra/`: Dockerfiles and piqueld deployments.
 - `tests/browser` (Playwright) and `tests/sdk-vectors` (cases every SDK passes).
+- `docs/`: the documentation book, a user guide and a contributor guide.
 
 This is still very early development. Breaking changes are expected. There are
 no real users yet so breaking things doesn't matter.
@@ -18,8 +19,10 @@ no real users yet so breaking things doesn't matter.
 
 When adding a feature, make sure all our surfaces get the feature as
 appropriate. This includes the operator CLI (`apps/auth-service/src/cli`), the
-developer console, the user settings, the admin panel and the SDKs. All surfaces
-should support all features. Don't let anything be left behind.
+developer console, the user settings, the admin panel, the SDKs and the
+documentation. All surfaces should support all features. Don't let anything be
+left behind. A feature ships with its documentation in the same pull request:
+use the `piquel-docs` skill.
 
 The CLI is the most complete surface. An admin operation may stay CLI-only
 (`AdminApplication::page()` in `apps/auth-service/src/web/admin/mod.rs` maps
@@ -28,4 +31,4 @@ it to `None`) only with a documented reason next to its arm, as `PurgeUser` and
 
 Generated files are committed; regenerate them with `just db prepare` (SQLx
 cache), `just sdk-vectors` and `just sdk-types`. `just validate` is the local
-check.
+check, and `just docs` checks the documentation.

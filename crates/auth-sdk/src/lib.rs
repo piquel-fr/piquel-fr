@@ -89,7 +89,7 @@
 //! `piquel_common` target, with its method, host and status only, as OpenTelemetry's
 //! HTTP client conventions name them.
 //!
-//! The behavior follows `docs/architecture/sdk.md` in the piquel-fr repository, and is
+//! The behavior follows `docs/dev/architecture/sdk.md` in the piquel-fr repository, and is
 //! tested against the shared vectors in `tests/sdk-vectors`.
 
 // Documented by its own inner docs, so their links resolve inside the module.

@@ -7,7 +7,7 @@ import type {
   StepUpRequirement
 } from './protocol.ts';
 
-/** Why a token failed validation, in the order of the checks (docs/architecture/sdk.md). */
+/** Why a token failed validation, in the order of the checks (docs/dev/architecture/sdk.md). */
 export type TokenReason = Extract<
   ErrorReason,
   | 'malformed'

@@ -70,7 +70,7 @@ const GITLAB_CLIENT_SECRET: Variable = Variable::new("AUTH_GITLAB_CLIENT_SECRET"
 ```
 
 The provider is enabled only when both variables are set. Add them to the
-environment table in `README.md`.
+table in [configuration](../operations/configuration.md).
 
 ## 4. Write the provider module
 
@@ -134,4 +134,4 @@ https://<auth origin>/login/gitlab/callback
 
 Set `AUTH_GITLAB_CLIENT_ID` and `AUTH_GITLAB_CLIENT_SECRET`, then restart the
 service. The provider then appears on the sign-in page. Add the callback URL
-and scopes to the provider list in `README.md`.
+and scopes to [sign-in providers](../operations/sign-in-providers.md).

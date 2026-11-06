@@ -208,7 +208,7 @@ impl PasskeyApplication {
 
     /// Starts handle-based authentication or lets the authenticator identify the account.
     ///
-    /// Handles are public (`docs/security/handles.md`), so a handle without an active
+    /// Handles are public (`docs/dev/security/handles.md`), so a handle without an active
     /// account or passkey is refused at once, before any ceremony. Text that is not a
     /// handle names no account, so it is refused the same way.
     pub(super) async fn start_login(
