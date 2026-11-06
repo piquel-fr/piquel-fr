@@ -111,6 +111,23 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
+/// The account's inbox. Listing and reading are shared settings operations;
+/// marking read or unread is the owner's alone.
+pub(crate) mod notifications {
+    /// Lists the account's notifications, newest first.
+    pub(crate) const LIST: &str = "/account/notifications";
+    /// How many are unread.
+    pub(crate) const UNREAD: &str = "/account/notifications/unread";
+    /// Marks every one read.
+    pub(crate) const READ_ALL: &str = "/account/notifications/read";
+    /// One notification.
+    pub(crate) const ITEM: &str = "/account/notifications/{id}";
+    /// Marks one read.
+    pub(crate) const READ: &str = "/account/notifications/{id}/read";
+    /// Marks one unread.
+    pub(crate) const MARK_UNREAD: &str = "/account/notifications/{id}/unread";
+}
+
 /// The account's sessions, one per signed-in browser.
 pub(crate) mod sessions {
     /// Lists the account's active sessions, most recently active first.
@@ -228,6 +245,10 @@ pub(crate) mod page {
     pub(crate) mod settings {
         /// The account at a glance.
         pub(crate) const HOME: &str = "/settings";
+        /// The inbox.
+        pub(crate) const NOTIFICATIONS: &str = "/settings/notifications";
+        /// One notification of the inbox.
+        pub(crate) const NOTIFICATION: &str = "/settings/notifications/{id}";
         /// Sign-in methods: passkeys and social sign-in.
         pub(crate) const SIGN_IN: &str = "/settings/sign-in";
         /// The profile: its handle, display name and picture.
@@ -271,7 +292,7 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 22] = [
+    pub(crate) const ALL: [&str; 24] = [
         LOGIN,
         REGISTER,
         CONSENT,
@@ -279,6 +300,8 @@ pub(crate) mod page {
         ADMIN,
         PREFERENCES,
         settings::HOME,
+        settings::NOTIFICATIONS,
+        settings::NOTIFICATION,
         settings::SIGN_IN,
         settings::PROFILE,
         settings::EMAILS,

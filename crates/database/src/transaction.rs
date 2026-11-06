@@ -31,7 +31,8 @@ impl<'a> DatabaseTransaction<'a> {
     }
 
     /// Records `event`, caused as `context` says and concerning the `subject`
-    /// account, in this transaction, with the outbound deliveries it causes: they
+    /// account, in this transaction, with the notification it gives the subject
+    /// ([`DomainEvent::notification`]) and the outbound deliveries it causes: they
     /// all commit or roll back with the change they describe. An operation that
     /// changes nothing, such as a failed sign-in, records its event in a
     /// transaction of its own. Once the transaction commits, each event is logged
@@ -58,6 +59,11 @@ impl<'a> DatabaseTransaction<'a> {
         event: DomainEvent,
     ) -> Result<(), DatabaseError> {
         let id = self.events().insert(context, subject, &event).await?;
+        if let Some((user, notification)) = subject.zip(event.notification(&context.actor)) {
+            self.notifications()
+                .insert(user, Some(id), &notification)
+                .await?;
+        }
         C::fan_out(self, id, subject, &event).await?;
         self.recorded.push(Committed {
             id,

@@ -1,10 +1,12 @@
 //! The export's JSON shape, which downloads keep across releases.
 use super::*;
 use crate::history::{ClientView, HistoryItem};
+use crate::notifications::NotificationItem;
 use chrono::TimeZone;
 use piquel_common::{
-    AuthenticationMethod, ClientId, EmailId, EventId, TokenId,
+    AuthenticationMethod, ClientId, EmailId, EventId, NotificationId, TokenId,
     events::{Browser, HistoryActor, HistoryEntry, Platform, UserAgentFamily},
+    notifications::Notification,
 };
 use piquel_repository::{RecoveryPasskey, StoredSession};
 use serde_json::json;
@@ -28,6 +30,7 @@ fn serializes_every_category_in_its_documented_shape() {
     let grant = TokenId::new();
     let event = EventId::new();
     let picture = PictureId::new();
+    let notification = NotificationId::new();
     let client: ClientId = "notes".parse().expect("client");
     let device = UserAgentFamily {
         browser: Browser::Firefox,
@@ -143,6 +146,15 @@ fn serializes_every_category_in_its_documented_shape() {
             device: Some(device),
             erased: false,
         }],
+        notifications: vec![NotificationItem {
+            id: notification,
+            created_at: at,
+            read_at: None,
+            event_id: Some(event),
+            notification: Notification::AccountEnabled,
+            subject: Notification::AccountEnabled.subject(),
+            body: Notification::AccountEnabled.body(),
+        }],
     };
     assert_eq!(export.file_name(), "piquel-account-ada-2026-10-22.json");
     let time = "2026-10-22T09:30:00Z";
@@ -227,6 +239,15 @@ fn serializes_every_category_in_its_documented_shape() {
                 "ip": "192.0.2.1",
                 "device": {"browser": "firefox", "platform": "linux"},
                 "erased": false,
+            }],
+            "notifications": [{
+                "id": notification,
+                "created_at": time,
+                "read_at": null,
+                "event_id": event,
+                "kind": "account_enabled",
+                "subject": "Your account was enabled again",
+                "body": "You can sign in to it again.",
             }],
         })
     );

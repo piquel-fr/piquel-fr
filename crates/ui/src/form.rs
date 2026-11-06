@@ -19,9 +19,9 @@
 
 use crate::{
     AppChange, AppSettingsState, ConnectedAppChange, ConnectedAppsState, DataChange, DataState,
-    DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange, HistoryState, LoginChange,
-    LoginQuery, NewAppChange, ProfileChange, RecoverChange, SecretsChange, SignInChange,
-    SignInState, UndoChange,
+    DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange, HistoryState, InboxChange,
+    LoginChange, LoginQuery, NewAppChange, NotificationState, ProfileChange, RecoverChange,
+    SecretsChange, SignInChange, SignInState, UndoChange,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use piquel_common::{
@@ -253,6 +253,10 @@ fields! {
     HistoryRow(HistoryState),
     /// A row of the connected apps.
     ConnectedRow(ConnectedAppsState),
+    /// A change of the inbox.
+    Inbox(InboxChange),
+    /// A notification's page, as its query opens it.
+    NotificationRow(NotificationState),
     /// A row of an app's settings.
     AppRow(AppSettingsState),
     /// A sign-in page, as its query opens it.

@@ -3,7 +3,8 @@
 //! material: passkeys show their label, dates and backup state only.
 
 use crate::{
-    clients::OwnedClientView, emails::EmailView, history::HistoryItem, sessions::SessionItem,
+    clients::OwnedClientView, emails::EmailView, history::HistoryItem,
+    notifications::NotificationItem, sessions::SessionItem,
 };
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -67,6 +68,8 @@ pub(crate) struct AccountExport {
     recoveries: Vec<Recovery>,
     /// The security history, newest first, as the account's history page shows it.
     history: Vec<HistoryItem>,
+    /// The inbox, newest first, with when each notification was read.
+    notifications: Vec<NotificationItem>,
 }
 
 /// The account's profile.
@@ -333,6 +336,7 @@ impl AccountExport {
                 .map(OwnedClientView::from)
                 .collect(),
             history: HistoryItem::all(tx, user_id).await?,
+            notifications: NotificationItem::all(tx, user_id).await?,
             profile: user.into(),
         })
     }

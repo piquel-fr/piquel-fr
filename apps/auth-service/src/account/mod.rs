@@ -33,10 +33,13 @@ use crate::{
     grants::ConnectedApp,
     handles,
     history::{HistoryPage, HistoryQuery},
+    notifications::{NotificationPage, NotificationQuery, NotificationView},
     operations::operations,
     passkey::{DisplayName, Rename},
     pictures::PictureView,
-    routes::{apps, emails, federation, history, passkey, pictures, profile, sessions},
+    routes::{
+        apps, emails, federation, history, notifications, passkey, pictures, profile, sessions,
+    },
     security::{RequestContext, SessionError},
     sessions::{Revoked, SessionItem},
 };
@@ -48,7 +51,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    ClientId, EmailId, Handle, PasskeyId, Personal, PictureId, SessionId,
+    ClientId, EmailId, Handle, NotificationId, PasskeyId, Personal, PictureId, SessionId,
     events::DomainEvent,
     protocol::api::{Identity, Passkey},
 };
@@ -95,6 +98,10 @@ operations! {
         ViewPicture,
         /// Remove the account's profile picture.
         RemovePicture,
+        /// Page through the account's notifications, without marking any read.
+        ListNotifications,
+        /// Read one notification, without marking it read.
+        ViewNotification,
     }
 }
 
@@ -255,6 +262,8 @@ impl AccountApplication {
             Op::ChangeDisplayName => (profile::ITEM, patch(Self::change_display_name)),
             Op::ViewPicture => (pictures::OWN, get(Self::picture)),
             Op::RemovePicture => (pictures::OWN, delete(Self::remove_picture)),
+            Op::ListNotifications => (notifications::LIST, get(Self::notifications)),
+            Op::ViewNotification => (notifications::ITEM, get(Self::notification)),
         }
     }
 
@@ -420,6 +429,26 @@ impl AccountApplication {
         Query(query): Query<HistoryQuery>,
     ) -> Result<Json<HistoryPage>, AccountError> {
         Ok(Json(app.service.history(&viewer, query.before).await?))
+    }
+
+    /// Returns a page of the account's notifications, newest first.
+    async fn notifications(
+        State(app): State<Self>,
+        viewer: Viewer,
+        Query(query): Query<NotificationQuery>,
+    ) -> Result<Json<NotificationPage>, AccountError> {
+        Ok(Json(
+            app.service.notifications(&viewer, query.before).await?,
+        ))
+    }
+
+    /// Returns one notification. Reading it marks nothing read.
+    async fn notification(
+        State(app): State<Self>,
+        viewer: Viewer,
+        Path(id): Path<NotificationId>,
+    ) -> Result<Json<NotificationView>, AccountError> {
+        Ok(Json(app.service.notification(&viewer, id).await?))
     }
 }
 

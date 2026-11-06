@@ -31,6 +31,9 @@ pub mod email;
 pub mod events;
 /// Handles: an account's public identifier and login name.
 pub mod handle;
+/// What an account's owner is told about their account, in their inbox.
+#[cfg(feature = "events")]
+pub mod notifications;
 /// The auth protocol's wire documents, shared by auth and the SDKs.
 pub mod protocol;
 
@@ -419,6 +422,10 @@ uuid_id!(
 uuid_id!(
     RecoveryId,
     "Identifier of an account recovery, which its link's token is derived from."
+);
+uuid_id!(
+    NotificationId,
+    "Identifier of a notification in an account's inbox."
 );
 
 /// The W3C Trace Context ID of a request's trace: 16 bytes, not all zero, written

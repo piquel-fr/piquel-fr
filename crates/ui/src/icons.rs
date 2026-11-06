@@ -17,6 +17,8 @@ pub enum Icon {
     Profile,
     /// Email addresses.
     Mail,
+    /// Notifications.
+    Bell,
     /// Devices.
     Device,
     /// Connected apps.
@@ -72,6 +74,10 @@ impl Icon {
             Self::Home => &["M2 7.5L8 2.5l6 5V13a1 1 0 01-1 1H3a1 1 0 01-1-1z"],
             Self::Key => &["M8.5 10.5a3 3 0 11-3-3 3 3 0 013 3z", "M8 8l6-6M11 5l2 2"],
             Self::Mail => &["M2 3.5h12v9H2z", "M2 5l6 4 6-4"],
+            Self::Bell => &[
+                "M4 11.5V7a4 4 0 018 0v4.5l1.5 1.5h-11z",
+                "M6.5 14a1.5 1.5 0 003 0",
+            ],
             Self::Device => &["M2 2.5h12v8H2z", "M5.5 13.5h5"],
             Self::Grid => &["M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"],
             Self::Clock => &["M14 8A6 6 0 112 8a6 6 0 0112 0z", "M8 4.5V8l2.5 1.5"],

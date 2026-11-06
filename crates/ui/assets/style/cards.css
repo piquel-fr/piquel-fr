@@ -51,6 +51,34 @@
 .empty {
   color: var(--muted);
 }
+/* A list or feed below a card's body, such as a notification's history entry. */
+.card > .body + .events {
+  border-top: 1px solid var(--line);
+}
+/* The inbox: a read notification's subject in the text's weight, an unread
+   one's bold, each a link to its own page. */
+.inbox > li {
+  flex-wrap: nowrap;
+}
+.inbox a {
+  color: var(--fg);
+  text-decoration: none;
+}
+.inbox a:hover {
+  text-decoration: underline;
+}
+/* Only an unread notification shows its dot; a read one keeps the room. */
+.inbox li.read .dot {
+  visibility: hidden;
+}
+.inbox time {
+  flex: none;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.inbox p {
+  margin: 0.2rem 0;
+}
 
 /* Lists of rows inside a card: the text keeps its room, and the row's buttons
    wrap under it on a narrow window. */

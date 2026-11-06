@@ -69,6 +69,7 @@ impl AccountPage for Overview {
         let passkeys = web.account.passkeys(&viewer).await?;
         let emails = web.account.emails(&viewer).await?;
         let identities = web.account.identities(&viewer).await?;
+        let unread = web.account.unread_notifications(&viewer).await?;
         let providers = web.federation.provider_rows(&identities);
         let linked: Vec<_> = identities
             .iter()
@@ -93,11 +94,13 @@ impl AccountPage for Overview {
             },
             providers: &providers,
             now,
+            unread,
         };
         let links = OverviewLinks {
             sign_in: settings::SIGN_IN,
             devices: settings::SESSIONS,
             history: settings::HISTORY,
+            notifications: settings::NOTIFICATIONS,
         };
         let page = Child::new(view! { cx =>
             piquel_ui::account_overview(overview: overview, links: links)

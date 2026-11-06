@@ -271,6 +271,7 @@ impl AdminApplication {
             .route(settings::emails)
             .route(settings::apps)
             .route(settings::history)
+            .route(settings::notifications)
             .route(settings::display_name);
         let pages = AdminOperation::ALL
             .iter()

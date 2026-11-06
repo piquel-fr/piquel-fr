@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id AS \"id: NotificationId\", event_id AS \"event_id: EventId\",\n                    payload, created_at, read_at\n                FROM notifications\n                WHERE user_id = $1\n                    AND ($2::uuid IS NULL OR (created_at, id) < (\n                        SELECT created_at, id FROM notifications WHERE id = $2 AND user_id = $1\n                    ))\n                ORDER BY created_at DESC, id DESC\n                LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: NotificationId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_id: EventId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "read_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "33d418d075c61751109a3a301691f39c8243439abce77cb4175a72298bcbd9e6"
+}

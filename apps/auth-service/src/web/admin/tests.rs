@@ -1723,6 +1723,51 @@ async fn handles_are_reserved_given_released_and_unreserved() {
     }
 }
 
+/// An administrator reads an account's inbox as its owner sees it, each
+/// notification's text in full, and reading it marks nothing read.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_read_an_inbox_without_marking_it() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let renamed =
+        Handle::parse(&format!("told-{}", &owner.user_id.to_string()[24..])).expect("handle");
+    AdminService::new(harness.database.clone(), true)
+        .rename_handle(
+            &operator(),
+            owner.user_id,
+            renamed,
+            Reason::parse("Asked by email".into()).expect("reason"),
+            false,
+        )
+        .await
+        .expect("rename");
+    let inbox = format!("/users/{}/notifications", owner.user_id);
+    let dashboard = harness.sign_in(&admin, &inbox).await;
+    let page = html(harness.visit(&dashboard, &inbox).await).await;
+    assert!(
+        page.contains("Piquel support changed your handle"),
+        "{page}"
+    );
+    assert!(
+        page.contains("You now sign in with your new handle"),
+        "{page}"
+    );
+    assert!(page.contains("Not read yet"), "{page}");
+    assert!(
+        !page.contains("Mark all as read"),
+        "only the owner marks: {page}"
+    );
+    let unread = harness
+        .database
+        .notifications()
+        .unread(owner.user_id)
+        .await
+        .expect("unread");
+    assert_eq!(unread, 1);
+}
+
 /// An administrator reads an account's security history as its owner sees it,
 /// from the account's settings tabs, without a confirmation and without
 /// reporting anything, and the read is recorded as a view.

@@ -1,7 +1,8 @@
 //! An account's settings, which an administrator changes on its owner's behalf:
 //! the owner's own sections and operations, for the changes administrators share
 //! with owners, each with the reason they give, the owner's handle, display
-//! name and profile picture, and the security history as the owner sees it.
+//! name and profile picture, and the security history and inbox as the owner
+//! sees them.
 //!
 //! Reads take a [`Viewer`] and changes a [`Subject`] of the administrator, so the
 //! service checks their rights, refuses an administrator's account, and records
@@ -23,8 +24,8 @@ use crate::{
 use piquel_common::{EventId, Handle, UserId};
 use piquel_ui::{
     Audience, Change, Checkbox, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow,
-    HistoryPage, HistoryState, Holdings, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
-    ProviderRow, Recovery, SignInChange, Tab, Who,
+    HistoryPage, HistoryState, Holdings, InboxPage, InboxRow, InboxState, ProfileChange,
+    ProfileDialog, ProfilePages, ProfileState, ProviderRow, Recovery, SignInChange, Tab, Who,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -329,6 +330,37 @@ pub(super) async fn history(cx: &Cx) -> Result<Response> {
     App::settings_page(cx, user, Tab::History, None, section).await
 }
 
+/// `/users/{account}/notifications`: the account's inbox, as its owner sees
+/// it, a page at a time, with each notification's text. Reading it marks nothing
+/// read, and it changes nothing, so it needs no confirmation.
+#[route(GET "/users/{account}/notifications")]
+pub(super) async fn notifications(cx: &Cx) -> Result<Response> {
+    let user = *path_param::<Account>(cx)?;
+    let admin = App::admin(cx).await?;
+    let shown = parse_query_params::<InboxState>(cx).unwrap_or_default();
+    let viewer = App::viewer(user, admin);
+    let account = &App::of(cx).account;
+    let notifications = account.notifications(&viewer, shown.before).await?;
+    let unread = account.unread_notifications(&viewer).await?;
+    let rows: Vec<_> = notifications
+        .notifications
+        .iter()
+        .map(InboxRow::from)
+        .collect();
+    let here = App::here(cx);
+    let page = InboxPage {
+        page: &here,
+        item: None,
+        shown,
+        next: notifications.next,
+        unread,
+        audience: Audience::Administrator { reason: "" },
+    };
+    let rows = &rows;
+    let section = view! { cx => piquel_ui::inbox(rows: rows, page: page) };
+    App::settings_page(cx, user, Tab::Notifications, None, section).await
+}
+
 /// `/users/{account}/handle`: gives the account a new handle, such as one that
 /// impersonates another account, without the settings' cooldown, and a reserved
 /// one only when the form allows it. It leads back to the account's Profile tab,
@@ -503,6 +535,10 @@ impl App {
             (Tab::Emails, href!(emails, Account(user)).resolve(cx)),
             (Tab::Apps, href!(apps, Account(user)).resolve(cx)),
             (Tab::History, href!(history, Account(user)).resolve(cx)),
+            (
+                Tab::Notifications,
+                href!(notifications, Account(user)).resolve(cx),
+            ),
         ];
         let tabs: &Vec<_> = &links
             .iter()

@@ -123,6 +123,47 @@ repositories! {
     deletions: AccountDeletionRepository;
     /// Profile pictures.
     pictures: PictureRepository;
+    /// The notifications of each account's inbox, and whether they were read.
+    notifications: NotificationRepository;
+}
+
+/// How decoding `{"kind": …}` alone as a stored, `kind`-tagged enum fails, which
+/// tells whether this release knows the kind: a [`DomainEvent`] or a
+/// [`Notification`] a newer release wrote reads as unknown, not as corrupt. Only
+/// serde's derive knows the variant names, and it reports an unknown one through
+/// [`serde::de::Error::unknown_variant`].
+///
+/// [`DomainEvent`]: piquel_common::events::DomainEvent
+/// [`Notification`]: piquel_common::notifications::Notification
+#[derive(Debug, thiserror::Error)]
+enum KindProbe {
+    /// The kind is no variant of this release's enum.
+    #[error("unknown kind")]
+    Unknown,
+    /// Anything else, such as the missing data of a known kind.
+    #[error("{0}")]
+    Other(String),
+}
+
+impl serde::de::Error for KindProbe {
+    /// Keeps the message, for the error to be complete.
+    fn custom<T: std::fmt::Display>(message: T) -> Self {
+        Self::Other(message.to_string())
+    }
+
+    /// Marks the kind as unknown.
+    fn unknown_variant(_: &str, _: &'static [&'static str]) -> Self {
+        Self::Unknown
+    }
+}
+
+impl KindProbe {
+    /// Whether `kind` is the serde tag of a variant of this release's `T`.
+    fn knows<T: DeserializeOwned>(kind: &str) -> bool {
+        let tag =
+            serde::de::value::MapDeserializer::<_, Self>::new(std::iter::once(("kind", kind)));
+        !matches!(T::deserialize(tag), Err(Self::Unknown))
+    }
 }
 
 /// Runs a checked query on the repository's pool or transaction connection, in a
@@ -330,6 +371,8 @@ pub(crate) mod federation;
 pub(crate) mod handles;
 /// Expired-state cleanup.
 pub(crate) mod maintenance;
+/// Each account's inbox.
+pub(crate) mod notifications;
 /// Client registrations, authorization requests, codes and consent.
 pub(crate) mod oidc;
 /// Passkey credentials and single-use ceremony records.
