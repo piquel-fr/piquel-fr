@@ -148,8 +148,8 @@ fn what_is_not_a_raster_image_is_refused() {
 
 /// An image too wide, of too many pixels, of no pixels on a side, or whose 16-bit
 /// pixels would decode past the allocation limit, is refused from its header,
-/// however small it compresses and whatever square it keeps: decoding it could
-/// allocate without bound.
+/// however small it compresses, and one with no pixels even with a square to keep:
+/// decoding it could allocate without bound.
 #[test]
 fn an_out_of_bounds_image_is_refused_before_decoding() {
     let png = |image: DynamicImage| encoded(&image, ImageFormat::Png);

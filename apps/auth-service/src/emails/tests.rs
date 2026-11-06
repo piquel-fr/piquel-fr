@@ -214,8 +214,8 @@ async fn adding_asks_for_confirmation_first() {
 
 /// A link verifies its address once, without a session, and makes the first one
 /// primary. A new primary address notifies the previous one, which can then be
-/// removed; the primary one only once no other could replace it. Which changes
-/// need a passkey confirmation is checked above and in the account tests.
+/// removed; the primary one only once no other could replace it. That adding one
+/// needs a passkey confirmation is checked above.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn links_verify_once_and_the_primary_address_moves() {
