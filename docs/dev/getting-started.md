@@ -11,6 +11,11 @@ your changes on a preview.
   workspace pins pnpm's version.
 - The PostgreSQL 18 server binaries (`initdb`, `pg_ctl`), for the database
   tests and `just coverage`.
+- For previews, [piquelctl](https://docs.piqueld.dev), piqueld's CLI
+  (`cargo install --locked piquelctl`), signed in to the daemon that runs
+  piquel.fr's previews with a token that has `previews:deploy` and
+  `previews:delete` on `piquel-fr`. Ask [contact@piquel.fr](mailto:contact@piquel.fr)
+  for one.
 
 Then install the rest:
 

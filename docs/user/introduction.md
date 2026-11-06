@@ -18,9 +18,11 @@ the apps you signed in to, your notifications and your data.
 - **Session:** one device signed in to your account. Settings list your devices,
   and you can sign any of them out.
 - **App:** a website or service that signs you in with your piquel.fr account.
-  The first time, it asks for your consent, naming what it will receive.
-- **Passkey confirmation:** sensitive changes, such as removing a passkey, ask
-  you to use your passkey again first, even when you are already signed in.
+  The first time, it asks for your consent, naming what it will receive. Apps
+  Piquel runs itself don't ask.
+- **Passkey confirmation:** sensitive changes, such as removing a passkey, need
+  you to have used your passkey in the last five minutes. If you haven't, Piquel
+  asks for it again first, even though you are signed in.
 
 ## Building an app
 
