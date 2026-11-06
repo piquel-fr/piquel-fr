@@ -38,13 +38,16 @@ impl Reference {
                  `apps/auth-service/src/cli`. Do not edit it by hand. -->\n\n{INTRO}"
             ),
         };
-        reference.command(&command);
+        reference.command(&command, "auth-service");
         reference.page
     }
 
     /// Adds `command`'s section: what it does, its usage, its arguments and
     /// options, and links to its subcommands, whose sections follow.
-    fn command(&mut self, command: &Command) {
+    /// `invocation` is how to call it: its path with the arguments its parents
+    /// take before it, such as `auth-service account <USER> name`, which clap's
+    /// usage leaves out.
+    fn command(&mut self, command: &Command, invocation: &str) {
         let path = command.get_bin_name().unwrap_or(command.get_name());
         let _ = writeln!(self.page, "\n## `{path}`\n");
         if let Some(about) = command.get_long_about().or(command.get_about()) {
@@ -54,7 +57,9 @@ impl Reference {
         let _ = writeln!(
             self.page,
             "```text\n{}\n```",
-            usage.trim_start_matches("Usage: ")
+            usage
+                .trim_start_matches("Usage: ")
+                .replacen(path, invocation, 1)
         );
 
         let (positionals, options): (Vec<&Arg>, Vec<&Arg>) = command
@@ -90,8 +95,13 @@ impl Reference {
                 );
             }
         }
+        let mut arguments = String::new();
+        for argument in command.get_positionals() {
+            let _ = write!(arguments, " {argument}");
+        }
         for subcommand in subcommands {
-            self.command(subcommand);
+            let invocation = format!("{invocation}{arguments} {}", subcommand.get_name());
+            self.command(subcommand, &invocation);
         }
     }
 
