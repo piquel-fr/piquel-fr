@@ -1,5 +1,5 @@
-//! Focused tests for the coarse user agent family.
-use super::{Browser, Platform, UserAgentFamily};
+//! Focused tests for the coarse user agent family, and the stored job names.
+use super::{Actor, Browser, JobName, Platform, UserAgentFamily};
 
 /// Real `User-Agent` headers classify to their browser and platform.
 #[test]
@@ -95,4 +95,20 @@ fn user_agent_family_text_round_trips() {
             platform: Platform::Other,
         })
     );
+}
+
+/// The audit jobs read as the release that records them will store them, so it
+/// may, once this release runs beside it.
+#[test]
+fn audit_job_actors_read() {
+    for (job, name) in [
+        (JobName::AuditVerification, "audit_verification"),
+        (JobName::AuditSealer, "audit_sealer"),
+    ] {
+        let stored = serde_json::json!({"type": "system", "job": name});
+        assert_eq!(
+            serde_json::from_value::<Actor>(stored).ok(),
+            Some(Actor::System { job })
+        );
+    }
 }
