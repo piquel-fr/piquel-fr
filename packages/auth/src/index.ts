@@ -35,11 +35,12 @@ export { Jws, KeyCache, KeySet, type JwsHeader, type KeyCacheOptions } from './k
 export { Resource, type ResourceConfig } from './resource.ts';
 export { Scopes, defineScopes } from './scope.ts';
 export type { Clock } from './time.ts';
-export {
+// Types only: a token class's prototype would type as a token without validation.
+export type {
   AccessToken,
-  type ClaimsReader,
+  ClaimsReader,
   IdToken,
   LogoutToken,
-  type LogoutTarget,
-  type Subject
+  LogoutTarget,
+  Subject
 } from './token.ts';

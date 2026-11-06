@@ -1,5 +1,11 @@
 /** Type tests: `tsc -p packages/auth/test` checks these lines, and nothing runs them. */
-import { AccessToken, type IdToken, type Issuer, defineScopes } from '../src/index.ts';
+import {
+  type AccessToken,
+  type IdToken,
+  type Issuer,
+  type LogoutToken,
+  defineScopes
+} from '../src/index.ts';
 
 const notes = defineScopes('notes:read', 'notes:write');
 type Notes = (typeof notes.all)[number];
@@ -16,13 +22,16 @@ declare function absent(value: undefined): void;
 declare function write(token: AccessToken<Notes, 'notes:write'>): void;
 /** Needs a validated ID token. */
 declare function signedIn(token: IdToken): void;
+/** Needs a validated logout token. */
+declare function loggedOut(token: LogoutToken): void;
 
 export async function checks(
   issuer: Issuer,
   compact: string,
   either: Notes,
   request: Request,
-  id: IdToken
+  id: IdToken,
+  logout: LogoutToken
 ) {
   const resource = issuer.resource({ identifier: 'notes-api', scopes: notes });
   const token = await resource.validate(compact);
@@ -59,6 +68,12 @@ export async function checks(
   write({ claims, subject, scopes, extra });
   // @ts-expect-error nor is one holding an ID token's
   signedIn({ claims: id.claims, token: id.token });
+  // @ts-expect-error nor is one holding a logout token's
+  loggedOut({ claims: logout.claims, target: logout.target });
+  // @ts-expect-error an access token is not an ID token, whatever is added to it
+  signedIn(Object.assign(token, { token: compact }));
+  // @ts-expect-error the classes are exported as types only, so no prototype stands in for a token
+  write(AccessToken.prototype); // eslint-disable-line @typescript-eslint/no-unsafe-argument -- it does not compile, so it types as `any`
 
   // Application claims take their type from the resource's reader, through narrowing.
   const tenants = issuer.resource({
