@@ -124,6 +124,8 @@ struct TokenEndpoint {
     refreshes: Arc<AtomicUsize>,
     /// Every token revoked.
     revoked: Arc<Mutex<Vec<String>>>,
+    /// Revocation requests that reached the endpoint, answered or not.
+    revocations_received: Arc<AtomicUsize>,
     /// Whether revocations fail, as when auth is down.
     revocations_fail: Arc<AtomicBool>,
     /// Whether revocations hang for an hour before answering, as a stuck auth would.
@@ -172,11 +174,13 @@ impl TokenEndpoint {
     {
         let refreshes = Arc::new(AtomicUsize::new(0));
         let revoked = Arc::new(Mutex::new(Vec::new()));
+        let revocations_received = Arc::new(AtomicUsize::new(0));
         let revocations_fail = Arc::new(AtomicBool::new(false));
         let revocations_hang = Arc::new(AtomicBool::new(false));
-        let (counted, recorded, failing, hanging) = (
+        let (counted, recorded, received, failing, hanging) = (
             refreshes.clone(),
             revoked.clone(),
+            revocations_received.clone(),
             revocations_fail.clone(),
             revocations_hang.clone(),
         );
@@ -194,6 +198,7 @@ impl TokenEndpoint {
             }
         };
         let revoke = move |::axum::Form(form): ::axum::Form<Form>| async move {
+            received.fetch_add(1, Ordering::SeqCst);
             if hanging.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_secs(3600)).await;
             }
@@ -215,6 +220,7 @@ impl TokenEndpoint {
             revocation: format!("http://{address}/revoke").parse().expect("URL"),
             refreshes,
             revoked,
+            revocations_received,
             revocations_fail,
             revocations_hang,
         }

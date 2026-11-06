@@ -327,4 +327,6 @@ async fn revocations_give_up_after_their_deadline() {
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(set_cookie(&response, SESSION_COOKIE), None);
     assert!(endpoint.revoked.lock().expect("revocations").is_empty());
+    // Both reached the hanging endpoint, so the deadline, not an early error, ended them.
+    assert_eq!(endpoint.revocations_received.load(Ordering::SeqCst), 2);
 }
