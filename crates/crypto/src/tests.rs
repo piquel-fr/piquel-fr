@@ -326,4 +326,8 @@ fn scram_verifiers_match_postgresql() {
     let fresh = ScramVerifier::new("pencil").expect("verifier").to_string();
     assert!(fresh.starts_with("SCRAM-SHA-256$4096:"));
     assert_ne!(fresh, DERIVED);
+    assert_ne!(
+        fresh,
+        ScramVerifier::new("pencil").expect("verifier").to_string()
+    );
 }
