@@ -14,7 +14,7 @@ use axum::{
     routing::get,
 };
 use chrono::{DateTime, Utc};
-use piquel_repository::{ChainLink, Checkpoint, Database};
+use piquel_repository::{ChainLink, Checkpoint, Database, DatabaseError};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -28,17 +28,20 @@ pub(crate) struct AuditApplication {
     /// Verifies the latest checkpoint before it is served.
     keys: Arc<AuditKeys>,
     /// The last checkpoint [`Self::latest`] found, reused until another is
-    /// stored. Stored checkpoints never change, so only a new one can change
-    /// which is the newest that verifies. Requests take turns with it, so
-    /// signatures are checked once per checkpoint stored.
+    /// stored where it could change the answer. Stored checkpoints never change,
+    /// so only a new one can.
     latest: Arc<Mutex<Option<LatestCheckpoint>>>,
 }
 
-/// The newest checkpoint that verified, as of a number of stored checkpoints.
+/// The newest checkpoint that verified, and what it was found among.
+#[derive(Clone)]
 struct LatestCheckpoint {
-    /// How many checkpoints were stored when it was found. Someone with auth's
+    /// The lowest position the search read; see
+    /// [`TrustedCheckpoint::floor`](super::TrustedCheckpoint::floor).
+    floor: u64,
+    /// How many checkpoints were stored at or after `floor`. Someone with auth's
     /// database role can add one at any position, even above one still being
-    /// signed, so only the count tells that another was stored.
+    /// signed, so only a count tells that another was stored.
     stored: u64,
     /// The signed note of the newest that verifies, if any does.
     note: Option<String>,
@@ -108,39 +111,57 @@ impl AuditApplication {
     }
 
     /// The signed note of the newest checkpoint that verifies, as `text/plain`.
-    /// Newer ones that do not are never served; `audit verify` reports them. Each
-    /// request counts the stored checkpoints, and checks signatures again only
-    /// once another was stored.
+    /// Newer ones that do not are never served; `audit verify` reports them. A
+    /// request counts the checkpoints stored since the last answer was found,
+    /// and searches again only if another was stored.
     async fn latest(State(app): State<Self>) -> Result<Response, ApiError> {
-        let mut audit = app.database.audit();
-        let mut latest = app.latest.lock().await;
-        let stored = audit.checkpoint_count().await?;
-        let note = match latest.as_ref() {
-            Some(found) if found.stored == stored => found.note.clone(),
-            _ => {
-                let note = app
-                    .keys
-                    .newest_trusted(&mut audit)
-                    .await
-                    .map_err(ApiError::internal)?
-                    .trusted
-                    .map(|checkpoint| checkpoint.note);
-                *latest = Some(LatestCheckpoint {
-                    stored,
-                    note: note.clone(),
-                });
-                note
-            }
-        };
-        drop(latest);
-        let note = note.ok_or_else(|| {
-            ApiError::not_found("no checkpoint that verifies has been signed yet")
-        })?;
+        let found = app.latest.lock().await.clone();
+        let note = match found {
+            Some(found) if app.is_current(&found).await? => found.note,
+            _ => app.find_latest().await?,
+        }
+        .ok_or_else(|| ApiError::not_found("no checkpoint that verifies has been signed yet"))?;
         Ok(Cached(
             Self::CACHE,
             ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], note),
         )
         .into_response())
+    }
+
+    /// Whether no checkpoint was stored where it could change `found`.
+    async fn is_current(&self, found: &LatestCheckpoint) -> Result<bool, DatabaseError> {
+        let stored = self.database.audit().count_checkpoints(found.floor).await?;
+        Ok(stored == found.stored)
+    }
+
+    /// Finds the newest checkpoint that verifies, and remembers it. One request
+    /// searches at a time; those that waited reuse its answer.
+    async fn find_latest(&self) -> Result<Option<String>, ApiError> {
+        let mut latest = self.latest.lock().await;
+        if let Some(found) = latest.as_ref()
+            && self.is_current(found).await?
+        {
+            return Ok(found.note.clone());
+        }
+        // One snapshot, so a checkpoint stored during the search is counted only
+        // if the search saw it.
+        let mut tx = self.database.begin().await?;
+        tx.audit().read_snapshot().await?;
+        let search = self
+            .keys
+            .newest_trusted(&mut tx.audit())
+            .await
+            .map_err(ApiError::internal)?;
+        let floor = search.floor();
+        let stored = tx.audit().count_checkpoints(floor).await?;
+        tx.commit().await?;
+        let note = search.trusted.map(|checkpoint| checkpoint.note);
+        *latest = Some(LatestCheckpoint {
+            floor,
+            stored,
+            note: note.clone(),
+        });
+        Ok(note)
     }
 
     /// Up to 100 checkpoints after `after`, oldest first. An empty page is the end.
