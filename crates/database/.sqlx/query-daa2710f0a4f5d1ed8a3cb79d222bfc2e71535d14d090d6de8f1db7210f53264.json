@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notifications (id, user_id, payload)\n                SELECT uuidv7(), user_id, $2 FROM announcement_recipients\n                WHERE announcement_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "daa2710f0a4f5d1ed8a3cb79d222bfc2e71535d14d090d6de8f1db7210f53264"
+}

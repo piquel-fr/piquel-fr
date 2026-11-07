@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO announcement_recipients (announcement_id, user_id)\n                    SELECT $1, id FROM users FOR KEY SHARE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "58fbc77442766ca527e77705996c2742a50a996cd919ed0fada691ebaa9d91ad"
+}

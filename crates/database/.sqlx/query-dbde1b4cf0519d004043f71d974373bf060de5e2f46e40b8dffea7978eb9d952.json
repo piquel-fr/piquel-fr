@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.user_id AS \"user_id: UserId\"\n                FROM announcement_recipients r\n                JOIN user_emails e ON e.user_id = r.user_id AND e.is_primary\n                WHERE r.announcement_id = $1\n                ORDER BY r.user_id\n                FOR KEY SHARE OF r",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dbde1b4cf0519d004043f71d974373bf060de5e2f46e40b8dffea7978eb9d952"
+}

@@ -5,7 +5,7 @@ use crate::{
     AuthConfig, KeyStore, SigningKeys, StartupError,
     audit::Sealer,
     deletion::{DeletionError, Deletions},
-    deliveries::{BackchannelLogoutSender, EmailSender, OutboundClient},
+    deliveries::{AnnouncementSender, BackchannelLogoutSender, EmailSender, OutboundClient},
 };
 use chrono::Utc;
 use piquel_common::{
@@ -104,6 +104,10 @@ impl Jobs {
         );
         jobs.deliveries(logout, database);
         jobs.deliveries(EmailSender::new(database.clone(), &config.email), database);
+        jobs.deliveries(
+            AnnouncementSender::new(database.clone(), &config.email),
+            database,
+        );
         Ok(jobs)
     }
 

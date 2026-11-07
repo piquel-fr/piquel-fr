@@ -1,9 +1,9 @@
 # Outbound delivery queue
 
-Auth sends messages to other systems through a PostgreSQL queue. Two channels
-exist: back-channel logout tokens and email (see [Channels](#channels)). Other
-kinds, such as audit witness checkpoints, would join them as channels of their
-own. Request handlers never send them inline. A slow or unreachable
+Auth sends messages to other systems through a PostgreSQL queue. Three channels
+exist: back-channel logout tokens, email and announcements (see
+[Channels](#channels)). Other kinds, such as audit witness checkpoints, would
+join them as channels of their own. Request handlers never send them inline. A slow or unreachable
 receiver must not slow a login, and a message must survive a restart.
 
 The repository owns the queue (`crates/database/src/repositories/deliveries/`).
@@ -20,8 +20,9 @@ page.
 - **Self-contained.** A delivery copies everything a send needs when it is
   created: the destination, and facts about the recipient such as `client_id`,
   `sub` and `sid`. Purging an account, deleting its sessions or changing a client
-  afterwards does not change or lose a pending delivery. Email is the exception,
-  on purpose: see [Email](#email).
+  afterwards does not change or lose a pending delivery. Email and announcements
+  are the exception, on purpose: see [Email](#email) and
+  [Announcements](#announcements).
 - **At least once, with possible duplicates.** A worker that stops after sending
   but before recording the outcome lets its lease expire, and another worker sends
   the delivery again. Every attempt carries the same delivery ID, which receivers
@@ -134,8 +135,32 @@ the recipient. Without `AUTH_SMTP_URL`, the workers still run and drop every
 delivery, so none waits forever.
 
 Templates live in `apps/auth-service/templates/email/` and are checked at
-compile time: each `EmailMessage` becomes a `Content` variant, which both the
-plain-text and the HTML template must match.
+compile time: each `EmailMessage`, and each announcement's email, becomes a
+`Content` variant, which both the plain-text and the HTML template must match.
+
+## Announcements
+
+The `announcement` channel (`deliveries/announcement.rs` in the database crate,
+`AnnouncementSender` beside `EmailSender` in auth-service) emails the
+announcements administrators send. It is a channel of its own, with workers of
+its own, so an announcement to every account never holds back a verification or
+recovery link on the `email` channel; it shares the relay, templates and
+`Message-ID` scheme with it.
+
+Sending an announcement writes a notification of kind `announcement`, with its
+subject and text, to each recipient's inbox, from the recipients it locked, and
+records `AnnouncementSent`, whose fan-out creates one unordered delivery per
+recipient with a primary verified address. These emails go out here, never on
+the `email` channel, and link the inbox. A delivery
+stores only the account's ID as its recipient and the announcement's ID as its
+payload, and its `destination` names both. The sender reads the account's primary
+verified address and the text when it sends, so an address changed meanwhile gets
+it, and an account with none left, or no longer a recipient, is skipped: the
+delivery succeeds without a send. The text of a sent announcement never changes,
+so every attempt sends the same message. `MAX_AGE` is three days, as an
+announcement stays worth reading through a long relay outage or a slow send to
+every account. A purge deletes the account's announcement deliveries, which
+would find no recipient left.
 
 ## Operations
 
@@ -182,6 +207,8 @@ gauges until the next one succeeds.
   with `iat` the attempt's time and `exp` two minutes later, and posts it as the
   `logout_token` form field. `jti` is the delivery ID. `MAX_AGE` is one hour.
 - **`email`**: messages to account holders, sent over SMTP; see [Email](#email).
+- **`announcement`**: announcements' emails to their recipients, sent over SMTP;
+  see [Announcements](#announcements).
 
 ## Adding a channel
 
@@ -226,7 +253,7 @@ The examples follow the back-channel logout channel
 
 2. **Register it** by adding it to `Registered` in `deliveries/mod.rs`, a nested
    list: adding a channel `Provisioning` makes it
-   `pub(crate) type Registered = (BackchannelLogout, (Email, (Provisioning, ())));`.
+   `pub(crate) type Registered = (BackchannelLogout, (Email, (Announcement, (Provisioning, ()))));`.
 
 3. **Send it**, in `apps/auth-service/src/deliveries/`: a type implementing
    `Sender` with `type Channel = BackchannelLogout`. `MAX_AGE` bounds how long it

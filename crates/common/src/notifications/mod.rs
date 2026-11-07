@@ -6,7 +6,10 @@
 //! reads the same once its event's personal data is erased, or the event pruned.
 //! Its event's security history entry, while kept, tells the rest.
 
-use crate::events::{Actor, DomainEvent};
+use crate::{
+    AnnouncementId,
+    events::{Actor, DomainEvent},
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +17,11 @@ use serde::{Deserialize, Serialize};
 /// `{"kind": "deletion_scheduled", "purge_after": …}`. Never rename a released
 /// kind: a newer release's kinds are skipped by older ones, not misread.
 ///
-/// A variant holds only enums, flags and timestamps: never a secret, an address
-/// or a [`Personal`](crate::Personal) value.
+/// A variant holds only IDs, enums, flags and timestamps, never a secret, an
+/// address or a [`Personal`](crate::Personal) value, except an announcement,
+/// which holds the text administrators wrote. A targeted announcement's text,
+/// which may name its recipients, goes with them: purging an account deletes its
+/// notifications, and the announcement once its last recipient is purged.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Notification {
@@ -50,6 +56,18 @@ pub enum Notification {
     },
     /// The account was restored before its deletion.
     AccountRestored,
+    /// Administrators sent an announcement to every account, or to chosen ones
+    /// among them this one. Sending writes it, as no event about the account
+    /// does.
+    Announcement {
+        /// The announcement.
+        announcement_id: AnnouncementId,
+        /// Its subject, as they wrote it. Named apart from the `subject` every
+        /// notification is shown with, which it becomes.
+        title: String,
+        /// Its text, as they wrote it, which becomes the notification's `body`.
+        text: String,
+    },
 }
 
 impl DomainEvent {
@@ -151,6 +169,8 @@ impl DomainEvent {
             | Self::SigningKeyChanged { .. }
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
+            // It concerns no one account: sending writes each recipient's.
+            | Self::AnnouncementSent { .. }
             | Self::Imported(_) => return None,
         })
     }
@@ -185,14 +205,17 @@ impl Notification {
             | Self::AccountDisabled
             | Self::AccountEnabled
             | Self::DeletionScheduled { .. }
-            | Self::AccountRestored => Addressees::Primary,
+            | Self::AccountRestored
+            // Through the `announcement` channel, which has workers of its own.
+            | Self::Announcement { .. } => Addressees::Primary,
         }
     }
 
     /// Its subject: one line, in the inbox and as an email's subject.
     #[must_use]
-    pub const fn subject(&self) -> &'static str {
+    pub fn subject(&self) -> &str {
         match self {
+            Self::Announcement { title, .. } => title,
             Self::PrimaryEmailChanged => "Your primary email address changed",
             Self::EmailRemoved => "An email address was removed from your account",
             Self::AccountSecured { .. } => "Piquel support secured your account",
@@ -212,6 +235,7 @@ impl Notification {
     #[must_use]
     pub fn body(&self) -> String {
         match self {
+            Self::Announcement { text, .. } => text.clone(),
             Self::PrimaryEmailChanged => "Another of your verified addresses is now the primary one. Piquel sends notices about your account there, and apps that read your email address see it the next time they refresh your profile. If you didn’t make this change, sign in and review your security history.".to_owned(),
             Self::EmailRemoved => "Piquel no longer sends anything to that address. If you didn’t remove it, sign in and review your security history.".to_owned(),
             Self::AccountSecured { kept } => {

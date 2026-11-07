@@ -62,7 +62,8 @@ mod tests;
 mod web;
 
 pub use admin::{
-    AdminError, AdminService, GracePeriod, HandleProblem, InviteExpiry, Operator, Reason, UserRef,
+    AdminError, AdminService, AnnouncementDraft, AnnouncementRecipients, GracePeriod,
+    HandleProblem, InviteExpiry, Operator, Reason, UserRef,
 };
 use audit::AuditApplication;
 pub use audit::{AuditError, AuditKeys};
@@ -101,6 +102,10 @@ pub const TELEMETRY_FILTER: &str = "auth_service=info,piquel_repository=info";
 
 /// Bound on browser ceremony and API JSON bodies.
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
+/// Bound on the admin dashboard's form bodies: an announcement's 20,000
+/// characters and up to 1,000 accounts encode to several times that many bytes,
+/// as a form percent-encodes every byte that is not plain ASCII.
+const MAX_DASHBOARD_BODY_BYTES: usize = 512 * 1024;
 
 /// Failures encountered before the service can accept requests.
 #[derive(Debug, Error)]
@@ -217,7 +222,7 @@ impl AuthConfig {
         let passkeys = self.dashboard_passkeys(database.clone(), keys)?;
         let pages = AdminApplication::new(database, self, dashboard, passkeys)?
             .routes()
-            .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            .layer(DefaultBodyLimit::max(MAX_DASHBOARD_BODY_BYTES))
             .layer(middleware::from_fn_with_state(
                 policy,
                 security::HttpSecurity::protect,

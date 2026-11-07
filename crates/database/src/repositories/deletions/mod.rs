@@ -266,12 +266,14 @@ impl AccountDeletionRepository<'_> {
     /// the account first, and record its last events afterwards.
     ///
     /// Deletes, in order: the grants, consents, sessions and administrator rights
-    /// that reference the account without cascading, and its email deliveries;
+    /// that reference the account without cascading, the announcements to chosen
+    /// accounts it was the last recipient of, and its email deliveries;
     /// the related origins of its clients, deleted ones included, wherever events
     /// recorded them, since its domain may be among them;
-    /// the account, which cascades to its emails, passkeys, identities, ceremonies
-    /// and scheduled deletion, and leaves its handles without an owner, so nobody
-    /// claims them again; then the personal data of every event the account is
+    /// the account, which cascades to its emails, passkeys, identities, ceremonies,
+    /// announcement rows and scheduled deletion, and leaves its handles without an owner, so nobody
+    /// claims them again; then its announcement deliveries, which an announcement
+    /// sent meanwhile may have just queued, and the personal data of every event the account is
     /// the subject or actor of, so those events read it as erased. Callers end its
     /// sessions, which queues their clients' logout tokens, and delete the clients
     /// it manages first. The events themselves stay: they hold only pseudonymous
@@ -306,6 +308,22 @@ impl AccountDeletionRepository<'_> {
             // Cascades to cookie digests, ceremonies and provider redirects.
             "DELETE FROM sessions WHERE user_id = $1",
             "DELETE FROM administrators WHERE user_id = $1",
+            // Purges of a targeted announcement's recipients take turns on it, in
+            // the same order, so of two at once, the second, with the next
+            // statement's fresh snapshot, finds itself the last.
+            "SELECT FROM announcements a
+            JOIN announcement_recipients r ON r.announcement_id = a.id
+            WHERE r.user_id = $1 AND NOT a.everyone
+            ORDER BY a.id FOR UPDATE OF a",
+            // An announcement to chosen accounts may concern them, so it goes with
+            // its last recipient; deleting the account deletes its own rows.
+            "DELETE FROM announcements a
+            USING announcement_recipients r
+            WHERE r.announcement_id = a.id AND r.user_id = $1 AND NOT a.everyone
+            AND NOT EXISTS (
+                SELECT FROM announcement_recipients other
+                WHERE other.announcement_id = a.id AND other.user_id <> $1
+            )",
             // Notification emails copy their address; the account's other
             // channels' deliveries hold no personal data.
             "DELETE FROM deliveries WHERE channel = 'email' AND recipient = to_jsonb($1::uuid::text)",
@@ -334,9 +352,14 @@ impl AccountDeletionRepository<'_> {
         )?
         .rows_affected()
             == 1;
+        // Its announcements' emails would find no recipient left to send to. An
+        // announcement being sent key-share locks its recipients, so deleting the
+        // account waited for it, and this fresh snapshot sees the emails it queued.
         // Users and administrators act as `{"type": …, "user_id": …}`; both
         // branches are indexed, so the cost does not grow with others' history.
         delete!(
+            "DELETE FROM deliveries
+            WHERE channel = 'announcement' AND recipient = to_jsonb($1::uuid::text)",
             "DELETE FROM event_personal_data p
             USING domain_events e
             WHERE p.event_id = e.id

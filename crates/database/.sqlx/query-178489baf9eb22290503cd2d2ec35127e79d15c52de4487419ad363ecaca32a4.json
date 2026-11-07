@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    u.id AS \"id: UserId\", h.handle AS \"handle: Handle\", u.display_name,\n                    u.status AS \"status: AccountStatus\", u.created_at,\n                    p.id AS \"picture?: PictureId\"\n                FROM announcements a\n                JOIN announcement_recipients r ON r.announcement_id = a.id\n                JOIN users u ON u.id = r.user_id\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'\n                WHERE a.id = $1 AND NOT a.everyone\n                ORDER BY h.handle",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status: AccountStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "picture?: PictureId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "178489baf9eb22290503cd2d2ec35127e79d15c52de4487419ad363ecaca32a4"
+}

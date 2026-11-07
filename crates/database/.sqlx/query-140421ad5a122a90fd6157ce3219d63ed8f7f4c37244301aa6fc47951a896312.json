@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    count(*) FILTER (WHERE status = 'pending') AS \"pending!: Unsigned\",\n                    count(*) FILTER (WHERE status = 'succeeded') AS \"succeeded!: Unsigned\",\n                    count(*) FILTER (WHERE status = 'failed') AS \"failed!: Unsigned\",\n                    count(*) FILTER (WHERE status = 'cancelled') AS \"cancelled!: Unsigned\"\n                FROM deliveries\n                WHERE channel = 'announcement' AND payload = to_jsonb($1::uuid::text)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "succeeded!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "failed!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "cancelled!: Unsigned",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "140421ad5a122a90fd6157ce3219d63ed8f7f4c37244301aa6fc47951a896312"
+}

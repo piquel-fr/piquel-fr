@@ -1,11 +1,12 @@
 //! The parts of a page within its frame: its opening and messages, its
-//! navigations, the pager below a list, and a private address.
+//! navigations, the pager below a list, a private address, and an
+//! announcement's text.
 
 use crate::{
     Alert, Messages,
     icons::{Icon, icon},
 };
-use piquel_common::admin::Paging;
+use piquel_common::admin::{Announcement, Paging};
 use topcoat::{
     Result,
     view::{Child, View, component, view},
@@ -107,6 +108,25 @@ pub async fn page_head(
             </div>
             <div class="row">(actions)</div>
         </div>
+    })
+}
+
+/// A text, `body`, as paragraphs, keeping its line breaks: an announcement's as
+/// its administrators wrote it, or any notification's.
+#[component]
+pub(crate) async fn announcement_text<'a>(body: &'a str) -> Result<impl View> {
+    let paragraphs = Announcement::paragraphs(body);
+    Ok(view! {
+        for lines in &paragraphs {
+            <p>
+                for (index, line) in lines.iter().enumerate() {
+                    if index > 0 {
+                        <br>
+                    }
+                    (*line)
+                }
+            </p>
+        }
     })
 }
 

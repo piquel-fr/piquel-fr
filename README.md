@@ -271,14 +271,16 @@ just auth account alice picture remove --reason "Impersonates someone"
 - Accounts are named by handle, ID or a verified email of an active account.
 - `--output json` prints the views the dashboard shows for `user search`
   (`UserPage`), `user show` (`UserDetail`), `audit list` (`EventPage`), `client
-  list`, `invite list` and `admin list`, as defined in `piquel_common::admin`.
+  list`, `invite list`, `admin list`, `announcement list` and `announcement show`
+  (`AnnouncementDetail`), as defined in `piquel_common::admin`.
   `audit verify --output json` prints the verification.
 - `audit verify` and `audit prune` are described in
   [audit-history.md](docs/security/audit-history.md). `audit prune` connects as
   the schema owner when `AUTH_DATABASE_OWNER_URL` is set, since auth's own role
   may not delete events.
 - `user disable|delete`, `user recover`, `user undo-recovery`, `session revoke-all`,
-  `admin revoke`, `client disable|suspend|delete`, `audit prune`, and `account …
+  `admin revoke`, `client disable|suspend|delete`, `audit prune`, `announcement
+  send`, and `account …
   passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -323,8 +325,9 @@ just auth account alice picture remove --reason "Impersonates someone"
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
 Administrators manage accounts, their settings and security history, sessions,
-invitations, other administrators, handles, the delivery queue, signing keys and
-the origins approved for clients' pages to sign users in from the admin dashboard,
+invitations, other administrators, handles, announcements, the delivery queue,
+signing keys and the origins approved for clients' pages to sign users in from
+the admin dashboard,
 which auth serves on `AUTH_ADMIN_LISTENER` for the dashboard's origin,
 `AUTH_ADMIN_ORIGIN`, and which only a private route reaches.
 Its pages call `AdminService` in-process; there is no admin API.
@@ -387,18 +390,21 @@ Piquel tells its owner about the account, newest first, with the unread count in
 the settings sidebar and on the overview. Today that is a replaced primary
 address, a removed address, a recovery that revoked the account's passkeys,
 enrolled one or was undone, an account disabled, enabled, scheduled for deletion
-or restored, and a handle or display name changed, or a profile picture removed,
-by support. Each notification opens on a page of its own, which marks it read
-when the browser came from auth's own pages, so a link from another site cannot
-dismiss one, and shows the security history entry of the event it came from
-while the history keeps it, with "This wasn’t me" where the history allows a
-report. A notification holds no personal data, so it reads the same after its
-event's personal data is erased or the event is pruned.
+or restored, a handle or display name changed, or a profile picture removed, by
+support, and administrators' announcements. Each notification opens on a page of
+its own, which marks it read when the browser came from auth's own pages, so a
+link from another site cannot dismiss one, and shows the security history entry
+of the event it came from while the history keeps it, with "This wasn’t me"
+where the history allows a report. A notification holds no personal data, so it
+reads the same after its event's personal data is erased or the event is pruned;
+an announcement holds the text its administrators wrote, which goes with its
+recipients.
 
 Each notification is also emailed: a recovery's to every verified address, a
 replaced or removed address's to that address, and any other to the primary
 verified address. The email says what the inbox says, and links the
-notification's page.
+notification's page; an announcement's goes out on a channel of its own and
+links the inbox.
 
 The owner marks one unread, or every one read, in settings or through
 `POST /account/notifications/{id}/read`, `…/{id}/unread` and
@@ -439,6 +445,43 @@ sign-in. For development, `just auth mailpit` runs a local Mailpit: set
 `http://localhost:8025`. Sending domains need SPF, DKIM and DMARC; see
 [infra/README.md](infra/README.md#email).
 
+### Announcements
+
+Administrators tell accounts what they must know, such as a security incident or
+a change to the privacy policy, with an announcement: a subject and a plain text,
+to every account or to up to 1,000 chosen ones. It is emailed to each recipient's
+primary verified address, and every recipient, including those without an
+address, gets it as a notification in their inbox (see
+[Notifications](#notifications)), whose page keeps its paragraphs. Its page on
+the dashboard says how many recipients read it. It is not for support
+conversations, which happen elsewhere.
+
+An announcement starts as a draft, which goes to nobody and which any
+administrator may change or discard; its page shows the email exactly as it will
+be sent, and how many recipients it reaches. Sending it needs the dashboard's
+passkey confirmation, and sends only the revision that was checked: a draft
+changed meanwhile, by another administrator say, is refused, to be checked again.
+Once sent, nothing, not even the database's own role, changes its text. One to
+everyone goes to every account at that moment, disabled ones and
+ones being deleted included, since Piquel still holds their data. Sending records
+an `announcement_sent` event with who sent it and to how many accounts.
+
+```sh
+just auth announcement draft --subject "Security incident on 2 November" \
+    --body-file incident.txt --everyone          # or --to alice --to bob; prints the draft's ID
+just auth announcement show <id>                 # its text, recipients, and once sent, its emails
+just auth announcement edit <id> --subject "…" --body-file - --to alice
+just auth announcement send <id> --revision <n>  # the revision `show` printed; asks first
+just auth announcement discard <id>              # a draft only
+just auth announcement list
+```
+
+Its emails go out on the `announcement` delivery channel, apart from the `email`
+channel's verification and recovery links, so sending one to every account
+holds none of them back. Each is sent to the address the account has when it
+goes out, for up to three days, and dropped once the account has none. The
+dashboard counts them by status while the queue keeps them.
+
 ### Data export and account deletion
 
 Owners download their data and delete their account on
@@ -466,7 +509,9 @@ probation sign-in.
 - **Purge:** every five minutes, one replica purges the accounts past their grace
   period. It deletes the apps the account registered, leaving tombstones with
   only their ID, settings and dates, then the account with its emails, passkeys,
-  identities, sessions, grants, consents and email deliveries, and the personal
+  identities, sessions, grants, consents, email and announcement deliveries, and
+  the announcements to chosen accounts it was the last recipient of, which may
+  concern it, and the personal
   data (IP, device, provider subjects, app origins, operators' reasons) of every
   event it is the subject or actor of, including one a request records while the
   purge runs. The events stay, with pseudonymous IDs only. Its handles stay in the
@@ -494,7 +539,8 @@ their records come with #66 and #97.
 
 ### Outbound deliveries
 
-Messages for other systems, such as back-channel logout tokens and email, wait in
+Messages for other systems, such as back-channel logout tokens, email and
+announcements, wait in
 a queue in the database until a worker sends them. Inspect and repair it with:
 
 ```sh
