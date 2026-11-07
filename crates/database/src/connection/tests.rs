@@ -1,8 +1,10 @@
 //! Focused persistence and security contract tests.
 
 use super::{Database, DatabaseConfig, Limit, MIGRATOR, RuntimeRole, Scope};
-use crate::{DatabaseConnectionError, DatabaseError};
+use crate::{DatabaseConnectionError, DatabaseError, LockKey};
+use sqlx::{PgConnection, Postgres, postgres::PgArguments, query::Query};
 use std::time::Duration;
+use uuid::Uuid;
 
 /// TCP needs verified TLS or an explicit `sslmode=disable`, loopback included; a
 /// Unix socket needs an absolute path under `localhost`. Repeated transport
@@ -261,7 +263,9 @@ fn runtime_roles_need_plain_names() {
 }
 
 /// The runtime role reads and writes app rows, and appends history, but cannot
-/// rewrite history, reach migrations, change the schema or run programs. The
+/// set an event's chain columns, transaction, time or sequence, attach personal
+/// data to another transaction's event, forge a checkpoint, rewrite history, reach
+/// migrations, change the schema, create temporary tables or run programs. The
 /// service's cleanup still works with it, and overlapping provisioning runs are safe.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
@@ -270,11 +274,7 @@ async fn runtime_role_has_only_row_privileges() {
         pool: Database::test_pool().await,
     };
     let name = format!("piquel_auth_{}", uuid::Uuid::now_v7().simple());
-    let mut url = url::Url::parse(&std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL"))
-        .expect("test URL");
-    url.set_username(&name).expect("user");
-    url.set_password(None).expect("password");
-    let config = DatabaseConfig::new(url.as_str(), 1, Duration::from_secs(5)).expect("config");
+    let config = config_for(&name);
     let role = RuntimeRole::new(&config, "runtime password").expect("role");
     // Overlapping runs, as two `migrate` jobs: one creates the role, the other
     // waits for it, then resets it.
@@ -320,6 +320,15 @@ async fn runtime_role_has_only_row_privileges() {
         .await
         .expect("cleanup");
     for statement in [
+        "INSERT INTO domain_events (id, kind, version, payload, actor, chain_position, chain_hash)
+        VALUES (uuidv7(), 'test', 1, '{}', '{}', 1, sha256(''))",
+        "INSERT INTO domain_events (id, kind, version, payload, actor, txid)
+        VALUES (uuidv7(), 'test', 1, '{}', '{}', '1')",
+        "INSERT INTO domain_events (id, kind, version, payload, actor, occurred_at)
+        VALUES (uuidv7(), 'test', 1, '{}', '{}', now() - INTERVAL '1 year')",
+        "INSERT INTO domain_events (id, kind, version, payload, actor, sequence)
+        OVERRIDING SYSTEM VALUE VALUES (uuidv7(), 'test', 1, '{}', '{}', 1)",
+        "INSERT INTO event_personal_data (event_id, created_at) VALUES (uuidv7(), now())",
         "UPDATE domain_events SET kind = kind",
         "DELETE FROM domain_events",
         "UPDATE event_personal_data SET client_ip = client_ip",
@@ -330,41 +339,136 @@ async fn runtime_role_has_only_row_privileges() {
         "DELETE FROM event_consumers",
         "SELECT FROM _sqlx_migrations",
         "CREATE TABLE shadow (id INT)",
+        "CREATE TEMPORARY TABLE shadow (id INT)",
         "ALTER TABLE users DISABLE TRIGGER ALL",
         "SET session_replication_role = replica",
         "COPY (SELECT 1) TO PROGRAM 'true'",
     ] {
-        // Rolled back, so a regressed grant cannot harm concurrent tests.
-        let mut probe = runtime.pool.begin().await.expect("begin");
-        let error = sqlx::query(statement)
-            .execute(&mut *probe)
-            .await
-            .expect_err(statement);
-        probe.rollback().await.expect("rollback");
-        let code = error
-            .as_database_error()
-            .and_then(sqlx::error::DatabaseError::code);
-        assert_eq!(code.as_deref(), Some("42501"), "{statement}: {error}");
+        assert_eq!(
+            refusal(&runtime, sqlx::query(statement)).await,
+            "42501",
+            "{statement}"
+        );
     }
     assert_personal_data_only_erases(&runtime).await;
+    assert_history_is_never_forged(&runtime).await;
     runtime.pool.close().await;
 
+    under_provisioning_lock(&owner, &format!("DROP OWNED BY {name}; DROP ROLE {name}")).await;
+}
+
+/// Runs `sql`, which changes roles or privileges, as `owner` in one transaction
+/// under provisioning's lock: concurrent tests provision too, and the database's
+/// and schema's privileges are each one catalog row.
+async fn under_provisioning_lock(owner: &Database, sql: &str) {
+    let locked = format!(
+        "SELECT pg_advisory_xact_lock({}); {sql}",
+        LockKey::Provisioning.id()
+    );
+    sqlx::raw_sql(&locked)
+        .execute(&owner.pool)
+        .await
+        .expect(sql);
+}
+
+/// Connection settings for `user` on `TEST_DATABASE_URL`, without a password.
+fn config_for(user: &str) -> DatabaseConfig {
+    let mut url = url::Url::parse(&std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL"))
+        .expect("test URL");
+    url.set_username(user).expect("user");
+    url.set_password(None).expect("password");
+    DatabaseConfig::new(url.as_str(), 1, Duration::from_secs(5)).expect("config")
+}
+
+/// Provisioning resets what an existing role holds beyond its grants: settings,
+/// such as replica mode, which skips every trigger, and privileges on the
+/// database and schema. A large object or default privileges it owns, which any
+/// role may create, do not stop provisioning.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn provisioning_resets_what_it_does_not_grant() {
+    let owner = Database {
+        pool: Database::test_pool().await,
+    };
+    let name = format!("piquel_auth_{}", uuid::Uuid::now_v7().simple());
+    let role = RuntimeRole::new(&config_for(&name), "password").expect("role");
+    owner.provision(&role).await.expect("create");
+    let database: String = sqlx::query_scalar("SELECT current_database()::text")
+        .fetch_one(&owner.pool)
+        .await
+        .expect("database");
+    let object: i64 = sqlx::query_scalar("SELECT lo_create(0)::text::bigint")
+        .fetch_one(&owner.pool)
+        .await
+        .expect("large object");
+    let setup = format!(
+        "ALTER ROLE {name} SET session_replication_role = replica;
+        ALTER ROLE {name} IN DATABASE {database} SET session_replication_role = replica;
+        GRANT CREATE ON DATABASE {database} TO {name};
+        GRANT CREATE ON SCHEMA public TO {name};
+        ALTER LARGE OBJECT {object} OWNER TO {name};
+        ALTER DEFAULT PRIVILEGES FOR ROLE {name} GRANT SELECT ON TABLES TO PUBLIC;"
+    );
+    under_provisioning_lock(&owner, &setup).await;
+    owner.provision(&role).await.expect("reset");
+    let (settings, create): (i64, bool) = sqlx::query_as(
+        "SELECT
+            (SELECT count(*) FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole
+            WHERE r.rolname = $1),
+            has_database_privilege($1, current_database(), 'CREATE')
+            OR has_schema_privilege($1, 'public', 'CREATE')",
+    )
+    .bind(&name)
+    .fetch_one(&owner.pool)
+    .await
+    .expect("what remains");
+    assert_eq!((settings, create), (0, false));
+    under_provisioning_lock(&owner, &format!("DROP OWNED BY {name}; DROP ROLE {name}")).await;
+}
+
+/// Provisioning refuses a role that could do more than the grants allow: the
+/// schema owner, a member of another role, which keeps that role's privileges,
+/// and the owner of anything, which could change it.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn provisioning_refuses_roles_that_could_do_more() {
+    let owner = Database {
+        pool: Database::test_pool().await,
+    };
     let owner_name = sqlx::query_scalar::<_, String>("SELECT current_user::text")
         .fetch_one(&owner.pool)
         .await
         .expect("owner");
-    url.set_username(&owner_name).expect("user");
-    let config = DatabaseConfig::new(url.as_str(), 1, Duration::from_secs(5)).expect("config");
     let error = owner
-        .provision(&RuntimeRole::new(&config, "password").expect("role"))
+        .provision(&RuntimeRole::new(&config_for(&owner_name), "password").expect("role"))
         .await
         .expect_err("the owner is refused");
     assert!(format!("{error:?}").contains("must not be the schema owner"));
 
-    sqlx::raw_sql(&format!("DROP OWNED BY {name}; DROP ROLE {name}"))
-        .execute(&owner.pool)
-        .await
-        .expect("drop the role");
+    let name = format!("piquel_auth_{}", uuid::Uuid::now_v7().simple());
+    let role = RuntimeRole::new(&config_for(&name), "password").expect("role");
+    for (setup, undo, refusal) in [
+        (
+            format!("CREATE ROLE {name}_group; GRANT {name}_group TO {name}"),
+            format!("DROP ROLE {name}_group"),
+            "must not be a member of another role",
+        ),
+        (
+            format!("CREATE SCHEMA {name} AUTHORIZATION {name}"),
+            format!("DROP SCHEMA {name}"),
+            "must not own anything",
+        ),
+        (
+            format!("GRANT SET ON PARAMETER session_replication_role TO {name}"),
+            format!("REVOKE SET ON PARAMETER session_replication_role FROM {name}"),
+            "must not be granted any server parameter",
+        ),
+    ] {
+        under_provisioning_lock(&owner, &format!("CREATE ROLE {name}; {setup}")).await;
+        let error = owner.provision(&role).await.expect_err(refusal);
+        assert!(format!("{error:?}").contains(refusal), "{error:?}");
+        under_provisioning_lock(&owner, &format!("{undo}; DROP ROLE {name}")).await;
+    }
 }
 
 /// Every function pins its `search_path` with `pg_temp` last, so temporary tables
@@ -423,13 +527,14 @@ async fn statements_and_lock_waits_past_their_limits_fail() {
     let database = Database::connect(config).await.expect("connect");
     let settings: Vec<String> = sqlx::query_scalar(
         "SELECT current_setting(name) FROM unnest(ARRAY[
-            'statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout'
+            'statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout',
+            'transaction_timeout'
         ]) AS name",
     )
     .fetch_all(&database.pool)
     .await
     .expect("settings");
-    assert_eq!(settings, ["15s", "5s", "30s"]);
+    assert_eq!(settings, ["15s", "5s", "30s", "0"]);
 
     let limit = Duration::from_millis(100);
     let mut slow = database.begin().await.expect("transaction");
@@ -475,6 +580,29 @@ async fn statements_and_lock_waits_past_their_limits_fail() {
     );
 }
 
+/// Runs `query` as `runtime` in a transaction it rolls back, so a regressed
+/// grant cannot harm concurrent tests, and returns the code it is refused with.
+async fn refusal(runtime: &Database, query: Query<'_, Postgres, PgArguments>) -> String {
+    let mut probe = runtime.pool.begin().await.expect("begin");
+    let error = query.execute(&mut *probe).await.expect_err("refused");
+    probe.rollback().await.expect("rollback");
+    error
+        .as_database_error()
+        .and_then(sqlx::error::DatabaseError::code)
+        .map_or_else(|| error.to_string(), Into::into)
+}
+
+/// Inserts an event as auth does, in `connection`'s transaction, and returns its ID.
+async fn insert_event(connection: &mut PgConnection) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO domain_events (id, kind, version, payload, actor)
+        VALUES (uuidv7(), 'test', 1, '{}', '{}') RETURNING id",
+    )
+    .fetch_one(connection)
+    .await
+    .expect("event")
+}
+
 /// Erasing a purged owner's origins removes values from `details` as `runtime`;
 /// no update may add or change one.
 async fn assert_personal_data_only_erases(runtime: &Database) {
@@ -489,17 +617,15 @@ async fn assert_personal_data_only_erases(runtime: &Database) {
         ),
     ] {
         let mut probe = runtime.pool.begin().await.expect("begin");
-        let personal = sqlx::query(
-            "WITH event AS (
-                INSERT INTO domain_events (id, kind, version, payload, actor)
-                VALUES (uuidv7(), 'test', 1, '{}', '{}') RETURNING id
-            )
-            INSERT INTO event_personal_data (event_id, details)
-            SELECT id, '{\"/origin\": \"https://a.example\", \"/name\": \"A\"}' FROM event",
+        let event = insert_event(&mut probe).await;
+        sqlx::query(
+            "INSERT INTO event_personal_data (event_id, details)
+            VALUES ($1, '{\"/origin\": \"https://a.example\", \"/name\": \"A\"}')",
         )
+        .bind(event)
         .execute(&mut *probe)
-        .await;
-        personal.expect("personal data");
+        .await
+        .expect("personal data");
         let updated = sqlx::query(statement).execute(&mut *probe).await;
         probe.rollback().await.expect("rollback");
         match updated {
@@ -513,4 +639,32 @@ async fn assert_personal_data_only_erases(runtime: &Database) {
             }
         }
     }
+}
+
+/// A checkpoint `runtime` inserts must sign a sealed event's hash, and an event it
+/// inserts must be JSON auth can read back, or sealing would fail on it.
+/// `personal_data_is_recorded_only_with_its_event` covers attaching personal data
+/// to an older event, which needs a committed event, so a schema of its own.
+async fn assert_history_is_never_forged(runtime: &Database) {
+    for payload in [
+        r#"{"n": 1e400}"#.to_owned(),
+        format!("{}{}", "[".repeat(100), "]".repeat(100)),
+        format!(r#"{{"s": "{}"}}"#, "a".repeat(9_000)),
+    ] {
+        let unreadable = sqlx::query(
+            "INSERT INTO domain_events (id, kind, version, payload, actor)
+            VALUES (uuidv7(), 'test', 1, $1::jsonb, '{}')",
+        )
+        .bind(&payload);
+        assert_eq!(refusal(runtime, unreadable).await, "23514", "{payload}");
+    }
+    let forged = sqlx::query(
+        "INSERT INTO audit_checkpoints (position, head, created_at, note)
+        VALUES (9223372036854775807, sha256(''), now(), 'forged')",
+    );
+    assert_eq!(
+        refusal(runtime, forged).await,
+        "23000",
+        "a forged checkpoint"
+    );
 }

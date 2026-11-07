@@ -258,10 +258,15 @@ impl PersonalDetails {
         }
     }
 
-    /// Puts each stored value back where [`Self::extract`] found it.
+    /// Puts each stored value back where [`Self::extract`] found it. Only an
+    /// `"$erased"` slot is filled, so stored personal data can never replace a
+    /// value of the payload, which the audit chain covers.
     fn restore(self, payload: &mut Value) {
         for (pointer, personal) in self.0 {
-            if let Some(slot) = payload.pointer_mut(&pointer) {
+            if let Some(slot) = payload
+                .pointer_mut(&pointer)
+                .filter(|slot| slot.as_str() == Some(ERASED))
+            {
                 *slot = Value::Object(Map::from_iter([(PERSONAL_KEY.to_owned(), personal)]));
             }
         }

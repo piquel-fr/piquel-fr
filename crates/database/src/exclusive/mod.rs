@@ -81,14 +81,16 @@ impl Database {
 }
 
 impl ExclusiveConnection {
-    /// Opens a transaction on the locked connection.
+    /// Opens a read committed, read-write transaction on the locked connection,
+    /// whatever defaults the role has: sealing events must read committed data,
+    /// and a default the role set itself would otherwise stop every seal.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if `BEGIN` fails.
     pub async fn begin(&mut self) -> Result<DatabaseTransaction<'_>, DatabaseError> {
         self.connection
-            .begin()
+            .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED, READ WRITE")
             .await
             .map(DatabaseTransaction::new)
             .map_err(Into::into)

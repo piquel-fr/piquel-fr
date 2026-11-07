@@ -41,8 +41,16 @@ impl Limit {
         "idle_in_transaction_session_timeout",
         Duration::from_secs(30),
     );
+    /// No limit on a whole transaction, whatever the role set for itself: a seal
+    /// batch or a verification may run longer than any one statement.
+    const TRANSACTION: Self = Self::new("transaction_timeout", Duration::ZERO);
     /// The limits every connection starts with.
-    pub(super) const DEFAULTS: [Self; 3] = [Self::STATEMENT, Self::LOCK, Self::IDLE_IN_TRANSACTION];
+    pub(super) const DEFAULTS: [Self; 4] = [
+        Self::STATEMENT,
+        Self::LOCK,
+        Self::IDLE_IN_TRANSACTION,
+        Self::TRANSACTION,
+    ];
 
     /// `setting` at `value`.
     const fn new(setting: &'static str, value: Duration) -> Self {
@@ -54,7 +62,7 @@ impl Limit {
         Self { value, ..self }
     }
 
-    /// The setting and its value in milliseconds, the unit all three read a bare
+    /// The setting and its value in milliseconds, the unit all four read a bare
     /// number in, as connection options pass them.
     pub(super) fn option(self) -> (&'static str, String) {
         (self.setting, self.value.as_millis().to_string())

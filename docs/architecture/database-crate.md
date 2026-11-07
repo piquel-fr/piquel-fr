@@ -225,7 +225,7 @@ throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_
 
 ## Time limits
 
-Every connection auth opens, as either role, starts with three limits, set as
+Every connection auth opens, as either role, starts with these limits, set as
 connection options by `DatabaseConfig` (`Limit::DEFAULTS` in
 `src/connection/limits.rs`), so one stuck statement, lock wait or forgotten
 transaction cannot hold connections and locks forever:
@@ -235,6 +235,7 @@ transaction cannot hold connections and locks forever:
 | `statement_timeout` | 15 s | The statement is cancelled: `DatabaseError::Cancelled` (`57014`). |
 | `lock_timeout` | 5 s | The lock wait fails: `DatabaseError::LockUnavailable` (`55P03`). |
 | `idle_in_transaction_session_timeout` | 30 s | `PostgreSQL` ends the session, rolling its transaction back. |
+| `transaction_timeout` | off | Never: connection options override a limit the role set for itself, which would cut a seal batch or a verification short. |
 
 The idle limit matters beyond the session itself: event consumers and the audit
 sealer wait for every older transaction to end (see [Consumers](#consumers)), so a
@@ -260,7 +261,8 @@ jobs, connect within the pool's acquire timeout, since no statement limit bounds
 connecting.
 
 Everything else fits the defaults: cleanup, the audit sealer and audit
-verification work in batches of at most 1,000 rows, and an account export reads one
+verification work in batches of at most 1,000 rows (100 for events, whose largest
+batch would otherwise not fit in memory), and an account export reads one
 account's rows.
 
 ## Roles
@@ -271,17 +273,21 @@ including `serve`, connects as a restricted runtime role, `piquel_auth`. When `m
 (`AUTH_DATABASE_OWNER_URL`), it then calls `Database::provision`, which creates
 the runtime role or resets its attributes and password, and grants it:
 
-- `CONNECT` on the database and `USAGE` on the schema;
+- `CONNECT` on the database and `USAGE` on the schema, but not `TEMPORARY`,
+  which provisioning also revokes from `PUBLIC`;
 - `SELECT, INSERT, UPDATE, DELETE` on every table, except:
-  - `domain_events`: `SELECT, INSERT`, and `UPDATE` on `chain_position` and
-    `chain_hash` only, so history cannot be rewritten (see
-    [Audit chain](#audit-chain));
+  - `domain_events`: `SELECT`, `INSERT` on the columns auth writes, and `UPDATE`
+    on `chain_position` and `chain_hash` only, so an event's transaction, time,
+    sequence and chain columns keep their defaults, and history cannot be
+    rewritten (see [Audit chain](#audit-chain)). A migration that adds a column
+    auth writes adds it to the script;
   - `audit_checkpoints`: `SELECT, INSERT`;
   - `audit_anchor`: `SELECT`;
-  - `event_personal_data`: `SELECT, INSERT, DELETE`, and `UPDATE` on `details`
-    only, so it can be erased but not rewritten: a trigger refuses an update
-    that does anything but remove values from `details`, as a purge does with
-    its clients' related origins;
+  - `event_personal_data`: `SELECT, DELETE`, `INSERT` on every column but
+    `created_at`, so retention counts from the insert, and `UPDATE` on `details`
+    only. It can be erased but not rewritten: a trigger refuses an insert for an
+    event of another transaction, and an update that does anything but remove
+    values from `details`, as a purge does with its clients' related origins;
   - `event_consumers`: `SELECT, INSERT, UPDATE`;
   - `_sqlx_migrations`: nothing.
 
@@ -289,12 +295,18 @@ Grants are reset on every run, so they cover tables that new migrations add. A
 migration that drops a listed table, or a new table that needs an exception,
 updates the script in the same change. Narrowing a grant on an existing table is a
 contract step: the previous release keeps running as the same role during a
-deploy, so revoke only once no deployed release needs the privilege. Provisioning refuses a role that is the owner or a superuser.
+deploy, so revoke only once no deployed release needs the privilege.
+Provisioning refuses a role that is the owner or a superuser, a member of
+another role, whose privileges it would keep, or the owner of anything but large
+objects and default privileges, which any role may create, and a role granted a
+server parameter, directly or through `PUBLIC`. It resets the role's settings,
+such as a `session_replication_role` that would skip every trigger, and its
+privileges on the database, schema and sequences, so only these grants remain.
 It sets the password as a SCRAM-SHA-256 verifier (`ScramVerifier`), so the server
 and its logs never see the password itself, even in a statement that fails.
 The role cannot change the schema, disable triggers, change
-`session_replication_role` or run programs on the server. It still takes the
-advisory locks `try_exclusive` uses, and may create temporary tables.
+`session_replication_role`, create temporary tables or run programs on the
+server. It still takes the advisory locks `try_exclusive` uses.
 
 Trigger functions run as the role that fires them, except a trigger that reads or
 writes a table its own migration creates: the runtime role is granted that table
@@ -302,9 +314,10 @@ only after the migrations, while the previous release already fires the trigger.
 That function runs as its owner (`SECURITY DEFINER`), like the one migration
 `0013` uses to record redeemed codes in `oidc_session_clients`, or those
 migration `0019` uses to hold account recoveries' rules for every release, and
-only its owner may execute it. The runtime role may create temporary tables and types, so it could
-otherwise attach the function to a table of its own and have it run that type's
-cast as the owner. A test fails for any such function others may execute.
+only its owner may execute it. A role that could create temporary tables and
+types could otherwise attach the function to a table of its own and have it run
+that type's cast as the owner. The runtime role no longer can, but a test still
+fails for any such function others may execute.
 
 ## Domain events
 
@@ -477,10 +490,22 @@ order but tracked by `chain_position IS NULL` rather than a cursor, gives each i
 from `EventContent`, whose serialization is the canonical event, so a tampered row
 reads back and fails verification rather than failing to decode.
 
-The runtime role may update only `chain_position` and `chain_hash` of
-`domain_events`, may only read and insert `audit_checkpoints`, and may only read
-`audit_anchor`. A trigger also rejects updates and deletes of sealed events, and
-any change to `audit_checkpoints`. Only `DatabaseTransaction::prune_audit_chain`,
+The runtime role inserts events with only the columns auth writes, and a check
+refuses one auth could not read back: a payload over 8 KiB or an actor over 1 KiB
+of JSON, a number beyond a double's range, nesting 64 levels deep, or a text
+column over 256 bytes. Parsed JSON takes up to about 100 times its text, so a
+batch of 100 such events stays under about 95 MB. An account keeps at most 100
+active passkeys, so a recovery listing them all fits. It may update only
+`chain_position` and `chain_hash` of `domain_events`, may only read and insert
+`audit_checkpoints`, and may only read `audit_anchor`. Triggers also
+reject updates and deletes of sealed events, a seal at any position but the one
+after a sealed event or the anchor, or outside a read committed transaction, any
+change to `audit_checkpoints`, and a new checkpoint that is not of a sealed
+event's hash, is dated at an infinite time or more than a minute ahead, or has a
+note over 1 KiB. A
+forged position or checkpoint time would otherwise stop sealing or signing until
+the owner repaired it. SQL cannot check a checkpoint's signature: that is auth's
+job. Only `DatabaseTransaction::prune_audit_chain`,
 run as the schema owner, deletes sealed events: it sets `piquel.audit_prune` for
 its own transaction, then moves the anchor (`audit_anchor`) to the checkpoint it
 pruned through. The anchor only moves forward, so of two concurrent prunes, the
@@ -491,7 +516,9 @@ so a delivery may name an event already pruned.
 
 Verification tests need history no other test shares: `Database::isolated` (behind
 `test-util`) migrates a schema of its own, and `audit().tamper` applies the
-changes an attacker could make, with the trigger disabled.
+changes an attacker could make, with the triggers disabled. The guards migration
+`0035` adds look tables up in the schema they were migrated into, so they guard
+that schema's chain too.
 
 ### Security history
 
