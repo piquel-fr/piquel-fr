@@ -186,7 +186,8 @@ first, and downloads it themselves.
 
 When an administrator or operator acts:
 
-- Every change needs their reason, renaming the handle included. It is stored with
+- Every change to a shared setting needs their reason, renaming the handle
+  included. It is stored with
   each event as personal data, and the owner sees it in their security history,
   next to "By a Piquel administrator".
 - Events record the administrator or operator as their actor. Their reads are
