@@ -24,3 +24,9 @@ check:
 # Serves the book on localhost:3000, rebuilding it on every change.
 serve *args:
     @mdbook serve {{ args }}
+
+# Rewrite the generated reference pages: the configuration variables and the
+# auth-service commands, from the code that defines them. `just test` fails while
+# they are stale.
+reference:
+    @UPDATE_DOCS_REFERENCE=1 cargo nextest run --locked -p auth-service -p piquel-web -E 'test(reference_is_current)'

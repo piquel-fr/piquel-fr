@@ -10,14 +10,26 @@ use std::collections::BTreeMap;
 /// Maximum provider-assigned client ID length.
 const MAX_PROVIDER_CLIENT_ID_LENGTH: usize = 512;
 
-/// GitHub-assigned client identifier.
-const GITHUB_CLIENT_ID: Variable = Variable::new("AUTH_GITHUB_CLIENT_ID");
-/// Reference to the GitHub client secret.
-const GITHUB_CLIENT_SECRET: Variable = Variable::new("AUTH_GITHUB_CLIENT_SECRET");
-/// Google-assigned client identifier.
-const GOOGLE_CLIENT_ID: Variable = Variable::new("AUTH_GOOGLE_CLIENT_ID");
-/// Reference to the Google client secret.
-const GOOGLE_CLIENT_SECRET: Variable = Variable::new("AUTH_GOOGLE_CLIENT_SECRET");
+piquel_common::variables! {
+    /// The sign-in providers' variables, in the configuration reference's order.
+    #[cfg(test)]
+    pub(crate) const VARIABLES;
+
+    /// The client ID of auth's GitHub OAuth app. Set, it turns GitHub sign-in on
+    /// and requires `AUTH_GITHUB_CLIENT_SECRET`; unset or empty, GitHub is off and
+    /// its secret isn't read.
+    const GITHUB_CLIENT_ID = "AUTH_GITHUB_CLIENT_ID";
+    /// Where to read the GitHub OAuth app's client secret, through `env://NAME` or
+    /// `file:///path`. It is read and checked at startup: restart auth after
+    /// changing it.
+    const GITHUB_CLIENT_SECRET = "AUTH_GITHUB_CLIENT_SECRET";
+    /// The client ID of auth's Google OAuth client, as `AUTH_GITHUB_CLIENT_ID` is
+    /// GitHub's.
+    const GOOGLE_CLIENT_ID = "AUTH_GOOGLE_CLIENT_ID";
+    /// Where to read the Google OAuth client's secret, as for
+    /// `AUTH_GITHUB_CLIENT_SECRET`.
+    const GOOGLE_CLIENT_SECRET = "AUTH_GOOGLE_CLIENT_SECRET";
+}
 
 /// OAuth credentials validated before application construction.
 #[derive(Clone, Debug)]

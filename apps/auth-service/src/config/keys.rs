@@ -1,6 +1,6 @@
-//! The keys auth reads from the environment besides the key-encryption key: the
-//! token digest keys, the link keys derived from them, and the audit checkpoint
-//! key.
+//! The keys auth reads from the environment: the key-encryption key, which
+//! `AuthConfig` opens, the token digest keys, the link keys derived from them, and
+//! the audit checkpoint key.
 
 use crate::{AuditKeys, emails::VerificationKeys, recovery::RecoveryLinks};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -22,13 +22,29 @@ const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
 /// Bytes of a token digest key's digest kept as its fingerprint.
 const DIGEST_KEY_FINGERPRINT_BYTES: usize = 8;
 
-/// Required reference to the key that signs audit checkpoints.
-const AUDIT_KEY_PROVIDER: Variable = Variable::new("AUTH_AUDIT_KEY_PROVIDER");
-/// Reference to the key under which opaque token secrets are digested.
-const TOKEN_DIGEST_KEY: Variable = Variable::new("AUTH_TOKEN_DIGEST_KEY");
-/// Optional reference to another token digest key, accepted but never used for
-/// new digests: the next key before it is current, or the old one after.
-const TOKEN_DIGEST_KEY_ACCEPTED: Variable = Variable::new("AUTH_TOKEN_DIGEST_KEY_ACCEPTED");
+piquel_common::variables! {
+    /// The keys' variables, in the configuration reference's order.
+    #[cfg(test)]
+    pub(crate) const VARIABLES;
+
+    /// Where to read the key that seals signing keys in the database: 32 bytes as
+    /// unpadded base64url text, through `env://NAME` or `file:///path`. A trailing
+    /// newline is ignored. Required. It can't be changed yet: the stored signing
+    /// keys would no longer open.
+    pub(super) const KEY_ENCRYPTION_KEY = "AUTH_KEY_ENCRYPTION_KEY";
+    /// Where to read the key under which refresh tokens, authorization codes and
+    /// pending logins are stored as HMAC digests. Its raw bytes are the key, at
+    /// least 32 of them. Email verification and recovery links derive from it too.
+    /// Required. Replacing it at once ends every refresh token and every login in
+    /// progress, so change it in two deploys.
+    const TOKEN_DIGEST_KEY = "AUTH_TOKEN_DIGEST_KEY";
+    /// Where to read another token digest key, accepted but never used for new
+    /// digests: the next key before it becomes current, or the old one after.
+    const TOKEN_DIGEST_KEY_ACCEPTED = "AUTH_TOKEN_DIGEST_KEY_ACCEPTED";
+    /// Where to read the key that signs audit checkpoints: a 32-byte Ed25519 seed
+    /// as 64 hex characters. Required.
+    const AUDIT_KEY_PROVIDER = "AUTH_AUDIT_KEY_PROVIDER";
+}
 
 /// One key under which opaque token secrets are stored as HMAC digests.
 pub(crate) struct TokenDigestKey {
