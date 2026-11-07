@@ -70,7 +70,7 @@ own. It builds on the [security boundaries](boundaries.md); the
 | Threat | Mitigation |
 | --- | --- |
 | Taking over an account | Administrators view, edit and remove, but never add a way in or an address; the types make it a compile error ([changing an account](../architecture/surfaces.md#changing-an-account-on-its-owners-behalf)). A recovery an administrator starts is only mailed, never shown to them. |
-| Acting without a trace | Every change is recorded with the administrator as its actor, and reads as views. Changes to an account's settings on its owner's behalf, and most actions on the account, need a reason, most of which the owner sees in their history; granting or revoking rights, enabling an account and signing its sessions out need none. |
+| Acting without a trace | Every change is recorded with the administrator as its actor, and reads as views. Changes to an account's settings on its owner's behalf, and most actions on the account, need a reason, most of which the owner sees in their history; granting or revoking rights, enabling an account and signing its sessions out from the account's dashboard page or with `session revoke` and `session revoke-all` need none. |
 | One administrator against another | An administrator may not change another administrator's account, nor their own rights or the last active administrator's. |
 | A stolen session reaching the dashboard | The dashboard needs a passkey sign-in, a confirmation of its own for every change, a request naming its host, and the tailnet ([admin.piquel.fr](../architecture/surfaces.md#adminpiquelfr)). |
 
