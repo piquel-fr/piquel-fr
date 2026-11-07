@@ -150,7 +150,6 @@ async fn drafts_change_until_sent_and_reach_only_their_recipients() {
         None
     );
     assert!(!announcements.discard(id).await.expect("discard"));
-    // Other tests' announcements to everyone reach these accounts too.
     for (user, received) in [(mailed, true), (unmailed, true), (bystander, false)] {
         let announcements = inbox(&pool, user).await;
         assert_eq!(announcements.contains(&id), received);
@@ -430,7 +429,6 @@ async fn sending_and_purging_wait_for_each_other() {
     });
     assert_eq!(deliveries_to(&pool, purged, chosen).await, 0);
     assert_eq!(deliveries_to(&pool, kept, chosen).await, 1);
-    // Other tests' announcements to everyone may reach these accounts too.
     assert!(inbox(&pool, kept).await.contains(&chosen));
     assert!(
         !inbox(&pool, purged).await.contains(&chosen),
