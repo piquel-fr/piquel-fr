@@ -29,7 +29,11 @@ A device stays signed in for 30 days at most, then signs in again.
 Select **Sign out** beside the device. The page says **The device was signed
 out.**
 
-Signing a device out also signs out the apps you use through it.
+Signing a device out also ends the access of the apps you signed in to through
+it: they can't refresh it, and those that listen for it are told to sign you
+out. An app's access token keeps working until it expires, within five minutes,
+and an app that keeps its own session may keep you signed in until it next
+checks with Piquel.
 
 To sign out everywhere but here, select **Sign out of all other devices** at
 the top of the page. The page says **Your other devices were signed out.**
