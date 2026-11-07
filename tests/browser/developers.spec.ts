@@ -1,3 +1,10 @@
+/**
+ * The developer console: registering a confidential app, with settings refused
+ * beside their input and reserved brand names refused; its secret shown once, in
+ * an answer no cache keeps and nowhere in the URL, history or storage; the app
+ * signing a user in through a consent page naming its host and owner; rotating
+ * its secret, changing its back-channel logout URI, disabling and deleting it.
+ */
 import { expect, type Page, type Request, test } from '@playwright/test';
 import { addPasskeys, authorization, authUrl, consent, serveClient, signUp } from './helpers';
 

@@ -194,10 +194,10 @@ and run with `just db test`.
 
 Then check the page in Chromium, with the real binary and a virtual
 authenticator: add a test to the spec of its area in `tests/browser/`, such as
-`settings.spec.ts`, describe it in the
-[browser tests' README](https://github.com/piquel-fr/piquel-fr/blob/main/tests/browser/README.md),
-and run `just web test-browser` against running servers, as that README sets
-them up. To see the page yourself, deploy the checkout with `just preview`.
+`settings.spec.ts`, and update the spec's top comment if it now covers more.
+Run `just web test-browser` against running servers, as the
+[browser tests' README](https://github.com/piquel-fr/piquel-fr/blob/main/tests/browser/README.md)
+sets them up. To see the page yourself, deploy the checkout with `just preview`.
 
 ## Document it
 
