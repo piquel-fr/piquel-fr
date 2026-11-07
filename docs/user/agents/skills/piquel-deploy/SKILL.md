@@ -53,11 +53,13 @@ the app's service. Here the service is `web`, on port 3000:
 domain = "staging.notes.example.com"
 piquel_client_id = "<staging client ID>"
 piquel_client_secret = "piquel-client-secret-staging"
+piquel_cookie_key = "piquel-cookie-key-staging"
 
 [spec.environments.production.variables]
 domain = "notes.example.com"
 piquel_client_id = "<production client ID>"
 piquel_client_secret = "piquel-client-secret-production"
+piquel_cookie_key = "piquel-cookie-key-production"
 
 [[spec.services]]
 name = "web"
@@ -74,7 +76,7 @@ name = "${{ vars.piquel_client_secret }}"
 target = "/run/secrets/piquel-client-secret"
 
 [[spec.services.secrets]]
-name = "piquel-cookie-key"
+name = "${{ vars.piquel_cookie_key }}"
 target = "/run/secrets/piquel-cookie-key"
 
 [spec.services.healthcheck]
@@ -93,7 +95,9 @@ visibility = "public"
 - In the container, the app must listen on `0.0.0.0`, not `127.0.0.1`, for the
   route to reach it.
 - The health check's path must answer without a session. A page that takes
-  `SignedIn` answers piqueld's check with 401, which fails it.
+  `SignedIn` answers piqueld's check with 401, which fails it, and the app the
+  piquel-sign-in skill builds has no such route yet: add a `/health` route
+  outside the login layer that answers 200 or 204.
 - The variables are runtime settings, not build arguments, so an environment
   promoted from staging can run staging's image.
 
@@ -112,16 +116,19 @@ never passes through you. In a terminal, `--stdin` asks for the value without
 showing it:
 
 ```console
-piquelctl app secret <app> set piquel-client-secret-production --stdin --environments production
+piquelctl app secret <app> set piquel-client-secret-production --stdin --environments production --no-previews
 piquelctl app secret <app> set piquel-client-secret-staging --stdin --environments staging
 ```
 
-The cookie key is 32 random bytes in standard base64. piqueld's generated
-secrets are hexadecimal or base64url, which the SDKs refuse, so store one
-instead. You can run this: the value goes straight into piqueld.
+Each environment also needs its own cookie key, never shared: the key seals
+whole sessions, tokens included, so an environment that could read another's
+key could forge its users' sessions. It is 32 random bytes in standard base64.
+piqueld's generated secrets are hexadecimal or base64url, which the SDKs refuse,
+so store them instead. You can run these: the values go straight into piqueld.
 
 ```console
-openssl rand -base64 32 | piquelctl app secret <app> set piquel-cookie-key --stdin --yes
+openssl rand -base64 32 | piquelctl app secret <app> set piquel-cookie-key-production --stdin --environments production --no-previews --yes
+openssl rand -base64 32 | piquelctl app secret <app> set piquel-cookie-key-staging --stdin --environments staging --yes
 ```
 
 ## 4. Deploy

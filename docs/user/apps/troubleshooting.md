@@ -27,6 +27,7 @@ that says what went wrong: search this page for either.
 | `client_id is not a registered, enabled client` | Check the client ID on the app's **Overview** tab. A disabled, suspended or deleted app answers this too. |
 | `redirect_uri is not registered for this client; it must match exactly` | Register the URI your app sends, character for character: scheme, host, port, path and trailing slash. See [local development](local-development.md#which-redirect-uris-work-locally) for loopback addresses. |
 | `authorization request is malformed: …` | A parameter is repeated or has the wrong type. The rest of the description names it. |
+| `request_uri is unknown, expired, already used or issued to another client` (`invalid_request_uri`) | A pushed request lasts 60 seconds and works once. Push a new one for each sign-in. A page that [signs users in with passkeys itself](passkey-sign-in.md) can get it from `/webauthn/related/start` too. |
 
 ## Errors at your redirect URI
 
@@ -53,7 +54,6 @@ that says what went wrong: search this page for either.
 | `invalid_grant` | `code was already used, …` or `refresh_token was already used, …` | A code, or a browser app's refresh token, was presented twice, so auth revoked the tokens issued from it. Sign the user in again. |
 | `invalid_grant` | `the sign-in session behind this grant has ended` or `the user withdrew consent for this application` | The user signed out, or removed your app under **Connected apps** in their settings. Sign them in again. |
 | `invalid_grant` | `the client or account no longer allows this grant, …` | A scope was removed, or refresh tokens turned off ([app settings](app-settings.md#change-the-settings)). Sign the user in again. |
-| `invalid_request_uri` | `request_uri is unknown, expired, already used or issued to another client` | A pushed request lasts 60 seconds and works once. Push a new one for each sign-in. |
 
 ## `interaction_required`
 

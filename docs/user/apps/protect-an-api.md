@@ -12,9 +12,11 @@ and
 
 ## Before you start
 
-- Know which tokens your API accepts. An access token's `aud` is the client ID of
-  the app it was issued to, so your API accepts the tokens of the apps whose client
-  ID it names. [How sign-in works](how-sign-in-works.md#tokens) explains the
+- Know which tokens your API accepts: those whose `aud` is its identifier. For an
+  app registered in the console, that is the app's client ID, so an API that
+  serves your own app uses your app's client ID as its identifier. The examples
+  below use `notes-api`, which stands for an audience an operator registered for
+  a first-party API. [How sign-in works](how-sign-in-works.md#tokens) explains the
   tokens.
 - Add an SDK to your API, as [signing in with Rust](sign-in-rust.md#before-you-start)
   or [with TypeScript](sign-in-typescript.md#before-you-start) shows. The Rust
@@ -146,8 +148,8 @@ lacks fails with `unknown_key`.
 ## Troubleshooting
 
 - **Every token is refused with `invalid_token`:** check the identifier. It must
-  equal the token's `aud` exactly, the client ID of the app the token was issued
-  to.
+  equal the token's `aud` exactly: your app's client ID, for an app registered in
+  the console.
 - **The API answers `503`:** it could not fetch auth's signing keys. It answers
   again once auth is reachable.
 - **A Rust handler answers `500`:** the route is missing `BearerLayer`.

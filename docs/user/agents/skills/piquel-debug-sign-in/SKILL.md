@@ -26,7 +26,7 @@ stopped:
 
 | Answer | What happened |
 | --- | --- |
-| `502` from `/auth/login`: `Sign-in could not start: the pushed authorization endpoint rejected the request with <error>.` | Auth refused the request before the browser left the app. Step 3 reads why |
+| `502` from `/auth/login`: `Sign-in could not start: the pushed authorization endpoint rejected the request with <error>.` (Rust), or `the https://…/oauth/par endpoint rejected the request with <error>` (TypeScript) | Auth refused the request before the browser left the app. Step 3 reads why |
 | `502` from `/auth/login`: `Sign-in could not start: request to <url> failed.` | The app could not reach auth |
 | `400` from `/auth/callback`: `Sign-in failed: ... authorization failed with access_denied.` | The person declined the consent page |
 | `400` from `/auth/callback`: `This sign-in has no pending login; start again.` | The browser didn't bring back the cookie of the sign-in it started. See the causes below |
@@ -54,10 +54,12 @@ the app discovers, character for character.
 
 The SDKs' message names the error code only. Send the app's request yourself
 to read auth's description. Run it where the app's environment is set, and
-don't print the secret:
+don't print the secret. On piqueld, the secret is in the file
+`PIQUEL_CLIENT_SECRET_FILE` names rather than in `PIQUEL_CLIENT_SECRET`:
 
 ```console
-curl -s -u "$PIQUEL_CLIENT_ID:$PIQUEL_CLIENT_SECRET" https://auth.piquel.fr/oauth/par \
+secret="${PIQUEL_CLIENT_SECRET:-$(cat "$PIQUEL_CLIENT_SECRET_FILE")}"
+curl -s -u "$PIQUEL_CLIENT_ID:$secret" https://auth.piquel.fr/oauth/par \
   --data-urlencode response_type=code \
   --data-urlencode "redirect_uri=$PIQUEL_REDIRECT_URI" \
   --data-urlencode "scope=openid profile offline_access" \

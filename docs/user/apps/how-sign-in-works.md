@@ -75,8 +75,9 @@ one stops working. A web app with a backend keeps the same one.
 
 The first time a user signs in to your app, auth asks for their consent and lists
 what the app will receive. Auth remembers their answer for each scope, so a new
-scope asks again. Apps registered in the console always ask, and the consent page
-says they are unverified, registered by your handle.
+scope asks again. Apps registered in the console are never trusted to skip that
+first ask, and their consent page says they are unverified, registered by your
+handle.
 
 Users can remove an app's access under **Connected apps** in their settings. The
 app then asks for consent again at its next sign-in.
