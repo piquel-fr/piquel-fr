@@ -196,4 +196,25 @@ impl AlertRepository<'_> {
         )?;
         rows.into_iter().map(StoredAlert::try_from).collect()
     }
+
+    /// The open alerts, oldest first: current, and not acknowledged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a payload does not decode.
+    pub async fn open(&mut self) -> Result<Vec<StoredAlert>, DatabaseError> {
+        let rows = run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                AlertRow,
+                r#"SELECT id AS "id: AlertId", payload, version, raised_at, seen_at,
+                    acknowledged_at, cleared_at
+                FROM alerts
+                WHERE cleared_at IS NULL AND acknowledged_at IS NULL
+                ORDER BY raised_at, id"#,
+            )
+        )?;
+        rows.into_iter().map(StoredAlert::try_from).collect()
+    }
 }

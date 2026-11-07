@@ -15,6 +15,15 @@ use topcoat::{
 /// Something that needs an administrator's attention.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Problem<'a> {
+    /// An alert is open.
+    OpenAlert {
+        /// What it says, in one line.
+        subject: &'a str,
+        /// When it was raised.
+        raised_at: DateTime<Utc>,
+        /// The alerts.
+        alerts: &'a str,
+    },
     /// Far more sign-ins failed in the last hour than usually do.
     FailedSignIns {
         /// How many failed in the last hour.
@@ -202,6 +211,16 @@ pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View
 async fn problem_notice<'a>(problem: &'a Problem<'a>) -> Result<impl View> {
     Ok(view! {
         match problem {
+            Problem::OpenAlert { subject, raised_at, alerts } => {
+                <section class="notice error" role="alert">
+                    icon(kind: Icon::Warning)
+                    <div class="text">
+                        <strong>(*subject)</strong>
+                        <small>"Raised " moment(at: *raised_at) ". Acknowledge it once someone is looking into it."</small>
+                    </div>
+                    <a class="button secondary small" href=(*alerts)>"See the alerts"</a>
+                </section>
+            },
             Problem::FailedSignIns { count, usual, events } => {
                 <section class="notice warning" role="alert">
                     icon(kind: Icon::Warning)

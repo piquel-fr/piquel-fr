@@ -32,6 +32,9 @@ pub enum Alert {
 }
 
 impl Alert {
+    /// What an alert a newer release raised says, since this one cannot show it.
+    pub const UNKNOWN: &'static str = "An alert this release cannot show";
+
     /// The condition it is about.
     #[must_use]
     pub const fn kind(&self) -> AlertKind {

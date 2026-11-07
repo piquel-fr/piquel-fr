@@ -1,7 +1,7 @@
 //! The alerts administrators are shown, and acknowledging one.
 
 use super::{AdminApplication as App, ReasonForm};
-use crate::{Reason, admin::ALERTS_SHOWN};
+use crate::{AdminError, Reason, admin::ALERTS_SHOWN};
 use piquel_common::{AlertId, alerts::AlertState};
 use piquel_ui::{AlertRow, Change};
 use topcoat::{
@@ -48,7 +48,9 @@ pub(super) async fn acknowledge(cx: &Cx, form: Option<Form<ReasonForm>>) -> Resu
     let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
         service
             .acknowledge_alert(&admin.operator, id, Reason::parse(input.reason)?)
-            .await
+            .await?;
+        App::forget_health(cx);
+        Ok::<_, AdminError>(())
     })
     .await?;
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());

@@ -510,7 +510,9 @@ behind it. See `docs/architecture/delivery-queue.md`.
 ### Alerts
 
 Conditions that need an administrator's attention, such as a broken audit chain,
-are raised as alerts. The dashboard's Alerts tab lists them, and so does:
+are raised as alerts. The dashboard's overview shows each open one, and its
+status bar counts them with the other problems. Its Alerts tab lists them all,
+and so does:
 
 ```sh
 just auth alerts list

@@ -2,7 +2,7 @@
 
 use super::{Action, Change, confirm, moment};
 use crate::layout::page_head;
-use piquel_common::alerts::{AlertState, StoredAlert};
+use piquel_common::alerts::{Alert, AlertState, StoredAlert};
 use topcoat::{
     Result,
     view::{View, class, component, view},
@@ -55,7 +55,7 @@ pub async fn alert_list<'a>(rows: &'a [AlertRow<'a>], limit: u32) -> Result<impl
                             for row in rows {
                                 let alert = row.alert;
                                 let (tone, label) = state_badge(alert.state());
-                                let subject = alert.alert.as_ref().map_or("An alert this release cannot show", |alert| alert.subject());
+                                let subject = alert.alert.as_ref().map_or(Alert::UNKNOWN, Alert::subject);
                                 <tr>
                                     <td>
                                         <strong>(subject)</strong>
