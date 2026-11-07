@@ -6,7 +6,7 @@ from your settings.
 ## Before you start
 
 You need one of your account's passkeys: downloading needs a
-[passkey confirmation](../introduction.md#words-this-guide-uses). A passkey
+[passkey confirmation](../account/signing-in.md#passkey-confirmation). A passkey
 added by a [recovery](recover-your-account.md#the-first-15-days) can't download
 your data during its first 15 days.
 
