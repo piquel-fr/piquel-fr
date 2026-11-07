@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domain_events e SET txid = other.txid\n                    FROM domain_events other\n                    WHERE (e.chain_position, other.chain_position) IN (($1, $2), ($2, $1))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "521ea06be936737dafa9264dd2ed0645ee2f3316ccaf08da61bbc26478e39c11"
+}

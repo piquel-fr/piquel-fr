@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT position AS \"position: Unsigned\", head AS \"head: Bytes32\", created_at, note\n                FROM audit_checkpoints\n                ORDER BY position DESC\n                LIMIT 1",
+  "query": "SELECT position AS \"position: Unsigned\", head AS \"head: Bytes32\", created_at, note\n                FROM audit_checkpoints\n                WHERE $1::bigint IS NULL OR position < $1\n                ORDER BY position DESC\n                LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -25,7 +25,10 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -34,5 +37,5 @@
       false
     ]
   },
-  "hash": "895c8eafd8aef46b6eefb0abb6506ebe8d0b4c9008be172cb2adfcd1688188f7"
+  "hash": "64163a4c4f4674fb462d47a21e3efec6f69d54f490c1aa6a1383df0b79396a13"
 }

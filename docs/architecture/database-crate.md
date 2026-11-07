@@ -277,9 +277,9 @@ the runtime role or resets its attributes and password, and grants it:
   which provisioning also revokes from `PUBLIC`;
 - `SELECT, INSERT, UPDATE, DELETE` on every table, except:
   - `domain_events`: `SELECT`, `INSERT` on the columns auth writes, and `UPDATE`
-    on `chain_position` and `chain_hash` only, so an event's transaction, time,
-    sequence and chain columns keep their defaults, and history cannot be
-    rewritten (see [Audit chain](#audit-chain)). A migration that adds a column
+    on `chain_position`, `chain_hash` and `chain_format` only, so an event's
+    transaction, time, sequence and chain columns keep their defaults, and
+    history cannot be rewritten (see [Audit chain](#audit-chain)). A migration that adds a column
     auth writes adds it to the script;
   - `audit_checkpoints`: `SELECT, INSERT`;
   - `audit_anchor`: `SELECT`;
@@ -421,7 +421,8 @@ have all finished. The rule is written once, in the `in_safe_order!` query macro
 both build on. A long-running transaction holds back every consumer until it ends,
 so keep transactions short; the idle limit (see [Time limits](#time-limits)) ends
 one that is forgotten. `history_for_user` lists an account's events,
-newest first.
+newest first, in the same `(txid, sequence)` order, so sealed history is listed in
+chain order.
 
 ### Sessions
 
@@ -485,27 +486,30 @@ pool.
 unsealed, so recording never waits on the chain head. Auth's sealer job, under
 `LockKey::AuditChain`, reads them with `audit().unsealed`, in the consumers' safe
 order but tracked by `chain_position IS NULL` rather than a cursor, gives each its
-`chain_position` and `chain_hash` with `seal`, and stores signed checkpoints with
+`chain_position`, `chain_hash` and `chain_format` with `seal`, and stores signed checkpoints with
 `insert_checkpoint`. The repository never hashes or signs: auth computes the hashes
 from `EventContent`, whose serialization is the canonical event, so a tampered row
-reads back and fails verification rather than failing to decode.
+reads back and fails verification rather than failing to decode. `seal` also
+stores the canonical event's format in `chain_format`, which `unsealed` takes
+from the sealer, and `chain` returns each event's `(txid, sequence)` beside it,
+for verification to check against chain order. `newest_checkpoints` reads
+checkpoints newest first, for the sealer to find the newest that verifies.
 
 The runtime role inserts events with only the columns auth writes, and a check
-refuses one auth could not read back: a payload over 8 KiB or an actor over 1 KiB
-of JSON, a number beyond a double's range, nesting 64 levels deep, or a text
+refuses one auth could not read back: a payload over 8 KiB or an actor over
+1 KiB of JSON, a number beyond a double's range, nesting 64 levels deep, or a text
 column over 256 bytes. Parsed JSON takes up to about 100 times its text, so a
 batch of 100 such events stays under about 95 MB. An account keeps at most 100
 active passkeys, so a recovery listing them all fits. It may update only
-`chain_position` and `chain_hash` of `domain_events`, may only read and insert
-`audit_checkpoints`, and may only read `audit_anchor`. Triggers also
-reject updates and deletes of sealed events, a seal at any position but the one
-after a sealed event or the anchor, or outside a read committed transaction, any
-change to `audit_checkpoints`, and a new checkpoint that is not of a sealed
+`chain_position`, `chain_hash` and `chain_format` of `domain_events`, may only
+read and insert `audit_checkpoints`, and may only read `audit_anchor`. Triggers
+also reject updates and deletes of sealed events, a seal at any position but the
+one after a sealed event or the anchor, or outside a read committed transaction,
+any change to `audit_checkpoints`, and a new checkpoint that is not of a sealed
 event's hash, is dated at an infinite time or more than a minute ahead, or has a
-note over 1 KiB. A
-forged position or checkpoint time would otherwise stop sealing or signing until
-the owner repaired it. SQL cannot check a checkpoint's signature: that is auth's
-job. Only `DatabaseTransaction::prune_audit_chain`,
+note over 1 KiB. A forged position or checkpoint time would otherwise stop
+sealing or signing until the owner repaired it. SQL cannot check a checkpoint's
+signature: that is auth's job. Only `DatabaseTransaction::prune_audit_chain`,
 run as the schema owner, deletes sealed events: it sets `piquel.audit_prune` for
 its own transaction, then moves the anchor (`audit_anchor`) to the checkpoint it
 pruned through. The anchor only moves forward, so of two concurrent prunes, the

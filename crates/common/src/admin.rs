@@ -471,6 +471,10 @@ pub enum ChainProblem {
     EventBeforeAnchor,
     /// The event's content or position does not match its stored chain hash.
     EventChanged,
+    /// The event was sealed out of the order events were recorded in, which
+    /// histories list them in: its transaction and sequence, which the chain does
+    /// not cover, do not come after the previous event's.
+    OutOfOrder,
     /// The chain recomputed through the position does not match the checkpoint
     /// signed there: an event before it was changed and the stored hashes
     /// recomputed.
@@ -493,6 +497,9 @@ impl std::fmt::Display for ChainProblem {
                 "a sealed event remains here, at or before the anchor it was pruned through"
             }
             Self::EventChanged => "the event does not match its chain hash",
+            Self::OutOfOrder => {
+                "the event's recorded order does not come after the previous event's"
+            }
             Self::CheckpointMismatch => {
                 "the recomputed chain does not match the checkpoint signed here"
             }

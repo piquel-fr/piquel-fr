@@ -30,9 +30,9 @@ const ERASED: &str = "$erased";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventCursor {
     /// The writing transaction's ID.
-    txid: i64,
+    pub(crate) txid: i64,
     /// The event's position in insertion order.
-    sequence: i64,
+    pub(crate) sequence: i64,
 }
 
 /// Which events [`EventRepository::list`] returns. The default matches every event.
@@ -379,6 +379,10 @@ impl EventRepository<'_> {
     /// `offset`. A `before` event that does not exist, or concerns another account
     /// than `subject`, matches nothing.
     ///
+    /// Newest means last in the order events are sealed in, `(txid, sequence)`,
+    /// which `audit verify` checks against the chain, so sealed history is listed
+    /// in chain order. `sequence` alone is not covered by the chain.
+    ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or a stored event does not decode.
@@ -407,15 +411,15 @@ impl EventRepository<'_> {
                 AND ($2::text IS NULL OR e.kind = $2)
                 AND (
                     $3::uuid IS NULL
-                    OR e.sequence < (
-                        SELECT sequence FROM domain_events
+                    OR (e.txid, e.sequence) < (
+                        SELECT txid, sequence FROM domain_events
                         WHERE id = $3
                         AND ($1::uuid IS NULL OR subject_user_id = $1)
                     )
                 )
                 AND ($5::uuid IS NULL OR e.id = $5)
                 AND ($7::text IS NULL OR e.kind <> $7)
-                ORDER BY e.sequence DESC
+                ORDER BY e.txid DESC, e.sequence DESC
                 LIMIT $4 OFFSET $6"#,
                 filter.subject.map(UserId::as_uuid),
                 filter.kind.as_deref(),
@@ -556,7 +560,7 @@ impl EventRepository<'_> {
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 WHERE e.client_id = $1
-                ORDER BY e.sequence DESC
+                ORDER BY e.txid DESC, e.sequence DESC
                 LIMIT $2"#,
                 client_id.as_str(),
                 i64::from(limit),

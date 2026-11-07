@@ -6,7 +6,7 @@
 //! checkpoints and verifies the chain; nothing here trusts a stored hash.
 
 use super::{AuditRepository, Bytes32, RepositoryExecutor, Unsigned};
-use crate::{DatabaseError, DatabaseTransaction, Limit, Scope};
+use crate::{DatabaseError, DatabaseTransaction, EventCursor, Limit, Scope};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
@@ -17,11 +17,13 @@ use uuid::Uuid;
 const PRUNE_STATEMENT_TIMEOUT: Duration = Duration::from_mins(30);
 
 /// What the chain covers of one `domain_events` row: everything but its storage
-/// order (`txid`, `sequence`) and its chain columns. Personal data lives in
-/// `event_personal_data`, so it is not covered, and erasing it never breaks the chain.
+/// order (`txid`, `sequence`) and its chain position and hash. Personal data lives
+/// in `event_personal_data`, so it is not covered, and erasing it never breaks the
+/// chain.
 ///
 /// Its serialization, with the event's position added, is the canonical event the
-/// chain hashes. Changing a field's name or format breaks every existing chain.
+/// chain hashes. Changing a field's name or format breaks every existing chain, so
+/// a new field comes with a new `format`, which events sealed before it keep.
 /// Values stay as stored, with plain UUIDs, rather than decoded into typed IDs, so
 /// a tampered row reads back and fails verification instead of failing to decode.
 /// RFC 8785 writes every JSON number as a double, so a payload integer beyond
@@ -49,9 +51,35 @@ pub struct EventContent {
     trace_id: Option<String>,
     /// The payload as stored, with `"$erased"` where personal values were.
     payload: Value,
+    /// The canonical event's format, stored in `chain_format`. The first,
+    /// [`Self::UNTAGGED`], has no `format` field; every later one has it.
+    #[serde(skip_serializing_if = "EventContent::untagged")]
+    format: i16,
 }
 
 impl EventContent {
+    /// The canonical event's first format, which names no format.
+    pub const UNTAGGED: i16 = 1;
+    /// The newest format this release hashes: format 2, which only adds its
+    /// `format` to the untagged one. A later format that adds a field comes with
+    /// a release that knows it.
+    pub const NEWEST_FORMAT: i16 = 2;
+
+    /// The format of the canonical event the chain hashes for this event.
+    #[must_use]
+    pub const fn format(&self) -> i16 {
+        self.format
+    }
+
+    /// Whether `format` is [`Self::UNTAGGED`], which serializes without it.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    const fn untagged(format: &i16) -> bool {
+        *format == Self::UNTAGGED
+    }
+
     /// Writes `occurred_at` as RFC 3339 in UTC with exactly six fractional digits,
     /// e.g. `2026-10-13T12:00:00.000000Z`, so it never depends on serde defaults.
     fn timestamp<S: Serializer>(value: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error> {
@@ -75,6 +103,16 @@ pub struct SealedEvent {
     pub link: ChainLink,
     /// What the hash covers.
     pub content: EventContent,
+}
+
+/// A sealed event as [`AuditRepository::chain`] reads it, with the order it was
+/// recorded in, which the chain does not cover but must agree with.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChainedEvent {
+    /// The event and its link.
+    pub sealed: SealedEvent,
+    /// Its place in the order events are sealed in, `(txid, sequence)`.
+    pub cursor: EventCursor,
 }
 
 /// A signed checkpoint of the chain head.
@@ -116,27 +154,40 @@ struct SealedRow {
     trace_id: Option<String>,
     /// The stored payload.
     payload: Value,
+    /// The canonical event's format.
+    format: i16,
+    /// The writing transaction's ID.
+    txid: i64,
+    /// Insertion order.
+    sequence: i64,
 }
 
-impl From<SealedRow> for SealedEvent {
-    /// Splits the row into its link and content.
+impl From<SealedRow> for ChainedEvent {
+    /// Splits the row into its link, content and order.
     fn from(row: SealedRow) -> Self {
         Self {
-            link: ChainLink {
-                position: row.position.into(),
-                hash: row.hash.into(),
+            cursor: EventCursor {
+                txid: row.txid,
+                sequence: row.sequence,
             },
-            content: EventContent {
-                id: row.id,
-                kind: row.kind,
-                version: row.version,
-                occurred_at: row.occurred_at,
-                actor: row.actor,
-                subject: row.subject,
-                client: row.client,
-                session: row.session,
-                trace_id: row.trace_id,
-                payload: row.payload,
+            sealed: SealedEvent {
+                link: ChainLink {
+                    position: row.position.into(),
+                    hash: row.hash.into(),
+                },
+                content: EventContent {
+                    id: row.id,
+                    kind: row.kind,
+                    version: row.version,
+                    occurred_at: row.occurred_at,
+                    actor: row.actor,
+                    subject: row.subject,
+                    client: row.client,
+                    session: row.session,
+                    trace_id: row.trace_id,
+                    payload: row.payload,
+                    format: row.format,
+                },
             },
         }
     }
@@ -167,8 +218,8 @@ impl From<CheckpointRow> for Checkpoint {
 }
 
 impl AuditRepository<'_> {
-    /// Returns up to `limit` unsealed events in the order to seal them: the safe
-    /// consumer order of `in_safe_order!`, which
+    /// Returns up to `limit` unsealed events in the order to seal them, to be
+    /// sealed in `format`: the safe consumer order of `in_safe_order!`, which
     /// [`EventRepository::read_after`](crate::EventRepository::read_after) shares. No
     /// event can later appear before one returned here, so positions never need to be
     /// reassigned. The rows stay locked until the transaction ends, so
@@ -177,7 +228,11 @@ impl AuditRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn unsealed(&mut self, limit: u32) -> Result<Vec<EventContent>, DatabaseError> {
+    pub async fn unsealed(
+        &mut self,
+        limit: u32,
+        format: i16,
+    ) -> Result<Vec<EventContent>, DatabaseError> {
         run!(
             self,
             fetch_all,
@@ -185,11 +240,13 @@ impl AuditRepository<'_> {
                 EventContent,
                 r#"SELECT
                     id, kind, version, occurred_at, actor, subject_user_id AS subject,
-                    client_id AS client, session_id AS session, trace_id, payload
+                    client_id AS client, session_id AS session, trace_id, payload,
+                    $2::smallint AS "format!"
                 FROM domain_events e
                 WHERE chain_position IS NULL"#,
                 "LIMIT $1 FOR UPDATE",
                 i64::from(limit),
+                format,
             )
         )
     }
@@ -259,7 +316,7 @@ impl AuditRepository<'_> {
         }))
     }
 
-    /// Gives each event its position and chain hash.
+    /// Gives each event its position, chain hash and format.
     ///
     /// # Errors
     ///
@@ -276,17 +333,20 @@ impl AuditRepository<'_> {
             .iter()
             .map(|event| event.link.hash.to_vec())
             .collect();
+        let formats: Vec<_> = events.iter().map(|event| event.content.format).collect();
         let sealed = run!(
             self,
             execute,
             sqlx::query!(
                 "UPDATE domain_events e
-                SET chain_position = s.position, chain_hash = s.hash
-                FROM UNNEST($1::uuid[], $2::bigint[], $3::bytea[]) AS s(id, position, hash)
+                SET chain_position = s.position, chain_hash = s.hash, chain_format = s.format
+                FROM UNNEST($1::uuid[], $2::bigint[], $3::bytea[], $4::smallint[])
+                    AS s(id, position, hash, format)
                 WHERE e.id = s.id AND e.chain_position IS NULL",
                 &ids,
                 &positions,
                 &hashes,
+                &formats,
             )
         )?;
         if sealed.rows_affected() == ids.len() as u64 {
@@ -305,7 +365,7 @@ impl AuditRepository<'_> {
         &mut self,
         after: u64,
         limit: u32,
-    ) -> Result<Vec<SealedEvent>, DatabaseError> {
+    ) -> Result<Vec<ChainedEvent>, DatabaseError> {
         Ok(run!(
             self,
             fetch_all,
@@ -314,7 +374,8 @@ impl AuditRepository<'_> {
                 r#"SELECT
                     chain_position AS "position!: Unsigned", chain_hash AS "hash!: Bytes32",
                     id, kind, version, occurred_at, actor, subject_user_id AS subject,
-                    client_id AS client, session_id AS session, trace_id, payload
+                    client_id AS client, session_id AS session, trace_id, payload,
+                    chain_format AS format, txid::text::bigint AS "txid!", sequence
                 FROM domain_events
                 WHERE chain_position > $1
                 ORDER BY chain_position
@@ -324,7 +385,7 @@ impl AuditRepository<'_> {
             )
         )?
         .into_iter()
-        .map(SealedEvent::from)
+        .map(ChainedEvent::from)
         .collect())
     }
 
@@ -353,24 +414,34 @@ impl AuditRepository<'_> {
         Ok(())
     }
 
-    /// The checkpoint at the highest position, if any.
+    /// Returns up to `limit` checkpoints before position `before`, or the newest
+    /// ones without it, newest first.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn latest_checkpoint(&mut self) -> Result<Option<Checkpoint>, DatabaseError> {
+    pub async fn newest_checkpoints(
+        &mut self,
+        before: Option<u64>,
+        limit: u32,
+    ) -> Result<Vec<Checkpoint>, DatabaseError> {
         Ok(run!(
             self,
-            fetch_optional,
+            fetch_all,
             sqlx::query_as!(
                 CheckpointRow,
                 r#"SELECT position AS "position: Unsigned", head AS "head: Bytes32", created_at, note
                 FROM audit_checkpoints
+                WHERE $1::bigint IS NULL OR position < $1
                 ORDER BY position DESC
-                LIMIT 1"#
+                LIMIT $2"#,
+                before.map(Unsigned::bind).transpose()?,
+                i64::from(limit),
             )
         )?
-        .map(Checkpoint::from))
+        .into_iter()
+        .map(Checkpoint::from)
+        .collect())
     }
 
     /// Returns up to `limit` checkpoints after position `after`, oldest first.
@@ -502,6 +573,9 @@ pub enum Tamper {
     InsertEvent(u64),
     /// Swaps the positions, and so the order, of two events.
     SwapEvents(u64, u64),
+    /// Swaps the transaction IDs of two events, which the chain does not cover,
+    /// reversing the order histories list them in.
+    SwapTransactions(u64, u64),
     /// Replaces the stored chain hash of the event at a position, as an attacker
     /// recomputing the chain after an edit would.
     SetHash(u64, [u8; 32]),
@@ -548,6 +622,17 @@ impl AuditRepository<'_> {
                 self.swap_events(Unsigned::bind(first)?, Unsigned::bind(second)?)
                     .await
             }
+            Tamper::SwapTransactions(first, second) => run!(
+                self,
+                execute,
+                sqlx::query!(
+                    "UPDATE domain_events e SET txid = other.txid
+                    FROM domain_events other
+                    WHERE (e.chain_position, other.chain_position) IN (($1, $2), ($2, $1))",
+                    Unsigned::bind(first)?,
+                    Unsigned::bind(second)?,
+                )
+            ),
             Tamper::SetHash(position, hash) => run!(
                 self,
                 execute,

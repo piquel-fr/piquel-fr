@@ -8,7 +8,9 @@ use super::{
 };
 use piquel_common::events::DomainEvent;
 use piquel_crypto::CryptoError;
-use piquel_repository::{ChainLink, Checkpoint, DatabaseTransaction, RecordedEvent};
+use piquel_repository::{
+    AuditRepository, ChainLink, ChainedEvent, Checkpoint, DatabaseTransaction, RecordedEvent,
+};
 use std::collections::BTreeMap;
 
 /// A checkpoint checked on its own, before the chain is compared with it.
@@ -22,7 +24,18 @@ struct Checked {
 /// Every checkpoint by position.
 type CheckedCheckpoints = BTreeMap<u64, Checked>;
 
+/// The newest checkpoint that verifies, as [`AuditKeys::newest_trusted`] finds it.
+pub(crate) struct TrustedCheckpoint {
+    /// The checkpoint, if any verifies.
+    pub(crate) trusted: Option<Checkpoint>,
+    /// The newer checkpoints, newest first, none of which verifies.
+    pub(crate) untrusted: Vec<Checkpoint>,
+}
+
 impl AuditKeys {
+    /// The most checkpoints that do not verify [`Self::newest_trusted`] passes over.
+    const UNTRUSTED_LIMIT: usize = 1_000;
+
     /// Checks a checkpoint on its own: a listed key signed its note, and the note
     /// names the position, head and time stored beside it.
     ///
@@ -51,6 +64,53 @@ impl AuditKeys {
             head: checkpoint.head,
             problem,
         })
+    }
+
+    /// Reads checkpoints through `audit`, newest first, until one verifies on its
+    /// own: a listed key signed it, and its note names the values stored beside it.
+    /// The database cannot check signatures, so someone with auth's database role
+    /// could add newer checkpoints that do not verify, and removing a key makes
+    /// those it signed fail too; they are returned as well. It looks at no more than
+    /// [`Self::UNTRUSTED_LIMIT`] of them, so they cannot make every read costly,
+    /// and finds none trusted past that many: the sealer then recomputes from the
+    /// anchor, and signs above them.
+    ///
+    /// # Errors
+    /// Returns [`AuditError`] if the database or the cryptographic provider fails.
+    pub(crate) async fn newest_trusted(
+        &self,
+        audit: &mut AuditRepository<'_>,
+    ) -> Result<TrustedCheckpoint, AuditError> {
+        /// Checkpoints read per query.
+        const BATCH: u32 = 100;
+        let mut untrusted = Vec::new();
+        loop {
+            let before = untrusted
+                .last()
+                .map(|checkpoint: &Checkpoint| checkpoint.position);
+            let page = audit.newest_checkpoints(before, BATCH).await?;
+            if page.is_empty() {
+                return Ok(TrustedCheckpoint {
+                    trusted: None,
+                    untrusted,
+                });
+            }
+            for checkpoint in page {
+                if self.check(&checkpoint)?.problem.is_none() {
+                    return Ok(TrustedCheckpoint {
+                        trusted: Some(checkpoint),
+                        untrusted,
+                    });
+                }
+                untrusted.push(checkpoint);
+                if untrusted.len() == Self::UNTRUSTED_LIMIT {
+                    return Ok(TrustedCheckpoint {
+                        trusted: None,
+                        untrusted,
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -163,9 +223,9 @@ impl AuditChain {
             .chain(0, 1)
             .await?
             .pop()
-            .filter(|event| event.link.position <= start.position)
+            .filter(|event| event.sealed.link.position <= start.position)
             .map(|event| ChainBreak {
-                position: event.link.position,
+                position: event.sealed.link.position,
                 problem: ChainProblem::EventBeforeAnchor,
             });
         // Checkpoints at or before the anchor signed pruned events: only their
@@ -224,30 +284,41 @@ impl AuditChain {
         })
     }
 
-    /// Recomputes the chain after `start`, comparing each event with its stored hash
-    /// and each new link with `check`. Returns the last link that matched, and the
-    /// first position that did not, if any.
+    /// Recomputes the chain after `start`, comparing each event with its stored hash,
+    /// its recorded order with the previous event's, the one at `start` included
+    /// unless it was pruned, and each new link with `check`. Returns the last link
+    /// that matched, and the first position that did not, if any.
     pub(super) async fn walk(
         tx: &mut DatabaseTransaction<'_>,
         start: ChainLink,
         check: impl Fn(&ChainLink) -> Option<ChainProblem>,
     ) -> Result<(ChainLink, Option<ChainBreak>), AuditError> {
         let mut head = start;
+        let mut previous = tx
+            .audit()
+            .chain(start.position.saturating_sub(1), 1)
+            .await?
+            .pop()
+            .filter(|event| event.sealed.link.position == start.position)
+            .map(|event| event.cursor);
         loop {
             let page = tx.audit().chain(head.position, Self::BATCH).await?;
             if page.is_empty() {
                 return Ok((head, None));
             }
-            for event in page {
+            for ChainedEvent { sealed, cursor } in page {
                 let position = head.position + 1;
-                let problem = if event.link.position == position {
-                    let link = head.extend(&event.content)?;
-                    if link.hash != event.link.hash {
+                let problem = if sealed.link.position == position {
+                    let link = head.extend(&sealed.content)?;
+                    if link.hash != sealed.link.hash {
                         Some(ChainProblem::EventChanged)
+                    } else if previous.is_some_and(|previous| previous >= cursor) {
+                        Some(ChainProblem::OutOfOrder)
                     } else if let Some(problem) = check(&link) {
                         Some(problem)
                     } else {
                         head = link;
+                        previous = Some(cursor);
                         None
                     }
                 } else {

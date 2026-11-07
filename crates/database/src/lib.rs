@@ -29,7 +29,7 @@ pub use repositories::{
     PictureRepository, RecoveryRepository, SecurityRepository, SessionRepository,
     SigningKeyRepository, TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
-    audit::{ChainLink, Checkpoint, EventContent, SealedEvent},
+    audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},
     deliveries::{

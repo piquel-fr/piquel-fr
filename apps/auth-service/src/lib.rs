@@ -146,7 +146,7 @@ impl AuthConfig {
             .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(NotificationApplication::new(database.clone()).routes())
-            .merge(AuditApplication::new(database.clone()).routes())
+            .merge(AuditApplication::new(database.clone(), self.audit.keys.clone()).routes())
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
             .merge(PictureApplication::new(database.clone()).routes())

@@ -33,20 +33,30 @@ The canonical event is the RFC 8785 (JCS) form of the event's row: `position`,
 `id`, `kind`, `version`, `occurred_at` (RFC 3339 in UTC, with microseconds),
 `actor`, `subject`, `client`, `session`, `trace_id` and `payload`, as stored.
 
+Each sealed event records the format of its canonical event in `chain_format`,
+so a later format can add a field without breaking the hashes of events sealed
+before it. Format 1, the original, has no `format` field. Format 2 adds only
+`"format": 2`, and every later format names itself the same way. This release
+verifies both and still seals format 1, which the release before it verifies
+too; the next release seals format 2. Verification refuses a format it does not
+know, rather than report the chain broken.
+
 The sealer works in the order event consumers use, `(txid, sequence)`, and only
 on events whose transaction, and every older one, has finished. No event can
 therefore appear later before one already sealed. A long-running transaction
-delays sealing for as long as it runs.
+delays sealing for as long as it runs. Histories list events in the same order,
+newest first, so sealed history is listed in chain order: the chain does not
+cover `txid` and `sequence`, but verification checks that they agree with it.
 
 Auth runs as a restricted database role. It may insert events, but not choose
 their transaction, time, sequence or chain columns, which keep their defaults,
 nor store one auth could not read back, such as one over 8 KiB, which would stop
-every sealing pass.
-It may update only their chain position and hash, which triggers allow only
-while they are unset, and only at the position right after a sealed event or the
-anchor. It may add checkpoints but not change them, and a trigger refuses one
-that is not of a sealed event's hash, is dated at an infinite time or more than
-a minute ahead, or has a note over 1 KiB. It may not move the anchor. So a compromise of auth alone
+every sealing pass. It may update only their chain position, hash and format,
+which triggers allow only while they are unset, and only at the position right
+after a sealed event or the anchor. It may add checkpoints but not change them,
+and a trigger refuses one that is not of a sealed event's hash, is dated at an
+infinite time or more than a minute ahead, or has a note over 1 KiB. It may not
+move the anchor. So a compromise of auth alone
 cannot rewrite, delete, reorder or backdate sealed history, nor stop sealing or
 signing with a forged position, an unreadable event or a checkpoint time. The
 schema owner can, by dropping the triggers; the chain is what detects that. The
@@ -74,7 +84,10 @@ an operator's `os_user` and `host`, which are accountability data.
 ### Checkpoints
 
 Every five minutes, if new events were sealed, the sealer signs a checkpoint of
-the head in the C2SP signed-note format:
+the head in the C2SP signed-note format. It checks whether one is due after
+every batch of 100 events, so a backlog of full batches never postpones it, and
+after one fails, such as over a broken chain, it waits five minutes before trying
+again:
 
 ```text
 auth.piquel.fr/audit
@@ -87,6 +100,21 @@ time 2026-10-13T12:00:00Z
 
 `head` is the base64 chain hash at `position`. The note is stored in
 `audit_checkpoints`, and checkpoints are never pruned.
+
+The sealer builds each checkpoint on the newest one that verifies against the
+environment's audit keys, and its own, or on the anchor if it is newer: it
+recomputes the chain from there, checking each event's hash and order. The
+database cannot check signatures, so someone with auth's database role but not
+the key could add a checkpoint that does not verify. The sealer logs every such
+newer checkpoint as an error, counts it in
+`piquel.auth.audit.untrusted_checkpoints` each time it passes over it, and
+recomputes nothing while one holds the head's position. It cannot postpone
+signing past the next sealed event, after which the next checkpoint follows it.
+`audit verify` keeps reporting it. The sealer and `/audit/checkpoints/latest`
+look past at most 1,000 of them, as many as removing a key that signed for a
+few days leaves, so they never make a read costly. Past that, the sealer
+recomputes from the anchor and signs above them, and the endpoint finds no
+checkpoint until it has.
 
 ### The audit key
 
@@ -112,9 +140,12 @@ key of the configured audit key.
 Checkpoints are public and cacheable for a minute. They hold only positions and
 hashes:
 
-- `GET /audit/checkpoints/latest`: the newest signed note, as `text/plain`.
+- `GET /audit/checkpoints/latest`: the signed note of the newest checkpoint that
+  verifies, as the sealer checks them, as `text/plain`. A newer one that does
+  not is never served as the latest.
 - `GET /audit/checkpoints?after=<position>`: up to 100 checkpoints after a
-  position, oldest first, as JSON `{position, hash, time, note}`.
+  position, oldest first, as JSON `{position, hash, time, note}`, every stored
+  one, for readers to verify. A position past 2^63 − 1 is refused with `400`.
 
 Anyone can keep copies and later check that the history still extends them.
 
@@ -138,7 +169,9 @@ Verification needs only the database, so it works from a bare recovery shell
 1. Checks every checkpoint's signature against the committed keys, and that its
    note matches the position, head and time stored beside it.
 2. Recomputes the chain from the anchor, and compares each event with its
-   stored hash and each checkpoint with the recomputed head.
+   stored hash and each checkpoint with the recomputed head. Each event must
+   also come after the previous one in the order it was recorded in,
+   `(txid, sequence)`, which histories list it in.
 3. Fails if a sealed event remains at or before the anchor, which pruning would
    have deleted, or if a checkpoint is past the last sealed event.
 
@@ -151,6 +184,7 @@ position.
 | `missing_event` | No sealed event has the position: one was deleted, or later events renumbered |
 | `event_before_anchor` | A sealed event remains at or before the anchor: the anchor was moved to hide it |
 | `event_changed` | The event's content or position does not match its stored hash |
+| `out_of_order` | The event's recorded order does not come after the previous event's: its `txid` or `sequence` was changed to reorder history, auth's database role sealed it out of order, or the database was restored from a logical dump |
 | `checkpoint_mismatch` | The recomputed chain differs from the signed checkpoint: an earlier event changed and the stored hashes were recomputed to hide it |
 | `checkpoint_signature` | No committed key signed the checkpoint |
 | `checkpoint_malformed` | The note does not match the position, head or time stored beside it |
@@ -251,12 +285,23 @@ so keep every key that signed a checkpoint still in the database.
   reach the database in between. Until then, the old sessions can still take the
   sealer's lock or hold a transaction open, which stops sealing.
 - **Wrong seals.** Auth's database role seals events, so someone with it can seal
-  the next event with a wrong hash. `audit verify` reports it, and the sealer
-  refuses to sign on top of it, until the schema owner repairs the chain.
+  the next event with a wrong hash, or out of order. `audit verify` reports it,
+  and the sealer refuses to sign on top of it, until the schema owner repairs
+  the chain. Sealing itself goes on.
 - **Forged checkpoints.** Someone with auth's database role but not the audit
   key can add a checkpoint of a real sealed position and hash with a forged
   signature. `audit verify` reports it as `checkpoint_signature`, and the chain
-  cannot be pruned through it, until the schema owner removes it.
+  cannot be pruned through it, until the schema owner removes it. The sealer
+  passes over it, but one that holds the newest position delays the next
+  checkpoint until a new event is sealed. That role can seal events itself, so
+  someone who keeps sealing one and adding a checkpoint at the new head can
+  keep postponing signing while their access lasts; the sealer logs and counts
+  each one.
+- **Moving the database.** The order check, and the order histories list
+  events in, rely on transaction IDs only ever increasing. A logical dump
+  restored into a new cluster starts them again from low values, so the first
+  event sealed after it would read as `out_of_order` and stop signing. Move the
+  database with `pg_upgrade` or a physical copy, which keep them.
 - **New events.** Someone with auth's database role can insert events, which
   are then sealed and signed like genuine ones. They are dated when inserted, so
   they cannot pass for older ones, and ordered by the transaction inserting
