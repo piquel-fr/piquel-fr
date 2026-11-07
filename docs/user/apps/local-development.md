@@ -63,7 +63,7 @@ restart then signs you out.
 1. Start your app, and open it at the address you registered.
 2. Sign in. Piquel shows the consent screen for **Notes (dev)**, naming
    `127.0.0.1` as where it sends you back.
-3. Approve. Your app receives you at its callback, signed in.
+3. Select **Continue**. Your app receives you at its callback, signed in.
 
 ## Troubleshooting
 

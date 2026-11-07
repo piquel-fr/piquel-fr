@@ -56,7 +56,9 @@ login requests. `backchannelLogout` is optional: see
 [End sessions auth ended](#end-sessions-auth-ended).
 
 Then answer each request: the login routes first, then your own pages with the
-session.
+session. The snippets come from
+[the full example](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/examples/server.ts),
+which also defines the small helpers they call, `env`, `page` and `escape`.
 
 ```ts
 {{#include ../../../packages/auth/examples/server.ts:handle}}

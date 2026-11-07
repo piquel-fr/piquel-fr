@@ -63,11 +63,11 @@ Auth chooses the client ID: `c_` followed by 20 random characters.
 
 Sign in to your app. Piquel shows the consent screen, which names your app, the
 host your redirect URI sends users back to, and says the app is unverified and
-registered by your handle. Apps registered in the console always ask for
-consent.
+registered by your handle. Apps registered in the console are never trusted,
+so users see this page at their first sign-in, and again when your app asks for
+a new scope.
 
-Back in the console, **Your apps** lists the app with when it was last used, to
-within an hour.
+Back in the console, **Your apps** lists the app with the day it was last used.
 
 ## Troubleshooting
 

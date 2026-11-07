@@ -25,17 +25,21 @@ callback on its environment's hostname:
 | `production` | `https://notes.example/auth/callback` |
 | `staging` | `https://staging.notes.example/auth/callback` |
 
-Then give each environment its app's client ID, which isn't secret, as a
-manifest variable:
+Then give each environment its own values as manifest variables: its app's
+client ID, which isn't secret, and the names of the secrets you store below.
 
 ```toml
 [spec.environments.production.variables]
 domain = "notes.example"
 client_id = "c_…"
+client_secret = "notes-client-secret"
+cookie_key = "notes-cookie-key"
 
 [spec.environments.staging.variables]
 domain = "staging.notes.example"
 client_id = "c_…"
+client_secret = "notes-staging-client-secret"
+cookie_key = "notes-staging-cookie-key"
 ```
 
 ## Store the client secret
@@ -51,16 +55,10 @@ environment variable.
    piquelctl app secret notes set notes-staging-client-secret --stdin --environments staging --no-previews
    ```
 
-2. Name each environment's secret in a variable, and mount it in `web` at the
-   same path, with the rest of the app's settings:
+2. Mount the secret the environment's `client_secret` variable names in `web`,
+   at the same path in every environment, with the rest of the app's settings:
 
    ```toml
-   [spec.environments.production.variables]
-   client_secret = "notes-client-secret"
-
-   [spec.environments.staging.variables]
-   client_secret = "notes-staging-client-secret"
-
    [[spec.services]]
    name = "web"
 
@@ -90,9 +88,12 @@ environment variable.
    piquelctl env deploy notes production
    ```
 
-Store the key that seals the SDKs' session cookies the same way, as its own
-secret. Generate it with `openssl rand -base64 32`: the SDKs read standard
-base64, which piqueld's generated secrets don't use.
+Store the key that seals the SDKs' session cookies the same way: one per
+environment, mountable by that environment only, named by its `cookie_key`
+variable. The cookie key seals a whole session, tokens included, so an
+environment that could read another's key could forge its sessions. Generate
+each with `openssl rand -base64 32`: the SDKs read standard base64, which
+piqueld's generated secrets don't use.
 
 ## Rotate the secret
 

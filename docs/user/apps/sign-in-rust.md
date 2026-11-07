@@ -29,6 +29,8 @@ The code on this page comes from the SDK's example app,
    ```toml
    [dependencies]
    piquel-auth = { git = "https://github.com/piquel-fr/piquel-fr", features = ["axum"] }
+   axum = "0.8"
+   tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
    ```
 
 ## Sign users in
