@@ -28,6 +28,16 @@
 {%- when None %}
 {%- endmatch %}
 <p><a href="{{ page }}">Read it in your Piquel notifications</a></p>
+{%- when Content::Alert { address: _, subject, body, alerts } %}
+<p><strong>{{ subject }}.</strong></p>
+<p>{{ body }}</p>
+{%- match alerts %}
+{%- when Some with (alerts) %}
+<p><a href="{{ alerts }}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">See the alerts</a></p>
+<p style="font-size:14px;color:#555555">You receive this as a Piquel administrator. Acknowledge the alert there once someone is looking into it.</p>
+{%- when None %}
+<p style="font-size:14px;color:#555555">You receive this as a Piquel administrator. Acknowledge the alert with <code>auth-service alerts acknowledge</code> once someone is looking into it.</p>
+{%- endmatch %}
 {%- endmatch %}
 <p>Piquel</p>
 </div>

@@ -6,7 +6,8 @@
 //! nothing, and derives the link's token again from the ID, under the key that
 //! made its stored digest, so it is stored nowhere and survives a change of token
 //! digest key. A notification's email carries the address it goes to and the
-//! notification, and says what the inbox says.
+//! notification, and says what the inbox says; an alert's, what the dashboard's
+//! Alerts tab says.
 //!
 //! Every attempt sends the same content, with the delivery's ID as `Message-ID`.
 //! SMTP is at least once like the queue: if the connection breaks after the relay
@@ -15,10 +16,10 @@
 
 use super::{DeliveryError, Failure, Sender};
 use crate::{
-    config::EmailConfig,
+    config::{DashboardConfig, EmailConfig},
     emails::{VERIFICATION_LIFETIME, VerificationKeys},
     recovery::{self, RecoveryLinks},
-    routes::page::settings,
+    routes::{self, page::settings},
 };
 use askama::Template;
 use lettre::{
@@ -82,12 +83,21 @@ pub(crate) struct EmailSender<M> {
     verification_keys: VerificationKeys,
     /// Builds recovery links.
     recovery_links: RecoveryLinks,
+    /// The admin dashboard's origin, whose Alerts tab an alert's email links,
+    /// unless the dashboard is off.
+    dashboard: Option<Origin>,
 }
 
 impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
-    /// Sends through the configured relay, or drops everything without one.
-    pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
+    /// Sends through the configured relay, or drops everything without one, with
+    /// `dashboard`'s Alerts tab in alerts' emails.
+    pub(crate) fn new(
+        database: Database,
+        config: &EmailConfig,
+        dashboard: Option<&DashboardConfig>,
+    ) -> Self {
         Self::with_mailer(database, config.smtp.clone(), config)
+            .linking(dashboard.map(|dashboard| dashboard.origin.clone()))
     }
 }
 
@@ -101,14 +111,21 @@ impl<M: Mailer> EmailSender<M> {
             origin: config.origin.clone(),
             verification_keys: config.verification_keys.clone(),
             recovery_links: config.recovery_links.clone(),
+            dashboard: None,
         }
+    }
+
+    /// Links the Alerts tab of the dashboard at `dashboard` in alerts' emails.
+    pub(crate) fn linking(self, dashboard: Option<Origin>) -> Self {
+        Self { dashboard, ..self }
     }
 
     /// Sends `message` about `user_id`'s account, as the delivery `id`. Does
     /// nothing while email is disabled, or once a link is no longer needed, so the
     /// delivery succeeds rather than retrying: a verification link's address was
     /// verified, replaced or removed, or a recovery's link was used, replaced or
-    /// undone, or expired, or the account is no longer active.
+    /// undone, or expired, or the account is no longer active. A notification or
+    /// an alert is sent as it was queued, without checking again.
     async fn deliver(
         &self,
         id: DeliveryId,
@@ -201,6 +218,15 @@ impl<M: Mailer> EmailSender<M> {
                     .origin
                     .join(&settings::NOTIFICATION.replace("{id}", &notification_id.to_string())),
                 undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
+            },
+            EmailMessage::Alert { address, alert, .. } => Content::Alert {
+                address: address.clone(),
+                subject: alert.subject(),
+                body: alert.body(),
+                alerts: self
+                    .dashboard
+                    .as_ref()
+                    .map(|dashboard| dashboard.join(routes::dashboard::ALERTS)),
             },
         }))
     }
@@ -311,6 +337,17 @@ enum Content {
         /// The undo page of the recovery it is about, while a passkey can undo it.
         undo: Option<String>,
     },
+    /// An alert, to an administrator.
+    Alert {
+        /// The address it goes to.
+        address: String,
+        /// Its subject, which the email's is.
+        subject: &'static str,
+        /// What it says.
+        body: String,
+        /// The dashboard's Alerts tab, unless the dashboard is off.
+        alerts: Option<String>,
+    },
 }
 
 impl Content {
@@ -319,7 +356,8 @@ impl Content {
         match self {
             Self::VerifyAddress { address, .. }
             | Self::RecoveryLink { address, .. }
-            | Self::Notification { address, .. } => address,
+            | Self::Notification { address, .. }
+            | Self::Alert { address, .. } => address,
         }
     }
 
@@ -328,7 +366,7 @@ impl Content {
         match self {
             Self::VerifyAddress { .. } => "Confirm your email address for Piquel",
             Self::RecoveryLink { .. } => "Recover your Piquel account",
-            Self::Notification { subject, .. } => subject,
+            Self::Notification { subject, .. } | Self::Alert { subject, .. } => subject,
         }
     }
 }

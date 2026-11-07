@@ -196,6 +196,8 @@ pub(crate) mod dashboard {
     pub(crate) const CONFIRM: &str = "/confirm";
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
     pub(crate) const PREFERENCES: &str = "/preferences";
+    /// The alerts, which an alert's email links.
+    pub(crate) const ALERTS: &str = "/alerts";
     /// Every path the dashboard serves is one of these, or under one: the admin
     /// listener mounts the pages on them, and nowhere else.
     pub(crate) const PREFIXES: [&str; 16] = [
@@ -214,7 +216,7 @@ pub(crate) mod dashboard {
         "/deliveries",
         "/keys",
         "/audit",
-        "/alerts",
+        ALERTS,
     ];
 }
 

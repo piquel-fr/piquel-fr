@@ -108,7 +108,8 @@ impl Jobs {
             OutboundClient::new().map_err(StartupError::Outbound)?,
         );
         jobs.deliveries(logout, database);
-        jobs.deliveries(EmailSender::new(database.clone(), &config.email), database);
+        let email = EmailSender::new(database.clone(), &config.email, config.dashboard.as_ref());
+        jobs.deliveries(email, database);
         Ok(jobs)
     }
 

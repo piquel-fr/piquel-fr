@@ -114,6 +114,14 @@ while a passkey can still undo a recovery, its undo page. The copied addresses
 are the channel's only personal data, deleted with the delivery. The `destination` column names the
 account and the address's ID, for operators.
 
+A raised alert (`DomainEvent::AlertRaised`) concerns no account: the `email`
+channel queues one `EmailMessage::Alert` for each active administrator's primary
+verified address, copying the address and the alert as a notification's email
+does, and an administrator without one gets none. It says what the dashboard's
+Alerts tab says and links it, or, with the dashboard off, names `auth-service
+alerts acknowledge`. Its `destination` names the administrator and the address's
+ID.
+
 A link's token is never stored, not even in the payload: it is an HMAC of the
 address's ID, or the recovery's, under a key derived from the token digest key.
 Settings store a verification token's SHA-256 digest when the address is added,
