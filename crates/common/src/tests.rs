@@ -86,7 +86,8 @@ fn trace_ids_are_lower_case_hex() {
     }
 }
 
-/// `DomainEvent::kind` is the serde tag each variant is stored under.
+/// `DomainEvent::kind` is the serde tag each variant is stored under, for every
+/// variant: a variant serde knows that this list doesn't build fails the test.
 #[cfg(feature = "events")]
 #[test]
 #[expect(
@@ -96,8 +97,28 @@ fn trace_ids_are_lower_case_hex() {
 fn event_kinds_match_their_serde_tags() {
     use events::{
         CodeRedemptionFailure, DomainEvent, GrantRevocation, RevocationReason, SignInFailure,
+        SigningKeyChange,
     };
+    use serde::Deserialize;
     use serde_json::json;
+
+    /// Captures the variant names serde expects when it reads an unknown tag.
+    #[derive(Debug)]
+    struct Tags(&'static [&'static str]);
+    impl std::fmt::Display for Tags {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "{:?}", self.0)
+        }
+    }
+    impl std::error::Error for Tags {}
+    impl serde::de::Error for Tags {
+        fn custom<T: std::fmt::Display>(message: T) -> Self {
+            panic!("expected an unknown variant, not: {message}")
+        }
+        fn unknown_variant(_: &str, expected: &'static [&'static str]) -> Self {
+            Self(expected)
+        }
+    }
 
     let session_id = SessionId::new();
     let passkey_id = PasskeyId::new();
@@ -240,10 +261,68 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::RecoveryUndone {
             recovery_id: RecoveryId::new(),
         },
+        DomainEvent::EmailAdded {
+            email_id: EmailId::new(),
+            address: Personal::Value(
+                email::NormalizedEmail::parse("a@example.com").expect("email"),
+            ),
+            provider: None,
+        },
+        DomainEvent::EmailVerified {
+            email_id: EmailId::new(),
+        },
+        DomainEvent::PrimaryEmailChanged {
+            email_id: EmailId::new(),
+            previous_email_id: None,
+        },
+        DomainEvent::EmailRemoved {
+            email_id: EmailId::new(),
+        },
+        DomainEvent::PictureChanged {
+            picture_id: PictureId::new(),
+        },
+        DomainEvent::PictureRemoved {},
+        DomainEvent::DeliveryRetried {
+            delivery_id: DeliveryId::new(),
+        },
+        DomainEvent::DeliveryCancelled {
+            delivery_id: DeliveryId::new(),
+        },
+        DomainEvent::SigningKeyChanged {
+            key_id: "key".parse().expect("key ID"),
+            change: SigningKeyChange::Generated,
+        },
+        DomainEvent::AccountExported {},
+        DomainEvent::AccountDeletionScheduled {
+            purge_after: chrono::Utc::now(),
+        },
+        DomainEvent::AccountRestored {},
+        DomainEvent::AccountPurged {},
+        DomainEvent::AuditHistoryPruned {
+            through: 1,
+            deleted: 1,
+        },
+        DomainEvent::AuditChainVerified(admin::AuditVerification {
+            broken: None,
+            events_checked: 0,
+            checkpoints_checked: 0,
+            unsealed: 0,
+            anchor: None,
+            newest: None,
+            latest_checkpoint: None,
+            keys: admin::VerificationKeys::Committed,
+        }),
         DomainEvent::Imported(imported),
     ];
+    let mut kinds: Vec<&str> = events.iter().map(DomainEvent::kind).collect();
     for event in events {
         let tagged = serde_json::to_value(&event).expect("serialize");
         assert_eq!(tagged["kind"], event.kind(), "{event:?}");
     }
+    let unknown = serde::de::value::MapDeserializer::<_, Tags>::new([("kind", "")].into_iter());
+    let Tags(tags) = DomainEvent::deserialize(unknown).expect_err("no variant is tagged \"\"");
+    let mut tags = tags.to_vec();
+    kinds.sort_unstable();
+    tags.sort_unstable();
+    assert_eq!(kinds, tags, "one event per variant");
 }
