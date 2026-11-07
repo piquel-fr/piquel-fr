@@ -103,6 +103,8 @@ just auth account alice picture remove --reason "Impersonates someone"
 
 ## The admin dashboard
 
+![The admin dashboard's overview: sign-in counts, recent events and the newest accounts](../../images/admin/overview.png)
+
 Administrators manage accounts, their settings and security history, sessions,
 invitations, other administrators, handles, the delivery queue, signing keys and
 the origins approved for clients' pages to sign users in from the admin dashboard,

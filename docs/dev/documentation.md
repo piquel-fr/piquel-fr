@@ -114,6 +114,45 @@ section, named after what the reader does, such as "Rotate a secret".
 ## Troubleshooting
 ```
 
+## Screenshots
+
+Show a page where it helps the reader find their way, such as the first time a
+guide uses it, or a step done through a form. The text must still make sense
+without the image. Images go in `docs/images/<section>/`.
+
+Screenshots of auth's pages are generated, never taken by hand, so they always
+match the pages. Retake them after changing a page they show:
+
+```console
+just docs screenshots
+```
+
+The recipe deploys this checkout to a fresh preview in the `docs` slot, runs the
+specs in `tests/browser/screenshots/` against it, then deletes it. It needs what
+`just preview` needs, and Playwright's Chromium
+(`pnpm exec playwright install chromium`). Each spec signs up an account and
+does what its guide does, then saves each page with `shoot` from
+`tests/browser/screenshots/docs.ts`:
+
+- `handle('alice')` gives a new handle, which every image shows as `alice`.
+- `shoot(page, '<section>/<name>', area)` saves the window, 1280 by 800 pixels,
+  in the dark theme, or only the element `area`, as `docs/images/<section>/<name>.png`. It first
+  replaces what changes from run to run: handles, the preview's hosts, IDs,
+  dates, addresses and trace IDs.
+
+An image is rewritten only when its page looks different, so a run that changes
+nothing leaves `docs/images` untouched. The browser suite never runs these
+specs, and neither does CI.
+
+Screenshots of other services, such as GitHub's or Google's consoles, are taken
+by hand: keep them few, since those pages change without notice.
+
+Give each image alt text that says what it shows, for readers who can't see it:
+
+```markdown
+![The settings overview: active sessions, connected apps, recent security activity and devices](../images/account/settings.png)
+```
+
 ## Links
 
 - Link to another page with its path relative to the current page. From a

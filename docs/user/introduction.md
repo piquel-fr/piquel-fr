@@ -9,6 +9,8 @@ Your account lives at [auth.piquel.fr](https://auth.piquel.fr). Its settings,
 at `auth.piquel.fr/settings`, manage your passkeys, email addresses, devices,
 the apps you signed in to, your notifications and your data.
 
+![The settings overview: active sessions, connected apps, recent security activity and devices](../images/account/settings.png)
+
 ## Words this guide uses
 
 - **Handle:** your account's public name, such as `alice`. You sign in with it,
@@ -20,6 +22,8 @@ the apps you signed in to, your notifications and your data.
 - **App:** a website or service that signs you in with your piquel.fr account.
   The first time, it asks for your consent, naming what it will receive. Apps
   Piquel runs itself don't ask.
+
+  ![The consent page for an app called Notes, listing what it will receive](../images/apps/consent.png)
 - **Passkey confirmation:** sensitive changes, such as removing a passkey, need
   you to have used your passkey in the last five minutes. If you haven't, Piquel
   asks for it again first, even though you are signed in.
