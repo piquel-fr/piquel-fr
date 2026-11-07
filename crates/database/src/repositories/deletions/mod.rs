@@ -276,9 +276,9 @@ impl AccountDeletionRepository<'_> {
     /// sent meanwhile may have just queued, the personal data of every event the
     /// account is the subject or actor of, so those events read it as erased, and
     /// any announcement to chosen accounts left without recipients, such as a
-    /// draft naming the account saved while the purge ran. Callers end its
-    /// sessions, which queues their clients' logout tokens, and delete the clients
-    /// it manages first. The events themselves stay: they hold only pseudonymous
+    /// draft naming the account saved while the purge ran. Callers lock the
+    /// administrator list, so purges take turns, end its sessions, which queues
+    /// their clients' logout tokens, and delete the clients it manages first. The events themselves stay: they hold only pseudonymous
     /// IDs.
     ///
     /// The personal data goes last because of migration 0022's trigger, which
@@ -371,8 +371,8 @@ impl AccountDeletionRepository<'_> {
         // ran was missed by the announcement cleanup above, but deleting the
         // account waited for it and cascaded its row: this fresh snapshot sees it
         // left without recipients, and deletes its text, which may concern them.
-        // A draft naming two accounts purged at the same moment, each purge still
-        // seeing the other's row, is left for the next purge to delete.
+        // Purges take turns on the administrator list's lock, so of two accounts
+        // such a draft names, the second purge finds it with one recipient left.
         run!(
             self,
             execute,
