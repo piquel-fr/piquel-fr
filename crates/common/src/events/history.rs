@@ -4,8 +4,7 @@
 use super::{Actor, DomainEvent, GrantRevocation, RevocationReason};
 use crate::{
     AuthenticationMethod, EmailId, EventId, PasskeyId, Personal, Provider, clients::RelatedOrigin,
-    email::NormalizedEmail,
-    notifications::NotificationPreference,
+    email::NormalizedEmail, notifications::NotificationPreference,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;

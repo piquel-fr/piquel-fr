@@ -4,7 +4,7 @@
 -- emailed. Deleting an account deletes its rows.
 CREATE TABLE notification_preferences (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    category TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('announcements')),
     email BOOLEAN NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, category)

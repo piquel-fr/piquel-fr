@@ -14,10 +14,9 @@ use crate::{
     },
 };
 use piquel_common::{
-    NotificationId,
+    NotificationId, UserId,
     notifications::{Notification, NotificationPreference},
 };
-use piquel_common::UserId;
 use piquel_ui::{
     Audience, Crumb, EmailRow, HistoryRow, Holdings, InboxChange, InboxPage, InboxRow, InboxState,
     Messages, NotificationState, Section, Tab, Title, UnsubscribeStep,
@@ -89,7 +88,12 @@ impl AccountPage for Inbox {
     ) -> Result<Response, Failure> {
         let viewer = reader.viewer();
         let inbox = web.account.inbox(&viewer, shown.before).await?;
-        let rows: Vec<_> = inbox.page.notifications.iter().map(InboxRow::from).collect();
+        let rows: Vec<_> = inbox
+            .page
+            .notifications
+            .iter()
+            .map(InboxRow::from)
+            .collect();
         let page = InboxPage {
             page: settings::NOTIFICATIONS,
             item: Some(settings::NOTIFICATION),

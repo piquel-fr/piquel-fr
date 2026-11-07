@@ -52,8 +52,13 @@ fn rotation_choices_are_the_periods_they_name() {
 #[test]
 fn announcements_are_bounded_text_to_bounded_accounts() {
     let everyone = || AnnouncementRecipients::Everyone;
-    let draft = AnnouncementDraft::new(" Incident ", "\r\nFirst.\r\n\r\n\tSecond.\n", everyone(), false)
-        .expect("a draft");
+    let draft = AnnouncementDraft::new(
+        " Incident ",
+        "\r\nFirst.\r\n\r\n\tSecond.\n",
+        everyone(),
+        false,
+    )
+    .expect("a draft");
     assert_eq!(
         (draft.subject.as_str(), draft.body.as_str()),
         ("Incident", "First.\n\n\tSecond.")

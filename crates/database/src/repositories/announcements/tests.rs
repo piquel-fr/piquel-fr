@@ -16,7 +16,16 @@ use sqlx::PgPool;
 
 /// The announcements in `user`'s inbox, newest first.
 async fn inbox(pool: &PgPool, user: UserId) -> Vec<AnnouncementId> {
-    NotificationRepository::from_pool(pool)
+    received(NotificationRepository::from_pool(pool), user).await
+}
+
+/// The announcements in `user`'s inbox, newest first, as `notifications` reads
+/// it: a transaction's own reads its uncommitted ones.
+async fn received(
+    mut notifications: NotificationRepository<'_>,
+    user: UserId,
+) -> Vec<AnnouncementId> {
+    notifications
         .list(user, None, 1000)
         .await
         .expect("inbox")
@@ -56,6 +65,20 @@ async fn account(pool: &PgPool, address: Option<&str>) -> UserId {
 /// the CLI would, and returns how many accounts it went to.
 async fn send(pool: &PgPool, id: AnnouncementId, revision: u64) -> Option<u64> {
     let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    let sent = send_in(&mut tx, id, revision).await;
+    tx.commit().await.expect("commit");
+    sent
+}
+
+/// Sends the draft `id` at `revision` in `tx`, recording its event as the CLI
+/// would, and returns how many accounts it went to. A test sending to everyone
+/// rolls `tx` back once it checked it, so its announcement never reaches the
+/// accounts other tests count notifications of.
+async fn send_in(
+    tx: &mut DatabaseTransaction<'_>,
+    id: AnnouncementId,
+    revision: u64,
+) -> Option<u64> {
     let sent = tx.announcements().send(id, revision).await.expect("send")?;
     let context = EventContext {
         actor: Actor::Anonymous,
@@ -68,7 +91,6 @@ async fn send(pool: &PgPool, id: AnnouncementId, revision: u64) -> Option<u64> {
         essential: sent.essential,
     };
     tx.record(&context, None, event).await.expect("record");
-    tx.commit().await.expect("commit");
     Some(sent.recipients)
 }
 
@@ -195,17 +217,18 @@ async fn an_announcement_to_everyone_goes_to_every_account_once_sent() {
     }
     assert!(announcements.discard(discarded).await.expect("discard"));
     assert_eq!(announcements.find(discarded).await.expect("find"), None);
-    let received = inbox(&pool, first).await;
-    assert!(!received.contains(&id), "a draft");
+    assert!(!inbox(&pool, first).await.contains(&id), "a draft");
 
-    let recipients = send(&pool, id, 1).await.expect("a draft");
-    let sent = announcements.find(id).await.expect("find").expect("sent");
+    let mut sending = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    let recipients = send_in(&mut sending, id, 1).await.expect("a draft");
+    let sent = sending.announcements().find(id).await.expect("find");
+    let sent = sent.expect("sent");
     assert_eq!(sent.recipients, recipients);
     assert!(sent.sent_at.is_some());
     for user in [first, second] {
-        let received = inbox(&pool, user).await;
-        assert!(received.contains(&id));
+        assert!(received(sending.notifications(), user).await.contains(&id));
     }
+    sending.rollback().await.expect("rollback");
 }
 
 /// A recipient who turned announcements' email off still gets each one in
@@ -229,9 +252,24 @@ async fn only_essential_announcements_email_those_who_turned_them_off() {
         [preference(true)],
         "on by default"
     );
-    assert!(!notifications.set_preference(off, preference(true)).await.expect("set"));
-    assert!(notifications.set_preference(off, preference(false)).await.expect("set"));
-    assert!(!notifications.set_preference(off, preference(false)).await.expect("set"));
+    assert!(
+        !notifications
+            .set_preference(off, preference(true))
+            .await
+            .expect("set")
+    );
+    assert!(
+        notifications
+            .set_preference(off, preference(false))
+            .await
+            .expect("set")
+    );
+    assert!(
+        !notifications
+            .set_preference(off, preference(false))
+            .await
+            .expect("set")
+    );
     let pool = &pool;
     let draft = |essential| async move {
         let id = AnnouncementId::new();
@@ -254,13 +292,29 @@ async fn only_essential_announcements_email_those_who_turned_them_off() {
     let mut announcements = AnnouncementRepository::from_pool(pool);
     assert_eq!(announcements.mailed(news).await.expect("mailed"), 1);
     assert_eq!(announcements.mailed(essential).await.expect("mailed"), 2);
-    for (user, id, emails) in [(on, news, 1), (off, news, 0), (on, essential, 1), (off, essential, 1)] {
+    for (user, id, emails) in [
+        (on, news, 1),
+        (off, news, 0),
+        (on, essential, 1),
+        (off, essential, 1),
+    ] {
         assert!(inbox(pool, user).await.contains(&id));
         assert_eq!(deliveries_to(pool, user, id).await, emails);
     }
     let mut emails = EmailRepository::from_pool(pool);
-    assert!(emails.announcement(on, news).await.expect("email").is_some());
-    assert!(notifications.set_preference(on, preference(false)).await.expect("set"));
+    assert!(
+        emails
+            .announcement(on, news)
+            .await
+            .expect("email")
+            .is_some()
+    );
+    assert!(
+        notifications
+            .set_preference(on, preference(false))
+            .await
+            .expect("set")
+    );
     assert_eq!(emails.announcement(on, news).await.expect("email"), None);
     let still = emails.announcement(on, essential).await.expect("email");
     assert!(still.is_some_and(|email| email.essential));
@@ -331,12 +385,15 @@ async fn sending_and_purging_wait_for_each_other() {
     let everyone = draft(Recipients::Everyone).await;
     let mut purge = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
     purge_as_callers_do(&mut purge, purged).await;
-    let (sent, ()) = tokio::join!(send(&pool, everyone, 1), async {
+    let mut sending = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    let (sent, ()) = tokio::join!(send_in(&mut sending, everyone, 1), async {
         until_blocked(&mut purge, 1).await;
         purge.commit().await.expect("commit");
     });
     assert!(sent.is_some(), "sent without the purged account");
-    assert_eq!(deliveries_to(&pool, purged, everyone).await, 0);
+    let recipients = sending.announcements().mail_recipients(everyone).await;
+    assert!(!recipients.expect("recipients").contains(&purged));
+    sending.rollback().await.expect("rollback");
 
     // The sending goes first: the purge waits for it, then deletes its email.
     let (purged, kept) = (

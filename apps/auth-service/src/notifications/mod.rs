@@ -163,16 +163,21 @@ impl AccountService {
             .notifications()
             .list(viewer.user(), before, u32::from(PAGE_SIZE))
             .await?;
+        Ok(Self::page(batch))
+    }
+
+    /// The page a `batch` of at most [`PAGE_SIZE`] notifications makes.
+    fn page(batch: Vec<StoredNotification>) -> NotificationPage {
         let next = (batch.len() == usize::from(PAGE_SIZE))
             .then(|| batch.last().map(|stored| stored.id))
             .flatten();
-        Ok(NotificationPage {
+        NotificationPage {
             notifications: batch
                 .into_iter()
                 .filter_map(NotificationItem::new)
                 .collect(),
             next,
-        })
+        }
     }
 
     /// The account's notification `id`, with its event's history entry. Reading
@@ -198,16 +203,22 @@ impl AccountService {
     }
 
     /// The inbox's page of notifications older than `before`, with how many are
-    /// unread and the email preferences, as its pages show them.
+    /// unread and the email preferences, as its pages show them, authorized once.
     pub(crate) async fn inbox(
         &self,
         viewer: &Viewer,
         before: Option<NotificationId>,
     ) -> Result<Inbox, AccountError> {
+        viewer.authorize(&self.database).await?;
+        let mut notifications = self.database.notifications();
         Ok(Inbox {
-            page: self.notifications(viewer, before).await?,
-            unread: self.unread_notifications(viewer).await?,
-            preferences: self.notification_preferences(viewer).await?,
+            page: Self::page(
+                notifications
+                    .list(viewer.user(), before, u32::from(PAGE_SIZE))
+                    .await?,
+            ),
+            unread: notifications.unread(viewer.user()).await?,
+            preferences: notifications.preferences(viewer.user()).await?,
         })
     }
 

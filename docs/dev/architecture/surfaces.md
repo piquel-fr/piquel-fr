@@ -156,9 +156,10 @@ The rule for what is shared: administrators may view, edit and remove, but never
 add a way to sign in or to receive the account's email, since that would let them
 take the account over. The operations only the owner may run take an `Owner`,
 which only the session cookie builds, or for a client the `OwnedClient` built from
-one, so calling one for an administrator does not compile. Two owner-only actions
-are authorized otherwise: verifying an address by its link's token, so it works
-signed out, and confirming with a passkey by the session it confirms.
+one, so calling one for an administrator does not compile. Three owner-only
+actions are authorized otherwise: verifying an address by its link's token, so it
+works signed out, turning announcements' email off by an email's unsubscribe
+link, likewise, and confirming with a passkey by the session it confirms.
 
 | Area | Shared | Owner only |
 | --- | --- | --- |
@@ -170,7 +171,7 @@ signed out, and confirming with a passkey by the session it confirms.
 | Sessions | list, sign out one, sign out all | |
 | Connected apps | list, remove an app's access | |
 | Security history | read | report an entry |
-| Notifications | list, read | mark read or unread |
+| Notifications | list, read, view email preferences | mark read or unread, change email preferences |
 | Account data | | download |
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 

@@ -28,8 +28,8 @@ Every notification is emailed too, in one of two categories:
 - **Security:** everything about your account itself, such as a removed address,
   a recovery, or a change Piquel support made. You always receive these, so
   nobody can hide one from you.
-- **Announcements:** news from Piquel, such as a change to the privacy policy.
-  You receive these by default, and can turn them off.
+- **Announcements:** news from Piquel, such as a new feature. You receive
+  these by default, and can turn them off.
 
 Some announcements are **essential**: a security incident, or a change to the
 privacy policy or terms. You receive those by email even with announcements

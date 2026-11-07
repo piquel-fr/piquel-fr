@@ -205,7 +205,7 @@ impl EmailCategory {
     pub const fn description(self) -> &'static str {
         match self {
             Self::Announcements => {
-                "News from Piquel, such as a change to the privacy policy. Announcements about a security incident or the terms reach you by email either way."
+                "News from Piquel, such as a new feature. Announcements about a security incident, or a change to the privacy policy or terms, reach you by email either way."
             }
         }
     }

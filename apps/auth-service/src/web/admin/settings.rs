@@ -341,7 +341,12 @@ pub(super) async fn notifications(cx: &Cx) -> Result<Response> {
     let viewer = App::viewer(user, admin);
     let account = &App::of(cx).account;
     let inbox = account.inbox(&viewer, shown.before).await?;
-    let rows: Vec<_> = inbox.page.notifications.iter().map(InboxRow::from).collect();
+    let rows: Vec<_> = inbox
+        .page
+        .notifications
+        .iter()
+        .map(InboxRow::from)
+        .collect();
     let here = App::here(cx);
     let page = InboxPage {
         page: &here,

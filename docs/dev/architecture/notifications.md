@@ -55,7 +55,9 @@ email off could hide a notice from the owner. The data export includes them.
 An announcement's email that is not essential carries an unsubscribe link,
 `/unsubscribe?account=<id>&token=<token>`, in its body and in the
 `List-Unsubscribe` header, with `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
-(RFC 8058), so mail clients offer it in one click. The token is the HMAC of the
+(RFC 8058), so mail clients offer it in one click. They do so only when the
+relay's DKIM signature covers both headers, which the relay must be set up to
+sign. The token is the HMAC of the
 account's ID under a key derived from the token digest key, so it is stored
 nowhere and never expires; holding it only turns that account's announcements'
 email off. Opening the link shows a page asking first, so a mail scanner that

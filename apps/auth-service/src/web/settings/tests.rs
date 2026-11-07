@@ -19,9 +19,9 @@ use piquel_common::{
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
-    Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange, HistoryChange,
-    HistoryState, InboxChange, NotificationState, PICTURE_FIELD, ProfileChange, ProfileDialog,
-    ProfileState, Query, SignInChange,
+    Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
+    HistoryChange, HistoryState, InboxChange, NotificationState, PICTURE_FIELD, ProfileChange,
+    ProfileDialog, ProfileState, Query, SignInChange,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the

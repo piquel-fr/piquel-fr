@@ -213,7 +213,11 @@ async fn owners_choose_which_notifications_are_emailed() {
         preferences
     };
     let announcements = |email| serde_json::json!([{"category": "announcements", "email": email}]);
-    assert_eq!(preferences(&alice).await, announcements(true), "on by default");
+    assert_eq!(
+        preferences(&alice).await,
+        announcements(true),
+        "on by default"
+    );
     for email in [false, false, true] {
         let preference = serde_json::json!({"category": "announcements", "email": email});
         let (status, _) = alice
@@ -242,7 +246,11 @@ async fn owners_choose_which_notifications_are_emailed() {
             })
             .collect()
     };
-    let emails: Vec<_> = changes(alice.user_id).await.into_iter().map(|(email, _)| email).collect();
+    let emails: Vec<_> = changes(alice.user_id)
+        .await
+        .into_iter()
+        .map(|(email, _)| email)
+        .collect();
     assert_eq!(emails, [true, false], "a repeat changes nothing");
 
     let links = UnsubscribeLinks::new(
