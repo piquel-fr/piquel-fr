@@ -46,8 +46,9 @@ pub(crate) const CODES: &str = "/settings/codes";
 
 The security layer classifies a request as a page by the route template it
 matched, against `page::ALL` (`Endpoint::classify` in
-`apps/auth-service/src/security/endpoint.rs`), so a path missing from it gets no
-page budget and no request context.
+`apps/auth-service/src/security/endpoint.rs`). A path missing from it is
+`Endpoint::Other`: it spends the sign-in budget instead of the page budget, and
+gets the API's browser rules instead of a page's.
 
 ## 2. Describe what its forms send
 

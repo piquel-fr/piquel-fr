@@ -60,7 +60,7 @@ own. It builds on the [security boundaries](boundaries.md); the
 | Threat | Mitigation |
 | --- | --- |
 | A code or token used by another app, or sent elsewhere | Exact redirect URIs, S256 PKCE for every client, codes tried once, and tokens bound to their audience ([OIDC](../../user/reference/oidc.md#codes-tokens-and-consent)). |
-| An app impersonating another, or Piquel | Console apps are never trusted, so the consent page always shows, naming the host it returns to and labelling the app unverified with its owner's handle. Their names may not contain a well-known brand ([OIDC clients](../operations/clients.md)). |
+| An app impersonating another, or Piquel | Console apps are never trusted, so the consent page shows unless the user already consented to the scopes asked, naming the host it returns to and labelling the app unverified with its owner's handle. `prompt=consent` forces it. Their names may not contain a well-known brand ([OIDC clients](../operations/clients.md)). |
 | An app keeping access | The owner, an administrator or an operator removes an app's access, which ends its refresh grants and outstanding codes. A public client's refresh token rotates, and replaying a spent one revokes the grant. |
 | A logout URI aimed at the internal network | Deliveries go only over HTTPS to public addresses, and never follow a redirect ([outbound HTTP](../architecture/delivery-queue.md#outbound-http)). |
 | Registering apps in bulk | An account may hold 10 apps and register 20 a day ([OIDC clients](../operations/clients.md)). |
@@ -70,7 +70,7 @@ own. It builds on the [security boundaries](boundaries.md); the
 | Threat | Mitigation |
 | --- | --- |
 | Taking over an account | Administrators view, edit and remove, but never add a way in or an address; the types make it a compile error ([changing an account](../architecture/surfaces.md#changing-an-account-on-its-owners-behalf)). A recovery an administrator starts is only mailed, never shown to them. |
-| Acting without a trace | Every change needs a reason, recorded with the administrator as its actor; the owner sees it in their history, and reads are recorded as views. |
+| Acting without a trace | Every change is recorded with the administrator as its actor, and reads as views. Changes to an account on its owner's behalf need a reason, which the owner sees in their history; granting or revoking rights and enabling an account need none. |
 | One administrator against another | An administrator may not change another administrator's account, nor their own rights or the last active administrator's. |
 | A stolen session reaching the dashboard | The dashboard needs a passkey sign-in, a confirmation of its own for every change, a request naming its host, and the tailnet ([admin.piquel.fr](../architecture/surfaces.md#adminpiquelfr)). |
 
