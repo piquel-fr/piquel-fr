@@ -1,7 +1,7 @@
 # Tamper-evident audit history
 
 Auth records every account and security change as a domain event (see
-[the database crate](../architecture/database-crate.md#domain-events)). Anyone
+[the database crate](../architecture/database.md#domain-events)). Anyone
 who can write to the database could otherwise edit, insert or delete events
 without a trace. To prevent that, sealed events form a hash chain, and auth signs
 checkpoints of the chain with a key the database never sees. Editing, inserting,

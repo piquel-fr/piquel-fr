@@ -23,7 +23,7 @@ pub mod clients;
 /// Environment variables, validated origins and secret references.
 #[cfg(feature = "config")]
 pub mod config;
-/// Conservative email normalization; see `docs/security/email-normalization.md`.
+/// Conservative email normalization; see `docs/dev/security/email-normalization.md`.
 #[cfg(feature = "email")]
 pub mod email;
 /// Typed domain events: what changed in an account, and who changed it.

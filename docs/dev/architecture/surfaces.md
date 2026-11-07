@@ -25,7 +25,7 @@ executable too, on another listener and host (see admin.piquel.fr below).
 The account API is routes in the same executable. It is small next to the pages
 that use it, and keeping it there keeps one binary, one database owner and one
 policy layer per listener. Auth keeps its state in PostgreSQL, so it runs
-as several replicas (see "Running several replicas" in `infra/README.md`). Every page it
+as several replicas (see [running several replicas](../operations/deploying.md#running-several-replicas)). Every page it
 serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
 never cached. Their scripts are the passkey script, which runs the passkey
@@ -285,7 +285,7 @@ changes together with auth's pages in this repository.
 Nothing auth runs on may require auth to log in: piqueld, server access, the
 tailnet, PostgreSQL, DNS and the tunnel. If auth or its frontends are down, the
 CLI, given database access, can still do every admin operation and repair
-accounts: see [Administration](../../README.md#administration). Recovering an
+accounts: see [administration](../operations/administration.md). Recovering an
 account whose owner lost every passkey follows
 [account recovery](../security/account-recovery.md), including support's
 evidence policy.

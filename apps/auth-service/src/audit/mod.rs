@@ -1,6 +1,6 @@
 //! The tamper-evident audit history: a hash chain over sealed events, signed
 //! checkpoints of its head, their publication, verification and pruning. See
-//! `docs/security/audit-history.md`.
+//! `docs/dev/security/audit-history.md`.
 //!
 //! Events are recorded unsealed, so a sign-in never waits on the chain head. The
 //! [`Sealer`] job, on one replica at a time, gives them their positions in safe
@@ -36,7 +36,7 @@ use thiserror::Error;
 /// The verifier keys committed to the repository, one per line: each environment's
 /// current audit key and those they replaced. A compromised server cannot change
 /// them, since they are compiled into every build.
-const COMMITTED_KEYS: &str = include_str!("../../../../docs/security/audit-key.pub");
+const COMMITTED_KEYS: &str = include_str!("../../../../docs/dev/security/audit-key.pub");
 
 /// Why sealing, signing, verifying or pruning failed.
 #[derive(Debug, Error)]
@@ -52,7 +52,7 @@ pub enum AuditError {
     Signing(#[source] CryptoError),
     /// No committed key has this environment's name, `<auth host>/audit`.
     #[error(
-        "no audit key named {0} is committed in docs/security/audit-key.pub; pass the \
+        "no audit key named {0} is committed in docs/dev/security/audit-key.pub; pass the \
          environment's verifier key, as `keys audit` prints it, with --key"
     )]
     NoCommittedKey(String),

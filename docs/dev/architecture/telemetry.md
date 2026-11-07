@@ -2,8 +2,7 @@
 
 Auth and the admin dashboard log to stderr. When `OTEL_EXPORTER_OTLP_ENDPOINT`
 is set, they also export traces, metrics and logs over OTLP/HTTP, to the
-`telemetry` application in production (see "Telemetry" in
-[infra/README.md](../../infra/README.md)). `piquel-telemetry`
+`telemetry` application in production (see [the telemetry stack](../operations/telemetry.md)). `piquel-telemetry`
 (`crates/telemetry`) does both. A feature gets most of its telemetry for free and
 adds the rest in one line.
 

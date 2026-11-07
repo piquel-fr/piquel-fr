@@ -1,6 +1,6 @@
 //! Storage for the tamper-evident audit chain: the position and hash each sealed
 //! event carries, signed checkpoints of the chain head, and the anchor that pruning
-//! leaves. See `docs/security/audit-history.md`.
+//! leaves. See `docs/dev/security/audit-history.md`.
 //!
 //! The repository stores what auth computes. Auth hashes [`EventContent`], signs
 //! checkpoints and verifies the chain; nothing here trusts a stored hash.

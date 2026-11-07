@@ -125,7 +125,7 @@ impl OidcApplication {
 
     /// The recovery of `user`'s account that can still be undone, if any, which a
     /// sign-in for an application first asks about: was it the owner's
-    /// (`docs/security/account-recovery.md`, C3)? An owner signing in with an
+    /// (`docs/dev/security/account-recovery.md`, C3)? An owner signing in with an
     /// older passkey learns of it there, even when its notice reached only a
     /// hijacked mailbox. Every sign-in for an application asks, or, inline, sends
     /// the browser to auth's pages to.

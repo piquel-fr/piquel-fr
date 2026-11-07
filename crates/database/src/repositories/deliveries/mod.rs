@@ -4,7 +4,7 @@
 //! Delivery is at least once. A worker claims a delivery with a lease, sends it
 //! outside any transaction, then records the outcome only if it still holds the
 //! lease. Deliveries sharing an ordering key are sent one at a time, in the order
-//! their transactions committed. See `docs/architecture/delivery-queue.md`.
+//! their transactions committed. See `docs/dev/architecture/delivery-queue.md`.
 
 use super::{DeliveryRepository, RepositoryExecutor, Unsigned};
 use crate::{DatabaseError, DatabaseTransaction, repositories::notifications::Notified};

@@ -1,0 +1,20 @@
+# The documentation book. `just docs` builds and checks it, `just docs serve`
+# previews it. See docs/dev/documentation.md.
+
+[book]
+title = "piquel.fr"
+description = "Passkey-first accounts for piquel.fr and the apps that sign in with them."
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "target/book"
+# A page listed in SUMMARY.md but missing fails the build.
+create-missing = false
+
+[output.html]
+site-url = "/"
+# Chapters are grouped into the user and contributor guides, not numbered.
+no-section-label = true
+git-repository-url = "https://github.com/piquel-fr/piquel-fr"
+edit-url-template = "https://github.com/piquel-fr/piquel-fr/edit/main/{path}"

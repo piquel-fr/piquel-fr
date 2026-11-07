@@ -22,12 +22,11 @@ This was decided in [#255](https://github.com/piquel-fr/piquel-fr/issues/255).
   would extend this to everyone.
 - **Handles are already published:** to relying parties, and in profiles once
   #101 ships.
-- **Decoys hid little.** Auth used to answer handle sign-in for an unknown handle
-  with stable fake credentials, derived from the token digest key. They had fixed
-  shapes, one or two IDs of 16, 20 or 32 bytes, so accounts with other passkeys
-  stood out. A disabled account visibly switched to decoys. Every change of
-  digest key changed them, so anyone comparing responses from before and after
-  learned which handles exist
+- **Decoys would hide little.** Answering handle sign-in for an unknown handle
+  with stable fake credentials, derived from a server key, gives them fixed
+  shapes, so accounts with other passkeys stand out. A disabled account would
+  visibly switch to decoys, and every change of the key changes them, so anyone
+  comparing responses from before and after learns which handles exist
   ([#181](https://github.com/piquel-fr/piquel-fr/issues/181)).
 
 ## What a handle reveals

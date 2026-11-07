@@ -1,5 +1,5 @@
 //! The audit history: every recorded domain event, and the tamper-evident chain
-//! over them (see `docs/security/audit-history.md`).
+//! over them (see `docs/dev/security/audit-history.md`).
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{

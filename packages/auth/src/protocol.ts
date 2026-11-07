@@ -1,5 +1,5 @@
 // Generated from piquel_common::protocol by `just sdk-types`. Do not edit.
-// The wire types auth and every SDK share; docs/architecture/sdk.md describes them.
+// The wire types auth and every SDK share; docs/dev/architecture/sdk.md describes them.
 
 /**
  * Claims of an access token (RFC 9068), signed with `typ: at+jwt`. `X` holds

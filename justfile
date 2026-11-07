@@ -16,6 +16,9 @@ mod auth 'just/auth.just'
 # piqueld previews of this worktree, and a local telemetry backend.
 mod infra 'just/infra.just'
 
+# The documentation book: `just docs` builds and checks it, `just docs serve` previews it.
+mod docs 'just/docs.just'
+
 alias format := fmt
 alias preview := infra::preview
 alias preview-delete := infra::preview-delete
@@ -25,9 +28,11 @@ validate: fmt-check lint unused check test web::test doc doc-test audit
 install:
     @pnpm install --frozen-lockfile
 
-# Cargo tools used by the test, coverage, audit and database recipes.
+# Cargo tools used by the test, coverage, audit, database and docs recipes. CI
+# installs mdBook and lychee at the same versions.
 install-tools: db::install-sqlx
     @cargo install --locked cargo-nextest cargo-llvm-cov cargo-deny cargo-machete
+    @cargo install --locked mdbook@0.5.4 lychee@0.24.2
 
 # The release auth-service executable.
 build: (rust::build "--release")

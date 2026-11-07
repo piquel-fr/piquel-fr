@@ -25,7 +25,7 @@ pub enum DatabaseError {
     #[error("the database operation timed out")]
     Timeout(#[source] tokio::time::error::Elapsed),
     /// `PostgreSQL` cancelled the statement, which ran past its statement timeout
-    /// (see `database-crate.md`) or was cancelled by an operator.
+    /// (see `docs/dev/architecture/database.md`) or was cancelled by an operator.
     #[error("the database cancelled a statement that ran too long")]
     Cancelled(#[source] Source),
     /// A statement waited for a lock past its lock timeout.

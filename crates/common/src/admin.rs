@@ -518,7 +518,7 @@ impl std::fmt::Display for ChainProblem {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerificationKeys {
-    /// The keys committed to the repository (`docs/security/audit-key.pub`).
+    /// The keys committed to the repository (`docs/dev/security/audit-key.pub`).
     Committed,
     /// Keys the operator gave on the command line.
     Given,

@@ -58,7 +58,7 @@ use user::UserCommand;
 #[derive(Parser)]
 #[command(
     after_help = "Every command uses AUTH_DATABASE_URL, except migrate and audit prune when \
-                  AUTH_DATABASE_OWNER_URL is set. See README.md for configuration and administration."
+                  AUTH_DATABASE_OWNER_URL is set. See docs/dev/operations/ for configuration and administration."
 )]
 pub struct Cli {
     /// Defaults to serving when no administrative command is supplied.

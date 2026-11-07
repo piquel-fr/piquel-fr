@@ -22,7 +22,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   Ed25519 signed notes, for audit checkpoints, and SCRAM-SHA-256 verifiers of
   database passwords.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
-  [sdk.md](sdk.md): token validation, typed scopes, login and the JWKS cache auth
+  [sdk.md](architecture/sdk.md): token validation, typed scopes, login and the JWKS cache auth
   also uses for Google; its `axum` feature adds extractors, a bearer layer and
   login routes over an application's own session backend. It depends only on
   `piquel-common`, with `client-spans` alone, among the workspace crates, since
@@ -31,7 +31,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   connections, migrations, typed repositories, transactions and storage
   vocabulary.
 - `piquel-telemetry` (`crates/telemetry`): logs, traces and metrics, following
-  [telemetry.md](telemetry.md).
+  [telemetry.md](architecture/telemetry.md).
 - `piquel-ui` (`crates/ui`): the Topcoat components and layouts of auth's
   server-rendered pages, the strings they show, titles and notices included, and
   the changes and queries their forms and links send. They render plain data,
@@ -285,7 +285,7 @@ Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs/mod.rs`,
 and `Jobs::start` schedules it. A job receives only its locked `ExclusiveConnection`,
 never the `Database`, so everything it does happens while it holds the lock.
 Messages for other systems are never sent from handlers: the event's channels queue
-them, and delivery workers send them. See [the delivery queue](delivery-queue.md).
+them, and delivery workers send them. See [the delivery queue](architecture/delivery-queue.md).
 
 ## Errors
 
@@ -304,7 +304,7 @@ Rejections tell the client what to fix: name the parameter or rule and its limit
 Every OAuth rejection goes through `OAuthCode::reject` or `reject_with`, which
 sends an RFC 6749 `error_description`. Stay vague only where detail would reveal
 a secret or whether an account exists; a handle may say so, since handles are
-public ([handles](../security/handles.md)). Internal failures keep a generic message.
+public ([handles](security/handles.md)). Internal failures keep a generic message.
 Keep separate variants when they identify different failures; merge indistinguishable ones.
 
 ## Vocabulary and persistence
