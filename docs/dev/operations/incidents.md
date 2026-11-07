@@ -56,14 +56,16 @@ too.
    The `next` and `retiring` keys go with it, since their private keys were
    stored beside it, and a new key signs at once. A retired key's private key is
    already erased.
-4. Wait until auth serves the key set without the revoked keys:
-   `https://auth.piquel.fr/.well-known/jwks.json` no longer lists their IDs.
-   Every replica reloads its keys each minute, and one that can't stops
-   serving within 15 minutes.
+4. Wait 15 minutes after the revocation. Each replica serves its own copy of
+   the key set and reloads it each minute, and one that can't reload stops
+   serving within 15 minutes, so only then has every replica dropped the
+   revoked keys. `https://auth.piquel.fr/.well-known/jwks.json` no longer
+   listing them shows only that the replica that answered has.
 5. Then restart the first-party resource servers, which drops the keys they
-   cached. Restarting sooner could cache the revoked keys again. The SDKs keep
-   a known key until their cache expires, so other verifiers may accept the
-   revoked keys for up to an hour from this point.
+   cached. Restarting sooner could cache the revoked keys again from a replica
+   that still serves them. The SDKs keep a known key until their cache expires,
+   so other verifiers may accept the revoked keys for up to an hour from this
+   point.
 
 Every access and ID token the revoked keys signed stops working at auth,
 including as an `id_token_hint`. Refresh tokens don't depend on signing keys, so
