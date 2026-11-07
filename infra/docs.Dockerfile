@@ -11,6 +11,9 @@ RUN tar -xzf /tmp/mdbook.tar.gz -C /usr/local/bin
 WORKDIR /book
 COPY book.toml ./
 COPY docs docs
+# The SDKs' examples, which the user guide includes.
+COPY crates/auth-sdk/examples/notes.rs crates/auth-sdk/examples/
+COPY packages/auth/examples/server.ts packages/auth/examples/browser.ts packages/auth/examples/resource.ts packages/auth/examples/
 RUN mdbook build
 
 # Serves the built book on port 8080, with mdBook's 404.html for missing pages.
