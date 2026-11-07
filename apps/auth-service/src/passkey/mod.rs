@@ -20,7 +20,7 @@ use piquel_common::{
 };
 use piquel_crypto::Secret;
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertPasskey, StoredPasskey,
+    Database, DatabaseError, DatabaseTransaction, InsertPasskey, PasskeyRepository, StoredPasskey,
 };
 use std::sync::Arc;
 use url::Url;
@@ -188,7 +188,7 @@ impl PasskeyApplication {
             .await
             .map_err(|error| match error {
                 DatabaseError::Conflict(_) => PasskeyError::PasskeyAlreadyRegistered(error),
-                DatabaseError::Refused(_) => PasskeyError::TooManyPasskeys(error),
+                DatabaseError::Refused(_) => PasskeyError::TooManyPasskeys(Some(error)),
                 DatabaseError::NotFound
                 | DatabaseError::Timeout(_)
                 | DatabaseError::Cancelled(_)
@@ -243,6 +243,20 @@ impl PasskeyApplication {
     /// Decodes the account's active passkeys for `WebAuthn`.
     async fn keys(&self, user_id: UserId) -> Result<Vec<Passkey>, PasskeyError> {
         Self::decode(self.database.passkeys().list_active(user_id).await?)
+    }
+
+    /// The credentials a new registration for `user_id` excludes: all its active
+    /// ones. Refuses an account that already keeps the most passkeys, before the
+    /// authenticator creates one the account could not store.
+    async fn exclusions(&self, user_id: UserId) -> Result<Vec<CredentialID>, PasskeyError> {
+        let stored = self.database.passkeys().list_active(user_id).await?;
+        if stored.len() >= PasskeyRepository::LIMIT {
+            return Err(PasskeyError::TooManyPasskeys(None));
+        }
+        Ok(Self::decode(stored)?
+            .iter()
+            .map(|key| key.cred_id().clone())
+            .collect())
     }
 
     /// Decodes stored passkey rows into `WebAuthn` credentials.
