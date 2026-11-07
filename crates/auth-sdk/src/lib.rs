@@ -8,6 +8,10 @@
 //! - [`KeyCache`] verifies JWS signatures against any JWKS URL, refetching on key
 //!   rotation without letting unknown key IDs flood the issuer.
 //!
+//! The user guide shows how to use it, with the `axum` feature:
+//! [signing in with Rust](https://docs.piquel.fr/user/apps/sign-in-rust.html) and
+//! [protecting an API](https://docs.piquel.fr/user/apps/protect-an-api.html).
+//!
 //! Everything starts from a discovered [`Issuer`]:
 //!
 //! ```no_run

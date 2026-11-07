@@ -64,7 +64,13 @@ Any account can register apps in the developer console, at
 Connect, with the Rust SDK (`piquel-auth`), the TypeScript SDK
 (`@piquel/auth`), or any OpenID Connect library:
 
+- [How sign-in works](apps/how-sign-in-works.md) explains the concepts, and
+  which SDK to pick.
 - [Registering an app](apps/register-an-app.md) covers the console.
+- [Signing in with Rust](apps/sign-in-rust.md),
+  [signing in with TypeScript](apps/sign-in-typescript.md) and
+  [browser apps](apps/browser-apps.md) sign users in with the SDKs.
+- [Protecting an API](apps/protect-an-api.md) validates access tokens.
 - [Step-up authentication](apps/step-up.md) asks for a fresh passkey before a
   sensitive action.
 - [Back-channel logout](apps/back-channel-logout.md) ends an app's session when
