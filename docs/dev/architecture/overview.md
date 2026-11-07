@@ -39,7 +39,7 @@ crosses a crate or a process.
   auth only to sign people in, and never shares its database, keys or process.
 - **PostgreSQL** holds all of auth's state. Auth needs no separate cache, RPC
   service, event bus or key-management service, so it runs as several replicas
-  ([running several replicas](../operations/deploying.md#running-several-replicas)).
+  ([running several replicas](../operations/replicas.md)).
 - **piqueld** deploys everything from `infra/piqueld.toml`. Its gateway
   terminates HTTPS, answers the `www` redirect itself, and overwrites
   `X-Forwarded-For`, which auth trusts only from the gateway's ranges

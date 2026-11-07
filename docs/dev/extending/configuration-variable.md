@@ -121,7 +121,7 @@ fails to start.
 - A secret is a `[[spec.secrets]]` entry, which piqueld generates, or stored by
   hand with `piquelctl app secret`, mounted with `[[spec.services.secrets]]`. The
   variable then points at the mount, such as `file:///run/secrets/<name>`. See
-  [secrets](../operations/deploying.md#secrets).
+  [secrets](../operations/secrets.md).
 
 ## Test it
 
