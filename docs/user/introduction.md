@@ -47,6 +47,16 @@ the apps you signed in to, your notifications and your data.
 - [Security history](account/security-history.md): every sign-in and change,
   and reporting what wasn't you.
 
+## Your account and your data
+
+- [Recover your account](your-data/recover-your-account.md) if you lost every
+  passkey.
+- [Undo a recovery](your-data/undo-a-recovery.md) that wasn't you.
+- [Download your data](your-data/export-your-data.md): everything Piquel keeps
+  about you, in one file.
+- [Delete your account](your-data/delete-your-account.md), and restore it
+  within 30 days.
+
 ## Building an app
 
 Any account can register apps in the developer console, at

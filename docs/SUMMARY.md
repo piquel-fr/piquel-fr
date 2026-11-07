@@ -19,6 +19,13 @@
 - [Back-channel logout](user/apps/back-channel-logout.md)
 - [Passkey sign-in on your own pages](user/apps/passkey-sign-in.md)
 
+# Your data
+
+- [Recover your account](user/your-data/recover-your-account.md)
+- [Undo a recovery](user/your-data/undo-a-recovery.md)
+- [Download your data](user/your-data/export-your-data.md)
+- [Delete your account](user/your-data/delete-your-account.md)
+
 # Reference
 
 - [OpenID Connect](user/reference/oidc.md)
