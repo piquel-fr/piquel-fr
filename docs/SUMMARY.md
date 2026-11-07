@@ -96,6 +96,8 @@
 # Operations
 
 - [Deploying with piqueld](dev/operations/deploying.md)
+  - [Secrets](dev/operations/secrets.md)
+  - [Running several replicas](dev/operations/replicas.md)
 - [Configuration](dev/operations/configuration.md)
 - [Signing keys](dev/operations/signing-keys.md)
 - [OIDC clients](dev/operations/clients.md)
@@ -104,3 +106,4 @@
 - [Sign-in providers](dev/operations/sign-in-providers.md)
 - [Email](dev/operations/email.md)
 - [Telemetry stack](dev/operations/telemetry.md)
+- [Incidents](dev/operations/incidents.md)

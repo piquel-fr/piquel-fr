@@ -1,205 +1,348 @@
 # Administration
 
-Administrators manage accounts, invitations, handles and auth's own state from
-the admin dashboard, and operators from the `auth-service` command line. Both
-run the same code.
+This page helps you run piquel.fr's accounts: grant administrators, invite
+people, help an owner who lost their passkeys, act on an account that breaks the
+rules, and repair auth's own state.
 
-## The command line
+Two surfaces run the same code (`AdminService` in
+`apps/auth-service/src/admin`, and `AccountService` in
+`apps/auth-service/src/account` for an account's settings):
 
-[auth-service commands](cli-commands.md) lists every command with its options.
-Every administrative operation has a command, which runs the same code as the
-admin dashboard (`AdminService` in `apps/auth-service/src/admin`), and so does every
-setting administrators may change on another account (`AccountService` in
-`apps/auth-service/src/account`). Commands need only `AUTH_DATABASE_URL`, so they
-work while auth is down: they are the break-glass path when the dashboard or
-auth's frontends are unreachable. `invite create` also needs
-`AUTH_PUBLIC_BASE_URL`, to build its link; `user recover` needs it and
-`AUTH_TOKEN_DIGEST_KEY`, to derive its link; `client origin add` needs it to tell
-auth's own domain apart; and `audit verify` and `audit prune` need it to pick the
-environment's audit key. `audit prune` connects as the schema owner (see
-[audit history](../security/audit-history.md#pruning)). In deployed
-environments, run them with `piquelctl app exec piquel-fr auth --env ENV --
-auth-service …` (see [deploying](deploying.md#running-auth-service-commands)).
-
-```sh
-just auth admin grant alice               # the first administrator is granted here
-just auth admin list
-just auth admin revoke bob                # the last administrator's rights stay
-just auth user search ali                 # by ID, or part of a handle, name or email
-just auth user show alice                 # recorded, since it shows personal data
-just auth user disable alice --reason "Spam"
-just auth user enable alice
-just auth user recover alice --reason "Lost every passkey"
-just auth user recover alice --reason "Phone stolen" --revoke --keep <passkey-id>
-just auth user undo-recovery alice --reason "Owner confirmed by phone"
-just auth user delete alice --reason "Asked by email"   # see Data export and account deletion
-just auth user restore alice --reason "Changed their mind"
-just auth session revoke <session-id>     # one session, as `user show` lists it
-just auth session revoke-all alice        # every session of the account
-just auth audit list --user alice --kind session_revoked
-just auth audit list --user alice --views # with administrators' views of the account
-just auth audit verify                    # recompute the tamper-evident chain, and record what it found
-just auth account alice passkeys list     # the account's settings, as its owner sees them
-just auth account alice name set "Alice B" --reason "Asked by email"
-just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
-just auth account alice emails remove <email-id> --reason "Asked by email"
-just auth account alice apps remove <client-id> --reason "Impersonating app"
-just auth account alice picture remove --reason "Impersonates someone"
-```
-
-- Accounts are named by handle, ID or a verified email of an active account.
-- `--output json` prints the views the dashboard shows for `user search`
-  (`UserPage`), `user show` (`UserDetail`), `audit list` (`EventPage`), `client
-  list`, `invite list` and `admin list`, as defined in `piquel_common::admin`.
-  `audit verify --output json` prints the verification.
-- `audit verify` and `audit prune` are described in
-  [audit history](../security/audit-history.md). `audit prune` connects as
-  the schema owner when `AUTH_DATABASE_OWNER_URL` is set, since auth's own role
-  may not delete events.
-- `user disable|delete`, `user recover`, `user undo-recovery`, `session revoke-all`,
-  `admin revoke`, `client disable|suspend|delete`, `audit prune`, and `account …
-  passkeys revoke`, `identities unlink` and
-  `sessions revoke-all` describe what they will change and ask for confirmation.
-  Without a terminal they refuse unless given `--yes`.
-- `account <user>` reads and changes the settings administrators share with the
-  owner: the display name, passkeys, social identities, email addresses,
-  sessions, connected apps, the profile picture, the security history and the
-  notifications, with the owner's own operations. It never adds a way to sign in
-  or an address. Every change needs `--reason`, which the owner sees in their
-  history; reads are recorded as views, once an hour per operator, which only the
-  audit shows, not the owner. See
-  [surfaces](../architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
-  for what is shared.
-- `user recover` is for an owner who lost every passkey. It signs the account
-  out everywhere, removes its unverified addresses, and emails its primary
-  verified address a link to auth's `/recover`, which enrolls one passkey, once,
-  within a day; it prints the link too, for an owner without an address. For 15
-  days after, that passkey signs in but confirms no change, and any other passkey
-  of the account can undo the recovery, which takes back its passkey, every
-  session and every app consent. Until then, nobody removes a passkey but the
-  recovery's own.
-  - It first lists the account's recoveries of the last 15 days. While one is in
-    probation, it refuses: find out who used it, and undo it with `user
-    undo-recovery` first. An unused link is just replaced.
-  - `--revoke [--keep <passkey-id>…]` is for an account that was in someone
-    else's hands: it also revokes every passkey not kept, unlinks every social
-    identity and withdraws every consent, and only prints the link. Remove the
-    addresses the owner doesn't recognize afterwards, before handing the link
-    over.
-  - `user undo-recovery` undoes the account's recovery for an owner with no other
-    passkey, or whose account is disabled, once support has confirmed them.
-  - Before running either, follow the evidence policy in
-    [account recovery](../security/account-recovery.md#supports-evidence-policy).
-    Every reason shows in the account's history: write what was asked, never the
-    evidence.
-  - It never recovers an account while it holds administrator rights: revoke them
-    with `admin revoke` first (grant another administrator first if it is the
-    last). `admin grant` refuses while a recovery of the account can still be
-    undone; grant the rights again once it settles.
-- Each change is recorded as a domain event with the operator: `$USER` and the host
-  name. Unlike the dashboard, the CLI may act on administrators' accounts, except
-  to recover one.
-- Failures print their causes and exit with 1; usage errors exit with 2.
-
-## The admin dashboard
+- **The admin dashboard**, for administrators, at `admin.piquel.fr`, from the
+  tailnet only.
+- **The `auth-service` command line**, for operators. It has a command for every
+  administrative operation, and needs only the database, so it works while auth
+  is down. In an environment, run it with `piquelctl app exec` (see
+  [running auth-service commands](deploying.md#running-auth-service-commands)),
+  and locally with `just auth …`. [auth-service commands](cli-commands.md) lists
+  every command with its options.
 
 ![The admin dashboard's overview: sign-in counts, recent events and the newest accounts](../../images/admin/overview.png)
 
-Administrators manage accounts, their settings and security history, sessions,
-invitations, other administrators, handles, the delivery queue, signing keys and
-the origins approved for clients' pages to sign users in from the admin dashboard,
-which auth serves on `AUTH_ADMIN_LISTENER` for the dashboard's origin,
-`AUTH_ADMIN_ORIGIN`, and which only a private route reaches.
-Its pages call `AdminService` in-process; there is no admin API.
+## Grant the first administrator
 
-An administrator signs in by a handoff from auth: the dashboard sends the browser
-to auth's `/admin` page, which needs a session signed in with a passkey, of an
-account that still holds administrator rights, and sends it back with a
-single-use code bound to that session and to the dashboard's state cookie. The
-dashboard's session lasts while that auth session does, and every request checks
-the administrator's rights again, so revoking either takes effect at once.
-Changes also need the dashboard's own passkey confirmation from the last five
-minutes, which the administrator gives on auth's `/admin` page, for the dashboard
-only. See [surfaces](../architecture/surfaces.md#adminpiquelfr).
+Only the command line grants the first administrator, once the environment is
+deployed. In production (for staging, use `--env staging` and its own hosts):
 
-The dashboard never changes an administrator's account: revoke their rights first.
-Administrators cannot grant or revoke their own rights, and nobody can revoke the last
-administrator's. Every change is recorded as a domain event with its administrator
-or CLI operator.
+1. Create an invitation, since signing up needs one:
 
-Auth serves the admin dashboard on its admin listener, port 8081, for the
-environment's admin host (`AUTH_ADMIN_ORIGIN`). Only the private `admin` route
-reaches that port, in every environment; auth's health check stays on 8080. The
-dashboard signs administrators in by a handoff from auth's own passkey session,
-so it needs no OIDC client or secret.
+   ```sh
+   piquelctl app exec piquel-fr auth --env production -- auth-service invite create
+   ```
 
-Only administrators can use it. Grant the first one with the CLI:
+2. Open the link it prints, and sign up with a passkey.
+3. Grant the new account administrator rights:
 
-```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service admin grant USERNAME
-```
+   ```sh
+   piquelctl app exec piquel-fr auth --env production -- auth-service admin grant <handle>
+   ```
 
-An administrator's dashboard session lasts while their auth session does, and
-survives restarts and replicas: it is stored, as a digest, in PostgreSQL.
+4. From a device on the tailnet, open `https://admin.piquel.fr`, and sign in
+   with the passkey.
 
-## Invitations
+Grant further administrators on the dashboard's **Administrators** page, with
+**Grant rights**, or with `admin grant`. `admin list` lists them, oldest grant
+first.
 
-```sh
-just auth invite create --expires-in 7d
-just auth invite list
-just auth invite revoke <id>
-```
+## Sign in to the admin dashboard
 
-`create` prints one signup link, to `/register` with the invitation filled in. A
-signup through GitHub or Google asks for the invitation on its own page. The
-database stores a digest, expiry and redemption time. Tokens expire after seven days by default; `h` and `d` are supported. A token
-is redeemed atomically with account creation, so a failed signup does not spend it.
-Disabling invitation enforcement affects signup only; existing users keep access.
-Administrators can also list, create and revoke invitations from the admin dashboard.
+1. Open the dashboard. It sends the browser to auth's `/admin` page.
+2. Sign in with a passkey, if the browser isn't already: a session signed in
+   with GitHub or Google is asked for a passkey first.
+3. Auth sends the browser back to the dashboard, signed in.
 
-## Handles
+A change also asks for a passkey, unless you gave one in the last five
+minutes. The dashboard's session lasts as long as your auth session, so signing
+out of auth signs you out of the dashboard too. See
+[how the dashboard signs administrators in](#how-the-dashboard-signs-administrators-in).
 
-```sh
-just auth handle check                                  # accounts whose handle is reserved
-just auth handle rename old-name new-name --reason "…"  # --allow-reserved to assign a reserved name
-just auth handle released                               # handles no account holds, kept from others
-just auth handle release old-name                       # let anyone claim a released handle again
-just auth handle reserve jane --reason "For Jane, joining in May"
-just auth handle reserved                               # reserved handles, then the built-in names
-just auth handle unreserve jane
-```
+## Invite someone
 
-Operators rename without the 30-day cooldown of settings renames, but not to a
-handle another account holds or held, or one that looks like it (see
-[security properties](../security/properties.md)). A rename bumps the account's profile
-version, so relying parties refresh `preferred_username`. `release` deletes a
-handle no account holds anymore, the only way one returns to the pool, for cases
-like a trademark dispute; to free a current handle, rename its account first.
-Every change is recorded as a domain event with its operator; a rename also with
-its reason, which the owner sees in their history.
+Signing up needs an invitation in staging and production.
 
-`reserve` keeps a handle for someone: signup and the settings refuse it and its
-look-alikes, as they do the built-in reserved names (`admin`, `support`, …),
-until an operator gives it with `rename --allow-reserved` or `unreserve`s it. Its
-reason says who or what it is kept for. An account already holding it keeps it,
-and `handle check` lists it.
+- **On the dashboard**, open **Invitations**, select **Invite someone**, choose
+  how long it's **Valid for**, and select **Create link**.
+- **At the terminal**, run `auth-service invite create --expires-in 7d`.
 
-The dashboard's Handles page does all of this: it lists the reserved handles,
-with the built-in names, the accounts holding one, and the released handles, and
-reserves, unreserves and releases them. An account's Change handle page renames
-it with a reason, and may allow a reserved handle as `--allow-reserved` does.
+Either shows a single-use signup link once: send it to the person. It opens
+`/register` with the invitation filled in, and a signup through GitHub or Google
+asks for it on its own page. A link lasts seven days unless you choose another
+time, in hours (`24h`) or days (`7d`).
 
-## Outbound deliveries
+Revoke an unused link with **Revoke** on the **Invitations** page, or
+`auth-service invite revoke <id>`, with the ID `invite list` shows.
 
-Messages for other systems, such as back-channel logout tokens and email, wait in
-a queue in the database until a worker sends them. Inspect and repair it with:
+## Find an account
 
 ```sh
-just auth deliveries list --status failed
-just auth deliveries retry <id>
-just auth deliveries cancel <id>
+auth-service user search ali     # by ID, or part of a handle, name or email
+auth-service user show alice     # the account's profile, emails, passkeys, sessions and consents
 ```
 
-A failed delivery with an ordering key holds back the ones after it until it is
-retried or cancelled. After 30 days, cleanup deletes it and cancels the ones
-behind it. See [the delivery queue](../architecture/delivery-queue.md).
+Commands name an account by its handle, its ID, or a verified email of an active
+account. On the dashboard, search on **Users**, then open the account.
+
+Reading an account is recorded as a view, once an hour per administrator or
+operator, since it shows personal data. Only the audit shows views, not the
+owner.
+
+## Disable or enable an account
+
+```sh
+auth-service user disable alice --reason "Spam"
+auth-service user enable alice
+```
+
+Disabling ends the account's sessions and refresh tokens, and it can't sign in
+until you enable it. On the dashboard, open the account and select **Disable**
+or **Enable**. Nobody can disable the last active administrator's account.
+
+## Change an account's settings for its owner
+
+When an owner asks for help, or an account breaks the rules, change its settings
+with the owner's own operations, never by signing in as them:
+
+```sh
+auth-service account alice passkeys list
+auth-service account alice name set "Alice B" --reason "Asked by email"
+auth-service account alice passkeys revoke <passkey-id> --reason "Phone stolen"
+auth-service account alice emails remove <email-id> --reason "Asked by email"
+auth-service account alice apps remove <client-id> --reason "Impersonating app"
+auth-service account alice picture remove --reason "Impersonates someone"
+```
+
+On the dashboard, open the account's pages for its display name, sign-in
+methods, profile picture, email addresses, connected apps, security history and
+notifications.
+
+Every change needs a reason, which the owner sees in their security history.
+You can view, change and remove, but never add a way to sign in or an address:
+see [what is shared](../architecture/surfaces.md#changing-an-account-on-its-owners-behalf).
+The dashboard never changes an administrator's account, while the command line
+may.
+
+## Recover an account
+
+Recovery is for an owner who lost every passkey. It is the weakest point of a
+passkey-only account, so it follows
+[support's evidence policy](../security/account-recovery.md#supports-evidence-policy)
+every time.
+
+1. Read the account and its history, looking for signs someone else already
+   holds it, such as an identity linked or a primary address changed recently:
+
+   ```sh
+   auth-service user show alice
+   auth-service account alice history
+   ```
+
+2. Confirm the request through a second channel that existed before it, as the
+   evidence policy describes. Keep the evidence in support's own record.
+3. If the account holds administrator rights, revoke them first with
+   `auth-service admin revoke alice`. Grant another administrator first if it's
+   the last.
+4. Start the recovery:
+
+   ```sh
+   auth-service user recover alice --reason "Lost every passkey"
+   ```
+
+   On the dashboard, open the account, select **Recover**, give the reason, and
+   select **Send the recovery link**. Write what was asked, never the evidence:
+   the reason shows in the account's history.
+5. The command first lists the account's recent recoveries, then asks you to
+   confirm. If one is in probation, it refuses: find out who used it, and undo it
+   first.
+6. Tell the owner to open the link sent to their primary verified address,
+   within a day. The command also prints it, for an owner without an address:
+   give it only through the channel you confirmed in step 2.
+
+Recovering signs the account out everywhere, and removes its unverified
+addresses. The link enrolls one passkey, once. For 15 days after, that passkey
+signs in but confirms no change, and any other passkey of the account can undo
+the recovery. `admin grant` refuses while the recovery can still be undone:
+grant administrator rights again once it settles.
+
+### Recover an account someone else held
+
+For an account that was in someone else's hands, also take away every way in the
+owner doesn't vouch for. The evidence policy holds this to a higher bar.
+
+1. List the passkeys the owner still trusts with
+   `auth-service account alice passkeys list`.
+2. Recover with `--revoke`, keeping those:
+
+   ```sh
+   auth-service user recover alice --reason "Phone stolen" --revoke --keep <passkey-id>
+   ```
+
+   It revokes every other passkey, unlinks every social identity, withdraws
+   every consent, and tells every verified address. It only prints the link, so
+   it runs at the terminal only.
+3. Remove the addresses the owner doesn't recognize, with
+   `auth-service account alice emails remove`, and review the clients the
+   account owns.
+4. Hand the link over through the confirmed channel.
+
+### Undo a recovery
+
+When a recovery wasn't the owner's, and the owner has no passkey from before it
+or the account is disabled:
+
+1. Establish the owner through evidence from before the recovery started.
+2. Undo it:
+
+   ```sh
+   auth-service user undo-recovery alice --reason "Owner confirmed by phone"
+   ```
+
+   On the dashboard, open the account, select **Undo recovery**, and select
+   **Undo the recovery**.
+
+In probation, this removes the recovery's passkey, even the last one, withdraws
+every consent, and ends every session and refresh grant. An unused link is
+cancelled. An owner who still has an older passkey undoes the recovery
+themselves, from the link in the recovery's emails.
+
+## End sessions
+
+```sh
+auth-service session revoke <session-id>   # one session, as `user show` lists it
+auth-service session revoke-all alice      # every session of the account
+```
+
+Each also ends the refresh tokens of the apps signed in through the session. On
+the dashboard, open the account and select **Revoke** next to a session, or
+**Revoke all**.
+
+## Delete or restore an account
+
+```sh
+auth-service user delete alice --reason "Asked by email"
+auth-service user restore alice --reason "Changed their mind"
+```
+
+Deleting signs the account out and schedules its purge in 30 days, unless it is
+restored first; its owner can restore it by signing in with a passkey. On the
+dashboard, open the account and select **Delete**, or **Restore**.
+
+> **Warning:** `user delete --immediately` purges the account now, and can't be
+> undone. Only the terminal offers it.
+
+See [data export and account deletion](../architecture/account-deletion.md).
+
+## Manage handles
+
+```sh
+auth-service handle rename old-name new-name --reason "…"
+auth-service handle reserve jane --reason "For Jane, joining in May"
+auth-service handle rename someone jane --allow-reserved --reason "Kept for this account"
+auth-service handle unreserve jane
+auth-service handle release old-name
+```
+
+- **Rename** gives an account a new handle without the 30-day cooldown of the
+  settings. It never takes a handle another account holds or held, or one that
+  looks like it (see [handles are public](../security/handles.md)). The owner
+  sees the reason, and apps receive the new `preferred_username` once they
+  refresh the profile.
+- **Reserve** keeps a handle and its look-alikes from signup and the settings,
+  as the built-in names (`admin`, `support`, …) are, until you give it with
+  `rename --allow-reserved`, or unreserve it. An account already holding it
+  keeps it.
+- **Release** frees a handle no account holds anymore, for cases like a
+  trademark dispute: it is the only way one returns to the pool. To free a
+  current handle, rename its account first.
+
+`handle reserved`, `handle released` and `handle check` list the reserved
+handles, the released ones, and the accounts whose handle is reserved. The
+dashboard's **Handles** page does all of this, and an account's **Change
+handle** page renames it.
+
+## Repair outbound deliveries
+
+Messages for other systems, such as back-channel logout tokens and email, wait
+in a queue until a worker sends them.
+
+1. List what failed:
+
+   ```sh
+   auth-service deliveries list --status failed
+   ```
+
+2. Fix the cause, such as an app's logout endpoint or the Resend key.
+3. Retry each delivery with `auth-service deliveries retry <id>`, or give up on
+   one with `auth-service deliveries cancel <id>`.
+
+On the dashboard, the **Deliveries** page filters them, and offers **Retry**
+and **Cancel delivery**. A failed delivery with an ordering key holds back the
+ones after it until it is retried or cancelled. After 30 days, cleanup deletes
+it and cancels the ones behind it. See
+[the delivery queue](../architecture/delivery-queue.md), and for email,
+[mail not going out](incidents.md#mail-not-going-out).
+
+## Check the audit history
+
+```sh
+auth-service audit list --user alice --kind session_revoked
+auth-service audit list --user alice --views   # with administrators' views of the account
+auth-service audit verify                      # recompute the tamper-evident chain
+```
+
+On the dashboard, the **Events** page lists events, and **Show views** adds the
+views. The **Audit** page shows the last verification, and **Verify now** runs
+another. See [audit history](../security/audit-history.md), which also explains
+pruning.
+
+## The command line
+
+- Commands need only `AUTH_DATABASE_URL`. Some need more configuration:
+  - `invite create` needs `AUTH_PUBLIC_BASE_URL`, to build its link.
+  - `user recover` needs `AUTH_PUBLIC_BASE_URL` and `AUTH_TOKEN_DIGEST_KEY`, to
+    derive its link.
+  - `client origin add` needs `AUTH_PUBLIC_BASE_URL`, to tell auth's own domain
+    apart.
+  - `audit verify` and `audit prune` need `AUTH_PUBLIC_BASE_URL`, to pick the
+    environment's audit key. `audit prune` connects as the schema owner when
+    `AUTH_DATABASE_OWNER_URL` is set, since auth's own role may not delete
+    events.
+- Commands that change a lot describe the change and ask for confirmation:
+  `user disable`, `user delete`, `user recover`, `user undo-recovery`,
+  `session revoke-all`, `admin revoke`, `client disable`, `client suspend`,
+  `client delete`, `audit prune`, and `account … passkeys revoke`,
+  `identities unlink` and `sessions revoke-all`. Without a terminal, they
+  refuse unless given `--yes`.
+- `--output json` prints the views the dashboard shows, as defined in
+  `piquel_common::admin`: `user search` (`UserPage`), `user show`
+  (`UserDetail`), `audit list` (`EventPage`), `client list`, `invite list`,
+  `admin list`, and `audit verify`'s result.
+- Each change is recorded as an event with its operator: `$USER` and the host
+  name.
+- Failures print their causes and exit with 1. Usage errors exit with 2.
+
+## How the dashboard signs administrators in
+
+Auth serves the dashboard on its admin listener (`AUTH_ADMIN_LISTENER`, port
+8081 in every environment), for the dashboard's own origin
+(`AUTH_ADMIN_ORIGIN`). Only the private `admin` route reaches that port, while
+auth's health check stays on 8080. The dashboard's pages call `AdminService`
+in-process: there is no admin API.
+
+The dashboard is no OIDC client, so it needs no client or secret. An
+administrator signs in by a handoff from auth: auth's `/admin` page needs a
+session signed in with a passkey, of an account that still holds administrator
+rights, and sends the browser back with a single-use code bound to that session
+and to the dashboard's state cookie. The dashboard stores its own session as a
+digest in PostgreSQL, so it survives restarts and replicas.
+
+- Every request checks the administrator's rights again, so revoking their
+  rights, or their auth session, takes effect at once.
+- Changes need the dashboard's own passkey confirmation from the last five
+  minutes, which a confirmation for auth's pages never gives.
+- Administrators can't grant or revoke their own rights, and nobody can revoke
+  the last administrator's. The dashboard never changes an administrator's
+  account: revoke their rights first.
+- Every change is recorded as an event with its administrator.
+
+See [admin.piquel.fr](../architecture/surfaces.md#adminpiquelfr) for the
+design.

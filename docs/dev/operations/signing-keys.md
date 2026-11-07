@@ -1,8 +1,128 @@
 # Signing keys
 
-Auth signs ID and access tokens with RSA keys kept in PostgreSQL, each private
-key sealed with AES-256-GCM under `AUTH_KEY_ENCRYPTION_KEY`. Keys rotate without
-a deploy, and every replica reloads them each minute:
+This page helps you check, rotate and revoke the keys auth signs ID and access
+tokens with, and change the token digest key.
+
+Auth keeps its RSA signing keys in PostgreSQL, each private key sealed with
+AES-256-GCM under `AUTH_KEY_ENCRYPTION_KEY`. They rotate on their own, without a
+deployment: a new key is published a day before it signs, and an old one stays
+published while tokens it signed may still be in use (see
+[how keys rotate](#how-keys-rotate)).
+
+None of the `keys` commands needs the service running. In an environment, run
+them with `piquelctl app exec` (see
+[running auth-service commands](deploying.md#running-auth-service-commands)), and
+locally with `just auth keys …`. The admin dashboard's **Signing keys** page
+lists, rotates and revokes keys too.
+
+## Check the signing keys
+
+```sh
+auth-service keys list
+```
+
+The command prints each key's ID, type and state, and when it was created,
+started signing, stopped signing and was retired, oldest first. One key is
+`active`. Usually a `next` key waits too, and a `retiring` one follows a
+rotation.
+
+## Rotate a key ahead of schedule
+
+To replace the active key before its 90 days are up:
+
+- **At the terminal**, run `auth-service keys rotate`. It prints the new key's
+  ID.
+- **On the dashboard**, select **Rotate** on the **Signing keys** page, and
+  confirm.
+
+Either publishes a `next` key, which starts signing in 24 hours, so every
+verifier has fetched it first. A key already waiting is kept.
+
+## Rotate at once
+
+Only the terminal rotates at once:
+
+```sh
+auth-service keys rotate --now
+```
+
+The new key signs straight away. Verifiers with a cached key set reject its
+tokens until they fetch keys again, which the SDKs do on an unknown `kid`, at
+most every 30 seconds. Auth's own replicas reload within a minute, so until then
+a token from one may fail at another. Prefer the 24-hour rotation unless the
+active key must stop signing now; for a compromised key, revoke it instead.
+
+## Revoke a key
+
+> **Warning:** revoking deletes the key at once, and can't be undone.
+
+- **At the terminal**, run `auth-service keys revoke <id>`.
+- **On the dashboard**, select **Revoke** next to the key on the **Signing
+  keys** page, and confirm.
+
+When the revoked key was signing, the `next` and `retiring` keys go with it,
+since their private keys were stored beside it, and a new key signs at once.
+Every replica stops accepting the tokens it signed within a minute, or within
+15 minutes if it can't reload its keys (see
+[how replicas load keys](#how-replicas-load-keys)). For a key that may be in
+someone else's hands, follow
+[a compromised signing key](incidents.md#a-compromised-signing-key).
+
+## Replace a key that doesn't open
+
+A `next` key signs only once its private key opens and matches its public key,
+which the promotion checks. Otherwise the active key keeps signing, and every
+rotation attempt logs the failure.
+
+1. Find the key in `auth-service keys list`, and the failure in auth's logs.
+2. Revoke it with `auth-service keys revoke <id>`, so rotation can publish
+   another.
+
+Revoking works even when the active key can't be opened, which is how to
+recover a key set whose active key is broken: revoke the active key, and a new
+one signs. Every other change first checks that its `AUTH_KEY_ENCRYPTION_KEY`
+opens the active key. So run the command with the deployment's own key: a key
+sealed with one no replica can open makes the replicas unready, until you revoke
+it again with the right one.
+
+## Import a key
+
+```sh
+auth-service keys import file:///path/key.pem
+```
+
+The command imports a PEM RSA key as the active key, named `primary` unless
+`--id` names it, so tokens it signed keep verifying. It imports only into an
+empty key set, and otherwise changes nothing. Every deployment runs it as the
+`signing-key-import` job, with the `signing-key` secret. The dashboard never
+imports, so the private key never passes through a browser.
+
+## Change the token digest key
+
+Auth stores refresh tokens, authorization codes and pending logins as HMAC
+digests under the token digest key, and email verification and recovery links
+derive from it (see [configuration](configuration.md)). Nothing rotates it.
+Change it by hand, rarely, in two deployments, so that during each rolling
+deployment, and after a rollback, every release accepts what the other issues:
+
+1. Set the new key as `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`, and deploy.
+2. Swap them: the new key as `AUTH_TOKEN_DIGEST_KEY`, and the old one as
+   `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`. Deploy. New digests use the new key.
+3. Wait until `auth-service keys digest-usage` lists only `current` keys:
+   about 30 days, since refresh tokens end with their session, and a redeemed
+   code is kept while the grant it produced lives.
+4. Remove `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`, and deploy. Removing it sooner ends
+   the refresh tokens still under it.
+
+In the manifest, each key is a generated secret mounted as a file, as
+`token-digest-key` is. `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` holds the `signing-key`
+secret until no digest remains under it, so a change starts once that secret is
+removed (see [secrets](secrets.md#generated-secrets)).
+
+For a key that leaked, replace it at once instead: see
+[a leaked token digest key](incidents.md#a-leaked-token-digest-key).
+
+## How keys rotate
 
 | State | Signs | In JWKS | Its tokens verify | Lasts |
 | --- | --- | --- | --- | --- |
@@ -15,79 +135,27 @@ JWKS is served with `Cache-Control: public, max-age=3600`, so a `next` key is
 published long before any verifier needs it. A retired key's private key is
 erased, but logout and authorization still accept the expired ID tokens it
 signed as hints. On first start with no keys, auth generates one that signs at
-once. One replica at a time takes each step, under a PostgreSQL advisory lock
-that the `keys` commands take too. None of them needs the service running:
+once.
 
-```sh
-just auth keys list                  # IDs, states and dates
-just auth keys rotate                # publish a next key; it signs in 24 hours
-just auth keys rotate --now          # or sign with it at once
-just auth keys revoke <id>           # delete a key at once
-just auth keys digest-usage          # stored token digests per digest key
-just auth keys import file:///path/key.pem   # import a PEM key into an empty key set
-```
+One replica at a time takes each step, under a PostgreSQL advisory lock that the
+`keys` commands take too (see [background jobs](replicas.md#background-jobs)).
 
-The admin dashboard's Signing keys page lists, rotates and revokes keys the same
-way. Importing stays at the terminal, so the PEM private key never passes
-through a browser.
+## How replicas load keys
 
-`keys rotate` publishes the next key ahead of schedule. It still waits 24 hours
-before signing, so no verifier meets an unknown key. `--now` skips the wait:
-verifiers with a cached key set reject the new key's tokens until they fetch
-keys again, which the SDKs do on an unknown `kid`, at most every 30 seconds.
-Auth's own replicas reload within a minute, so until then a token from one may
-fail at another.
+Every replica reloads the key set each minute. A reload also checks the `next`
+and `retiring` keys: one that fails to open is left out of JWKS, and logged.
 
-A `next` key signs only once its private key opens and matches its public key,
-checked in the transaction that promotes it. Otherwise the active key keeps
-signing, every rotation attempt logs the failure, and `keys revoke <id>` removes
-the bad key so rotation can publish another. Reloads also check the `next` and
-`retiring` keys: one that fails is left out of JWKS and logged.
-
-A replica that cannot reload its keys keeps the set it has, but fails readiness
+A replica that can't reload its keys keeps the set it has, but fails readiness
 after 5 minutes. After 15 minutes it stops using them: endpoints that sign or
 verify answer `503`, so it never trusts a revoked key for longer than that.
 
-## Revoking a compromised key
+## Token digest usage
 
-`keys revoke <id>` deletes the key. If it was signing, the `next` and `retiring`
-keys go with it, since their private keys were stored alongside, and a new key
-signs at once. This works even when the active key cannot be opened, which is
-how to recover a key set whose active key is broken. Every other change first
-checks that its `AUTH_KEY_ENCRYPTION_KEY` opens the active key, so check that
-the command runs with the deployment's key: replacing a key with one no replica
-can open makes the replicas unready until it is revoked again with the right one.
-Revocation takes effect in two places, at different times:
+`auth-service keys digest-usage` counts the stored digests per kind of record
+and per key, until cleanup deletes them. It names each key:
 
-- **At auth:** within a minute, every replica that can reload stops accepting
-  the key, and one that cannot stops serving within 15 minutes, for
-  access tokens at `UserInfo`, and for `id_token_hint`s. The
-  tokens it legitimately signed stop working at auth too, so their users sign
-  in again through SSO.
-- **Downstream:** verifiers that cached JWKS keep accepting the key until their
-  cache expires: up to an hour with `max-age=3600`, and longer for verifiers
-  that ignore `Cache-Control`. Whoever holds the key can mint tokens with any
-  `exp`, so token lifetimes do not shorten this window; only the cache does.
-
-After revoking, restart first-party resource servers, which drops their cached
-keys; the SDKs keep a known key until their cache expires. Treat the hour as
-the remaining exposure at third parties.
-
-## Changing the token digest key
-
-Nothing rotates the token digest key; change it by hand, rarely, in two deploys,
-so that during each rolling deploy, and after a rollback, every release accepts
-what the other issues:
-
-1. Set the new key as `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` and deploy.
-2. Swap them: the new key as `AUTH_TOKEN_DIGEST_KEY`, the old one as
-   `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`, and deploy. New digests use the new key.
-3. Remove `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` once `keys digest-usage` lists only
-   `current`: about 30 days later, since refresh tokens end with their session,
-   and a redeemed code is kept while the grant it produced lives.
-   Removing it sooner ends the refresh tokens still under it.
-
-Each stored digest records a fingerprint of its key, and `keys digest-usage`
-counts them per key, until cleanup deletes them, named `current`, `accepted`, `unrecorded`
-(made before fingerprints were recorded, under the old PEM signing key) or
-`unknown`.
+- `current`: `AUTH_TOKEN_DIGEST_KEY`.
+- `accepted`: `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`.
+- `unrecorded`: made before digests recorded their key's fingerprint, under the
+  old PEM signing key.
+- `unknown`: neither configured key.

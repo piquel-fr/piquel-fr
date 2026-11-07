@@ -137,5 +137,5 @@ just db test -E 'test(deliveries)'
 Add the channel to [Channels](../architecture/delivery-queue.md#channels): what
 causes its deliveries, what each copies, how it is sent, its `MAX_AGE` and how
 receivers deduplicate. Operators manage it as they do every channel, so the
-CLI, the dashboard and [administration](../operations/administration.md#outbound-deliveries)
+CLI, the dashboard and [administration](../operations/administration.md#repair-outbound-deliveries)
 need no change.
