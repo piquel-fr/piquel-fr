@@ -2,16 +2,16 @@
 
 `infra/piqueld.toml` deploys piquel.fr as one repository-backed piqueld
 application, `piquel-fr`: auth, which also serves the account settings and the
-admin dashboard, and PostgreSQL. Its environments and previews share the
+admin dashboard, piquel.fr's web server, the documentation, and PostgreSQL. Its environments and previews share the
 manifest; variables give each its own hostnames. A second application,
 `telemetry` (`infra/telemetry.toml`), stores and shows their traces, metrics and
 logs; see [the telemetry stack](telemetry.md).
 
-| Deployment | Source | Web, redirects to auth | Auth | Admin | www, redirects to web | Reachable from |
-| --- | --- | --- | --- | --- | --- | --- |
-| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | `admin.piquel.fr` | `www.piquel.fr` | internet; admin from the tailnet |
-| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | `admin.staging.piquel.fr` | `www.staging.piquel.fr` | tailnet |
-| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | `admin-<slug>.dev.piquel.fr` | `www-<slug>.dev.piquel.fr` | tailnet |
+| Deployment | Source | Web, redirects to auth | Auth | Admin | Docs | www, redirects to web | Reachable from |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | `admin.piquel.fr` | `docs.piquel.fr` | `www.piquel.fr` | internet; admin from the tailnet |
+| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | `admin.staging.piquel.fr` | `docs.staging.piquel.fr` | `www.staging.piquel.fr` | tailnet |
+| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | `admin-<slug>.dev.piquel.fr` | `docs-<slug>.dev.piquel.fr` | `www-<slug>.dev.piquel.fr` | tailnet |
 
 The gateway answers both redirects itself, keeping the path and query. `web` is
 temporary (307), so browsers cache nothing once piquel.fr serves pages of its own
@@ -36,7 +36,7 @@ contain nothing environment-specific: per-environment values are runtime
   `piquel.fr`: private routes get DNS-01 certificates (`*.dev.piquel.fr` covers
   every preview).
 - DNS records for every hostname: `manage_records = true` on that provider, or by
-  hand: public hosts (`piquel.fr`, `auth.piquel.fr`, `www.piquel.fr`) to the
+  hand: public hosts (`piquel.fr`, `auth.piquel.fr`, `docs.piquel.fr`, `www.piquel.fr`) to the
   server, and `admin.piquel.fr`, `staging.piquel.fr`, `*.staging.piquel.fr` and
   `*.dev.piquel.fr` and `grafana.piquel.fr` to the apps node's tailnet addresses. Through the Cloudflare Tunnel, a public
   host is a proxied CNAME to the tunnel; on ports 80/443, an A record, and Caddy
@@ -148,6 +148,17 @@ piquelctl app exec piquel-fr auth --env production -- auth-service client list
 
 An environment needs no OIDC client: the dashboard signs administrators in
 itself (see [the admin dashboard](administration.md#the-admin-dashboard)).
+
+## Documentation
+
+The `docs` service serves the documentation book, built by
+`infra/docs.Dockerfile` from the deployment's own commit: production at
+`docs.piquel.fr`, staging at `docs.staging.piquel.fr`, and each preview at
+`docs-<slug>.dev.piquel.fr`. Production's book therefore always describes the
+release production runs, and a preview's shows a branch's documentation as it
+would be published. The book is static files, served by
+[static-web-server](https://static-web-server.net), with mdBook's page for any
+missing one.
 
 ## Client addresses
 

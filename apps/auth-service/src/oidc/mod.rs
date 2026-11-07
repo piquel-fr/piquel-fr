@@ -73,7 +73,7 @@ const PUSHED_REQUEST_SECONDS: i64 = 60;
 /// How long an authorization code stays redeemable.
 const AUTHORIZATION_CODE_MINUTES: i64 = 2;
 /// Developer documentation advertised in the metadata.
-const SERVICE_DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
+const SERVICE_DOCUMENTATION: &str = "https://docs.piquel.fr/user/reference/oidc.html";
 
 /// The OAuth 2.0 and `OpenID` Connect provider.
 #[derive(Clone)]

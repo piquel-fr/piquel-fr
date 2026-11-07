@@ -54,6 +54,7 @@ web_host = "piquel.fr"
 auth_host = "auth.piquel.fr"
 www_host = "www.piquel.fr"
 admin_host = "admin.piquel.fr"
+docs_host = "docs.piquel.fr"
 smtp_secret = "resend-production"
 email_from = "Piquel <security@piquel.fr>"
 audit_key = "audit-key-production"
@@ -71,6 +72,7 @@ web_host = "staging.piquel.fr"
 auth_host = "auth.staging.piquel.fr"
 www_host = "www.staging.piquel.fr"
 admin_host = "admin.staging.piquel.fr"
+docs_host = "docs.staging.piquel.fr"
 smtp_secret = "resend-dev"
 email_from = "Piquel <security@dev.piquel.fr>"
 audit_key = "audit-key-staging"
@@ -89,6 +91,7 @@ web_host = "${{ env.slug }}.dev.piquel.fr"
 auth_host = "auth-${{ env.slug }}.dev.piquel.fr"
 www_host = "www-${{ env.slug }}.dev.piquel.fr"
 admin_host = "admin-${{ env.slug }}.dev.piquel.fr"
+docs_host = "docs-${{ env.slug }}.dev.piquel.fr"
 smtp_secret = "resend-dev"
 email_from = "Piquel <security@dev.piquel.fr>"
 invite_required = "false"
@@ -121,6 +124,14 @@ hostname = "${{ vars.admin_host }}"
 service = "auth"
 port = 8081
 visibility = "private"
+
+# The documentation book, as its deployment's commit has it.
+[[spec.routes]]
+name = "docs"
+hostname = "${{ vars.docs_host }}"
+service = "docs"
+port = 8080
+visibility = "public"
 
 # Routes cannot be limited to one environment, so staging and previews redirect
 # their own `www` name too. The gateway answers; path and query are kept.
@@ -314,6 +325,28 @@ OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
 type = "http"
 port = 8080
 path = "/health"
+
+# The documentation book, built by infra/docs.Dockerfile from this commit's docs/.
+[[spec.services]]
+name = "docs"
+
+[spec.services.source]
+type = "git"
+repository = "self"
+
+[spec.services.source.build]
+type = "docker"
+dockerfile = "infra/docs.Dockerfile"
+
+# static-web-server uses a few MiB serving static files.
+[spec.services.resources]
+cpu_millis = 500
+memory_bytes = 67108864 # 64 MiB
+
+[spec.services.healthcheck]
+type = "http"
+port = 8080
+path = "/"
 
 [[spec.services]]
 name = "postgres"
