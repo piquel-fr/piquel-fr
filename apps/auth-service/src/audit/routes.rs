@@ -16,7 +16,8 @@ use axum::{
 use chrono::{DateTime, Utc};
 use piquel_repository::{ChainLink, Checkpoint, Database};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Public, cacheable checkpoint routes. Checkpoints hold only positions and
 /// hashes, so serving them reveals nothing but how many events were recorded.
@@ -28,15 +29,17 @@ pub(crate) struct AuditApplication {
     keys: Arc<AuditKeys>,
     /// The last checkpoint [`Self::latest`] found, reused until another is
     /// stored. Stored checkpoints never change, so only a new one can change
-    /// which is the newest that verifies.
+    /// which is the newest that verifies. Requests take turns with it, so
+    /// signatures are checked once per checkpoint stored.
     latest: Arc<Mutex<Option<LatestCheckpoint>>>,
 }
 
-/// The newest checkpoint that verified, as of the newest one stored.
-#[derive(Clone)]
+/// The newest checkpoint that verified, as of a number of stored checkpoints.
 struct LatestCheckpoint {
-    /// The position of the newest checkpoint stored when it was found.
-    newest: u64,
+    /// How many checkpoints were stored when it was found. Someone with auth's
+    /// database role can add one at any position, even above one still being
+    /// signed, so only the count tells that another was stored.
+    stored: u64,
     /// The signed note of the newest that verifies, if any does.
     note: Option<String>,
 }
@@ -106,23 +109,15 @@ impl AuditApplication {
 
     /// The signed note of the newest checkpoint that verifies, as `text/plain`.
     /// Newer ones that do not are never served; `audit verify` reports them. Each
-    /// request reads only the newest stored position, and checks signatures again
-    /// only once another checkpoint was stored.
+    /// request counts the stored checkpoints, and checks signatures again only
+    /// once another was stored.
     async fn latest(State(app): State<Self>) -> Result<Response, ApiError> {
         let mut audit = app.database.audit();
-        let newest = audit
-            .newest_checkpoints(None, 1)
-            .await?
-            .first()
-            .map(|checkpoint| checkpoint.position);
-        let remembered = || app.latest.lock().unwrap_or_else(PoisonError::into_inner);
-        let found = remembered()
-            .clone()
-            .filter(|latest| Some(latest.newest) == newest);
-        let note = match (found, newest) {
-            (Some(latest), _) => latest.note,
-            (None, None) => None,
-            (None, Some(newest)) => {
+        let mut latest = app.latest.lock().await;
+        let stored = audit.checkpoint_count().await?;
+        let note = match latest.as_ref() {
+            Some(found) if found.stored == stored => found.note.clone(),
+            _ => {
                 let note = app
                     .keys
                     .newest_trusted(&mut audit)
@@ -130,14 +125,17 @@ impl AuditApplication {
                     .map_err(ApiError::internal)?
                     .trusted
                     .map(|checkpoint| checkpoint.note);
-                *remembered() = Some(LatestCheckpoint {
-                    newest,
+                *latest = Some(LatestCheckpoint {
+                    stored,
                     note: note.clone(),
                 });
                 note
             }
-        }
-        .ok_or_else(|| ApiError::not_found("no checkpoint that verifies has been signed yet"))?;
+        };
+        drop(latest);
+        let note = note.ok_or_else(|| {
+            ApiError::not_found("no checkpoint that verifies has been signed yet")
+        })?;
         Ok(Cached(
             Self::CACHE,
             ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], note),

@@ -268,6 +268,21 @@ impl AuditRepository<'_> {
         .map(Into::into)
     }
 
+    /// Counts the stored checkpoints. No checkpoint is ever deleted or changed, so
+    /// the count changes exactly when one is added, at whatever position.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn checkpoint_count(&mut self) -> Result<u64, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(r#"SELECT count(*) AS "count!: Unsigned" FROM audit_checkpoints"#)
+        )
+        .map(Into::into)
+    }
+
     /// Whether this connection's role may delete events, as pruning must: the
     /// schema owner may, and auth's runtime role may not.
     ///

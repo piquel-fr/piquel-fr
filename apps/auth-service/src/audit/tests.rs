@@ -183,6 +183,13 @@ impl Fixture {
     /// key and dated `ahead` of now, as someone with auth's database role but not
     /// its audit key can: a trigger allows up to a minute.
     async fn forge_checkpoint(&self, position: u64, ahead: TimeDelta) {
+        let other = NoteKey::generate("auth.example/audit").expect("another key");
+        self.store_checkpoint(&other, position, ahead).await;
+    }
+
+    /// Stores a checkpoint of the stored head at `position`, signed by `key` and
+    /// dated `ahead` of now.
+    async fn store_checkpoint(&self, key: &NoteKey, position: u64, ahead: TimeDelta) {
         let head = self
             .database
             .audit()
@@ -197,14 +204,13 @@ impl Fixture {
             head,
             time,
         };
-        let other = NoteKey::generate("auth.example/audit").expect("another key");
         self.database
             .audit()
             .insert_checkpoint(&Checkpoint {
                 position,
                 head: head.hash,
                 created_at: time,
-                note: other.sign(&text.render()).expect("forged note"),
+                note: key.sign(&text.render()).expect("signed note"),
             })
             .await
             .expect("a checkpoint the database cannot check");
@@ -747,8 +753,8 @@ async fn forged_checkpoints_are_passed_over_and_not_served() {
 }
 
 /// The latest checkpoint is verified once per checkpoint stored: a replica keeps
-/// serving the note it verified until another checkpoint is stored, and then
-/// serves the newest that verifies.
+/// serving the note it verified until another checkpoint is stored, at any
+/// position, even below a forged one, and then serves the newest that verifies.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_latest_checkpoint_is_verified_once_per_checkpoint() {
@@ -760,6 +766,7 @@ async fn the_latest_checkpoint_is_verified_once_per_checkpoint() {
 
     let mut fixture = Fixture::sealed_six().await;
     let router = fixture.router().await;
+    let keys = Arc::clone(&fixture.keys);
     let latest = async |router: &axum::Router| {
         let response = router
             .clone()
@@ -773,31 +780,35 @@ async fn the_latest_checkpoint_is_verified_once_per_checkpoint() {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body");
-        String::from_utf8(body.to_vec()).expect("UTF-8")
-    };
-    let verified = latest(&router).await;
-    assert!(
-        fixture
-            .keys
+        let note = String::from_utf8(body.to_vec()).expect("UTF-8");
+        let text = keys
             .verifiers
-            .open(&verified)
+            .open(&note)
             .expect("a signed note")
-            .contains("\nposition 6\n")
-    );
+            .to_owned();
+        (note, text)
+    };
+    assert!(latest(&router).await.1.contains("\nposition 6\n"));
+    // A forged checkpoint holds the top position while a genuine one below it is
+    // still being signed; once that one is stored, it is served.
+    fixture.record(2).await;
+    let mut lock = fixture.lock().await;
+    fixture.seal_with(&mut lock).await;
+    lock.release().await.expect("release");
+    fixture.forge_checkpoint(8, TimeDelta::zero()).await;
+    assert!(latest(&router).await.1.contains("\nposition 6\n"));
+    let key = fixture.audit.key.clone();
+    fixture.store_checkpoint(&key, 7, TimeDelta::zero()).await;
+    let (verified, text) = latest(&router).await;
+    assert!(text.contains("\nposition 7\n"), "{text}");
     // No checkpoint was stored since, so the replica does not read it again, and
     // a fresh one finds the one before.
     fixture
-        .tamper(Tamper::EditCheckpointNote(6, "forged".into()))
+        .tamper(Tamper::EditCheckpointNote(7, "forged".into()))
         .await;
-    assert_eq!(latest(&router).await, verified);
-    let fresh = latest(&fixture.router().await).await;
-    let text = fixture.keys.verifiers.open(&fresh).expect("a signed note");
-    assert!(text.contains("\nposition 3\n"), "{text}");
-    fixture.record(1).await;
-    fixture.seal().await;
-    let text = latest(&router).await;
-    let text = fixture.keys.verifiers.open(&text).expect("a signed note");
-    assert!(text.contains("\nposition 7\n"), "{text}");
+    assert_eq!(latest(&router).await.0, verified);
+    let text = latest(&fixture.router().await).await.1;
+    assert!(text.contains("\nposition 6\n"), "{text}");
 }
 
 /// A forged checkpoint over a tampered event, as someone with auth's database
