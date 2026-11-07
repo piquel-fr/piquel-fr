@@ -365,6 +365,19 @@ impl AccountDeletionRepository<'_> {
             WHERE p.event_id = e.id
             AND (e.subject_user_id = $1 OR e.actor ->> 'user_id' = $1::text)",
         );
+        // A draft to chosen accounts saved naming the account while this purge
+        // ran was missed by the announcement cleanup above, but deleting the
+        // account waited for it and cascaded its row: this fresh snapshot sees it
+        // left without recipients, and deletes its text, which may concern them.
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "DELETE FROM announcements a
+                WHERE NOT a.everyone
+                AND NOT EXISTS (SELECT FROM announcement_recipients r WHERE r.announcement_id = a.id)"
+            )
+        )?;
         Ok(purged)
     }
 }

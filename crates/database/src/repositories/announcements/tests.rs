@@ -224,12 +224,14 @@ async fn until_blocked(holder: &mut DatabaseTransaction<'_>) {
 }
 
 /// The announcement deliveries queued to `user`.
-async fn deliveries_to(pool: &PgPool, user: UserId) -> i64 {
+async fn deliveries_to(pool: &PgPool, user: UserId, id: AnnouncementId) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM deliveries
-        WHERE channel = 'announcement' AND recipient = to_jsonb($1::text)",
+        WHERE channel = 'announcement' AND recipient = to_jsonb($1::text)
+        AND payload = to_jsonb($2::text)",
     )
     .bind(user.to_string())
+    .bind(id.to_string())
     .fetch_one(pool)
     .await
     .expect("deliveries")
@@ -269,7 +271,7 @@ async fn sending_and_purging_wait_for_each_other() {
         purge.commit().await.expect("commit");
     });
     assert!(sent.is_some(), "sent without the purged account");
-    assert_eq!(deliveries_to(&pool, purged).await, 0);
+    assert_eq!(deliveries_to(&pool, purged, everyone).await, 0);
 
     // The sending goes first: the purge waits for it, then deletes its email.
     let (purged, kept) = (
@@ -298,10 +300,14 @@ async fn sending_and_purging_wait_for_each_other() {
         until_blocked(&mut sending).await;
         sending.commit().await.expect("commit");
     });
-    assert_eq!(deliveries_to(&pool, purged).await, 0);
-    assert_eq!(deliveries_to(&pool, kept).await, 1);
-    assert_eq!(inbox(&pool, kept).await, [chosen]);
-    assert_eq!(inbox(&pool, purged).await, [], "gone with the account");
+    assert_eq!(deliveries_to(&pool, purged, chosen).await, 0);
+    assert_eq!(deliveries_to(&pool, kept, chosen).await, 1);
+    // Other tests' announcements to everyone may reach these accounts too.
+    assert!(inbox(&pool, kept).await.contains(&chosen));
+    assert!(
+        !inbox(&pool, purged).await.contains(&chosen),
+        "gone with the account"
+    );
 }
 
 /// Purging a targeted announcement's last two recipients at once still deletes
@@ -341,4 +347,37 @@ async fn purging_the_last_recipients_at_once_deletes_the_text() {
     });
     let announcements = AnnouncementRepository::from_pool(&pool).find(id).await;
     assert_eq!(announcements.expect("find"), None);
+}
+
+/// A draft to chosen accounts saved naming an account while that account is
+/// purged goes with it too: the purge's cleanup misses the uncommitted draft, but
+/// deleting the account waits for it, then finds it without recipients.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn a_draft_saved_during_a_purge_goes_with_the_account() {
+    let pool = Database::test_pool().await;
+    let named = account(&pool, None).await;
+    let id = AnnouncementId::new();
+    let mut drafting = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    drafting
+        .announcements()
+        .insert_draft(&DraftedAnnouncement {
+            id,
+            subject: "About you",
+            body: "Names you.",
+            recipients: Recipients::Accounts(&[named]),
+        })
+        .await
+        .expect("draft");
+    let purge = async {
+        let mut purge = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+        purge_as_callers_do(&mut purge, named).await;
+        purge.commit().await.expect("commit");
+    };
+    tokio::join!(purge, async {
+        until_blocked(&mut drafting).await;
+        drafting.commit().await.expect("commit");
+    });
+    let left = AnnouncementRepository::from_pool(&pool).find(id).await;
+    assert_eq!(left.expect("find"), None);
 }

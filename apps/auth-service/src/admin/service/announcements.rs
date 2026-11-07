@@ -84,6 +84,8 @@ impl AdminService {
             .update_draft(&Self::drafted(id, draft, accounts.as_deref()))
             .await?
         else {
+            // Its connection goes back to the pool before the lookup takes one.
+            tx.rollback().await?;
             return Err(self.unchangeable(id).await);
         };
         tx.commit().await?;
@@ -108,8 +110,8 @@ impl AdminService {
     /// returns how many accounts it went to: every account if it is to everyone,
     /// or the chosen ones still there. Each with a primary verified address is
     /// emailed it, from the `announcement` delivery channel, and every one gets
-    /// it as a notification in their inbox. Recorded, without the text, which never changes once
-    /// sent. A draft changed since its sender checked it is refused, to be
+    /// it as a notification in their inbox. Recorded, without the text, which
+    /// never changes once sent. A draft changed since its sender checked it is refused, to be
     /// checked again.
     pub(crate) async fn send_announcement(
         &self,
@@ -119,6 +121,8 @@ impl AdminService {
     ) -> Result<u64, AdminError> {
         let mut tx = self.database.begin().await?;
         let Some(recipients) = tx.announcements().send(id, revision).await? else {
+            // Its connection goes back to the pool before the lookup takes one.
+            tx.rollback().await?;
             return Err(self.unchangeable(id).await);
         };
         let sent = DomainEvent::AnnouncementSent {
