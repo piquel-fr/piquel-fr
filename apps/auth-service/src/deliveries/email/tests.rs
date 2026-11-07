@@ -571,13 +571,7 @@ async fn a_raised_alert_is_emailed_to_active_administrators() {
         problem: ChainProblem::EventChanged,
     });
     let alert_id = AlertId::new();
-    let context = EventContext {
-        actor: Actor::System {
-            job: JobName::AuditVerification,
-        },
-        origin: RequestOrigin::default(),
-        reason: None,
-    };
+    let context = EventContext::system(JobName::AuditVerification);
     let mut tx = database.begin().await.expect("transaction");
     let raised = DomainEvent::AlertRaised {
         alert_id,

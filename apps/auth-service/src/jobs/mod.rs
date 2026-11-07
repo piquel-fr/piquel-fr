@@ -10,7 +10,7 @@ use crate::{
 use chrono::Utc;
 use piquel_common::{
     AccountStatus, ErrorChain, UserId,
-    events::{Actor, EventContext, JobName, RequestOrigin},
+    events::{EventContext, JobName},
 };
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, ExclusiveConnection, LockKey,
@@ -378,14 +378,9 @@ impl AccountPurge {
         if user.status != AccountStatus::Deleting || !due {
             return Ok(());
         }
-        let context = EventContext {
-            actor: Actor::System {
-                job: JobName::AccountPurge,
-            },
-            origin: RequestOrigin::default(),
-            reason: None,
-        };
-        Deletions::new(&mut tx, context).purge(&user).await?;
+        Deletions::new(&mut tx, EventContext::system(JobName::AccountPurge))
+            .purge(&user)
+            .await?;
         Ok(tx.commit().await?)
     }
 }
