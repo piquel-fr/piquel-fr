@@ -1033,15 +1033,20 @@ async fn checkpoints_keep_their_interval_while_batches_stay_full() {
     );
 }
 
-/// Events sealed in format 2 name it in their canonical form, and events sealed
-/// before, untagged, keep hashing without it; one chain holds both and verifies.
+/// Auth seals format 2, which names itself in the canonical form, and events
+/// sealed before in the untagged format keep hashing without it; one chain holds
+/// both and verifies.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_chain_format_is_per_event() {
     let mut fixture = Fixture::new().await;
+    let sealer = std::mem::replace(
+        &mut fixture.sealer,
+        Sealer::eager(&fixture.audit).sealing(1_000, EventContent::UNTAGGED),
+    );
     fixture.record(1).await;
     fixture.seal().await;
-    fixture.sealer = fixture.sealer.sealing(1_000, EventContent::NEWEST_FORMAT);
+    fixture.sealer = sealer;
     fixture.record(1).await;
     fixture.seal().await;
     let chain = fixture.database.audit().chain(0, 10).await.expect("chain");
