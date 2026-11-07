@@ -1,9 +1,14 @@
 # Outbound delivery queue
 
+This page explains how auth sends messages to other systems without slowing a
+request: the queue's guarantees, the life of a delivery, its channels, and how
+to add one.
+
 Auth sends messages to other systems through a PostgreSQL queue. Three channels
 exist: back-channel logout tokens, email and announcements (see
-[Channels](#channels)). Other kinds, such as audit witness checkpoints, would
-join them as channels of their own. Request handlers never send them inline. A slow or unreachable
+[Channels](#channels)). Other
+kinds, such as audit witness checkpoints, would join them as channels of their
+own. Request handlers never send them inline. A slow or unreachable
 receiver must not slow a login, and a message must survive a restart.
 
 The repository owns the queue (`crates/database/src/repositories/deliveries/`).
@@ -155,17 +160,15 @@ is essential, those who turned announcements' email off
 ([email preferences](notifications.md#email-preferences)). These emails go out
 here, never on the `email` channel, and link the inbox; one that is not
 essential also carries the recipient's one-click unsubscribe link, in its body
-and its `List-Unsubscribe` headers. A delivery
-stores only the account's ID as its recipient and the announcement's ID as its
-payload, and its `destination` names both. The sender reads the account's primary
-verified address and the text when it sends, so an address changed meanwhile gets
-it, and an account with none left, no longer a recipient, or that turned
-announcements' email off since, unless it is essential, is skipped: the
-delivery succeeds without a send. The text of a sent announcement never changes,
-so every attempt sends the same message. `MAX_AGE` is three days, as an
-announcement stays worth reading through a long relay outage or a slow send to
-every account. A purge deletes the account's announcement deliveries, which
-would find no recipient left.
+and its `List-Unsubscribe` headers. A delivery stores only the account's ID
+as its recipient and the announcement's ID as its payload, and its `destination`
+names both. The sender reads the account's primary verified address and the text
+when it sends, so an address changed meanwhile gets it, and an account with none
+left, no longer a recipient, or that turned announcements' email off since,
+unless it is essential, is skipped: the delivery succeeds without a send. The text of a sent announcement never changes, so every attempt sends the
+same message. `MAX_AGE` is three days, as an announcement stays worth reading
+through a long relay outage or a slow send to every account. A purge deletes the
+account's announcement deliveries, which would find no recipient left.
 
 ## Operations
 
@@ -238,6 +241,7 @@ The examples follow the back-channel logout channel
        async fn deliveries(
            event: &DomainEvent,
            _: Option<UserId>,
+           _: Option<&Notified>,
            tx: &mut DatabaseTransaction<'_>,
        ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
            let DomainEvent::SessionRevoked { session_id, .. } = event else {
@@ -251,7 +255,8 @@ The examples follow the back-channel logout channel
    ```
 
    `deliveries` runs inside the event's transaction, so it sees the rows as the
-   change left them. Copy everything a send needs; a send must not read rows that
+   change left them. It also receives the subject and the notification `record`
+   just wrote, if any, which the `email` channel sends. Copy everything a send needs; a send must not read rows that
    can change or disappear. Set `ordering_key` only if receivers need deliveries
    in order, such as a future provisioning channel's changes per client and user,
    since a failure blocks the key. Neither channel today sets one.
