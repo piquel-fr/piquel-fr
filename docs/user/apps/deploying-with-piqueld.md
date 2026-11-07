@@ -69,6 +69,10 @@ environment variable.
    [[spec.services.secrets]]
    name = "${{ vars.client_secret }}"
    target = "/run/secrets/piquel-client-secret"
+
+   [[spec.services.secrets]]
+   name = "${{ vars.cookie_key }}"
+   target = "/run/secrets/piquel-cookie-key"
    ```
 
 3. Read the secret from the file in your app. In Rust:
@@ -93,7 +97,8 @@ environment, mountable by that environment only, named by its `cookie_key`
 variable. The cookie key seals a whole session, tokens included, so an
 environment that could read another's key could forge its sessions. Generate
 each with `openssl rand -base64 32`: the SDKs read standard base64, which
-piqueld's generated secrets don't use.
+piqueld's generated secrets don't use. Step 2 mounts it at
+`/run/secrets/piquel-cookie-key`: read it the same way as the client secret.
 
 ## Rotate the secret
 

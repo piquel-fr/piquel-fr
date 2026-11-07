@@ -26,7 +26,7 @@ stopped:
 
 | Answer | What happened |
 | --- | --- |
-| `502` from `/auth/login`: `Sign-in could not start: the pushed authorization endpoint rejected the request with <error>.` (Rust), or `the https://…/oauth/par endpoint rejected the request with <error>` (TypeScript) | Auth refused the request before the browser left the app. Step 3 reads why |
+| `502` from `/auth/login`: `Sign-in could not start: the pushed authorization endpoint rejected the request with <error>.` | Auth refused the request before the browser left the app. Step 3 reads why |
 | `502` from `/auth/login`: `Sign-in could not start: request to <url> failed.` | The app could not reach auth |
 | `400` from `/auth/callback`: `Sign-in failed: ... authorization failed with access_denied.` | The person declined the consent page |
 | `400` from `/auth/callback`: `This sign-in has no pending login; start again.` | The browser didn't bring back the cookie of the sign-in it started. See the causes below |
