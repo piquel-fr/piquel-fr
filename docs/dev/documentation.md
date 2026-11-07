@@ -17,7 +17,8 @@ root, configures it.
   published, and a page it lists that doesn't exist fails the build.
 - A page about one directory of the repository, such as how to run the browser
   tests, may stay a `README.md` in that directory, where GitHub shows it.
-  `packages/auth/README.md` is also the TypeScript SDK's page on npm.
+  `packages/auth/README.md` also introduces the TypeScript SDK wherever the
+  package is read on its own.
 
 Don't document what explains itself elsewhere. A migration says what it does,
 and why, in its own SQL comments. A test says what it checks in its name and
