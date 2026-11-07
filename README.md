@@ -507,6 +507,21 @@ A failed delivery with an ordering key holds back the ones after it until it is
 retried or cancelled. After 30 days, cleanup deletes it and cancels the ones
 behind it. See `docs/architecture/delivery-queue.md`.
 
+### Alerts
+
+Conditions that need an administrator's attention, such as a broken audit chain,
+are raised as alerts. The dashboard's Alerts tab lists them, and so does:
+
+```sh
+just auth alerts list
+just auth alerts acknowledge <id> --reason "Looking into it"
+```
+
+An alert stays current while its condition holds, and clears once it no longer
+does. Acknowledging an open alert means it needs no more attention. A new alert
+is raised if its condition changes, or clears and comes back. See "Alerts" in
+`docs/architecture/database-crate.md`.
+
 ### OIDC clients
 
 Clients live in the database. Register and change them with `auth-service client`

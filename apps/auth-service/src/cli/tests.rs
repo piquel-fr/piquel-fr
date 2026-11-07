@@ -103,6 +103,8 @@ impl AdminOperation {
             Self::RotateSigningKey => &["keys", "rotate", "--now"],
             Self::RevokeSigningKey => &["keys", "revoke", "primary"],
             Self::ImportSigningKey => &["keys", "import", "file://key.pem"],
+            Self::ListAlerts => &["alerts", "list"],
+            Self::AcknowledgeAlert => &["alerts", "acknowledge", AN_ID, "--reason", "On it"],
         }
     }
 }

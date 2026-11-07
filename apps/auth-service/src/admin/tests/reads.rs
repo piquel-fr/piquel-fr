@@ -66,6 +66,7 @@ impl AdminOperation {
                     .map(drop),
                 service.audit_page(operator, None).await.map(drop),
             ],
+            Self::ListAlerts => vec![service.list_alerts(operator).await.map(drop)],
             // Pruning checks its operator before anything else too.
             Self::PruneAuditChain => vec![
                 service
@@ -105,7 +106,8 @@ impl AdminOperation {
             | Self::UndoRecovery
             | Self::RotateSigningKey
             | Self::RevokeSigningKey
-            | Self::ImportSigningKey => return None,
+            | Self::ImportSigningKey
+            | Self::AcknowledgeAlert => return None,
         })
     }
 }

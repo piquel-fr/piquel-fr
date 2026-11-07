@@ -412,6 +412,15 @@ pub enum DomainEvent {
         /// What it says.
         alert: Alert,
     },
+    /// An administrator acknowledged the open alert `alert_id`, with their
+    /// reason: it needs no attention while its condition holds as it says. It
+    /// concerns no account.
+    AlertAcknowledged {
+        /// The alert.
+        alert_id: AlertId,
+        /// What it says.
+        alert: Alert,
+    },
     /// The condition of the alert `alert_id` no longer holds, or holds
     /// differently, as another alert, so it cleared. It concerns no account.
     AlertCleared {
@@ -447,7 +456,9 @@ impl DomainEvent {
                 ..
             } => origin.version(),
             Self::AuditChainVerified(verification) => verification.version(),
-            Self::AlertRaised { alert, .. } | Self::AlertCleared { alert, .. } => alert.version(),
+            Self::AlertRaised { alert, .. }
+            | Self::AlertAcknowledged { alert, .. }
+            | Self::AlertCleared { alert, .. } => alert.version(),
             _ => Self::FIRST_VERSION,
         }
     }
@@ -522,6 +533,7 @@ impl DomainEvent {
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
             | Self::AlertRaised { .. }
+            | Self::AlertAcknowledged { .. }
             | Self::AlertCleared { .. }
             | Self::Imported(_) => None,
         }
@@ -589,6 +601,7 @@ impl DomainEvent {
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
             | Self::AlertRaised { .. }
+            | Self::AlertAcknowledged { .. }
             | Self::AlertCleared { .. }
             | Self::Imported(_) => None,
         }
@@ -656,6 +669,7 @@ impl DomainEvent {
             Self::AuditHistoryPruned { .. } => "audit_history_pruned",
             Self::AuditChainVerified(_) => "audit_chain_verified",
             Self::AlertRaised { .. } => "alert_raised",
+            Self::AlertAcknowledged { .. } => "alert_acknowledged",
             Self::AlertCleared { .. } => "alert_cleared",
             Self::Imported(_) => "imported",
         }

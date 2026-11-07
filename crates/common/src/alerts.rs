@@ -3,7 +3,11 @@
 //! notification, an alert concerns no account: it is the administrators' to
 //! acknowledge, and clears once its condition no longer holds.
 
-use crate::admin::{ChainBreak, ChainProblem};
+use crate::{
+    AlertId,
+    admin::{ChainBreak, ChainProblem},
+};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 crate::str_enum! {
@@ -60,6 +64,62 @@ impl Alert {
     pub const fn subject(&self) -> &'static str {
         match self {
             Self::AuditChainBroken(_) => "The audit chain is broken",
+        }
+    }
+
+    /// What it says, below its subject.
+    #[must_use]
+    pub fn body(&self) -> String {
+        match self {
+            Self::AuditChainBroken(broken) => format!(
+                "A verification found the chain broken at position {}: {}. The change \
+                 may also be a removal or insertion just before it. Find out what changed \
+                 before relying on the history; docs/security/audit-history.md says what each \
+                 problem means.",
+                broken.position, broken.problem
+            ),
+        }
+    }
+}
+
+/// An alert as stored, which the dashboard and the CLI show. At most one alert
+/// of each kind is current, the one not cleared yet.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StoredAlert {
+    /// Alert identifier.
+    pub id: AlertId,
+    /// What it says; `None` for a kind a newer release raised, which this one
+    /// cannot show.
+    pub alert: Option<Alert>,
+    /// When it was raised.
+    pub raised_at: DateTime<Utc>,
+    /// When auth last found its condition holding.
+    pub seen_at: DateTime<Utc>,
+    /// When an administrator acknowledged it, if one did.
+    pub acknowledged_at: Option<DateTime<Utc>>,
+    /// When its condition stopped holding, or changed, if it did.
+    pub cleared_at: Option<DateTime<Utc>>,
+}
+
+/// Where an alert stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlertState {
+    /// It needs an administrator's attention.
+    Open,
+    /// An administrator acknowledged it, and its condition still holds.
+    Acknowledged,
+    /// Its condition no longer holds as it says.
+    Cleared,
+}
+
+impl StoredAlert {
+    /// Where it stands.
+    #[must_use]
+    pub const fn state(&self) -> AlertState {
+        match (self.cleared_at, self.acknowledged_at) {
+            (Some(_), _) => AlertState::Cleared,
+            (None, Some(_)) => AlertState::Acknowledged,
+            (None, None) => AlertState::Open,
         }
     }
 }

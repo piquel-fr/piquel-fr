@@ -1678,3 +1678,70 @@ async fn administrators_read_an_accounts_inbox_and_history() {
         "a tab: {page}"
     );
 }
+
+/// The Alerts page lists an open alert with its acknowledgement, which asks why
+/// and is recorded as the administrator's; the alert then shows as acknowledged.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn alerts_are_acknowledged_from_the_dashboard() {
+    use piquel_common::{
+        admin::{ChainBreak, ChainProblem},
+        alerts::{Alert, AlertKind},
+        events::{EventContext, JobName, RequestOrigin},
+    };
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    // The test database outlives a run, so each raises an alert of its own.
+    let position = Utc::now().timestamp_micros().unsigned_abs();
+    let context = EventContext {
+        actor: Actor::System {
+            job: JobName::AuditVerification,
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let mut tx = harness.database.begin().await.expect("transaction");
+    let alert = Alert::AuditChainBroken(ChainBreak {
+        position,
+        problem: ChainProblem::EventChanged,
+    });
+    crate::alerts::Alerts::new(&mut tx, &context)
+        .raise(alert)
+        .await
+        .expect("raise");
+    let id = tx
+        .alerts()
+        .current(AlertKind::AuditChainBroken)
+        .await
+        .expect("current")
+        .expect("raised")
+        .id;
+    tx.commit().await.expect("commit");
+    let acknowledge = format!("/alerts/{id}/acknowledge");
+    let dashboard = harness.confirmed(&admin, &acknowledge, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, "/alerts").await).await;
+    assert!(
+        page.contains(&format!(r#"action="{acknowledge}""#)),
+        "{page}"
+    );
+    assert!(page.contains(&position.to_string()), "{page}");
+
+    let url = format!("{DASHBOARD}{acknowledge}");
+    let reason = [("reason", "Looking into it")];
+    let done = dashboard
+        .submit(&harness.dashboard, &url, &reason, OWN_PAGE)
+        .await;
+    assert_eq!(redirect(&done), "/alerts");
+    let page = html(harness.visit(&dashboard, "/alerts").await).await;
+    assert!(!page.contains(&acknowledge), "{page}");
+    assert!(page.contains("Acknowledged"), "{page}");
+    let actor = harness
+        .actor_of("alert_acknowledged", |event| {
+            matches!(event, DomainEvent::AlertAcknowledged { alert_id, .. } if *alert_id == id)
+        })
+        .await;
+    assert!(
+        matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
+        "{actor:?}"
+    );
+}

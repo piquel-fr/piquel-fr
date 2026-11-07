@@ -102,5 +102,9 @@ operations! {
         VerifyAuditChain,
         /// Delete the audit history through a checkpoint.
         PruneAuditChain,
+        /// List the current alerts, then those that cleared.
+        ListAlerts,
+        /// Acknowledge an open alert, with a reason.
+        AcknowledgeAlert,
     }
 }

@@ -1,10 +1,15 @@
-//! How raising and clearing change the current alert of a kind, and what they
-//! record. Each test uses a schema of its own, since an alert concerns the whole
-//! database.
+//! How raising, clearing and acknowledging change the current alert of a kind,
+//! and what they record. Each test uses a schema of its own, since an alert
+//! concerns the whole database.
 use super::*;
-use crate::admin::tests::Harness;
+use crate::{
+    AdminError, Reason,
+    admin::tests::{Harness, operator},
+};
+use chrono::Utc;
 use piquel_common::{
     admin::{ChainBreak, ChainProblem},
+    alerts::AlertState,
     events::{Actor, JobName, RequestOrigin},
 };
 use piquel_repository::{Database, EventFilter, RecordedEvent};
@@ -144,5 +149,64 @@ async fn concurrent_raises_leave_one_alert() {
     assert!(
         matches!(raised.as_slice(), [DomainEvent::AlertRaised { .. }]),
         "{raised:?}"
+    );
+}
+
+/// Acknowledging an open alert records who did and why. It stays current:
+/// finding the same condition again leaves it acknowledged, and a change raises a
+/// new alert. Only an open alert is acknowledged.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_acknowledged_alert_stays_quiet_until_its_condition_changes() {
+    let harness = Harness::isolated().await;
+    let (database, service) = (&harness.database, harness.service());
+    let admin = operator(harness.admin().await, Utc::now());
+    let states = async || {
+        service
+            .list_alerts(&admin)
+            .await
+            .expect("alerts")
+            .iter()
+            .map(|alert| (alert.alert.clone(), alert.state()))
+            .collect::<Vec<_>>()
+    };
+    found(database, Some(broken(5))).await;
+    let id = service.list_alerts(&admin).await.expect("alerts")[0].id;
+    let acknowledge = async || {
+        let reason = Reason::parse("Looking into it".into()).expect("reason");
+        service.acknowledge_alert(&admin, id, reason).await
+    };
+    acknowledge().await.expect("acknowledge");
+    assert!(matches!(
+        acknowledge().await,
+        Err(AdminError::AlertNotFound)
+    ));
+    let acknowledged = database
+        .events()
+        .list(&EventFilter::default(), 1)
+        .await
+        .expect("events")
+        .remove(0);
+    assert!(matches!(acknowledged.actor, Actor::Admin { .. }));
+    assert_eq!(
+        acknowledged.event,
+        RecordedEvent::Known(DomainEvent::AlertAcknowledged {
+            alert_id: id,
+            alert: broken(5)
+        })
+    );
+
+    found(database, Some(broken(5))).await;
+    assert_eq!(
+        states().await,
+        [(Some(broken(5)), AlertState::Acknowledged)]
+    );
+    found(database, Some(broken(3))).await;
+    assert_eq!(
+        states().await,
+        [
+            (Some(broken(3)), AlertState::Open),
+            (Some(broken(5)), AlertState::Cleared),
+        ]
     );
 }

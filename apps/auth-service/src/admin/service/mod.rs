@@ -5,6 +5,10 @@ mod access;
 /// Accounts: finding, viewing, disabling and deleting them, their sessions and
 /// their handles.
 mod accounts;
+/// The alerts administrators are shown, and acknowledging them.
+mod alerts;
+
+pub(crate) use alerts::ALERTS_SHOWN;
 /// OIDC clients and the origins approved for their pages.
 mod clients;
 /// The event log, the audit chain that signs it, and the deliveries events cause.

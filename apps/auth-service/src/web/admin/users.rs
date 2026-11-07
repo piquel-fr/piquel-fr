@@ -1,6 +1,6 @@
 //! Account search, one account's page, and the changes made to an account.
 
-use super::{AdminApplication as App, invitations, lists, settings};
+use super::{AdminApplication as App, ReasonForm, invitations, lists, settings};
 use crate::{Reason, routes};
 use piquel_common::{
     AccountStatus, PictureId, SessionId, UserId,
@@ -330,14 +330,6 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
         )
     };
     App::render(cx, StatusCode::OK, "Revoke a session", page).await
-}
-
-/// The form of a change whose reason the owner sees in their history: starting
-/// or undoing a recovery, scheduling a deletion or restoring the account.
-#[derive(Clone, serde::Deserialize)]
-pub(super) struct ReasonForm {
-    /// Why, recorded with the change and shown to the owner in their history.
-    reason: String,
 }
 
 /// `/users/{account}/recover`: the account's recent recoveries, then starts one,
