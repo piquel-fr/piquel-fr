@@ -1,4 +1,4 @@
-//! Sends the `email` channel over SMTP.
+//! Sends the `email` and `announcement` channels over SMTP.
 //!
 //! A link's delivery names the account and the address's ID, and a recovery link's
 //! the recovery's too: the sender reads the address when it sends, so an address
@@ -25,9 +25,11 @@ use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
     message::{Mailbox, MultiPart},
 };
-use piquel_common::{DeliveryId, ErrorChain, Handle, UserId, config::Origin};
+use piquel_common::{
+    AnnouncementId, DeliveryId, ErrorChain, Handle, UserId, admin, config::Origin,
+};
 use piquel_crypto::CryptoError;
-use piquel_repository::{Database, DatabaseError, Delivery, Email, EmailMessage};
+use piquel_repository::{Announcement, Database, DatabaseError, Delivery, Email, EmailMessage};
 use std::{fmt::Display, time::Duration};
 
 /// Sends a built message, classifying failures for the retry policy. The SMTP
@@ -126,6 +128,51 @@ impl<M: Mailer> EmailSender<M> {
         mailer.send(self.compose(id, &content)?).await
     }
 
+    /// Sends the announcement `announcement` to `user_id`'s primary verified
+    /// address, as the delivery `id`. Does nothing while email is disabled, or
+    /// once the account has no such address or is no longer a recipient, as after
+    /// a purge, so the delivery succeeds rather than retrying.
+    async fn announce(
+        &self,
+        id: DeliveryId,
+        user_id: UserId,
+        announcement: AnnouncementId,
+    ) -> Result<(), DeliveryError> {
+        let Some(mailer) = &self.mailer else {
+            tracing::info!(%id, "email is disabled; delivery dropped");
+            return Ok(());
+        };
+        let Some(content) = self.announcement(user_id, announcement).await? else {
+            tracing::info!(%id, "the account has no primary address to announce to; delivery dropped");
+            return Ok(());
+        };
+        mailer.send(self.compose(id, &content)?).await
+    }
+
+    /// What the announcement `id` says to `user_id`, at its primary verified
+    /// address now, if it still has one and still receives it.
+    async fn announcement(
+        &self,
+        user_id: UserId,
+        id: AnnouncementId,
+    ) -> Result<Option<Content>, DeliveryError> {
+        let email = self
+            .database
+            .emails()
+            .announcement(user_id, id)
+            .await
+            .map_err(|error| Self::unread(&error))?;
+        Ok(email.map(|email| {
+            Content::announcement(
+                email.address,
+                email.subject,
+                email.body,
+                email.everyone,
+                &self.origin,
+            )
+        }))
+    }
+
     /// What `message` says, with its links and the address it goes to: the one it
     /// copied, or, for a link, the address that still waits for it.
     async fn content(
@@ -195,7 +242,7 @@ impl<M: Mailer> EmailSender<M> {
                 recovery_id,
             } => Content::Notification {
                 address: address.clone(),
-                subject: notification.subject(),
+                subject: notification.subject().to_owned(),
                 body: notification.body(),
                 page: self
                     .origin
@@ -268,8 +315,52 @@ impl<M: Mailer> Sender for EmailSender<M> {
     }
 }
 
+/// Sends announcements' email through `M`, as [`EmailSender`] sends account
+/// holders', on a channel of their own, so an announcement to every account never
+/// holds back a verification or recovery link.
+pub(crate) struct AnnouncementSender<M>(EmailSender<M>);
+
+impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
+    /// Sends through the configured relay, or drops everything without one.
+    pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
+        Self(EmailSender::new(database, config))
+    }
+
+    /// The plain-text body of `announcement`'s email, linking the inbox on
+    /// `auth`, auth's origin, which the dashboard shows before it is sent.
+    ///
+    /// # Errors
+    /// Fails when the template cannot render.
+    pub(crate) fn preview(
+        announcement: &admin::Announcement,
+        auth: &Origin,
+    ) -> Result<String, askama::Error> {
+        let content = Content::announcement(
+            String::new(),
+            announcement.subject.clone(),
+            announcement.body.clone(),
+            announcement.everyone,
+            auth,
+        );
+        Text { content: &content }.render()
+    }
+}
+
+impl<M: Mailer> Sender for AnnouncementSender<M> {
+    type Channel = Announcement;
+    /// An announcement stays worth reading for days, through a long relay outage
+    /// or a slow send to every account.
+    const MAX_AGE: Duration = Duration::from_hours(72);
+
+    async fn send(&self, delivery: &Delivery<Announcement>) -> Result<(), DeliveryError> {
+        self.0
+            .announce(delivery.id, delivery.recipient, delivery.payload)
+            .await
+    }
+}
+
 /// What a message says, with everything its templates show. Each
-/// [`EmailMessage`] becomes one of these.
+/// [`EmailMessage`], and each announcement's email, becomes one of these.
 enum Content {
     /// A verification link.
     VerifyAddress {
@@ -303,7 +394,7 @@ enum Content {
         /// The address it goes to.
         address: String,
         /// Its subject, which the email's is.
-        subject: &'static str,
+        subject: String,
         /// What it says.
         body: String,
         /// Its page in the inbox.
@@ -311,24 +402,63 @@ enum Content {
         /// The undo page of the recovery it is about, while a passkey can undo it.
         undo: Option<String>,
     },
+    /// An announcement administrators sent, to the account's primary address.
+    Announcement {
+        /// The primary address.
+        address: String,
+        /// Its subject, as they wrote it.
+        subject: String,
+        /// Its text, as they wrote it, for the plain-text body.
+        body: String,
+        /// The same text as paragraphs of lines, for the HTML body.
+        paragraphs: Vec<Vec<String>>,
+        /// Whether it went to every account, rather than to chosen ones.
+        everyone: bool,
+        /// The inbox, where the account reads it again.
+        inbox: String,
+    },
 }
 
 impl Content {
+    /// An announcement's email to `address`, saying `subject` and `body`, which
+    /// links the account's inbox on `origin`.
+    fn announcement(
+        address: String,
+        subject: String,
+        body: String,
+        everyone: bool,
+        origin: &Origin,
+    ) -> Self {
+        let paragraphs = admin::Announcement::paragraphs(&body)
+            .into_iter()
+            .map(|lines| lines.into_iter().map(str::to_owned).collect())
+            .collect();
+        Self::Announcement {
+            address,
+            subject,
+            body,
+            paragraphs,
+            everyone,
+            inbox: origin.join(settings::NOTIFICATIONS),
+        }
+    }
+
     /// Where the message goes.
     fn address(&self) -> &str {
         match self {
             Self::VerifyAddress { address, .. }
             | Self::RecoveryLink { address, .. }
-            | Self::Notification { address, .. } => address,
+            | Self::Notification { address, .. }
+            | Self::Announcement { address, .. } => address,
         }
     }
 
     /// The message's subject.
-    const fn subject(&self) -> &'static str {
+    fn subject(&self) -> &str {
         match self {
             Self::VerifyAddress { .. } => "Confirm your email address for Piquel",
             Self::RecoveryLink { .. } => "Recover your Piquel account",
-            Self::Notification { subject, .. } => subject,
+            Self::Notification { subject, .. } | Self::Announcement { subject, .. } => subject,
         }
     }
 }

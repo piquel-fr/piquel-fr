@@ -25,8 +25,8 @@ pub use payload::{
 };
 
 use crate::{
-    AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
-    PictureId, Provider, RecoveryId, SessionId, TokenId,
+    AnnouncementId, AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle,
+    PasskeyId, Personal, PictureId, Provider, RecoveryId, SessionId, TokenId,
     admin::{AuditVerification, ChainBreak, ChainProblem, VerificationKeys},
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
@@ -402,6 +402,17 @@ pub enum DomainEvent {
     /// The audit chain was verified, by `auth-service audit verify` or from the
     /// dashboard, with what that found. It concerns no account.
     AuditChainVerified(AuditVerification),
+    /// An administrator or operator sent an announcement, such as a security
+    /// incident or a change to the privacy policy, to every account or to chosen
+    /// ones. Each recipient with a primary verified address is emailed it, and
+    /// every recipient gets it as a notification in their inbox. It concerns no
+    /// one account.
+    AnnouncementSent {
+        /// The announcement.
+        announcement_id: AnnouncementId,
+        /// How many accounts it went to.
+        recipients: u64,
+    },
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -502,6 +513,7 @@ impl DomainEvent {
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
+            | Self::AnnouncementSent { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -567,6 +579,7 @@ impl DomainEvent {
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
+            | Self::AnnouncementSent { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -632,6 +645,7 @@ impl DomainEvent {
             Self::AccountPurged {} => "account_purged",
             Self::AuditHistoryPruned { .. } => "audit_history_pruned",
             Self::AuditChainVerified(_) => "audit_chain_verified",
+            Self::AnnouncementSent { .. } => "announcement_sent",
             Self::Imported(_) => "imported",
         }
     }

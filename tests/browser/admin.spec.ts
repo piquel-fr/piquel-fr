@@ -407,3 +407,53 @@ test('a handle support renames signs in at once, while the owner waits a month',
   await signIn.click();
   await expect(owner).toHaveURL('/settings');
 });
+
+/**
+ * An announcement's journey: a draft saved without a confirmation, then edited
+ * to a small group found and added on its form, sent from the editor after the
+ * dashboard's passkey dialog, and read in the recipient's inbox, its paragraphs
+ * kept, and, with a mail catcher, their mailbox.
+ */
+test('an announcement is drafted, sent to a group found on its form, and read', async ({
+  browser
+}) => {
+  const suffix = Date.now().toString(36);
+  const handle = `reader-${suffix}`;
+  const address = `${handle}@e2e.test`;
+  const admin = await administrator(browser, `announcer-${suffix}`);
+  const reader = await signedUp(browser, handle);
+  // Its email goes to a verified primary address.
+  if (mailUrl) await addAddress(reader, address);
+  const subject = `Maintenance ${suffix}`;
+
+  // Saving a draft needs no confirmation; to everyone, it has no accounts to find.
+  await admin.goto(`${adminUrl}/announcements/new`);
+  await admin.getByRole('textbox', { name: /^Subject/ }).fill(subject);
+  await admin
+    .getByRole('textbox', { name: /^Text/ })
+    .fill('Sign-in pauses tonight.\n\nNothing else changes.');
+  await expect(admin.getByRole('searchbox', { name: 'Find accounts' })).toBeHidden();
+  await admin.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(admin.getByRole('heading', { name: subject, exact: true })).toBeVisible();
+  await expect(admin.locator('pre.email')).toContainText('Sign-in pauses tonight.');
+
+  // Its editor finds the reader and adds them, then sends it after the dialog.
+  await admin.getByRole('link', { name: 'Edit', exact: true }).click();
+  await admin.getByRole('radio', { name: 'These accounts', exact: true }).check();
+  await admin.getByRole('searchbox', { name: 'Find accounts' }).fill(handle);
+  await admin.getByRole('button', { name: 'Find', exact: true }).click();
+  await admin.getByRole('button', { name: `Add @${handle}`, exact: true }).click();
+  await expect(admin.getByRole('textbox', { name: /^Accounts/ })).toHaveValue(handle);
+  await admin.getByRole('button', { name: 'Send', exact: true }).click();
+  const dialog = admin.getByRole('dialog', { name: "Confirm it's you" });
+  await dialog.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  await expect(admin.getByRole('term').filter({ hasText: /^Sent$/ })).toBeVisible();
+
+  if (mailUrl) {
+    await mailed(address, /Sign-in pauses tonight\./);
+  }
+  await reader.goto('/settings/notifications');
+  await reader.getByRole('link', { name: subject, exact: true }).click();
+  const announcement = reader.getByRole('article', { name: subject });
+  await expect(announcement.getByText('Nothing else changes.', { exact: true })).toBeVisible();
+});

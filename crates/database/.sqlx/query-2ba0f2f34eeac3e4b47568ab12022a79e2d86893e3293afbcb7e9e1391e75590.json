@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM announcements WHERE id = $1 AND sent_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2ba0f2f34eeac3e4b47568ab12022a79e2d86893e3293afbcb7e9e1391e75590"
+}

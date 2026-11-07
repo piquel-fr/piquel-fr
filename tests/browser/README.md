@@ -127,7 +127,11 @@ changes an account's passkeys and addresses, each confirmed from its mailed link
 on its owner's behalf, whose history shows each reason. Support also renames a
 handle, which an owner may change only 30 days after signup: the new one signs in
 at once, and the old one no longer does. The
-top bar keeps its crumb, search box and avatar apart at every window size. Set
+top bar keeps its crumb, search box and avatar apart at every window size. An
+administrator saves an announcement as a draft without a confirmation, finds and
+adds its recipient on its form, sends it from the editor after the dashboard's
+confirmation, and the recipient reads it in their inbox and, with
+`E2E_MAIL_URL`, by email. Set
 `E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command
 that grants administrator rights to the handle appended to it, e.g. `just auth
 admin grant` with the deployment's configuration. Without them, the tests are

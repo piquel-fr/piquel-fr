@@ -23,19 +23,20 @@ pub use exclusive::{ExclusiveConnection, LockKey};
 #[cfg(any(test, feature = "test-util"))]
 pub use repositories::audit::Tamper;
 pub use repositories::{
-    AccountDeletionRepository, AdministratorRepository, AuditRepository, DashboardRepository,
-    DeliveryRepository, EmailRepository, EventRepository, FederationRepository, HandleRepository,
-    MaintenanceRepository, NotificationRepository, OidcRepository, PasskeyRepository,
-    PictureRepository, RecoveryRepository, SecurityRepository, SessionRepository,
-    SigningKeyRepository, TokenRepository, UserRepository,
+    AccountDeletionRepository, AdministratorRepository, AnnouncementRepository, AuditRepository,
+    DashboardRepository, DeliveryRepository, EmailRepository, EventRepository,
+    FederationRepository, HandleRepository, MaintenanceRepository, NotificationRepository,
+    OidcRepository, PasskeyRepository, PictureRepository, RecoveryRepository, SecurityRepository,
+    SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
+    announcements::{DraftedAnnouncement, Recipients},
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},
     deliveries::{
-        BackchannelLogout, Channel, Delivery, DeliveryBacklog, DeliveryOutcome, DeliveryStatus,
-        DeliverySummary, Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress,
-        PendingRecovery,
+        Announcement, AnnouncementEmail, BackchannelLogout, Channel, Delivery, DeliveryBacklog,
+        DeliveryOutcome, DeliveryStatus, DeliverySummary, Email, EmailMessage, LogoutRecipient,
+        NewDelivery, PendingAddress, PendingRecovery,
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},

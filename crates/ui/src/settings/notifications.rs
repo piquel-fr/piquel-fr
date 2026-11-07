@@ -5,7 +5,7 @@ use super::{Audience, HistoryRow, Holdings, timeline::report_form};
 use crate::{
     form::{Precision, Query, change_form, open, time},
     icons::{Icon, icon},
-    layout::page_head,
+    layout::{announcement_text, page_head},
 };
 use chrono::{DateTime, Utc};
 use piquel_common::NotificationId;
@@ -143,7 +143,7 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
                                 </a>
                             } else {
                                 <strong>(row.subject)</strong>
-                                <p>(row.body)</p>
+                                announcement_text(body: row.body)
                                 <small>(if row.read { "Read by the owner" } else { "Not read yet" })</small>
                             }
                         </div>
@@ -221,7 +221,7 @@ pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> 
                 time(at: row.created_at, precision: Precision::Minute)
             </header>
             <div class="body">
-                <p>(row.body)</p>
+                announcement_text(body: row.body)
                 if let Some(undo) = page.undo {
                     <p><a class="button danger" href=(undo)>"Undo the recovery"</a></p>
                 }

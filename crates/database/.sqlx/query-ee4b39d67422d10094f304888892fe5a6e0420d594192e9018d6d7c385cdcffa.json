@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM announcements a\n                WHERE NOT a.everyone\n                AND NOT EXISTS (SELECT FROM announcement_recipients r WHERE r.announcement_id = a.id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "ee4b39d67422d10094f304888892fe5a6e0420d594192e9018d6d7c385cdcffa"
+}

@@ -25,7 +25,9 @@ probation sign-in.
 - **Purge:** every five minutes, one replica purges the accounts past their grace
   period. It deletes the apps the account registered, leaving tombstones with
   only their ID, settings and dates, then the account with its emails, passkeys,
-  identities, sessions, grants, consents and email deliveries, and the personal
+  identities, sessions, grants, consents, email and announcement deliveries, and
+  the announcements to chosen accounts it was the last recipient of, which may
+  concern it, and the personal
   data (IP, device, provider subjects, app origins, operators' reasons) of every
   event it is the subject or actor of, including one a request records while the
   purge runs. The events stay, with pseudonymous IDs only. Its handles stay in the

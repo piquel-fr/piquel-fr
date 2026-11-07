@@ -66,7 +66,7 @@ pub(crate) struct NotificationItem {
     #[serde(flatten)]
     pub(crate) notification: Notification,
     /// Its subject.
-    pub(crate) subject: &'static str,
+    pub(crate) subject: String,
     /// What it says.
     pub(crate) body: String,
 }
@@ -98,7 +98,7 @@ impl NotificationItem {
             created_at: stored.created_at,
             read_at: stored.read_at,
             event_id: stored.event_id,
-            subject: notification.subject(),
+            subject: notification.subject().to_owned(),
             body: notification.body(),
             notification,
         })

@@ -17,6 +17,7 @@ pub(crate) use crate::tests::operator as cli;
 
 mod accounts;
 mod administrators;
+mod announcements;
 mod deliveries;
 mod handles;
 mod invitations;

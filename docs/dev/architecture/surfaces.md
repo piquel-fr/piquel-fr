@@ -70,9 +70,10 @@ The network path is a second wall, not the authorization.
 The admin listener has a security layer of its own. It answers only requests that
 name the dashboard's host, takes a form only from the dashboard's own pages (the
 same-origin rule auth's pages follow), spends a request budget of its own, and
-limits bodies to 64 KiB. Every page loads only the stylesheet and the dashboard's
-own script, which its Content-Security-Policy names alone, and its forms post only
-to the dashboard, whose answer may go on to auth's handoff page.
+limits bodies to 512 KiB, which an announcement's text and accounts need. Every
+page loads only the stylesheet and the dashboard's own script, which its
+Content-Security-Policy names alone, and its forms post only to the dashboard,
+whose answer may go on to auth's handoff page.
 
 The dashboard is no OIDC client. An administrator signs in by a handoff from auth:
 
@@ -114,6 +115,19 @@ script, or in a browser without related origins, the browser goes to the handoff
 page and back as before.
 
 Lists page by number, with their totals, as the CLI's `--page` does.
+
+Administrators also send announcements, such as a security incident or a change
+to the privacy policy, to every account or to chosen ones. An announcement starts
+as a draft with a page of its own, showing its email as it will be sent. Drafting,
+editing and discarding one need only what a read needs, since nobody else sees a
+draft: a confirmation that runs out while the text is written sends the browser
+to confirm and back to the saved draft, with nothing lost. Sending it needs the
+dashboard's recent confirmation, like any change, and names the draft's revision
+its page showed, so a draft changed meanwhile is checked again rather than sent
+unseen; its text never changes afterwards. Each recipient gets it as a
+notification in their inbox, and each with a primary verified address is emailed
+it (see
+[the delivery queue](delivery-queue.md#announcements)).
 
 Administrators manage the administrator list too, but never their own rights or
 the last active administrator's, and the dashboard never changes an administrator's

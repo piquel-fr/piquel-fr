@@ -23,7 +23,7 @@ values before any SQL runs.
 
 Each repository has its own module under `src/repositories/` (`users`, `handles`, `emails`,
 `sessions`, `events`, `audit`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
-`security`, `maintenance`, `administrators`, `deletions`, `pictures`), holding its methods and the
+`security`, `maintenance`, `administrators`, `deletions`, `pictures`, `announcements`), holding its methods and the
 records they take and return.
 `repositories/mod.rs` holds only shared plumbing: the executor, the
 `repositories!` macro that declares every handle and its accessors on `Database`,
@@ -121,7 +121,8 @@ Important invariants:
   `administrators().lock()` before the account lock, as grants and disabling do,
   so the last active administrator's account cannot be deleted. Callers end its sessions and
   delete the clients it manages first. `deletions().purge` then deletes the rows
-  that reference the account without cascading, its clients' related origins
+  that reference the account without cascading, the announcements to chosen
+  accounts it was the last recipient of, its clients' related origins
   from the events about them, the account itself, then the personal data of the
   events it is the subject or actor of, in the same transaction. Its handles stay in `handles` without an owner, so nobody claims
   them again. The personal data goes last: storing an event's personal data

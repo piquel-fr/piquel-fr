@@ -125,6 +125,8 @@ repositories! {
     pictures: PictureRepository;
     /// The notifications of each account's inbox, and whether they were read.
     notifications: NotificationRepository;
+    /// Announcements to accounts and their recipients.
+    announcements: AnnouncementRepository;
 }
 
 /// How decoding `{"kind": …}` alone as a stored, `kind`-tagged enum fails, which
@@ -353,6 +355,8 @@ impl From<Bytes32> for [u8; 32] {
 
 /// Administrator rights and the lock that serializes their changes.
 pub(crate) mod administrators;
+/// Announcements, their drafts and their recipients.
+pub(crate) mod announcements;
 /// The audit chain, its checkpoints and its anchor.
 pub(crate) mod audit;
 /// Handoff codes and dashboard sessions.
