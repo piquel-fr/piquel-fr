@@ -1,5 +1,9 @@
 # Outbound delivery queue
 
+This page explains how auth sends messages to other systems without slowing a
+request: the queue's guarantees, the life of a delivery, its channels, and how
+to add one.
+
 Auth sends messages to other systems through a PostgreSQL queue. Two channels
 exist: back-channel logout tokens and email (see [Channels](#channels)). Other
 kinds, such as audit witness checkpoints, would join them as channels of their
@@ -103,8 +107,9 @@ link was used, cancelled or expired, or the account was disabled.
 Every notification an event gives its subject (`DomainEvent::notification`) is
 emailed too: `record` hands the notification it just wrote to the channels, and
 the `email` channel queues one `EmailMessage::Notification` per address that
-`Notification::addressees` names, each once. A recovery's notifications go to
-every verified address, so a compromised one cannot hide them; a replaced or
+`Notification::addressees` names, each once. A recovery that secured the account
+or added a passkey (`AccountSecured`, `Recovered`) goes to every verified
+address, so a compromised one cannot hide it; a replaced or
 removed address's to that address, so whoever reads it hears of it; any other to
 the primary verified address, and an account without one gets no email. The
 message copies the address and the notification, read in the event's
@@ -183,66 +188,4 @@ gauges until the next one succeeds.
   `logout_token` form field. `jti` is the delivery ID. `MAX_AGE` is one hour.
 - **`email`**: messages to account holders, sent over SMTP; see [Email](#email).
 
-## Adding a channel
-
-The examples follow the back-channel logout channel
-(`repositories/deliveries/backchannel.rs`, `apps/auth-service/src/deliveries/backchannel.rs`).
-
-1. **Define what it stores**, in `crates/database/src/repositories/deliveries/`:
-   a type implementing `Channel`. `NAME` is stored in every row, so never rename a
-   released channel. `Recipient` holds the facts copied about the recipient, and
-   `Payload` the message, both serialized as JSON.
-
-   ```rust
-   /// Back-channel logout tokens (OIDC Back-Channel Logout 1.0).
-   pub struct BackchannelLogout;
-
-   impl Channel for BackchannelLogout {
-       const NAME: &'static str = "backchannel_logout";
-       type Recipient = LogoutRecipient; // client_id, sub, sid
-       type Payload = ();
-
-       /// One delivery per client the revoked session signed in to.
-       async fn deliveries(
-           event: &DomainEvent,
-           _: Option<UserId>,
-           tx: &mut DatabaseTransaction<'_>,
-       ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
-           let DomainEvent::SessionRevoked { session_id, .. } = event else {
-               return Ok(Vec::new());
-           };
-           // Read the clients and their logout URIs through a repository method.
-           let clients = tx.oidc().logout_clients(*session_id).await?;
-           // ...one `NewDelivery` per client.
-       }
-   }
-   ```
-
-   `deliveries` runs inside the event's transaction, so it sees the rows as the
-   change left them. Copy everything a send needs; a send must not read rows that
-   can change or disappear. Set `ordering_key` only if receivers need deliveries
-   in order, such as a future provisioning channel's changes per client and user,
-   since a failure blocks the key. Neither channel today sets one.
-
-2. **Register it** by adding it to `Registered` in `deliveries/mod.rs`, a nested
-   list: adding a channel `Provisioning` makes it
-   `pub(crate) type Registered = (BackchannelLogout, (Email, (Provisioning, ())));`.
-
-3. **Send it**, in `apps/auth-service/src/deliveries/`: a type implementing
-   `Sender` with `type Channel = BackchannelLogout`. `MAX_AGE` bounds how long it
-   keeps retrying. `send` builds the message with `delivery.id` as its identity,
-   fresh timestamps such as `iat` and `exp`, and sends it with `OutboundClient`.
-   Return `DeliveryError::Retryable` or `Permanent`; `OutboundClient::send`
-   already classifies statuses and transport failures.
-
-4. **Start its workers** in `Jobs::start` with `jobs.deliveries(sender, database)`.
-
-5. **Handle duplicates.** Decide how a receiver recognizes a repeated delivery,
-   and document it with the channel.
-
-6. **Test it**: that the right events create the right deliveries with their facts
-   copied, and how `send` maps the receiver's answers. The queue itself is tested
-   in `deliveries/tests.rs` of both crates.
-
-A delivery that no event causes, like a future audit witness checkpoint, is inserted with
-`tx.deliveries().insert(None, delivery)` instead.
+To add a channel, see [adding a delivery channel](../extending/delivery-channel.md).

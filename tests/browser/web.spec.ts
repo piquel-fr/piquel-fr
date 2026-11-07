@@ -1,3 +1,9 @@
+/**
+ * piquel.fr's own web server: auth's footer links its policies, which allow
+ * nothing but their stylesheet; its homepage links auth's pages; and a link to a
+ * settings path on piquel.fr goes on to auth with its fragment. Skipped
+ * without `E2E_WEB_URL`.
+ */
 import { expect, test } from '@playwright/test';
 import { authUrl } from './helpers';
 

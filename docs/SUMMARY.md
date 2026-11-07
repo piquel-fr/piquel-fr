@@ -57,7 +57,11 @@
 
 # Architecture
 
-- [Monorepo boundaries](dev/architecture/overview.md)
+- [Overview](dev/architecture/overview.md)
+- [Request lifecycle](dev/architecture/request-lifecycle.md)
+- [Sessions](dev/architecture/sessions.md)
+- [Authorization flow](dev/architecture/oidc.md)
+- [Keys](dev/architecture/keys.md)
 - [Auth, account and admin surfaces](dev/architecture/surfaces.md)
 - [PostgreSQL boundary](dev/architecture/database.md)
 - [Outbound delivery queue](dev/architecture/delivery-queue.md)
@@ -69,6 +73,8 @@
 
 # Security
 
+- [Security boundaries](dev/security/boundaries.md)
+- [Threat model](dev/security/threat-model.md)
 - [Security properties](dev/security/properties.md)
 - [Account recovery](dev/security/account-recovery.md)
 - [Tamper-evident audit history](dev/security/audit-history.md)
@@ -77,7 +83,15 @@
 
 # Extending
 
+- [Adding a page or route to auth](dev/extending/page.md)
+- [Adding a database migration](dev/extending/migration.md)
+- [Adding an administrative operation](dev/extending/admin-operation.md)
+- [Adding an account setting](dev/extending/account-setting.md)
+- [Adding a configuration variable](dev/extending/configuration-variable.md)
+- [Adding a notification](dev/extending/notification.md)
+- [Adding a feature to the SDKs](dev/extending/sdk-feature.md)
 - [Adding a federation provider](dev/extending/federation-providers.md)
+- [Adding a delivery channel](dev/extending/delivery-channel.md)
 
 # Operations
 

@@ -1,7 +1,9 @@
 # Security properties
 
-What auth guarantees about passkeys, handles, sessions and browser flows, and
-the limits it enforces. The pages after this one explain the larger designs in
+This page lists the guarantees auth makes about passkeys, handles, sessions and
+browser flows, and the limits it enforces. [Security boundaries](boundaries.md)
+maps where they are checked, and the [threat model](threat-model.md) says what
+they defend against. The pages after this one explain the larger designs in
 detail.
 
 - Passkeys require user verification and prefer resident credentials. Synced
