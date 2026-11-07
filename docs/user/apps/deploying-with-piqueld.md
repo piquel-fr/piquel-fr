@@ -42,21 +42,33 @@ client_secret = "notes-staging-client-secret"
 cookie_key = "notes-staging-cookie-key"
 ```
 
-## Store the client secret
+## Store the secrets
 
 piqueld gives a service each secret as a file under `/run/secrets`, never as an
-environment variable.
+environment variable. Each environment needs two: its app's client secret, and
+the key that seals the SDKs' session cookies.
 
-1. Store each environment's secret, mountable by that environment only. Paste
-   the secret when `piquelctl` asks for it:
+1. Store each environment's client secret, mountable by that environment only.
+   Paste the secret when `piquelctl` asks for it:
 
    ```console
    piquelctl app secret notes set notes-client-secret --stdin --environments production --no-previews
    piquelctl app secret notes set notes-staging-client-secret --stdin --environments staging --no-previews
    ```
 
-2. Mount the secret the environment's `client_secret` variable names in `web`,
-   at the same path in every environment, with the rest of the app's settings:
+2. Store each environment's cookie key the same way. The cookie key seals a
+   whole session, tokens included, so an environment that could read another's
+   key could forge its sessions: never share one. The SDKs read standard base64,
+   which piqueld's generated secrets don't use, so generate each with `openssl`:
+
+   ```console
+   openssl rand -base64 32 | piquelctl app secret notes set notes-cookie-key --stdin --environments production --no-previews --yes
+   openssl rand -base64 32 | piquelctl app secret notes set notes-staging-cookie-key --stdin --environments staging --no-previews --yes
+   ```
+
+3. Mount the secrets the environment's `client_secret` and `cookie_key`
+   variables name in `web`, at the same paths in every environment, with the
+   rest of the app's settings:
 
    ```toml
    [[spec.services]]
@@ -75,7 +87,7 @@ environment variable.
    target = "/run/secrets/piquel-cookie-key"
    ```
 
-3. Read the secret from the file in your app. In Rust:
+4. Read the secrets from their files in your app. In Rust:
 
    ```rust
    let secret = std::fs::read_to_string("/run/secrets/piquel-client-secret")?;
@@ -83,22 +95,22 @@ environment variable.
    ```
 
    In TypeScript, pass `readFileSync('/run/secrets/piquel-client-secret',
-   'utf8').trim()` as the client's `clientSecret`.
+   'utf8').trim()` as the client's `clientSecret`. Read the cookie key from
+   `/run/secrets/piquel-cookie-key` the same way.
 
-4. Deploy each environment:
+5. Save the manifest. If the application deploys from a repository, commit and
+   push it to the branch each environment deploys from. Otherwise, save it:
+
+   ```console
+   piquelctl app apply --file piqueld.toml
+   ```
+
+6. Deploy each environment:
 
    ```console
    piquelctl env deploy notes staging
    piquelctl env deploy notes production
    ```
-
-Store the key that seals the SDKs' session cookies the same way: one per
-environment, mountable by that environment only, named by its `cookie_key`
-variable. The cookie key seals a whole session, tokens included, so an
-environment that could read another's key could forge its sessions. Generate
-each with `openssl rand -base64 32`: the SDKs read standard base64, which
-piqueld's generated secrets don't use. Step 2 mounts it at
-`/run/secrets/piquel-cookie-key`: read it the same way as the client secret.
 
 ## Rotate the secret
 
