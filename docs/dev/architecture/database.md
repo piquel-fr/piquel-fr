@@ -427,7 +427,8 @@ chain order.
 ### Sessions
 
 [Sessions](sessions.md) explains sessions as a whole; this section covers their
-storage. `SessionRepository::revoke(user_id, scope)` is the only way a session ends early.
+storage. `DatabaseTransaction::revoke_sessions` is the only way a session ends
+early.
 `SessionScope` names one session, every other session or all of them, and the
 query always filters on `user_id`, so no scope reaches another account's session.
 It skips expired sessions, which are already over, so the count it returns is what

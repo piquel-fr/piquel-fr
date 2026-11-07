@@ -230,9 +230,9 @@ operation joins `AdminOperation`: the admin router
 maps it to its route, or to none when only the CLI runs it, and every CLI command
 names the operation it runs. A test parses a command line for each operation and
 checks that it names that operation. The router's match is exhaustive, so a new
-operation does not compile until the dashboard handles it; the test's match of
-operations to command lines is too, so the tests don't compile until the CLI
-does.
+operation does not compile until the dashboard handles it. The test's match of
+operations to command lines is exhaustive too, so the tests don't compile until
+the operation has a command line, and fail until a CLI command runs it.
 
 Account operations are methods of `AccountService` (`src/account`), written with
 their setting's module, such as `src/passkey`. Each takes the account and who acts
