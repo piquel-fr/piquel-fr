@@ -83,3 +83,6 @@ Connect, with the Rust SDK (`piquel-auth`), the TypeScript SDK
 - [Troubleshooting sign-in](apps/troubleshooting.md) explains the errors your
   app may see.
 - [OpenID Connect](reference/oidc.md) lists the endpoints, tokens and claims.
+
+Building with an AI coding agent? [Building with coding agents](agents/overview.md)
+explains what it can do for you, with skills to give it.

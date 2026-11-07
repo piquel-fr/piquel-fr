@@ -33,7 +33,7 @@ Deleting an app removes its origins.
 
 ## Sign in with the TypeScript SDK
 
-The browser client of [`@piquel/auth/browser`](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/README.md#browser-apps)
+The browser client of [`@piquel/auth/browser`](browser-apps.md)
 runs the whole flow, falling back to auth's pages whenever it must:
 
 ```ts
