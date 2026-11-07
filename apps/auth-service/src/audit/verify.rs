@@ -5,7 +5,10 @@
 use super::{
     AuditChain, AuditCheckpoint, AuditError, AuditKeys, AuditPage, AuditVerification, Chain,
     ChainBreak, ChainProblem, CheckpointText, Pruning, RecordedVerification, StoredChain,
+    VerificationKeys,
 };
+use crate::alerts::Alerts;
+use piquel_common::alerts::{Alert, AlertKind};
 use piquel_common::events::{DomainEvent, EventContext};
 use piquel_crypto::CryptoError;
 use piquel_repository::{
@@ -147,7 +150,10 @@ impl AuditChain {
     }
 
     /// Records `verification`, made as `context`, in `tx`, and commits: the
-    /// dashboard's audit page shows the newest one recorded.
+    /// dashboard's audit page shows the newest one recorded. A broken chain raises
+    /// its alert, and an intact one clears it, unless the keys were given with
+    /// `--key`, such as another environment's, which say nothing of this one's
+    /// checkpoints.
     pub(crate) async fn record(
         mut tx: DatabaseTransaction<'_>,
         context: &EventContext,
@@ -155,6 +161,13 @@ impl AuditChain {
     ) -> Result<(), AuditError> {
         let verified = DomainEvent::AuditChainVerified(verification.clone());
         tx.record(context, None, verified).await?;
+        if verification.keys != VerificationKeys::Given {
+            let mut alerts = Alerts::new(&mut tx, context);
+            match &verification.broken {
+                Some(broken) => alerts.raise(Alert::AuditChainBroken(broken.clone())).await,
+                None => alerts.clear(AlertKind::AuditChainBroken).await,
+            }?;
+        }
         Ok(tx.commit().await?)
     }
 
