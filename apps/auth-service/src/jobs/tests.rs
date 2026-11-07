@@ -1,4 +1,5 @@
-//! Job runner failure isolation and exclusivity across runners.
+//! Job runner failure isolation and exclusivity across runners, and the alert
+//! of failing purges.
 use super::*;
 use crate::tests::Replicas;
 use std::sync::{
@@ -178,4 +179,50 @@ async fn runners_never_overlap_and_a_dropped_holder_hands_over() {
         )),
         "runs overlapped: {events:?}"
     );
+}
+
+/// A purge run raises the alert of accounts that keep failing to be purged, and
+/// a run with none clears it. The schema is its own, since the count is every
+/// account's.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn failing_purges_raise_their_alert_until_none_fail() {
+    let harness = crate::admin::tests::Harness::isolated().await;
+    let database = &harness.database;
+    let user_id = harness.account().await.user_id;
+    // Failing, and waiting a day for its next attempt, so the run purges nothing.
+    let mut deletions = database.deletions();
+    deletions
+        .schedule(user_id, Utc::now() - chrono::Duration::days(1))
+        .await
+        .expect("schedule");
+    for _ in 0..AccountPurge::FAILING_ATTEMPTS {
+        let day = chrono::Duration::days(1);
+        deletions
+            .record_failure(user_id, "boom", day, day)
+            .await
+            .expect("failure");
+    }
+    let mut lock = database
+        .try_exclusive(LockKey::AccountPurge)
+        .await
+        .expect("lock")
+        .expect("no other test purges");
+    let shutdown = Shutdown(watch::Sender::new(false).subscribe());
+    let current = async || {
+        let mut tx = database.begin().await.expect("transaction");
+        let current = tx
+            .alerts()
+            .current(AlertKind::PurgesFailing)
+            .await
+            .expect("current");
+        tx.commit().await.expect("commit");
+        current.and_then(|current| current.alert)
+    };
+    AccountPurge.run(&mut lock, &shutdown).await.expect("run");
+    assert_eq!(current().await, Some(Alert::PurgesFailing {}));
+    assert!(database.deletions().cancel(user_id).await.expect("cancel"));
+    AccountPurge.run(&mut lock, &shutdown).await.expect("run");
+    assert_eq!(current().await, None);
+    lock.release().await.expect("release");
 }
