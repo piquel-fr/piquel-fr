@@ -53,7 +53,7 @@ authentication** method and the **Scopes**. An app with a backend also gets a
 Rust example that signs users in with the
 [Rust SDK](https://github.com/piquel-fr/piquel-fr/tree/main/crates/auth-sdk).
 A browser app signs users in with the
-[TypeScript SDK](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/README.md#browser-apps).
+[TypeScript SDK](browser-apps.md).
 
 ![The overview of the registered app Notes: issuer, discovery URL, client ID, client authentication and scopes](../../images/apps/app-overview.png)
 
