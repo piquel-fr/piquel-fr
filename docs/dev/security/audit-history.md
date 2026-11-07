@@ -144,7 +144,7 @@ hashes:
   verifies, as the sealer checks them, as `text/plain`. A newer one that does
   not is never served as the latest. Each replica checks signatures only once
   per checkpoint stored: stored checkpoints never change, so it reuses the note
-  it found until another is stored.
+  it found until the number stored changes, whatever position a new one has.
 - `GET /audit/checkpoints?after=<position>`: up to 100 checkpoints after a
   position, oldest first, as JSON `{position, hash, time, note}`, every stored
   one, for readers to verify. A position past 2^63 − 1 is refused with `400`.
