@@ -115,7 +115,8 @@ apps are unaffected.
   agree on the requirement, and that your server's clock is synchronized
   ([clock skew](troubleshooting.md#clock-skew)).
 - **The user came back as another account.** Signing in as another account ends
-  the previous session. Send `id_token_hint`, and refuse a token whose `sub`
-  changed; the SDKs' login routes already do.
+  the previous session. Refuse a step-up whose token has a different `sub`: the
+  SDKs' login routes check it at the callback. A flow of your own can also send
+  `id_token_hint`, so auth asks for that account.
 
 [RFC 9470]: https://www.rfc-editor.org/rfc/rfc9470
