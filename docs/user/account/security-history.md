@@ -43,8 +43,9 @@ change you didn't make.
 Piquel then:
 
 - signs out every device but the one you are using,
-- makes every app you use with Piquel sign in again, including on this
-  device.
+- ends the access of every app you use with Piquel, including on this device,
+  so they ask you to sign in again once their access token expires, within five
+  minutes, or when they next check with Piquel.
 
 Your passkeys keep working. The page says **Your account is secured.**
 

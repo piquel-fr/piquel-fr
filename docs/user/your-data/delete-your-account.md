@@ -31,7 +31,10 @@ be deleted for good.
 
 - Every device is signed out. Signing in with a passkey only offers to
   [restore the account](#restore-your-account).
-- Apps can no longer use your account, or sign you in with it.
+- Apps can no longer sign you in with it or refresh their access. An access
+  token an app already holds keeps working until it expires, within five
+  minutes, and an app that keeps its own session may keep you signed in to it
+  until it next checks with Piquel.
 - A recovery link support sent you stops working.
 - Your primary email address receives "Your account is scheduled for
   deletion", with the date.
