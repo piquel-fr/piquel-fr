@@ -54,15 +54,15 @@ impl Sealer {
     const CHECKPOINT_EVERY: TimeDelta = TimeDelta::minutes(5);
 
     /// A sealer signing with `audit`'s key, and building only on checkpoints its
-    /// keys verify. It seals in the untagged format, which the release before this
-    /// one hashes too; a later release seals in [`EventContent::NEWEST_FORMAT`].
+    /// keys verify. It seals in [`EventContent::NEWEST_FORMAT`], which the release
+    /// before this one verifies too.
     pub(crate) fn new(audit: &AuditConfig) -> Self {
         Self {
             key: audit.key.clone(),
             keys: audit.keys.clone(),
             checkpoint_every: Self::CHECKPOINT_EVERY,
             batch: Self::BATCH,
-            format: EventContent::UNTAGGED,
+            format: EventContent::NEWEST_FORMAT,
             failed_at: Mutex::new(None),
         }
     }
