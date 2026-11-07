@@ -59,31 +59,40 @@ the manifest, never with `piquelctl env create`, `env source` or `env sync`.
 
 To set them up on a new daemon, once the manifest is on `main`:
 
-1. Store the secrets piqueld can't generate: the Resend keys, the sign-in
+1. Save the manifest, which creates the application and its environments
+   without deploying them:
+
+   ```sh
+   piquelctl app apply --file infra/piqueld.toml
+   ```
+
+2. Store the secrets piqueld can't generate: the Resend keys, the sign-in
    providers' client secrets and the audit keys. See
    [stored secrets](secrets.md#stored-secrets). A deployment that mounts a
    missing secret fails.
-2. Save the manifest and deploy staging:
+3. Deploy staging:
 
    ```sh
-   piquelctl --timeout 30m app apply --file infra/piqueld.toml --deploy --yes
+   piquelctl --timeout 30m env deploy piquel-fr staging
    ```
 
    piqueld generates each environment's other secrets on its first deployment.
-3. Create the webhook's secret, then print its payload URL:
+4. Create the webhook's secret, then print its payload URL:
 
    ```sh
    piquelctl app repository webhook rotate piquel-fr   # prints the secret once
    piquelctl app repository webhook show piquel-fr     # prints the payload URL
    ```
 
-4. Add a webhook to this repository on GitHub, with that URL and secret, the
+5. Add a webhook to this repository on GitHub, with that URL and secret, the
    `application/json` content type and the `push` event.
-5. Sign up the first account and grant it administrator rights: see
-   [grant the first administrator](administration.md#grant-the-first-administrator).
+6. Grant staging its first administrator, as
+   [grant the first administrator](administration.md#grant-the-first-administrator)
+   describes with `--env staging`.
 
 Staging now follows `main`. Production waits for its first
-[promotion](#promote-to-production).
+[promotion](#promote-to-production); once it runs, grant its first
+administrator the same way.
 
 ## Deploy staging
 

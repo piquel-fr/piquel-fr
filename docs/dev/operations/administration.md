@@ -21,7 +21,8 @@ Two surfaces run the same code (`AdminService` in
 
 ## Grant the first administrator
 
-Only the command line grants the first administrator. In production:
+Only the command line grants the first administrator, once the environment is
+deployed. In production (for staging, use `--env staging` and its own hosts):
 
 1. Create an invitation, since signing up needs one:
 
