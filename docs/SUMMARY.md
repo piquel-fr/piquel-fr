@@ -83,7 +83,15 @@
 
 # Extending
 
+- [Adding a page or route to auth](dev/extending/page.md)
+- [Adding a database migration](dev/extending/migration.md)
+- [Adding an administrative operation](dev/extending/admin-operation.md)
+- [Adding an account setting](dev/extending/account-setting.md)
+- [Adding a configuration variable](dev/extending/configuration-variable.md)
+- [Adding a notification](dev/extending/notification.md)
+- [Adding a feature to the SDKs](dev/extending/sdk-feature.md)
 - [Adding a federation provider](dev/extending/federation-providers.md)
+- [Adding a delivery channel](dev/extending/delivery-channel.md)
 
 # Operations
 
