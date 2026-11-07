@@ -152,7 +152,7 @@ fn serializes_every_category_in_its_documented_shape() {
             read_at: None,
             event_id: Some(event),
             notification: Notification::AccountEnabled,
-            subject: Notification::AccountEnabled.subject(),
+            subject: Notification::AccountEnabled.subject().to_owned(),
             body: Notification::AccountEnabled.body(),
         }],
     };

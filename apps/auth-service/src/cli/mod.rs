@@ -9,6 +9,8 @@
 mod account;
 /// Granting, revoking and listing administrators.
 mod admin;
+/// Drafting and sending announcements to accounts.
+mod announcement;
 /// The audit history.
 mod audit;
 /// Registering, inspecting and changing OIDC clients.
@@ -37,6 +39,7 @@ use crate::{
 };
 use account::AccountCommand;
 use admin::AdminCommand;
+use announcement::AnnouncementCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
 use client::{ClientCommand, OriginCommand};
@@ -112,6 +115,10 @@ enum Administration {
     /// Inspect, retry and cancel outbound deliveries.
     #[command(subcommand)]
     Deliveries(DeliveriesCommand),
+    /// Draft, send and read announcements to accounts, such as a security
+    /// incident or a change to the privacy policy.
+    #[command(subcommand)]
+    Announcement(AnnouncementCommand),
     /// Read or change one account's settings on its owner's behalf.
     Account(AccountCommand),
 }
@@ -242,6 +249,14 @@ impl Administration {
                 DeliveriesCommand::Retry { .. } => Op::RetryDelivery,
                 DeliveriesCommand::Cancel { .. } => Op::CancelDelivery,
             },
+            Self::Announcement(command) => match command {
+                AnnouncementCommand::List { .. } => Op::ListAnnouncements,
+                AnnouncementCommand::Show { .. } => Op::ViewAnnouncement,
+                AnnouncementCommand::Draft(_) => Op::DraftAnnouncement,
+                AnnouncementCommand::Edit { .. } => Op::EditAnnouncement,
+                AnnouncementCommand::Discard { .. } => Op::DiscardAnnouncement,
+                AnnouncementCommand::Send { .. } => Op::SendAnnouncement,
+            },
         })
     }
 
@@ -263,6 +278,7 @@ impl Administration {
             Self::Admin(command) => command.run(console).await,
             Self::Handle(command) => command.run(console).await,
             Self::Deliveries(command) => command.run(console).await,
+            Self::Announcement(command) => command.run(console).await,
             Self::Account(command) => command.run(console).await,
         }
     }

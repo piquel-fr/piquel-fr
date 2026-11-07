@@ -25,6 +25,8 @@
 
 /// The administrators.
 mod administrators;
+/// Announcements to accounts.
+mod announcements;
 /// The audit chain's state, and the checkpoints it may be pruned through.
 mod audit;
 /// The OIDC clients, one client, and the changes made to them.
@@ -53,7 +55,7 @@ mod tests;
 mod users;
 
 use crate::{
-    AdminError, AdminService, AuthConfig, KeyStore, MAX_REQUEST_BODY_BYTES,
+    AdminError, AdminService, AuthConfig, KeyStore, MAX_DASHBOARD_BODY_BYTES,
     account::{AccountError, AccountService},
     admin::{AdminOperation, DashboardSignIn, SignedInAdmin},
     assets::EmbeddedAssets,
@@ -256,7 +258,7 @@ impl AdminApplication {
             // pages, by a stricter rule: Topcoat's also takes `Sec-Fetch-Site: none`.
             .origin_policy(OriginPolicy::dangerous_disable())
             // axum's body limit does not reach Topcoat, whose own default is 2 MiB.
-            .layer(BodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            .layer(BodyLimit::max(MAX_DASHBOARD_BODY_BYTES))
             .layer(answers)
             .route(overview::overview)
             .route(preferences)
@@ -352,6 +354,12 @@ impl AdminApplication {
             Op::ListSigningKeys => &keys::list,
             Op::RotateSigningKey => &keys::rotate,
             Op::RevokeSigningKey => &keys::revoke,
+            Op::ListAnnouncements => &announcements::list,
+            Op::ViewAnnouncement => &announcements::show,
+            Op::DraftAnnouncement => &announcements::draft,
+            Op::EditAnnouncement => &announcements::edit,
+            Op::DiscardAnnouncement => &announcements::discard,
+            Op::SendAnnouncement => &announcements::send,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
             // Importing takes the deployment's PEM private key, which must never
@@ -599,7 +607,7 @@ impl AdminApplication {
     }
 
     /// Each tab's page, in the sidebar's order.
-    fn tabs(cx: &Cx) -> [(DashboardTab, String); 10] {
+    fn tabs(cx: &Cx) -> [(DashboardTab, String); 11] {
         [
             (
                 DashboardTab::Overview,
@@ -623,6 +631,10 @@ impl AdminApplication {
             ),
             (DashboardTab::SigningKeys, href!(keys::list).resolve(cx)),
             (DashboardTab::Audit, href!(audit::verify).resolve(cx)),
+            (
+                DashboardTab::Announcements,
+                href!(announcements::list).resolve(cx),
+            ),
         ]
     }
 

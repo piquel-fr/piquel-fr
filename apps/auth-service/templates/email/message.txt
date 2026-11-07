@@ -30,6 +30,12 @@ Undo the recovery:
 Read it in your Piquel notifications:
 
 {{ page }}
+{%- when Content::Announcement { address: _, subject: _, body, paragraphs: _, everyone, inbox } %}
+{{ body }}
+
+{% if everyone %}Piquel sent this announcement to every account.{% else %}Piquel sent this announcement to your account.{% endif %} You can read it again in your Piquel notifications:
+
+{{ inbox }}
 {%- endmatch %}
 
 Piquel

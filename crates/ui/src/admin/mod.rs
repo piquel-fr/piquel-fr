@@ -9,6 +9,8 @@
 //! [`Confirmation`] says; without the script, the browser confirms on auth's
 //! handoff page, and comes back. Every page works without it.
 
+/// Announcements to accounts.
+mod announcements;
 /// The audit chain's state and its checkpoints.
 mod audit;
 /// The OIDC clients, one client, and registering and changing them.
@@ -30,6 +32,10 @@ mod recoveries;
 /// Account search and one account.
 mod users;
 
+pub use announcements::{
+    AdminAnnouncementRow, DraftActions, FoundAccount, announcement_form, announcement_list,
+    announcement_page,
+};
 pub use audit::audit_page;
 pub use clients::{
     AdminClientRow, ClientChanges, ClientPage, NewClientForm, OperatorDraft, Registration,
@@ -62,7 +68,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use piquel_common::{
     AccountStatus, TraceId,
-    admin::{EventSearch, UserSearch},
+    admin::{EventSearch, SendAnnouncement, UserSearch},
 };
 use serde::{Deserialize, Serialize};
 use topcoat::{
@@ -101,6 +107,7 @@ pub struct HandoffProof {
 
 impl Query for UserSearch {}
 impl Query for EventSearch {}
+impl Query for SendAnnouncement {}
 
 /// A page of the dashboard, as the sidebar lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,6 +132,8 @@ pub enum Tab {
     SigningKeys,
     /// The tamper-evident audit chain.
     Audit,
+    /// Announcements to accounts.
+    Announcements,
 }
 
 impl Tab {
@@ -141,6 +150,7 @@ impl Tab {
             Self::Deliveries => Icon::Send,
             Self::SigningKeys => Icon::Key,
             Self::Audit => Icon::Audit,
+            Self::Announcements => Icon::Megaphone,
         }
     }
 }
@@ -159,6 +169,7 @@ impl Label for Tab {
             Self::Deliveries => "Deliveries",
             Self::SigningKeys => "Signing keys",
             Self::Audit => "Audit",
+            Self::Announcements => "Announcements",
         }
     }
 }
@@ -209,7 +220,8 @@ pub struct Dashboard<'a> {
 /// and how long the confirmation lasts, which it reads from the dialog. Once too
 /// little is left, it asks for a passkey there before it follows a link marked
 /// `data-confirm-first`, to a change's page, or posts a form in the page's
-/// `<main>`, a change; then it goes on. Without the script, or a browser that
+/// `<main>`, a change, unless the form is marked `data-unconfirmed`, as a draft
+/// announcement's changes are; then it goes on. Without the script, or a browser that
 /// cannot run the ceremony on the dashboard's origin, the browser goes on at
 /// once, and the page confirms on auth's handoff page instead.
 #[derive(Clone, Copy, Debug)]
@@ -316,8 +328,9 @@ pub async fn dashboard_frame<'a>(
     })
 }
 
-/// A change the dashboard makes after a confirmation: what it does, in the
-/// words its form and its row's button use.
+/// A change the dashboard makes, after a confirmation unless it changes only an
+/// administrators' draft: what it does, in the words its form and its row's
+/// button use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
     /// Disabling an account, with a reason.
@@ -376,6 +389,14 @@ pub enum Change {
     RotateSigningKey,
     /// Deleting a signing key at once.
     RevokeSigningKey,
+    /// Drafting an announcement, which needs no confirmation.
+    DraftAnnouncement,
+    /// Changing a draft announcement, which needs no confirmation.
+    EditAnnouncement,
+    /// Sending a draft announcement.
+    SendAnnouncement,
+    /// Deleting a draft announcement, which needs no confirmation.
+    DiscardAnnouncement,
 }
 
 impl Change {
@@ -411,6 +432,10 @@ impl Change {
             Self::CancelDelivery => "Cancel this delivery",
             Self::RotateSigningKey => "Rotate the signing key",
             Self::RevokeSigningKey => "Revoke this signing key",
+            Self::DraftAnnouncement => "New announcement",
+            Self::EditAnnouncement => "Edit the draft",
+            Self::SendAnnouncement => "Send this announcement",
+            Self::DiscardAnnouncement => "Discard this draft",
         }
     }
 
@@ -493,6 +518,14 @@ impl Change {
             Self::DeleteClient => {
                 "It stops working at once: its refresh tokens are revoked, and its secrets and the consents users gave it are removed. Its ID can never be registered again. This cannot be undone."
             }
+            Self::DraftAnnouncement => {
+                "Save it as a draft to check its email first, or send it now."
+            }
+            Self::EditAnnouncement => "Nothing is sent until you send it.",
+            Self::SendAnnouncement => {
+                "Emails it to each recipient with a primary verified address, and puts it in every recipient's inbox. Nobody can change or take it back once it is sent."
+            }
+            Self::DiscardAnnouncement => "It is deleted, and goes to nobody.",
         }
     }
 
@@ -525,6 +558,9 @@ impl Change {
             // Not "Cancel", which closes its dialog.
             Self::CancelDelivery => "Cancel delivery",
             Self::RotateSigningKey => "Rotate",
+            Self::DraftAnnouncement | Self::EditAnnouncement => "Save draft",
+            Self::SendAnnouncement => "Send",
+            Self::DiscardAnnouncement => "Discard",
         }
     }
 
@@ -557,8 +593,22 @@ impl Change {
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RotateSigningKey
-            | Self::RevokeSigningKey => self.button(),
+            | Self::RevokeSigningKey
+            | Self::DraftAnnouncement
+            | Self::EditAnnouncement
+            | Self::SendAnnouncement
+            | Self::DiscardAnnouncement => self.button(),
         }
+    }
+
+    /// Whether it needs the dashboard's recent passkey confirmation, which the
+    /// dashboard's script asks for in a dialog before its link or form goes on. A
+    /// draft announcement's own changes don't: a long text never outlasts one.
+    const fn confirms(self) -> bool {
+        !matches!(
+            self,
+            Self::DraftAnnouncement | Self::EditAnnouncement | Self::DiscardAnnouncement
+        )
     }
 
     /// Whether it takes something away, which its buttons show.
@@ -581,6 +631,7 @@ impl Change {
                 | Self::UnreserveHandle
                 | Self::CancelDelivery
                 | Self::RevokeSigningKey
+                | Self::DiscardAnnouncement
         )
     }
 
@@ -614,7 +665,11 @@ impl Change {
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RotateSigningKey
-            | Self::RevokeSigningKey => None,
+            | Self::RevokeSigningKey
+            | Self::DraftAnnouncement
+            | Self::EditAnnouncement
+            | Self::SendAnnouncement
+            | Self::DiscardAnnouncement => None,
         }
     }
 }
@@ -667,7 +722,7 @@ pub async fn dashboard_change<'a>(
             <p class="notice error" role="alert">(refusal)</p>
         }
         <section class="card">
-            <form class="stack" method="post" data-submit-once="">
+            <form class="stack" method="post" data-submit-once="" data-unconfirmed=(!change.confirms())>
                 (child)
                 reason_field(change: change, value: reason)
                 <div class="row actions">
@@ -730,7 +785,7 @@ pub(crate) async fn confirm<'a>(
                     <p><strong>(subject)</strong></p>
                 }
                 <p class="help">(change.description())</p>
-                <form method="post" action=(action.href.as_str()) data-submit-once="">
+                <form method="post" action=(action.href.as_str()) data-submit-once="" data-unconfirmed=(!change.confirms())>
                     (child)
                     reason_field(change: change)
                     <div class="row actions">
@@ -740,7 +795,7 @@ pub(crate) async fn confirm<'a>(
                 </form>
             </div>
         } else {
-            <a data-confirm-first="" class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
+            <a data-confirm-first=(change.confirms()) class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
         }
     })
 }

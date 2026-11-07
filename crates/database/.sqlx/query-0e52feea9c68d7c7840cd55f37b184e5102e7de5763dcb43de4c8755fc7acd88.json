@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id AS \"id: AnnouncementId\", a.subject, a.body, a.everyone,\n                    a.revision AS \"revision: Unsigned\",\n                    CASE WHEN a.everyone AND a.sent_at IS NULL\n                        THEN (SELECT count(*) FROM users)\n                        ELSE (SELECT count(*) FROM announcement_recipients r\n                            WHERE r.announcement_id = a.id)\n                    END AS \"recipients!: Unsigned\",\n                    a.created_at, a.updated_at, a.sent_at\n                FROM announcements a\n                WHERE a.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: AnnouncementId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "everyone",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "revision: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "recipients!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "sent_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "0e52feea9c68d7c7840cd55f37b184e5102e7de5763dcb43de4c8755fc7acd88"
+}

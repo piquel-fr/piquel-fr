@@ -141,6 +141,8 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
     let bystander = insert_user(&pool, "bystander").await;
     let client = format!("purge-{user}");
     let (session, code, family) = (SessionId::new(), TokenId::new(), TokenId::new());
+    // Announcements to the account alone, to it and the bystander, and to everyone.
+    let (alone, shared, everyone) = (TokenId::new(), TokenId::new(), TokenId::new());
     // Test-generated IDs only, so formatting them into the SQL is safe.
     sqlx::raw_sql(&format!(
         "INSERT INTO oidc_clients (id, display_name, allowed_scopes, allowed_audiences)
@@ -182,6 +184,13 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         ) VALUES ('{family}', '{user}', '{client}', '{session}', 'test', '[]', '{{}}', '{code}');
         INSERT INTO refresh_tokens (id, family_id, secret_digest, expires_at)
         VALUES (uuidv7(), '{family}', uuid_send('{family}'), now() + interval '1 day');
+        INSERT INTO announcements (id, subject, body, everyone, sent_at) VALUES
+            ('{alone}', 'About you', 'Text', FALSE, now()),
+            ('{shared}', 'About you both', 'Text', FALSE, now()),
+            ('{everyone}', 'About everyone', 'Text', TRUE, now());
+        INSERT INTO announcement_recipients (announcement_id, user_id) VALUES
+            ('{alone}', '{user}'), ('{shared}', '{user}'), ('{shared}', '{bystander}'),
+            ('{everyone}', '{user}'), ('{everyone}', '{bystander}');
         INSERT INTO deliveries (id, channel, destination, recipient, payload, status) VALUES
             (uuidv7(), 'email', 'account', to_jsonb('{user}'::text),
                 '{{\"type\": \"notification\", \"address\": \"{client}@example.com\"}}', 'succeeded'),
@@ -351,6 +360,15 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
     .await
     .expect("deliveries");
     assert_eq!(channels, ["backchannel_logout"]);
+
+    // An announcement to the account alone may concern it, so it went with it.
+    let kept: Vec<uuid::Uuid> =
+        sqlx::query_scalar("SELECT id FROM announcements WHERE id = ANY($1) ORDER BY id")
+            .bind([alone, shared, everyone].map(TokenId::as_uuid))
+            .fetch_all(&pool)
+            .await
+            .expect("announcements");
+    assert_eq!(kept, [shared.as_uuid(), everyone.as_uuid()]);
 }
 
 /// A request that stores personal data about the account while it is being

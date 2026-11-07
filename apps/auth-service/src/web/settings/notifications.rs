@@ -194,7 +194,7 @@ impl AccountPage for NotificationPage {
                 Crumb::Label(Tab::Notifications.label()),
                 settings::NOTIFICATIONS,
             )],
-            title: Crumb::Name(view.item.subject),
+            title: Crumb::Name(&view.item.subject),
             head: Child::default(),
             page,
         };

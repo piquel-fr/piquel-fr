@@ -28,6 +28,11 @@
 {%- when None %}
 {%- endmatch %}
 <p><a href="{{ page }}">Read it in your Piquel notifications</a></p>
+{%- when Content::Announcement { address: _, subject: _, body: _, paragraphs, everyone, inbox } %}
+{%- for paragraph in paragraphs %}
+<p>{% for line in paragraph %}{% if !loop.first %}<br>{% endif %}{{ line }}{% endfor %}</p>
+{%- endfor %}
+<p style="font-size:14px;color:#555555">{% if everyone %}Piquel sent this announcement to every account.{% else %}Piquel sent this announcement to your account.{% endif %} You can read it again in <a href="{{ inbox }}">your Piquel notifications</a>.</p>
 {%- endmatch %}
 <p>Piquel</p>
 </div>

@@ -49,14 +49,16 @@ just auth account alice picture remove --reason "Impersonates someone"
 - Accounts are named by handle, ID or a verified email of an active account.
 - `--output json` prints the views the dashboard shows for `user search`
   (`UserPage`), `user show` (`UserDetail`), `audit list` (`EventPage`), `client
-  list`, `invite list` and `admin list`, as defined in `piquel_common::admin`.
+  list`, `invite list`, `admin list`, `announcement list` and `announcement show`
+  (`AnnouncementDetail`), as defined in `piquel_common::admin`.
   `audit verify --output json` prints the verification.
 - `audit verify` and `audit prune` are described in
   [audit history](../security/audit-history.md). `audit prune` connects as
   the schema owner when `AUTH_DATABASE_OWNER_URL` is set, since auth's own role
   may not delete events.
 - `user disable|delete`, `user recover`, `user undo-recovery`, `session revoke-all`,
-  `admin revoke`, `client disable|suspend|delete`, `audit prune`, and `account …
+  `admin revoke`, `client disable|suspend|delete`, `audit prune`, `announcement
+  send`, and `account …
   passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -103,8 +105,9 @@ just auth account alice picture remove --reason "Impersonates someone"
 ## The admin dashboard
 
 Administrators manage accounts, their settings and security history, sessions,
-invitations, other administrators, handles, the delivery queue, signing keys and
-the origins approved for clients' pages to sign users in from the admin dashboard,
+invitations, other administrators, handles, announcements, the delivery queue,
+signing keys and the origins approved for clients' pages to sign users in from
+the admin dashboard,
 which auth serves on `AUTH_ADMIN_LISTENER` for the dashboard's origin,
 `AUTH_ADMIN_ORIGIN`, and which only a private route reaches.
 Its pages call `AdminService` in-process; there is no admin API.
@@ -186,9 +189,57 @@ with the built-in names, the accounts holding one, and the released handles, and
 reserves, unreserves and releases them. An account's Change handle page renames
 it with a reason, and may allow a reserved handle as `--allow-reserved` does.
 
+## Announcements
+
+Administrators tell accounts what they must know, such as a security incident or
+a change to the privacy policy, with an announcement: a subject and a plain text,
+to every account or to up to 1,000 chosen ones. Each recipient gets it as a
+notification in their inbox (see [Notifications](../architecture/notifications.md)),
+and by email at their primary verified address if they have one. It is not for
+support conversations, which happen elsewhere.
+
+On the dashboard:
+
+1. Open **Announcements** and select **New announcement**.
+2. Write the **Subject** and **Text**. Choose **Everyone**, or **These accounts**:
+   paste a list, one handle, verified email or account ID per line, or type into
+   the search box and select **Find**, then **Add** beside each account. Finding
+   and adding save nothing.
+3. Select **Save draft** to check the email first, or **Send** to send it now.
+   Saving a draft needs no passkey; sending asks for one. Sending can't be taken
+   back.
+
+A draft goes to nobody, and any administrator may change or discard it; its page
+shows the email exactly as it will be sent, and how many recipients it reaches.
+Sending sends only the revision that was saved or checked: a draft changed
+meanwhile, by another administrator say, is refused, to be checked again. Once
+sent, nothing, not even the database's own role, changes its text, and its page
+says how many recipients read it. One to everyone goes to every account at that
+moment, disabled ones and ones being deleted included, since Piquel still holds
+their data. Sending records an `announcement_sent` event with who sent it and to
+how many accounts.
+
+From the command line:
+
+```sh
+just auth announcement draft --subject "Security incident on 2 November" \
+    --body-file incident.txt --everyone          # or --to alice --to bob; prints the draft's ID
+just auth announcement show <id>                 # its text, recipients, and once sent, its emails
+just auth announcement edit <id> --subject "…" --body-file - --to alice
+just auth announcement send <id> --revision <n>  # the revision `show` printed; asks first
+just auth announcement discard <id>              # a draft only
+just auth announcement list
+```
+
+Its emails go out on the `announcement` delivery channel, apart from the `email`
+channel's verification and recovery links, so sending one to every account holds
+none of them back (see
+[the delivery queue](../architecture/delivery-queue.md#announcements)).
+
 ## Outbound deliveries
 
-Messages for other systems, such as back-channel logout tokens and email, wait in
+Messages for other systems, such as back-channel logout tokens, email and
+announcements, wait in
 a queue in the database until a worker sends them. Inspect and repair it with:
 
 ```sh

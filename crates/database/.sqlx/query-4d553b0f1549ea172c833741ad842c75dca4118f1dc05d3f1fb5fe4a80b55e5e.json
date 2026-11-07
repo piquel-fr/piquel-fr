@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO announcement_recipients (announcement_id, user_id)\n                SELECT $1, account FROM unnest($2::uuid[]) account\n                ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4d553b0f1549ea172c833741ad842c75dca4118f1dc05d3f1fb5fe4a80b55e5e"
+}

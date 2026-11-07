@@ -10,7 +10,10 @@
  * needs `data-form-time` left to show its form. Once too little is left:
  * - a click on a link marked `data-confirm-first`, to a change's page, opens the
  *   dialog, then follows the link;
- * - a form in the page's `<main>` posting, a change, opens the dialog, then posts.
+ * - a form in the page's `<main>` posting, a change, opens the dialog, then posts,
+ *   unless it is marked `data-unconfirmed`, as a change that needs no
+ *   confirmation, such as writing a draft announcement, is; a button of it marked
+ *   `data-confirms`, such as the draft's "Send", still asks.
  * The dialog's `data-passkey-confirm` button runs the passkey ceremony for the
  * dashboard's origin, which auth lists as a related origin of its RP ID: the
  * dialog's `data-confirmation-start` starts it, and its `data-confirmation-finish`
@@ -219,8 +222,10 @@ function wire(document) {
       confirmedForm = undefined;
       return;
     }
-    if (!form.closest('main') || confirmed(0)) return;
     const submitter = event.submitter;
+    const unconfirmed =
+      form.hasAttribute('data-unconfirmed') && !submitter?.hasAttribute('data-confirms');
+    if (!form.closest('main') || unconfirmed || confirmed(0)) return;
     const opened = confirm(() => {
       // Its submit event runs within the call, or not at all if it is invalid.
       confirmedForm = form;
