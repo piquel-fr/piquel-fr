@@ -40,7 +40,8 @@ too.
    access first. The key-encryption key can't be changed: it seals every key
    auth generates, including the one that replaces the revoked key. So someone
    who holds it and reads the database again can open the new key too.
-2. Find the active key, the one in state `active`:
+2. Find the key to revoke: the one in state `active`, or `primary` when only the
+   `signing-key` secret leaked:
 
    ```sh
    auth-service keys list
@@ -76,7 +77,7 @@ apps refresh and receive tokens signed by the new key.
 - `auth-service keys list` shows a new `active` key, and none of the revoked
   ones.
 - `https://auth.piquel.fr/.well-known/jwks.json` no longer lists their IDs.
-- An hour later, verifiers that respect `Cache-Control` have dropped them. Until
+- An hour after step 5, verifiers that respect `Cache-Control` have dropped them. Until
   then, whoever holds a revoked key can mint tokens that third parties accept,
   with any `exp`, so token lifetimes don't shorten this window. Verifiers that
   ignore `Cache-Control` may accept them longer.
@@ -151,8 +152,8 @@ For a leaked key, replace it at once instead:
 
    If the `signing-key` secret leaked with it, regenerate it too: it is the
    accepted key, `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`. It is also the RSA key
-   imported as `primary`, so if `auth-service keys list` still lists `primary`
-   unretired, revoke it as [a compromised signing key](#a-compromised-signing-key)
+   imported as `primary`, so if `auth-service keys list` still lists `primary`,
+   in any state, revoke it as [a compromised signing key](#a-compromised-signing-key)
    describes.
 2. Deploy production's own release again, as
    [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)
