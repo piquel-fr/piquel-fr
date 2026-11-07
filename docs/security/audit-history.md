@@ -201,11 +201,15 @@ auth-service audit verify --key preview-key.pub
 `--output json` prints the same result as JSON. Run from a trusted build, the
 CLI is the authoritative check: a compromised server could answer anything.
 
-Every verification is recorded as an `audit_chain_verified` event, with the
-operator and what it found. The admin dashboard's Audit tab shows the newest one
-and when it was made, beside the chain as stored, so loading it costs the same
-however long the history. It recomputes nothing until an administrator presses
-**Verify now**, which runs the same `AdminService` operation as the CLI, within
+Every verification is recorded as an `audit_chain_verified` event, with who
+made it and what it found. Auth also verifies the chain on its own: every ten
+minutes one replica checks the newest recorded verification, and once it is six
+hours old, whoever made it, verifies the whole chain with the dashboard's keys
+(below) and records it as the `audit_verification` job. The admin dashboard's
+Audit tab shows the newest one and when it was made, beside the chain as stored,
+so loading it costs the same however long the history. It recomputes nothing
+until an administrator presses **Verify now**, which runs the same
+`AdminService` operation as the CLI, within
 the dashboard's 30-second request deadline, so on a very long unpruned history
 use the CLI. It checks against the environment's committed key, or, on a
 preview, which commits none, against the server's own key, and says so. Someone

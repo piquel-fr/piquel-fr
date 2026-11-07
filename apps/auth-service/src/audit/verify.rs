@@ -6,7 +6,7 @@ use super::{
     AuditChain, AuditCheckpoint, AuditError, AuditKeys, AuditPage, AuditVerification, Chain,
     ChainBreak, ChainProblem, CheckpointText, Pruning, RecordedVerification, StoredChain,
 };
-use piquel_common::events::DomainEvent;
+use piquel_common::events::{DomainEvent, EventContext};
 use piquel_crypto::CryptoError;
 use piquel_repository::{
     AuditRepository, ChainLink, ChainedEvent, Checkpoint, DatabaseTransaction, RecordedEvent,
@@ -131,18 +131,39 @@ impl AuditChain {
     /// Returns [`AuditError`] if the database fails or an event cannot be
     /// canonicalized; a broken chain is a result, not an error.
     pub(crate) async fn verify(&self, keys: &AuditKeys) -> Result<AuditVerification, AuditError> {
-        let mut tx = self.database.begin().await?;
+        Self::verify_in(self.database.begin().await?, keys).await
+    }
+
+    /// [`Self::verify`], in `tx`, a transaction just begun, which it makes see one
+    /// snapshot and commits.
+    pub(super) async fn verify_in(
+        mut tx: DatabaseTransaction<'_>,
+        keys: &AuditKeys,
+    ) -> Result<AuditVerification, AuditError> {
         tx.audit().read_snapshot().await?;
-        let verification = Self::verify_in(&mut tx, keys).await?;
+        let verification = Self::verify_snapshot(&mut tx, keys).await?;
         tx.commit().await?;
         Ok(verification)
+    }
+
+    /// Records `verification`, made as `context`, in `tx`, and commits: the
+    /// dashboard's audit page shows the newest one recorded.
+    pub(crate) async fn record(
+        mut tx: DatabaseTransaction<'_>,
+        context: &EventContext,
+        verification: &AuditVerification,
+    ) -> Result<(), AuditError> {
+        let verified = DomainEvent::AuditChainVerified(verification.clone());
+        tx.record(context, None, verified).await?;
+        Ok(tx.commit().await?)
     }
 
     /// The dashboard's audit page: the chain as stored, the newest verification
     /// the audit log records, and up to [`Self::PAGE`] checkpoints after `after`,
     /// or after the anchor, each judged by that verification, all from one
     /// snapshot. It recomputes nothing, so it costs the same however long the
-    /// history: [`Self::verify`] runs only when an operator asks.
+    /// history: [`Self::verify`] runs only when an operator asks, or the
+    /// [`Verifier`](super::Verifier) job finds the newest verification too old.
     ///
     /// # Errors
     /// Returns [`AuditError`] if the database fails or the recorded verification
@@ -206,7 +227,7 @@ impl AuditChain {
     }
 
     /// [`Self::verify`], in a transaction that sees one snapshot.
-    async fn verify_in(
+    async fn verify_snapshot(
         tx: &mut DatabaseTransaction<'_>,
         keys: &AuditKeys,
     ) -> Result<AuditVerification, AuditError> {

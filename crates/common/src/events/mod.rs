@@ -399,8 +399,9 @@ pub enum DomainEvent {
         /// How many events were deleted.
         deleted: u64,
     },
-    /// The audit chain was verified, by `auth-service audit verify` or from the
-    /// dashboard, with what that found. It concerns no account.
+    /// The audit chain was verified, by `auth-service audit verify`, from the
+    /// dashboard or by auth's own verifier job, with what that found. It concerns
+    /// no account.
     AuditChainVerified(AuditVerification),
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
