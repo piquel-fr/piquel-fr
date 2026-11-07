@@ -7,8 +7,8 @@
 
 pub use crate::protocol::api::{Identity, Passkey};
 use crate::{
-    AccountStatus, AuthenticationMethod, ClientId, DeliveryId, EventId, Handle, PictureId,
-    SessionId, TokenId, TraceId, UserId,
+    AccountStatus, AnnouncementId, AuthenticationMethod, ClientId, DeliveryId, EventId, Handle,
+    PictureId, SessionId, TokenId, TraceId, UserId,
     clients::RelatedOrigin,
     protocol::{jwt::KeyId, oauth::ClientAuthMethod},
 };
@@ -406,6 +406,180 @@ pub struct Administrator {
 pub struct GrantAdministrator {
     /// The active account to make an administrator.
     pub user_id: UserId,
+}
+
+/// An announcement to accounts, such as a security incident or a change to the
+/// privacy policy: a draft until it is sent, and unchanged once it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Announcement {
+    /// Announcement ID.
+    pub id: AnnouncementId,
+    /// The email's subject, and its title in the recipients' settings.
+    pub subject: String,
+    /// Its text, as typed: paragraphs separated by blank lines.
+    pub body: String,
+    /// Whether it goes to every account, rather than to chosen ones.
+    pub everyone: bool,
+    /// Counts its draft's changes: sending names the one its sender checked.
+    pub revision: u64,
+    /// How many accounts it goes to: the chosen ones, or every account, as of
+    /// now for a draft and as of its sending once sent. Purged accounts no longer
+    /// count.
+    pub recipients: u64,
+    /// When it was drafted.
+    pub created_at: DateTime<Utc>,
+    /// When its draft last changed.
+    pub updated_at: DateTime<Utc>,
+    /// When it was sent; `None` while it is a draft.
+    pub sent_at: Option<DateTime<Utc>>,
+}
+
+impl Announcement {
+    /// The paragraphs of an announcement's text `body`, split at blank lines, each
+    /// a list of its lines, so every page and email shows the line breaks it was
+    /// written with.
+    #[must_use]
+    pub fn paragraphs(body: &str) -> Vec<Vec<&str>> {
+        let mut paragraphs = Vec::new();
+        let mut paragraph = Vec::new();
+        for line in body.lines().map(str::trim_end) {
+            if line.trim().is_empty() {
+                if !paragraph.is_empty() {
+                    paragraphs.push(std::mem::take(&mut paragraph));
+                }
+            } else {
+                paragraph.push(line);
+            }
+        }
+        if !paragraph.is_empty() {
+            paragraphs.push(paragraph);
+        }
+        paragraphs
+    }
+}
+
+/// One announcement, with who its email reaches.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnnouncementDetail {
+    /// The announcement.
+    pub announcement: Announcement,
+    /// The accounts it was chosen for, by handle; empty for one to everyone.
+    pub accounts: Vec<User>,
+    /// How many of its recipients have a primary verified address, which its
+    /// email goes to, as of now: the others only see it in their inbox.
+    pub mailed: u64,
+    /// How many of its recipients have read it in their inbox, once it is sent.
+    pub read: u64,
+    /// Its emails in the delivery queue, by status, once it is sent. The queue
+    /// deletes them 7 days after they succeed, 30 after they fail.
+    pub emails: AnnouncementEmails,
+}
+
+/// An announcement's emails in the delivery queue, by status.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnnouncementEmails {
+    /// Waiting for an attempt, or being attempted.
+    pub pending: u64,
+    /// Accepted by the relay.
+    pub succeeded: u64,
+    /// Refused for good, or past their retries.
+    pub failed: u64,
+    /// Cancelled by an operator.
+    pub cancelled: u64,
+}
+
+/// The form sending a draft: the revision its sender checked, so a change made
+/// meanwhile is not sent unseen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendAnnouncement {
+    /// The draft's revision, as its page showed it.
+    pub revision: u64,
+}
+
+/// Whom an announcement goes to, as its form chooses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnouncementAudience {
+    /// Every account, as of its sending.
+    #[default]
+    Everyone,
+    /// The accounts the form lists.
+    Accounts,
+}
+
+/// The form drafting an announcement, or changing a draft, as typed: the
+/// dashboard checks it, so a mistake is explained beside the form.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftAnnouncement {
+    /// The email's subject: one line, up to 150 characters.
+    #[serde(default)]
+    pub subject: String,
+    /// Its text: up to 20,000 characters, paragraphs separated by blank lines.
+    #[serde(default)]
+    pub body: String,
+    /// Whom it goes to.
+    #[serde(default)]
+    pub audience: AnnouncementAudience,
+    /// For [`AnnouncementAudience::Accounts`], the accounts, one per line, each by
+    /// handle, verified email or ID.
+    #[serde(default)]
+    pub accounts: String,
+    /// What the button pressed asks for.
+    #[serde(default)]
+    pub intent: DraftIntent,
+    /// The accounts search, as typed.
+    #[serde(default)]
+    pub find: String,
+    /// The handle a search result's button adds to the accounts.
+    #[serde(default)]
+    pub add: Option<String>,
+}
+
+impl DraftAnnouncement {
+    /// Whether the form only looks accounts up, or adds one: nothing is saved,
+    /// and it shows again as typed.
+    #[must_use]
+    pub const fn composes(&self) -> bool {
+        matches!(self.intent, DraftIntent::Find) || self.add.is_some()
+    }
+
+    /// Whether the accounts list `handle`, with or without its `@`.
+    #[must_use]
+    pub fn lists(&self, handle: &str) -> bool {
+        self.accounts
+            .lines()
+            .map(str::trim)
+            .any(|line| line.strip_prefix('@').unwrap_or(line) == handle)
+    }
+
+    /// Adds the account the pressed button names, by handle, to the accounts,
+    /// unless they list it already, and sends the announcement to the accounts.
+    pub fn add_chosen(&mut self) {
+        let Some(handle) = self.add.take() else {
+            return;
+        };
+        self.audience = AnnouncementAudience::Accounts;
+        if self.lists(&handle) {
+            return;
+        }
+        if !self.accounts.trim_end().is_empty() {
+            self.accounts = format!("{}\n", self.accounts.trim_end());
+        }
+        self.accounts.push_str(&handle);
+    }
+}
+
+/// What a draft's form asks for, by the button pressed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DraftIntent {
+    /// Save it as a draft.
+    #[default]
+    Save,
+    /// Save it, then send it as saved.
+    Send,
+    /// Look accounts up to add, saving nothing.
+    Find,
 }
 
 /// The result of verifying the audit chain, as `auth-service audit verify` prints

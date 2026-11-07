@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!: Unsigned\" FROM notifications\n                WHERE payload ->> 'kind' = 'announcement'\n                AND payload ->> 'announcement_id' = $1::uuid::text AND read_at IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!: Unsigned",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2848e3c34daf6adf76a47f35d11dacc756b95a2ce43a7c19cc9fb391e3bc8ba7"
+}

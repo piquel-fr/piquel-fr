@@ -578,3 +578,8 @@ img.avatar {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* An announcement to everyone has no accounts to find or list. */
+form:has(input[name='audience'][value='everyone']:checked) .chosen-accounts {
+  display: none;
+}

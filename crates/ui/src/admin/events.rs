@@ -409,6 +409,11 @@ impl EventRow<'_> {
                 })
                 .with("events checked", verification.events_checked)
             }
+            DomainEvent::AnnouncementSent {
+                announcement_id,
+                recipients,
+            } => Description::new(format!("Announcement sent to {recipients} accounts"))
+                .with("announcement", announcement_id),
             DomainEvent::Imported(audit) => {
                 Description::new(format!("{} ({})", audit.action(), audit.outcome()))
             }

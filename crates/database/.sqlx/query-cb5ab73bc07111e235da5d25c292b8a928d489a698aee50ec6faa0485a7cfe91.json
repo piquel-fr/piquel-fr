@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!: Unsigned\" FROM (\n                    SELECT FROM announcement_recipients r\n                    JOIN users u ON u.id = r.user_id\n                    WHERE r.announcement_id = $1\n                    FOR KEY SHARE\n                ) locked",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!: Unsigned",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cb5ab73bc07111e235da5d25c292b8a928d489a698aee50ec6faa0485a7cfe91"
+}

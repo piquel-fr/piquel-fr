@@ -427,6 +427,10 @@ uuid_id!(
     NotificationId,
     "Identifier of a notification in an account's inbox."
 );
+uuid_id!(
+    AnnouncementId,
+    "Identifier of an announcement administrators sent to accounts, by email and in their settings."
+);
 
 /// The W3C Trace Context ID of a request's trace: 16 bytes, not all zero, written
 /// as 32 lower-case hex digits. Telemetry assigns one to every request and job run;

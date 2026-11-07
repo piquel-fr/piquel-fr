@@ -5,6 +5,8 @@ mod access;
 /// Accounts: finding, viewing, disabling and deleting them, their sessions and
 /// their handles.
 mod accounts;
+/// Announcements to accounts: drafting, changing and sending them.
+mod announcements;
 /// OIDC clients and the origins approved for their pages.
 mod clients;
 /// The event log, the audit chain that signs it, and the deliveries events cause.

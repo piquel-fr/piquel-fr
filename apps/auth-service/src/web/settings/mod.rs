@@ -140,7 +140,7 @@ impl<'a> From<&'a NotificationItem> for InboxRow<'a> {
             id: item.id,
             created_at: item.created_at,
             read: item.read(),
-            subject: item.subject,
+            subject: &item.subject,
             body: &item.body,
         }
     }

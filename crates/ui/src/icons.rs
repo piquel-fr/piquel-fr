@@ -65,6 +65,8 @@ pub enum Icon {
     Send,
     /// Handles.
     At,
+    /// Announcements.
+    Megaphone,
 }
 
 impl Icon {
@@ -114,6 +116,10 @@ impl Icon {
             Self::SignOut => &["M6 2H3v12h3M10 11l3-3-3-3M13 8H6"],
             Self::Check => &["M3 8.5l3 3 7-7"],
             Self::Warning => &["M8 2l6.5 11.5h-13zM8 6.5v3.5M8 12.2v.3"],
+            Self::Megaphone => &[
+                "M2 6.5h2.5L11 3v10L4.5 9.5H2z",
+                "M4.5 9.5l1 4h2L7 10.2M13.5 6.5v3",
+            ],
             Self::Link => &[
                 "M6.5 9.5a3 3 0 004.2 0l2-2a3 3 0 00-4.2-4.2l-1 1M9.5 6.5a3 3 0 00-4.2 0l-2 2a3 3 0 004.2 4.2l1-1",
             ],

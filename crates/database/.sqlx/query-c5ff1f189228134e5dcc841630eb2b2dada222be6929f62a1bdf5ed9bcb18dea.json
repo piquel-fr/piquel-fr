@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!: Unsigned\"\n                FROM announcements a\n                JOIN user_emails e ON e.is_primary AND (\n                    (a.everyone AND a.sent_at IS NULL)\n                    OR EXISTS (SELECT FROM announcement_recipients r\n                        WHERE r.announcement_id = a.id AND r.user_id = e.user_id)\n                )\n                WHERE a.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!: Unsigned",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c5ff1f189228134e5dcc841630eb2b2dada222be6929f62a1bdf5ed9bcb18dea"
+}

@@ -18,6 +18,7 @@ use piquel_repository::StoredEvent;
 impl AdminOperation {
     /// A full command line that runs this operation, after `auth-service`. The
     /// match is exhaustive, so a new operation does not compile without one.
+    #[expect(clippy::too_many_lines, reason = "One arm per operation.")]
     const fn invocation(self) -> &'static [&'static str] {
         match self {
             Self::SearchUsers => &["user", "search", "ali"],
@@ -103,6 +104,30 @@ impl AdminOperation {
             Self::RotateSigningKey => &["keys", "rotate", "--now"],
             Self::RevokeSigningKey => &["keys", "revoke", "primary"],
             Self::ImportSigningKey => &["keys", "import", "file://key.pem"],
+            Self::ListAnnouncements => &["announcement", "list"],
+            Self::ViewAnnouncement => &["announcement", "show", AN_ID],
+            Self::DraftAnnouncement => &[
+                "announcement",
+                "draft",
+                "--subject",
+                "Incident",
+                "--body-file",
+                "incident.txt",
+                "--everyone",
+            ],
+            Self::EditAnnouncement => &[
+                "announcement",
+                "edit",
+                AN_ID,
+                "--subject",
+                "Incident",
+                "--body-file",
+                "-",
+                "--to",
+                "alice",
+            ],
+            Self::DiscardAnnouncement => &["announcement", "discard", AN_ID],
+            Self::SendAnnouncement => &["announcement", "send", AN_ID, "--revision", "1", "--yes"],
         }
     }
 }

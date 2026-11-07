@@ -312,6 +312,10 @@ fn event_kinds_match_their_serde_tags() {
             latest_checkpoint: None,
             keys: admin::VerificationKeys::Committed,
         }),
+        DomainEvent::AnnouncementSent {
+            announcement_id: AnnouncementId::new(),
+            recipients: 2,
+        },
         DomainEvent::Imported(imported),
     ];
     let mut kinds: Vec<&str> = events.iter().map(DomainEvent::kind).collect();
@@ -325,4 +329,19 @@ fn event_kinds_match_their_serde_tags() {
     kinds.sort_unstable();
     tags.sort_unstable();
     assert_eq!(kinds, tags, "one event per variant");
+}
+
+/// An announcement's text splits into paragraphs at blank lines, even ones of
+/// spaces, and keeps each paragraph's lines, without their trailing spaces.
+#[cfg(feature = "admin")]
+#[test]
+fn announcements_split_into_paragraphs_of_lines() {
+    assert_eq!(
+        admin::Announcement::paragraphs("\nFirst,  \nstill first.\n \n\n\tSecond.\n"),
+        [vec!["First,", "still first."], vec!["\tSecond."]]
+    );
+    assert_eq!(
+        admin::Announcement::paragraphs(" \n"),
+        Vec::<Vec<&str>>::new()
+    );
 }
