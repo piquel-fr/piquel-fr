@@ -39,7 +39,7 @@ pub use repositories::{
         NewDelivery, PendingAddress, PendingRecovery,
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
-    events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},
+    events::{EventCursor, EventFilter, RecordedEvent, StoredEvent, Verifications},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,

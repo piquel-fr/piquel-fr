@@ -17,6 +17,7 @@ use piquel_common::{
 use piquel_crypto::NoteKey;
 use piquel_repository::{
     Checkpoint, DatabaseTransaction, EventFilter, ExclusiveConnection, LockKey, Tamper,
+    Verifications,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -612,24 +613,34 @@ async fn the_audit_page_shows_the_newest_recorded_verification() {
 }
 
 /// The verifier job verifies the chain when no verification was recorded lately,
-/// and records what it found as itself, which then holds off its next pass.
+/// one with keys given with `--key` aside, and records what it found as itself,
+/// which then holds off its next pass.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_verifier_verifies_when_no_verification_is_recent() {
     let fixture = Fixture::sealed_six().await;
-    let verifier = Verifier::new((*fixture.keys).clone());
+    // The server's own keys: what it records with them holds off its next pass.
+    let keys = AuditKeys::for_server(&Fixture::origin(), fixture.audit.verifier()).expect("keys");
+    let verifier = Verifier::new(keys);
     let mut lock = fixture
         .database
         .try_exclusive(LockKey::AuditVerification)
         .await
         .expect("lock")
         .expect("no other test verifies");
-    let intact = fixture.verify().await;
+    AdminService::new(fixture.database.clone(), false)
+        .verify_audit_chain(&operator(), &fixture.keys)
+        .await
+        .expect("a verification with given keys");
+    let intact = AuditVerification {
+        keys: VerificationKeys::Uncommitted,
+        ..fixture.verify().await
+    };
     assert_eq!(verifier.pass(&mut lock).await.expect("pass"), Some(intact));
     let newest = fixture
         .database
         .events()
-        .newest_audit_verification()
+        .newest_audit_verification(Verifications::Any)
         .await
         .expect("newest")
         .expect("recorded");

@@ -344,10 +344,11 @@ auth-service audit verify                      # recompute the tamper-evident ch
 
 On the dashboard, the **Events** page lists events, and **Show views** adds the
 views. The **Audit** page shows the last verification, and **Verify now** runs
-another. Auth also verifies the chain on its own once no verification has been
-recorded for six hours, so the page always shows a recent one; `audit verify`
-and **Verify now** push the next automatic run back. A verification that finds
-the chain broken, other than one with `--key`, raises an alert (see
+another. Auth also verifies the chain on its own once no verification, other
+than one with `--key`, has been recorded for six hours, so the page always shows
+a recent one; `audit verify` and **Verify now** push the next automatic run
+back. A verification that finds the chain broken, other than one with `--key`,
+raises an alert (see
 [respond to an alert](#respond-to-an-alert)). See
 [audit history](../security/audit-history.md), which also explains pruning.
 
