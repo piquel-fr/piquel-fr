@@ -201,6 +201,7 @@ impl AdminService {
             .map_err(|error| match error {
                 DatabaseError::Conflict(_) => AdminError::EmailClaimed(error),
                 DatabaseError::NotFound
+                | DatabaseError::Refused(_)
                 | DatabaseError::Timeout(_)
                 | DatabaseError::Cancelled(_)
                 | DatabaseError::LockUnavailable(_)

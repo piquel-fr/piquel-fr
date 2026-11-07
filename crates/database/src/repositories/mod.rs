@@ -240,7 +240,7 @@ impl RepositoryExecutor<'_> {
     }
 
     /// Marks `span` failed when the query failed for a reason other than a
-    /// missing row or a conflict, which callers expect.
+    /// missing row, a conflict or a refused check, which callers expect.
     fn finish<T>(
         span: &tracing::Span,
         result: Result<T, crate::DatabaseError>,

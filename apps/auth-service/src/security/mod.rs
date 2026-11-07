@@ -149,7 +149,8 @@ impl From<DatabaseError> for ApiError {
                 Self::bad_request("This request has expired or is no longer available.")
             }
             DatabaseError::Conflict(_) => Self::conflict("This information is already in use."),
-            error @ (DatabaseError::Timeout(_)
+            error @ (DatabaseError::Refused(_)
+            | DatabaseError::Timeout(_)
             | DatabaseError::Cancelled(_)
             | DatabaseError::LockUnavailable(_)
             | DatabaseError::InvalidStoredData { .. }

@@ -106,7 +106,8 @@ impl PasskeyRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError::Conflict`] if the credential ID is already
-    /// registered, or another [`DatabaseError`] if the query fails.
+    /// registered, [`DatabaseError::Refused`] if the account already has 100
+    /// active passkeys, or another [`DatabaseError`] if the query fails.
     pub async fn insert(&mut self, input: &InsertPasskey) -> Result<StoredPasskey, DatabaseError> {
         run!(
             self,
