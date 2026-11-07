@@ -1,29 +1,36 @@
 # Step-up authentication
 
-Some actions need more than a signed-in user: a passkey rather than a social
-sign-in, or a sign-in from the last few minutes. An application asks for this
-with a step-up challenge ([RFC 9470]). Auth then signs the user in again, and
-the application retries the action with the new token.
+Ask for more than a signed-in user before a sensitive action: a passkey rather
+than a GitHub or Google sign-in, or a sign-in from the last few minutes. Your
+API answers with a step-up challenge ([RFC 9470]), your app signs the user in
+again, and retries the action with the new token.
 
-## Choosing a requirement
+## Before you start
+
+- You need an app that signs users in ([registering an app](register-an-app.md)),
+  and an API that validates its access tokens, with the Rust SDK (`piquel-auth`)
+  or the TypeScript SDK (`@piquel/auth`).
+
+## Choose a requirement
 
 A requirement has two optional parts.
 
 - **`acr`: how the user signed in.** Ask for `phr` when a phished or reused
-  social login must not be enough, for example to delete data or change who
-  can access it. `phr` means a passkey signed in or confirmed the session.
-  `urn:piquel:acr:social` is weaker, and `phr` also meets it.
-- **`max_age`: how recently.** Ask for a number of seconds when the user should
-  be present right now, for example before showing a recovery code or
-  exporting their data. Five minutes (`300`) is what auth's own settings use.
-  An API should ask for a positive age: by the time a token reaches it,
-  `auth_time` is already in the past. `0` only makes sense in an authorization
-  request, where it means "sign in again now".
+  GitHub or Google login must not be enough, for example to delete data or
+  change who can access it. `phr` means a passkey signed in or confirmed the
+  session. `urn:piquel:acr:social` is weaker, and `phr` also meets it.
+- **`max_age`: how recently, in seconds.** Ask for it when the user should be
+  present right now, for example before showing a recovery code or exporting
+  their data. Five minutes (`300`) is what Piquel's own settings use. An API
+  should ask for a positive age: by the time a token reaches it, `auth_time` is
+  already in the past.
 
-Most sensitive actions want both: `phr` within `300` seconds. A `max_age`
-alone accepts a recent social sign-in.
+Most sensitive actions want both: `phr` within `300` seconds. A `max_age` alone
+accepts a recent GitHub or Google sign-in.
+[Authentication claims](../reference/oidc.md#authentication-claims) lists what
+each value means.
 
-## Resource servers
+## Require it in your API
 
 Check the access token's `acr` and `auth_time` claims. When they fall short,
 answer `401` with a challenge naming the requirement:
@@ -34,9 +41,8 @@ WWW-Authenticate: Bearer error="insufficient_user_authentication",
   error_description="A passkey confirmation is required", acr_values="phr", max_age="300"
 ```
 
-In Rust, `piquel_auth::StepUpRequirement` holds the requirement, and
-`AccessToken::require_authentication` checks a validated token against it. Auth's
-own settings check the same requirement without the SDK's 30-second leeway.
+In Rust, `StepUpRequirement` holds the requirement, and
+`AccessToken::require_authentication` checks a validated token against it:
 
 ```rust
 use piquel_auth::StepUpRequirement;
@@ -50,41 +56,66 @@ if let Err(error) = token.require_authentication(DELETE_REPOSITORY, validator.no
 }
 ```
 
-Pass the issuer's clock, `ResourceValidator::now`. The SDK allows its 30-second
-leeway on `auth_time` itself, since `auth_time` comes from auth's clock. With the
-`axum` feature, the `RequireAuthentication<P>` extractor does all of this for an
+Pass the issuer's clock, `ResourceValidator::now`. With the `axum` feature, the
+`RequireAuthentication<P>` extractor does all of this for an
 `AuthenticationPolicy` `P` that names the requirement.
 
-## Clients
+In TypeScript, `token.requireAuthentication({ acr_values: 'phr', max_age: 300 })`
+throws an `AuthError` with the code `insufficient_user_authentication`, whose
+`toResponse()` answers with that challenge.
 
-When an API answers with `insufficient_user_authentication`:
+Both SDKs allow 30 seconds of clock difference on `auth_time`.
+
+## Step up in your app
+
+With the SDKs' login routes, a page asks for the requirement itself, and the
+SDK sends the user through Piquel and back to the same page:
+
+- In Rust, `user.require::<P>()?` on a `SignedIn` user, for a page, or
+  `user.step_up(requirement)` with the requirement an API's challenge named.
+- In TypeScript, `user.require(requirement)`, which returns `null` when the
+  sign-in already meets it and otherwise the response to send, or
+  `user.stepUp(challenge)` with a challenge `parseChallenge` read.
+
+The new sign-in must be the same user, and must meet the requirement. Asked
+again on the page's return, the SDKs answer `403` instead of looping.
+
+Without the login routes, when an API answers with
+`insufficient_user_authentication`:
 
 1. Start a new authorization request with the challenge's `acr_values` and
-   `max_age` (`StepUpRequirement::authorize_params` gives both). Keep the
-   user's place in `state`.
-2. Send the user through it interactively. With `prompt=none`, auth answers
-   `login_required` instead of asking for a passkey.
-3. Retry the action once with the new access token. If it fails the same
-   requirement again, show an error. Starting another authorization would loop.
+   `max_age` (`StepUpRequirement::authorize_params` gives both in Rust). Keep
+   the user's place in `state`, and send the current ID token as
+   `id_token_hint`, so Piquel issues tokens only for that account.
+2. Send the user through it interactively.
+3. Check that the new ID token's `sub` is unchanged, then retry the action once
+   with the new access token. If it fails the same requirement again, show an
+   error: starting another authorization would loop.
 
-Auth signs the user in again on the same session. The new tokens keep the same
-`sid` and carry a newer `auth_time`, so session-based logout and other
-applications are unaffected. That holds only if the user signs in as the same
-account: signing in as another one ends the previous session. Send the current
-ID token as `id_token_hint`, so auth issues tokens only for that account, and
-check that the new token's `sub` is unchanged before retrying.
+Piquel signs the user in again on the same session. The new tokens keep the
+same `sid` and carry a newer `auth_time`, so your app's other sessions and other
+apps are unaffected.
 
-Server-rendered apps should do this in their server hook: a challenge from an
-API becomes a redirect to the app's login route, with the requirement attached.
+## Check that it works
 
-## Auth's own pages
+1. Sign in to your app with GitHub or Google, or wait more than `max_age`
+   seconds after signing in.
+2. Try the protected action. Piquel asks for a passkey, only passkeys if you
+   asked for `phr`.
+3. After you confirm, the action succeeds without asking again.
 
-Auth's settings pages, developer console and account API use the session cookie,
-not bearer tokens, so they don't send RFC 9470 challenges. They check the same
-requirement. A form whose change needs it confirms the passkey on the page before
-it posts; a change refused without it, such as one posted after the confirmation
-lapsed, shows its form again asking for the passkey. The account API answers
-`403 {"error": "...", "code": "step_up_required", "max_age": 300}`, and auth's
-own pages then confirm the passkey and retry once.
+## Troubleshooting
+
+- **The authorization comes back with `login_required`.** The request sent
+  `prompt=none`, which never asks for a passkey. Step up interactively.
+- **It comes back with `unmet_authentication_requirements`.** The user signed
+  in, but can't reach `phr` for now, as with a passkey added by account recovery
+  until the recovery settles. Tell the user, rather than asking again.
+- **The retry still fails the requirement.** Check that your API and the SDK
+  agree on the requirement, and that your server's clock is synchronized
+  ([clock skew](troubleshooting.md#clock-skew)).
+- **The user came back as another account.** Signing in as another account ends
+  the previous session. Send `id_token_hint`, and refuse a token whose `sub`
+  changed; the SDKs' login routes already do.
 
 [RFC 9470]: https://www.rfc-editor.org/rfc/rfc9470
