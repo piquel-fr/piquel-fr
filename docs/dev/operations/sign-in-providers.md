@@ -50,8 +50,8 @@ another provider, see
    ```
 
 3. Deploy the environment: `piquelctl --timeout 30m env deploy piquel-fr staging`
-   for staging, or a [promotion](deploying.md#promote-to-production) for
-   production. Auth reads and checks the secret at startup only.
+   for staging, or [production's own release again](deploying.md#pick-up-a-changed-secret-in-production)
+   for production. Auth reads and checks the secret at startup only.
 4. Sign in with the provider on the environment, to check the new secret works.
 5. Delete the old secret with the provider.
 

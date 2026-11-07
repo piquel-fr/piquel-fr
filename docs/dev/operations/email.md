@@ -39,8 +39,9 @@ Piquel, so auth can still email people while it is broken.
    domain. Keep the old key for now.
 2. Store it under the same name, with the same access, as in
    [set up a sending domain](#set-up-a-sending-domain).
-3. Deploy the environments that mount it. For `resend-production`, promote
-   production (see [promote to production](deploying.md#promote-to-production)).
+3. Deploy the environments that mount it. For `resend-production`, deploy
+   production's own release again (see
+   [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)).
    For `resend-dev`, run `piquelctl --timeout 30m env deploy piquel-fr staging`;
    each preview uses the new key from its next deployment.
 4. Check that mail goes out: the newest deliveries in
