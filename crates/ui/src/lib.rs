@@ -105,7 +105,7 @@ pub use settings::{
     EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, InboxChange,
     InboxPage, InboxRow, InboxState, NotificationPage, NotificationState, OverviewLinks,
     PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
-    ProviderRow, SignInChange, SignInState, Tab, account_data, account_deleted, account_overview,
-    addresses, connected_apps, devices, history, inbox, notification, profile_settings,
-    sign_in_methods, verified, verify,
+    ProviderRow, SignInChange, SignInState, Tab, UnsubscribeStep, account_data, account_deleted,
+    account_overview, addresses, connected_apps, devices, history, inbox, notification,
+    profile_settings, sign_in_methods, unsubscribe, verified, verify,
 };

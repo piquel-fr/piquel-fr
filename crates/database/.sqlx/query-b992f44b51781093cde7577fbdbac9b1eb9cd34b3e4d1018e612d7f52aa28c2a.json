@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE announcements SET sent_at = now()\n                WHERE id = $1 AND sent_at IS NULL AND revision = $2\n                RETURNING everyone, subject, body",
+  "query": "UPDATE announcements SET sent_at = now()\n                WHERE id = $1 AND sent_at IS NULL AND revision = $2\n                RETURNING everyone, subject, body, essential",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "body",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "essential",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -28,8 +33,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "85ed02700cf28b4b2cc9e4bf47f661e92c4d04ff69a51ab7a71b801f11204525"
+  "hash": "b992f44b51781093cde7577fbdbac9b1eb9cd34b3e4d1018e612d7f52aa28c2a"
 }

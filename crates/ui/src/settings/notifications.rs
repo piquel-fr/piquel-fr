@@ -3,20 +3,24 @@
 
 use super::{Audience, HistoryRow, Holdings, timeline::report_form};
 use crate::{
-    form::{Precision, Query, change_form, open, time},
+    form::{Checkbox, Precision, Query, change_form, open, time},
     icons::{Icon, icon},
     layout::{announcement_text, page_head},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::NotificationId;
+use piquel_common::{
+    NotificationId,
+    notifications::{EmailCategory, NotificationPreference},
+};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{View, component, view},
 };
 
-/// A change the inbox posts, named by its `action` field. Read state changes
-/// nothing about the account, so it needs no passkey confirmation.
+/// A change the inbox posts, named by its `action` field. Read state and email
+/// preferences change nothing about the account, so they need no passkey
+/// confirmation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum InboxChange {
@@ -26,6 +30,14 @@ pub enum InboxChange {
     MarkUnread {
         /// The notification.
         id: NotificationId,
+    },
+    /// Turns a category's email on, or off.
+    Email {
+        /// The category.
+        category: EmailCategory,
+        /// Whether it is emailed from now on.
+        #[serde(default, skip_serializing_if = "Checkbox::is_off")]
+        email: Checkbox,
     },
 }
 
@@ -81,6 +93,9 @@ pub struct InboxPage<'a> {
     /// Who reads it: the owner opens each notification and marks them read; an
     /// administrator only reads them, which marks nothing.
     pub audience: Audience<'a>,
+    /// Whether each category's notifications are emailed, which only the owner
+    /// changes.
+    pub preferences: &'a [NotificationPreference],
 }
 
 impl InboxPage<'_> {
@@ -163,6 +178,109 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
                 <a class="button secondary" href=(page.page)>"Newest notifications"</a>
             }
         </div>
+        email_preferences(page: page)
+    })
+}
+
+/// Which categories of notifications are emailed, each with a button turning its
+/// email on or off for the owner, read-only for an administrator.
+#[component]
+async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
+    let owner = page.audience.owns();
+    Ok(view! {
+        <section class="card" aria-labelledby="email-heading">
+            <header>
+                <h2 id="email-heading">"Email"</h2>
+            </header>
+            <p class="help">
+                (if owner {
+                    "Piquel always emails you about your account itself, at your primary address: its addresses, sign-in methods and recovery, and what support changes."
+                } else {
+                    "Piquel always emails the owner about their account itself. Only the owner turns the rest on or off."
+                })
+            </p>
+            <ul class="list">
+                for preference in page.preferences {
+                    <li>
+                        <div class="text">
+                            <strong>(preference.category.label())</strong>
+                            " "
+                            if preference.email {
+                                <span class="badge ok">"Emailed"</span>
+                            } else {
+                                <span class="badge">"Not emailed"</span>
+                            }
+                            <small>(preference.category.description())</small>
+                        </div>
+                        if owner {
+                            change_form(
+                                action: page.page,
+                                change: InboxChange::Email {
+                                    category: preference.category,
+                                    email: Checkbox(!preference.email),
+                                },
+                                label: if preference.email { "Turn off" } else { "Turn on" },
+                                class: "secondary small",
+                                aria_label: format!(
+                                    "Turn {} emails for {}",
+                                    if preference.email { "off" } else { "on" },
+                                    preference.category.label(),
+                                ),
+                            )
+                        }
+                    </li>
+                }
+            </ul>
+        </section>
+    })
+}
+
+/// What the unsubscribe page shows.
+#[derive(Clone, Copy, Debug)]
+pub enum UnsubscribeStep<'a> {
+    /// Asks to turn announcements' email off, posting to `action`, the link
+    /// itself.
+    Confirm {
+        /// The link.
+        action: &'a str,
+    },
+    /// It is off; the inbox at `notifications` turns it back on.
+    Done {
+        /// The inbox.
+        notifications: &'a str,
+    },
+    /// The link is not one Piquel made, or not whole.
+    Invalid,
+}
+
+/// The page an announcement's unsubscribe link opens, at `step`.
+#[component]
+pub async fn unsubscribe(step: UnsubscribeStep<'_>) -> Result<impl View> {
+    Ok(view! {
+        match step {
+            UnsubscribeStep::Confirm { action } => {
+                <h1>"Stop announcement emails?"</h1>
+                <p class="lead">
+                    "You will still find Piquel’s announcements in your notifications, and receive by email those about a security incident or a change to the privacy policy or terms. Emails about your account itself keep coming."
+                </p>
+                <form method="post" action=(action) data-submit-once="true">
+                    <button type="submit">"Stop announcement emails"</button>
+                </form>
+            }
+            UnsubscribeStep::Done { notifications } => {
+                <h1>"Announcement emails stopped"</h1>
+                <p class="lead">
+                    "Piquel no longer emails you its announcements, except those about a security incident or a change to the privacy policy or terms. Turn them back on from your notifications."
+                </p>
+                <a class="button secondary" href=(notifications)>"Open your notifications"</a>
+            }
+            UnsubscribeStep::Invalid => {
+                <h1>"This link doesn’t work"</h1>
+                <p class="lead">
+                    "Open the link from the email again, or turn announcement emails off from your notifications."
+                </p>
+            }
+        }
     })
 }
 

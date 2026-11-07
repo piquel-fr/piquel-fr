@@ -5,7 +5,10 @@
 use super::{KindProbe, NotificationRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{EventId, NotificationId, UserId, notifications::Notification};
+use piquel_common::{
+    EventId, NotificationId, UserId,
+    notifications::{EmailCategory, Notification, NotificationPreference},
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -219,6 +222,70 @@ impl NotificationRepository<'_> {
         )?
         .rows_affected()
             == 1)
+    }
+
+    /// Whether `user_id` receives each category's email, its default, on, where
+    /// they never chose.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn preferences(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<NotificationPreference>, DatabaseError> {
+        let chosen = run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                NotificationPreference,
+                r#"SELECT category AS "category: EmailCategory", email
+                FROM notification_preferences WHERE user_id = $1"#,
+                user_id.as_uuid(),
+            )
+        )?;
+        Ok(EmailCategory::ALL
+            .into_iter()
+            .map(|category| NotificationPreference {
+                category,
+                email: chosen
+                    .iter()
+                    .find(|chosen| chosen.category == category)
+                    .is_none_or(|chosen| chosen.email),
+            })
+            .collect())
+    }
+
+    /// Sets `user_id`'s `preference`. Returns whether it changed what they
+    /// receive. Run it in a transaction holding the account's lock, so a
+    /// concurrent change waits and finds it already made.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if a query fails or a row is invalid.
+    pub async fn set_preference(
+        &mut self,
+        user_id: UserId,
+        preference: NotificationPreference,
+    ) -> Result<bool, DatabaseError> {
+        let current = self.preferences(user_id).await?;
+        if current.contains(&preference) {
+            return Ok(false);
+        }
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO notification_preferences (user_id, category, email)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, category)
+                DO UPDATE SET email = EXCLUDED.email, updated_at = now()",
+                user_id.as_uuid(),
+                preference.category.as_str(),
+                preference.email,
+            )
+        )?;
+        Ok(true)
     }
 
     /// Marks every unread notification of `user_id`'s read.

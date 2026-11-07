@@ -10,6 +10,7 @@ use chrono::Utc;
 use piquel_common::{
     EmailId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
+    notifications::{EmailCategory, NotificationPreference},
 };
 use sqlx::PgPool;
 
@@ -55,19 +56,20 @@ async fn account(pool: &PgPool, address: Option<&str>) -> UserId {
 /// the CLI would, and returns how many accounts it went to.
 async fn send(pool: &PgPool, id: AnnouncementId, revision: u64) -> Option<u64> {
     let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
-    let recipients = tx.announcements().send(id, revision).await.expect("send")?;
+    let sent = tx.announcements().send(id, revision).await.expect("send")?;
     let context = EventContext {
         actor: Actor::Anonymous,
         origin: RequestOrigin::default(),
         reason: None,
     };
-    let sent = DomainEvent::AnnouncementSent {
+    let event = DomainEvent::AnnouncementSent {
         announcement_id: id,
-        recipients,
+        recipients: sent.recipients,
+        essential: sent.essential,
     };
-    tx.record(&context, None, sent).await.expect("record");
+    tx.record(&context, None, event).await.expect("record");
     tx.commit().await.expect("commit");
-    Some(recipients)
+    Some(sent.recipients)
 }
 
 /// A draft to chosen accounts changes until it is sent, and then never again.
@@ -89,6 +91,7 @@ async fn drafts_change_until_sent_and_reach_only_their_recipients() {
             subject: "Draft",
             body: "Text",
             recipients: Recipients::Accounts(&[bystander]),
+            essential: false,
         })
         .await
         .expect("draft");
@@ -97,6 +100,7 @@ async fn drafts_change_until_sent_and_reach_only_their_recipients() {
         subject: "Incident",
         body: "What happened",
         recipients: Recipients::Accounts(&[mailed, unmailed, mailed]),
+        essential: false,
     };
     assert_eq!(
         tx.announcements()
@@ -183,6 +187,7 @@ async fn an_announcement_to_everyone_goes_to_every_account_once_sent() {
                 subject: "Privacy policy",
                 body: "It changed.",
                 recipients: Recipients::Everyone,
+                essential: false,
             })
             .await
             .expect("draft");
@@ -201,6 +206,64 @@ async fn an_announcement_to_everyone_goes_to_every_account_once_sent() {
         let received = inbox(&pool, user).await;
         assert!(received.contains(&id));
     }
+}
+
+/// A recipient who turned announcements' email off still gets each one in
+/// their inbox, but its email only when it is essential; turning it off after
+/// one was queued drops that email too.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn only_essential_announcements_email_those_who_turned_them_off() {
+    let pool = Database::test_pool().await;
+    let (on, off) = (
+        account(&pool, Some("example.com")).await,
+        account(&pool, Some("example.com")).await,
+    );
+    let mut notifications = NotificationRepository::from_pool(&pool);
+    let preference = |email| NotificationPreference {
+        category: EmailCategory::Announcements,
+        email,
+    };
+    assert_eq!(
+        notifications.preferences(off).await.expect("preferences"),
+        [preference(true)],
+        "on by default"
+    );
+    assert!(!notifications.set_preference(off, preference(true)).await.expect("set"));
+    assert!(notifications.set_preference(off, preference(false)).await.expect("set"));
+    assert!(!notifications.set_preference(off, preference(false)).await.expect("set"));
+    let pool = &pool;
+    let draft = |essential| async move {
+        let id = AnnouncementId::new();
+        let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+        tx.announcements()
+            .insert_draft(&DraftedAnnouncement {
+                id,
+                subject: "News",
+                body: "Something changed.",
+                recipients: Recipients::Accounts(&[on, off]),
+                essential,
+            })
+            .await
+            .expect("draft");
+        tx.commit().await.expect("commit");
+        send(pool, id, 1).await.expect("a draft");
+        id
+    };
+    let (news, essential) = (draft(false).await, draft(true).await);
+    let mut announcements = AnnouncementRepository::from_pool(pool);
+    assert_eq!(announcements.mailed(news).await.expect("mailed"), 1);
+    assert_eq!(announcements.mailed(essential).await.expect("mailed"), 2);
+    for (user, id, emails) in [(on, news, 1), (off, news, 0), (on, essential, 1), (off, essential, 1)] {
+        assert!(inbox(pool, user).await.contains(&id));
+        assert_eq!(deliveries_to(pool, user, id).await, emails);
+    }
+    let mut emails = EmailRepository::from_pool(pool);
+    assert!(emails.announcement(on, news).await.expect("email").is_some());
+    assert!(notifications.set_preference(on, preference(false)).await.expect("set"));
+    assert_eq!(emails.announcement(on, news).await.expect("email"), None);
+    let still = emails.announcement(on, essential).await.expect("email");
+    assert!(still.is_some_and(|email| email.essential));
 }
 
 /// Purges `user` in `tx` as auth's callers do: the administrator list locked,
@@ -255,6 +318,7 @@ async fn sending_and_purging_wait_for_each_other() {
                 subject: "Incident",
                 body: "What happened.",
                 recipients,
+                essential: false,
             })
             .await
             .expect("draft");
@@ -281,7 +345,12 @@ async fn sending_and_purging_wait_for_each_other() {
     );
     let chosen = draft(Recipients::Accounts(&[purged, kept])).await;
     let mut sending = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
-    let recipients = sending.announcements().send(chosen, 1).await.expect("send");
+    let sent = sending
+        .announcements()
+        .send(chosen, 1)
+        .await
+        .expect("send")
+        .expect("a draft");
     let context = EventContext {
         actor: Actor::Anonymous,
         origin: RequestOrigin::default(),
@@ -289,7 +358,8 @@ async fn sending_and_purging_wait_for_each_other() {
     };
     let event = DomainEvent::AnnouncementSent {
         announcement_id: chosen,
-        recipients: recipients.expect("a draft"),
+        recipients: sent.recipients,
+        essential: sent.essential,
     };
     sending.record(&context, None, event).await.expect("record");
     let purge = async {
@@ -327,6 +397,7 @@ async fn purging_the_last_recipients_at_once_deletes_the_text() {
             subject: "About you two",
             body: "Names them.",
             recipients: Recipients::Accounts(&[first, second]),
+            essential: false,
         })
         .await
         .expect("draft");
@@ -368,6 +439,7 @@ async fn a_draft_saved_during_its_accounts_purges_goes_with_them() {
             subject: "About you",
             body: "Names you.",
             recipients: Recipients::Accounts(&named),
+            essential: false,
         })
         .await
         .expect("draft");

@@ -14,7 +14,9 @@ use piquel_common::{
         AnnouncementAudience, AnnouncementDetail, DraftAnnouncement, DraftIntent, SendAnnouncement,
     },
 };
-use piquel_ui::{Action, AdminAnnouncementRow, Change, Crumb, DraftActions, FoundAccount, Query};
+use piquel_ui::{
+    Action, AdminAnnouncementRow, Change, Checkbox, Crumb, DraftActions, FoundAccount, Query,
+};
 use serde::de::IgnoredAny;
 use topcoat::{
     Error, Result,
@@ -163,7 +165,7 @@ pub(super) async fn send(cx: &Cx, form: Option<Form<SendAnnouncement>>) -> Resul
     } else {
         format!("{} chosen accounts", announcement.recipients)
     };
-    let mailed = &format!("{} with a primary verified address", detail.mailed);
+    let mailed = &format!("{} {}", detail.mailed, announcement.emailed());
     let revision = &checked.revision.to_string();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
@@ -173,6 +175,7 @@ pub(super) async fn send(cx: &Cx, form: Option<Form<SendAnnouncement>>) -> Resul
             <dl class="facts">
                 <dt>"Subject"</dt><dd>(announcement.subject.as_str())</dd>
                 <dt>"To"</dt><dd>(to.as_str())</dd>
+                <dt>"Essential"</dt><dd>(announcement.essentiality())</dd>
                 <dt>"Emailed to"</dt><dd>(mailed.as_str())</dd>
             </dl>
             <input type="hidden" name="revision" value=(revision.as_str())>
@@ -334,7 +337,7 @@ impl App {
                 refusal: refused,
             )
         };
-        Self::render(cx, StatusCode::OK, title, page).await
+        Box::pin(Self::render(cx, StatusCode::OK, title, page)).await
     }
 
     /// The form showing the draft `detail` as it is, its chosen accounts by
@@ -355,6 +358,7 @@ impl App {
                 .map(|user| user.handle.as_str())
                 .collect::<Vec<_>>()
                 .join("\n"),
+            essential: Checkbox(announcement.essential),
             ..DraftAnnouncement::default()
         }
     }

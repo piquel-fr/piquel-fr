@@ -7,7 +7,7 @@ sign in with.
 
 Your account lives at [auth.piquel.fr](https://auth.piquel.fr). Its settings,
 at `auth.piquel.fr/settings`, manage your passkeys, email addresses, devices,
-the apps you signed in to, your notifications and your data.
+the apps you signed in to, your [notifications](notifications.md) and your data.
 
 ![The settings overview: active sessions, connected apps, recent security activity and devices](../images/account/settings.png)
 

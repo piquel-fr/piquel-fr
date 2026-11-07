@@ -28,6 +28,9 @@ pub struct AnnouncementEmail {
     pub body: String,
     /// Whether it went to every account, rather than to chosen ones.
     pub everyone: bool,
+    /// Whether it is emailed whatever the recipient's preference, so its email
+    /// offers no unsubscribe.
+    pub essential: bool,
 }
 
 impl Channel for Announcement {
@@ -35,9 +38,11 @@ impl Channel for Announcement {
     type Recipient = UserId;
     type Payload = AnnouncementId;
 
-    /// One unordered delivery per recipient of the sent announcement with a
-    /// primary verified address. Its `destination` names the account and the
+    /// One unordered delivery per recipient of the sent announcement its email
+    /// goes to ([`mail_recipients`]). Its `destination` names the account and the
     /// announcement, never the address.
+    ///
+    /// [`mail_recipients`]: crate::repositories::AnnouncementRepository::mail_recipients
     async fn deliveries(
         event: &DomainEvent,
         _: Option<UserId>,
@@ -67,8 +72,9 @@ impl Channel for Announcement {
 
 impl EmailRepository<'_> {
     /// The email of the sent announcement `id` to `user_id`, at the account's
-    /// primary verified address now, if it still has one and is still a
-    /// recipient: a purge removes it.
+    /// primary verified address now, if it still has one, is still a recipient
+    /// (a purge removes it), and, unless it is essential, did not turn
+    /// announcements' email off since it was queued.
     ///
     /// # Errors
     ///
@@ -83,11 +89,13 @@ impl EmailRepository<'_> {
             fetch_optional,
             sqlx::query_as!(
                 AnnouncementEmail,
-                "SELECT e.normalized_email AS address, a.subject, a.body, a.everyone
+                r#"SELECT e.normalized_email AS address, a.subject, a.body, a.everyone,
+                    a.essential
                 FROM announcement_recipients r
                 JOIN announcements a ON a.id = r.announcement_id
                 JOIN user_emails e ON e.user_id = r.user_id AND e.is_primary
-                WHERE r.user_id = $1 AND r.announcement_id = $2 AND a.sent_at IS NOT NULL",
+                WHERE r.user_id = $1 AND r.announcement_id = $2 AND a.sent_at IS NOT NULL
+                    AND (a.essential OR announcements_emailed(r.user_id))"#,
                 user_id.as_uuid(),
                 id.as_uuid(),
             )

@@ -126,7 +126,8 @@ dashboard's recent confirmation, like any change, and names the draft's revision
 its page showed, so a draft changed meanwhile is checked again rather than sent
 unseen; its text never changes afterwards. Each recipient gets it as a
 notification in their inbox, and each with a primary verified address is emailed
-it (see
+it, unless they turned announcements' email off and it is not essential, which
+its sender chooses on the draft (see
 [the delivery queue](delivery-queue.md#announcements)).
 
 Administrators manage the administrator list too, but never their own rights or

@@ -11,8 +11,8 @@ probation sign-in.
   and backup state, no key material), linked identities, devices with their IP
   addresses, an administrator's dashboard sign-ins, consents, refresh grants, the
   apps the account registered, its recoveries (dates, state and the passkey each
-  enrolled, never a link), the security history and the notifications with when
-  each was read. It is read
+  enrolled, never a link), the security history, the notifications with when
+  each was read, and which categories of them are emailed. It is read
   from one snapshot, holds no secret or digest, nothing may cache it, and it is
   recorded in the history.
 - **Deleting** asks for the account's handle. The account becomes `deleting`, every

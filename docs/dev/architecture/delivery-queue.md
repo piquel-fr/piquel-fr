@@ -150,12 +150,17 @@ recovery link on the `email` channel; it shares the relay, templates and
 Sending an announcement writes a notification of kind `announcement`, with its
 subject and text, to each recipient's inbox, from the recipients it locked, and
 records `AnnouncementSent`, whose fan-out creates one unordered delivery per
-recipient with a primary verified address. These emails go out here, never on
-the `email` channel, and link the inbox. A delivery
+recipient with a primary verified address, leaving out, unless the announcement
+is essential, those who turned announcements' email off
+([email preferences](notifications.md#email-preferences)). These emails go out
+here, never on the `email` channel, and link the inbox; one that is not
+essential also carries the recipient's one-click unsubscribe link, in its body
+and its `List-Unsubscribe` headers. A delivery
 stores only the account's ID as its recipient and the announcement's ID as its
 payload, and its `destination` names both. The sender reads the account's primary
 verified address and the text when it sends, so an address changed meanwhile gets
-it, and an account with none left, or no longer a recipient, is skipped: the
+it, and an account with none left, no longer a recipient, or that turned
+announcements' email off since, unless it is essential, is skipped: the
 delivery succeeds without a send. The text of a sent announcement never changes,
 so every attempt sends the same message. `MAX_AGE` is three days, as an
 announcement stays worth reading through a long relay outage or a slow send to

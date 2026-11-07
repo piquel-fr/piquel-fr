@@ -340,21 +340,17 @@ pub(super) async fn notifications(cx: &Cx) -> Result<Response> {
     let shown = parse_query_params::<InboxState>(cx).unwrap_or_default();
     let viewer = App::viewer(user, admin);
     let account = &App::of(cx).account;
-    let notifications = account.notifications(&viewer, shown.before).await?;
-    let unread = account.unread_notifications(&viewer).await?;
-    let rows: Vec<_> = notifications
-        .notifications
-        .iter()
-        .map(InboxRow::from)
-        .collect();
+    let inbox = account.inbox(&viewer, shown.before).await?;
+    let rows: Vec<_> = inbox.page.notifications.iter().map(InboxRow::from).collect();
     let here = App::here(cx);
     let page = InboxPage {
         page: &here,
         item: None,
         shown,
-        next: notifications.next,
-        unread,
+        next: inbox.page.next,
+        unread: inbox.unread,
         audience: Audience::Administrator { reason: "" },
+        preferences: &inbox.preferences,
     };
     let rows = &rows;
     let section = view! { cx => piquel_ui::inbox(rows: rows, page: page) };

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT a.id AS \"id: AnnouncementId\", a.subject, a.body, a.everyone,\n                    a.revision AS \"revision: Unsigned\",\n                    CASE WHEN a.everyone AND a.sent_at IS NULL\n                        THEN (SELECT count(*) FROM users)\n                        ELSE (SELECT count(*) FROM announcement_recipients r\n                            WHERE r.announcement_id = a.id)\n                    END AS \"recipients!: Unsigned\",\n                    a.created_at, a.updated_at, a.sent_at\n                FROM announcements a\n                ORDER BY a.created_at DESC, a.id DESC\n                LIMIT $1",
+  "query": "SELECT a.id AS \"id: AnnouncementId\", a.subject, a.body, a.everyone,\n                    a.essential, a.revision AS \"revision: Unsigned\",\n                    CASE WHEN a.everyone AND a.sent_at IS NULL\n                        THEN (SELECT count(*) FROM users)\n                        ELSE (SELECT count(*) FROM announcement_recipients r\n                            WHERE r.announcement_id = a.id)\n                    END AS \"recipients!: Unsigned\",\n                    a.created_at, a.updated_at, a.sent_at\n                FROM announcements a\n                ORDER BY a.created_at DESC, a.id DESC\n                LIMIT $1",
   "describe": {
     "columns": [
       {
@@ -25,26 +25,31 @@
       },
       {
         "ordinal": 4,
+        "name": "essential",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
         "name": "revision: Unsigned",
         "type_info": "Int8"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "recipients!: Unsigned",
         "type_info": "Int8"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "sent_at",
         "type_info": "Timestamptz"
       }
@@ -60,11 +65,12 @@
       false,
       false,
       false,
+      false,
       null,
       false,
       false,
       true
     ]
   },
-  "hash": "03946eaecf2e7e9ac624bc2ec4753b5b91cec11a2cc37d0d89f2f8ab8e9696a4"
+  "hash": "6a92ba70364db72affe7dea0dc952679240e951601f4f1d38e53144ae1f37d03"
 }

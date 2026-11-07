@@ -523,7 +523,7 @@ impl Change {
             }
             Self::EditAnnouncement => "Nothing is sent until you send it.",
             Self::SendAnnouncement => {
-                "Emails it to each recipient with a primary verified address, and puts it in every recipient's inbox. Nobody can change or take it back once it is sent."
+                "Puts it in every recipient's inbox, and emails it to each with a primary verified address who receives announcements by email, or to all of them if it is essential. Nobody can change or take it back once it is sent."
             }
             Self::DiscardAnnouncement => "It is deleted, and goes to nobody.",
         }

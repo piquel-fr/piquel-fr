@@ -1,9 +1,11 @@
 //! `/settings/notifications`: the inbox, marking every notification read or one
-//! unread; and `/settings/notifications/{id}`, one notification, which opening
-//! marks read.
+//! unread, and turning a category's email on or off; `/settings/notifications/{id}`,
+//! one notification, which opening marks read; and `/unsubscribe`, which an
+//! announcement's email links to turn announcements' email off.
 
 use crate::{
     account::{AccountError, Owner},
+    notifications::Unsubscribe,
     routes::page::{self, settings},
     security::FETCH_SITE_HEADER,
     web::{
@@ -11,15 +13,20 @@ use crate::{
         account::{AccountPage, Applied, Framed, NoChange, Reader},
     },
 };
-use piquel_common::{NotificationId, notifications::Notification};
+use piquel_common::{
+    NotificationId,
+    notifications::{Notification, NotificationPreference},
+};
+use piquel_common::UserId;
 use piquel_ui::{
     Audience, Crumb, EmailRow, HistoryRow, Holdings, InboxChange, InboxPage, InboxRow, InboxState,
-    Messages, NotificationState, Section, Tab,
+    Messages, NotificationState, Section, Tab, Title, UnsubscribeStep,
 };
 use topcoat::{
-    context::Cx,
+    Error,
+    context::{Cx, app_context},
     router::{
-        Method, StatusCode, path_param,
+        Body, Method, StatusCode, parse_query_params, path_param,
         request::{headers, method, uri},
         response::Response,
     },
@@ -47,8 +54,8 @@ impl AccountPage for Inbox {
         InboxState::default()
     }
 
-    /// Marking read or unread goes back to the inbox's newest page, which shows
-    /// the change.
+    /// Marking read or unread, or turning a category's email on or off, goes
+    /// back to the inbox's newest page, which shows the change.
     async fn apply(
         web: &WebApplication,
         _: &Cx,
@@ -59,6 +66,15 @@ impl AccountPage for Inbox {
             InboxChange::ReadAll => web.account.read_all_notifications(&owner).await?,
             InboxChange::MarkUnread { id } => {
                 web.account.mark_notification(&owner, id, false).await?;
+            }
+            InboxChange::Email { category, email } => {
+                let preference = NotificationPreference {
+                    category,
+                    email: email.0,
+                };
+                web.account
+                    .set_notification_preference(&owner, preference)
+                    .await?;
             }
         }
         Ok(Applied::Opened(InboxState::default()))
@@ -72,22 +88,18 @@ impl AccountPage for Inbox {
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
         let viewer = reader.viewer();
-        let notifications = web.account.notifications(&viewer, shown.before).await?;
-        let unread = web.account.unread_notifications(&viewer).await?;
-        let rows: Vec<_> = notifications
-            .notifications
-            .iter()
-            .map(InboxRow::from)
-            .collect();
+        let inbox = web.account.inbox(&viewer, shown.before).await?;
+        let rows: Vec<_> = inbox.page.notifications.iter().map(InboxRow::from).collect();
         let page = InboxPage {
             page: settings::NOTIFICATIONS,
             item: Some(settings::NOTIFICATION),
             shown,
-            next: notifications.next,
-            unread,
+            next: inbox.page.next,
+            unread: inbox.unread,
             audience: Audience::Owner {
                 confirmed: reader.is_recent(),
             },
+            preferences: &inbox.preferences,
         };
         let page = Child::new(view! { cx => piquel_ui::inbox(rows: &rows, page: page) });
         web.settings_page(cx, Tab::Notifications, reader, outcome, &[], page)
@@ -199,5 +211,70 @@ impl AccountPage for NotificationPage {
             page,
         };
         web.account_page(cx, reader, outcome, &[], framed).await
+    }
+}
+
+/// The unsubscribe link of an announcement's email, which needs no session: its
+/// token, derived from the account's ID, is its credential.
+impl WebApplication {
+    /// `GET /unsubscribe`: asks to turn announcements' email off, for the account
+    /// the link names. Opening it changes nothing, so a mail scanner that follows
+    /// links does not unsubscribe anyone.
+    pub(in crate::web) async fn unsubscription(cx: &Cx) -> Result<Response, Failure> {
+        let web = app_context::<Self>(cx);
+        let here = uri(cx).to_string();
+        match web.unsubscriber(cx)? {
+            Some(_) => {
+                let step = UnsubscribeStep::Confirm { action: &here };
+                web.unsubscribe_page(cx, StatusCode::OK, step).await
+            }
+            None => {
+                web.unsubscribe_page(cx, StatusCode::NOT_FOUND, UnsubscribeStep::Invalid)
+                    .await
+            }
+        }
+    }
+
+    /// `POST /unsubscribe`: turns announcements' email off for the account the
+    /// link names, from the page's button, or in one click from a mail client
+    /// (RFC 8058). The body, `List-Unsubscribe=One-Click` from a client, is not
+    /// read: the link is all it needs.
+    pub(in crate::web) async fn unsubscribe(cx: &Cx, _: Body) -> Result<Response, Failure> {
+        let web = app_context::<Self>(cx);
+        let Some(user) = web.unsubscriber(cx)? else {
+            return web
+                .unsubscribe_page(cx, StatusCode::NOT_FOUND, UnsubscribeStep::Invalid)
+                .await;
+        };
+        web.account.unsubscribe(user, Self::context(cx)?).await?;
+        let step = UnsubscribeStep::Done {
+            notifications: settings::NOTIFICATIONS,
+        };
+        web.unsubscribe_page(cx, StatusCode::OK, step).await
+    }
+
+    /// The account the page's link names, if its token is the one Piquel made
+    /// for it.
+    fn unsubscriber(&self, cx: &Cx) -> Result<Option<UserId>, Failure> {
+        let Ok(link) = parse_query_params::<Unsubscribe>(cx) else {
+            return Ok(None);
+        };
+        Ok(self
+            .email
+            .unsubscribe_links
+            .check(&link)
+            .map_err(Error::from)?)
+    }
+
+    /// The unsubscribe page at `step`, at `status`.
+    async fn unsubscribe_page(
+        &self,
+        cx: &Cx,
+        status: StatusCode,
+        step: UnsubscribeStep<'_>,
+    ) -> Result<Response, Failure> {
+        let view = view! { cx => piquel_ui::unsubscribe(step: step) };
+        let title = Title::Unsubscribe.as_str();
+        Ok(self.render(cx, status, title, &[], view).await?)
     }
 }

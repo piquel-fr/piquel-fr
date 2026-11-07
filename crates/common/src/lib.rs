@@ -30,6 +30,9 @@ pub mod config;
 /// Conservative email normalization; see `docs/dev/security/email-normalization.md`.
 #[cfg(feature = "email")]
 pub mod email;
+/// What auth's HTML forms post that does not decode as itself, such as a
+/// checkbox.
+pub mod form;
 /// Typed domain events: what changed in an account, and who changed it.
 #[cfg(feature = "events")]
 pub mod events;

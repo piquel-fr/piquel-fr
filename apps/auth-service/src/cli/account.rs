@@ -15,6 +15,7 @@ use crate::{
 use clap::{Args, Subcommand};
 use piquel_common::{
     ClientId, EmailId, EventId, NotificationId, PasskeyId, Provider, SessionId, UserId,
+    notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
 };
 
@@ -85,6 +86,14 @@ enum Notifications {
     Show {
         /// The notification, as `list` shows it.
         notification: NotificationId,
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Show which categories of notifications the account receives by email.
+    /// Only the owner changes them, since turning one off could hide a notice
+    /// from them.
+    Preferences {
         /// Output format.
         #[command(flatten)]
         output: Output,
@@ -309,6 +318,7 @@ impl AccountCommand {
             Setting::Notifications(notifications) => match notifications {
                 Notifications::List { .. } => Op::ListNotifications,
                 Notifications::Show { .. } => Op::ViewNotification,
+                Notifications::Preferences { .. } => Op::ViewNotificationPreferences,
             },
         }
     }
@@ -524,8 +534,8 @@ impl AccountCommand {
 }
 
 impl Notifications {
-    /// Prints the inbox, or one notification, as `viewer` reads it, marking
-    /// nothing read.
+    /// Prints the inbox, one notification, or the email preferences, as `viewer`
+    /// reads them, marking nothing read.
     async fn run(self, account: &AccountService, viewer: &Viewer) -> Result<(), CliError> {
         match self {
             Self::List { before, output } => output.print(
@@ -539,8 +549,23 @@ impl Notifications {
                 &account.notification(viewer, notification).await?,
                 Self::print_one,
             )?,
+            Self::Preferences { output } => output.print(
+                &account.notification_preferences(viewer).await?[..],
+                Self::print_preferences,
+            )?,
         }
         Ok(())
+    }
+
+    /// Prints each category and whether it is emailed. Everything about the
+    /// account itself always is.
+    fn print_preferences(preferences: &[NotificationPreference]) {
+        println!("CATEGORY\tEMAIL");
+        println!("security\talways");
+        for preference in preferences {
+            let email = if preference.email { "on" } else { "off" };
+            println!("{}\t{email}", preference.category);
+        }
     }
 
     /// Prints one notification per line, and how to continue if there may be more.

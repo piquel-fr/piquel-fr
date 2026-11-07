@@ -2,7 +2,9 @@
 //! `AuthConfig` opens, the token digest keys, the link keys derived from them, and
 //! the audit checkpoint key.
 
-use crate::{AuditKeys, emails::VerificationKeys, recovery::RecoveryLinks};
+use crate::{
+    AuditKeys, emails::VerificationKeys, notifications::UnsubscribeLinks, recovery::RecoveryLinks,
+};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use piquel_common::config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable};
 use piquel_crypto::{CryptoError, Digest, NoteKey, NoteVerifier, Secret};
@@ -17,6 +19,9 @@ const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"piquel-email-verification-token-v1";
 /// Separates the recovery link key from every other use of a token digest key,
 /// as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
 const RECOVERY_LINK_CONTEXT: &[u8] = b"piquel-account-recovery-link-v1";
+/// Separates the unsubscribe link key from every other use of a token digest
+/// key, as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
+const UNSUBSCRIBE_LINK_CONTEXT: &[u8] = b"piquel-email-unsubscribe-link-v1";
 /// Fewest bytes a token digest key may have.
 const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
 /// Bytes of a token digest key's digest kept as its fingerprint.
@@ -34,7 +39,8 @@ piquel_common::variables! {
     pub(super) const KEY_ENCRYPTION_KEY = "AUTH_KEY_ENCRYPTION_KEY";
     /// Where to read the key under which refresh tokens, authorization codes and
     /// pending logins are stored as HMAC digests. Its raw bytes are the key, at
-    /// least 32 of them. Email verification and recovery links derive from it too.
+    /// least 32 of them. Email verification, recovery and unsubscribe links derive
+    /// from it too.
     /// Required. Replacing it at once ends every refresh token and every login in
     /// progress, so change it in two deploys.
     const TOKEN_DIGEST_KEY = "AUTH_TOKEN_DIGEST_KEY";
@@ -58,10 +64,13 @@ pub(crate) struct TokenDigestKey {
     verification: Secret,
     /// The recovery link key, derived and used like [`Self::verification`].
     recovery: Secret,
+    /// The unsubscribe link key, derived like [`Self::verification`]. Its links
+    /// are checked by deriving them again, under either key.
+    unsubscribe: Secret,
 }
 
 impl TokenDigestKey {
-    /// Derives the HMAC, verification and recovery link keys from
+    /// Derives the HMAC, verification, recovery and unsubscribe link keys from
     /// configured bytes, as the PEM key's always were.
     pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
         let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
@@ -72,6 +81,7 @@ impl TokenDigestKey {
             fingerprint,
             verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT)?,
             recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT)?,
+            unsubscribe: Secret::derive(bytes, UNSUBSCRIBE_LINK_CONTEXT)?,
         })
     }
 
@@ -97,6 +107,12 @@ impl TokenDigestKeys {
     /// rebuilt under the accepted one's for recoveries started before a change.
     pub(crate) fn recovery_links(&self, origin: &Origin) -> RecoveryLinks {
         RecoveryLinks::new(origin.clone(), self.link_keys(|key| &key.recovery))
+    }
+
+    /// Unsubscribe links on `origin`, under the current key's unsubscribe key,
+    /// and accepted under the accepted one's.
+    pub(crate) fn unsubscribe_links(&self, origin: &Origin) -> UnsubscribeLinks {
+        UnsubscribeLinks::new(origin.clone(), self.link_keys(|key| &key.unsubscribe))
     }
 
     /// Verification tokens under the current key's verification key, rebuilt
@@ -229,6 +245,21 @@ impl LinkKeys {
             }
         }
         Ok(None)
+    }
+
+    /// Whether a configured key derives `presented` for `id`, compared in
+    /// constant time: how a link whose token is stored nowhere is checked.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError`] if the HMAC provider fails.
+    pub(crate) fn derives(&self, id: &[u8; 16], presented: &Secret) -> Result<bool, CryptoError> {
+        let mut derived = false;
+        for key in self.0.iter() {
+            let token = Self::derive(key, id)?;
+            derived |= Digest::constant_time_eq(token.as_bytes(), presented.as_bytes());
+        }
+        Ok(derived)
     }
 
     /// The token `key` derives for `id`.
