@@ -32,6 +32,21 @@ pub(crate) struct TrustedCheckpoint {
     pub(crate) untrusted: Vec<Checkpoint>,
 }
 
+impl TrustedCheckpoint {
+    /// The lowest position the search read: the trusted checkpoint's, or the
+    /// oldest it passed over once it stopped at its limit, or 0 when it read every
+    /// checkpoint. No checkpoint stored below it can change what it finds.
+    pub(crate) fn floor(&self) -> u64 {
+        match (&self.trusted, self.untrusted.last()) {
+            (Some(trusted), _) => trusted.position,
+            (None, Some(oldest)) if self.untrusted.len() == AuditKeys::UNTRUSTED_LIMIT => {
+                oldest.position
+            }
+            (None, _) => 0,
+        }
+    }
+}
+
 impl AuditKeys {
     /// The most checkpoints that do not verify [`Self::newest_trusted`] passes over.
     const UNTRUSTED_LIMIT: usize = 1_000;
