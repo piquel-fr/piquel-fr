@@ -14,11 +14,11 @@ the apps you signed in to, your notifications and your data.
 ## Words this guide uses
 
 - **Handle:** your account's public name, such as `alice`. You sign in with it,
-  and apps receive it.
+  and apps receive it. See [your handle](account/profile.md#your-handle).
 - **Passkey:** a credential bound to your account. An account can have several,
   one per device or password manager.
-- **Session:** one device signed in to your account. Settings list your devices,
-  and you can sign any of them out.
+- **Session:** one device signed in to your account. Settings list your
+  [devices](account/devices.md), and you can sign any of them out.
 - **App:** a website or service that signs you in with your piquel.fr account.
   The first time, it asks for your consent, naming what it will receive. Apps
   Piquel runs itself don't ask.
@@ -26,7 +26,36 @@ the apps you signed in to, your notifications and your data.
   ![The consent page for an app called Notes, listing what it will receive](../images/apps/consent.png)
 - **Passkey confirmation:** sensitive changes, such as removing a passkey, need
   you to have used your passkey in the last five minutes. If you haven't, Piquel
-  asks for it again first, even though you are signed in.
+  asks for it again first, even though you are signed in. See
+  [passkey confirmation](account/signing-in.md#passkey-confirmation).
+
+## Your account
+
+- [Creating an account](account/creating-an-account.md) with a passkey, or
+  starting from GitHub or Google.
+- [Signing in](account/signing-in.md) and signing out.
+- [Sign-in methods](account/sign-in-methods.md): adding and removing passkeys,
+  and linking GitHub or Google.
+- [Profile](account/profile.md): your handle, display name and picture.
+- [Email addresses](account/email-addresses.md): adding and confirming
+  addresses, and choosing the one apps receive.
+- [Devices](account/devices.md): the browsers signed in to your account.
+- [Connected apps](account/connected-apps.md): the apps that can use your
+  account.
+- [Notifications](account/notifications.md): what Piquel tells you, in your
+  inbox and by email.
+- [Security history](account/security-history.md): every sign-in and change,
+  and reporting what wasn't you.
+
+## Your data
+
+- [Recover your account](your-data/recover-your-account.md) if you lost every
+  passkey.
+- [Undo a recovery](your-data/undo-a-recovery.md) that wasn't you.
+- [Download your data](your-data/export-your-data.md): everything Piquel keeps
+  about you, in one file.
+- [Delete your account](your-data/delete-your-account.md), and restore it
+  within 30 days.
 
 ## Building an app
 
