@@ -242,13 +242,14 @@ impl RepositoryExecutor<'_> {
     }
 
     /// Marks `span` failed when the query failed for a reason other than a
-    /// missing row, a conflict or a refused check, which callers expect.
+    /// missing row or a conflict, which callers expect.
     fn finish<T>(
         span: &tracing::Span,
         result: Result<T, crate::DatabaseError>,
     ) -> Result<T, crate::DatabaseError> {
         if let Err(
-            crate::DatabaseError::Timeout(_)
+            crate::DatabaseError::Refused(_)
+            | crate::DatabaseError::Timeout(_)
             | crate::DatabaseError::Cancelled(_)
             | crate::DatabaseError::LockUnavailable(_)
             | crate::DatabaseError::InvalidStoredData { .. }

@@ -33,12 +33,7 @@ impl PasskeyApplication {
     ) -> Result<Response, ApiError> {
         let recovery = app.service().open_recovery(&input.token).await?;
         let user_id = recovery.user_id();
-        let exclusions = app
-            .keys(user_id)
-            .await?
-            .iter()
-            .map(|key| key.cred_id().clone())
-            .collect();
+        let exclusions = app.exclusions(user_id).await?;
         let account = recovery.account();
         let (challenge, state) = app.registration(
             user_id,

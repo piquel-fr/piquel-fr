@@ -43,8 +43,8 @@ Binds pass the column's own type, e.g. `id.as_uuid()` or `kind.as_str()`, so the
 macro checks them too; JSONB binds use `Json(&value) as _`. A value its Rust type
 rejects, like a non-v7 ID or JSON outside the record's type, becomes
 `DatabaseError::InvalidStoredData` with the column index SQLx reports and the
-decoding error as its source. Uniqueness conflicts and deadline failures retain
-their sources too.
+decoding error as its source. Uniqueness conflicts, writes a check refused
+(`DatabaseError::Refused`) and deadline failures retain their sources too.
 
 Only `Database::provision` runs unchecked SQL: DDL takes no bind parameters, so a
 checked query renders its script (`src/connection/runtime_role.sql`) with
@@ -495,7 +495,8 @@ refuses one auth could not read back: a payload over 8 KiB or an actor over
 1 KiB of JSON, a number beyond a double's range, nesting 64 levels deep, or a text
 column over 256 bytes. Parsed JSON takes up to about 100 times its text, so a
 batch of 100 such events stays under about 95 MB. An account keeps at most 100
-active passkeys, so a recovery listing them all fits. It may update only
+active passkeys, so a recovery listing them all fits; a 101st fails as
+`DatabaseError::Refused`, and auth refuses to start registering it. It may update only
 `chain_position`, `chain_hash` and `chain_format` of `domain_events`, may only
 read and insert `audit_checkpoints`, and may only read `audit_anchor`. Triggers
 also reject updates and deletes of sealed events, a seal at any position but the

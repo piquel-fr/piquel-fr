@@ -11,8 +11,6 @@ type Source = Box<dyn StdError + Send + Sync>;
 const QUERY_CANCELED: &str = "57014";
 /// SQLSTATE of a lock not granted within the lock timeout.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
-/// SQLSTATE of a write a check refused.
-const CHECK_VIOLATION: &str = "23514";
 
 /// Stable, non-SQL database failure categories.
 #[derive(Debug, Error)]
@@ -23,9 +21,9 @@ pub enum DatabaseError {
     /// A uniqueness constraint rejected the write; its driver diagnostic is retained.
     #[error("the operation conflicts with existing data")]
     Conflict(#[source] Source),
-    /// A check refused the write, such as the trigger that keeps an account at
-    /// 100 active passkeys; its driver diagnostic is retained.
-    #[error("the operation breaks a limit the database enforces")]
+    /// A check constraint or trigger refused the write, such as the one keeping
+    /// an account at 100 active passkeys; its driver diagnostic is retained.
+    #[error("a database check refused the write")]
     Refused(#[source] Source),
     /// The database did not answer within the bounded wait.
     #[error("the database operation timed out")]
@@ -114,7 +112,7 @@ impl From<sqlx::Error> for DatabaseError {
             sqlx::Error::Database(error) if error.is_unique_violation() => {
                 Self::Conflict(Box::new(sqlx::Error::Database(error)))
             }
-            sqlx::Error::Database(error) if error.code().as_deref() == Some(CHECK_VIOLATION) => {
+            sqlx::Error::Database(error) if error.is_check_violation() => {
                 Self::Refused(Box::new(sqlx::Error::Database(error)))
             }
             sqlx::Error::Database(error) if error.code().as_deref() == Some(QUERY_CANCELED) => {
