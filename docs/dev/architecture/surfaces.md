@@ -1,7 +1,8 @@
 # Auth, account and admin surfaces
 
-piquel.fr identity spans three hosts. This is the target design; parts not built
-yet are marked *(planned)*.
+This page sets out what each of piquel.fr's three hosts serves, and how
+administrators act on accounts without signing in as their owners. Parts not
+built yet are marked *(planned)*.
 
 | Host | Serves | Used by |
 | --- | --- | --- |
@@ -50,9 +51,9 @@ them as `op_policy_uri` and `op_tos_uri`, which the SDK reads with the rest of t
 metadata.
 
 Every other path redirects to the same one on auth.piquel.fr, with a temporary
-`307` keeping the path and query; browsers keep the fragment. Links to
-`piquel.fr/settings/…` sent before the settings moved still open the same page.
-The security notices among them never expire, so the redirect stays until
+`307` keeping the path and query; browsers keep the fragment, so links to
+`piquel.fr/settings/…` open the same page on auth. The security notices among
+them never expire, so the redirect stays until
 piquel.fr serves pages of its own at those paths, such as public profiles
 *(planned)*.
 
@@ -90,6 +91,8 @@ The dashboard is no OIDC client. An administrator signs in by a handoff from aut
 The dashboard's session rests on the auth session: signing out of auth, revoking
 that session or replacing it ends it, and every request checks the
 administrator's rights again. Signing out of the dashboard ends only its session.
+[The admin dashboard's session](sessions.md#the-admin-dashboards-session) describes
+how it is stored.
 
 A change needs the dashboard's own passkey confirmation from the last five
 minutes, which a confirmation for auth's pages never gives. A page that changes

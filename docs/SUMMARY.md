@@ -57,7 +57,11 @@
 
 # Architecture
 
-- [Monorepo boundaries](dev/architecture/overview.md)
+- [Overview](dev/architecture/overview.md)
+- [Request lifecycle](dev/architecture/request-lifecycle.md)
+- [Sessions](dev/architecture/sessions.md)
+- [Authorization flow](dev/architecture/oidc.md)
+- [Keys](dev/architecture/keys.md)
 - [Auth, account and admin surfaces](dev/architecture/surfaces.md)
 - [PostgreSQL boundary](dev/architecture/database.md)
 - [Outbound delivery queue](dev/architecture/delivery-queue.md)

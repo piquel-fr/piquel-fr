@@ -1,5 +1,9 @@
 # Outbound delivery queue
 
+This page explains how auth sends messages to other systems without slowing a
+request: the queue's guarantees, the life of a delivery, its channels, and how
+to add one.
+
 Auth sends messages to other systems through a PostgreSQL queue. Two channels
 exist: back-channel logout tokens and email (see [Channels](#channels)). Other
 kinds, such as audit witness checkpoints, would join them as channels of their
@@ -206,6 +210,7 @@ The examples follow the back-channel logout channel
        async fn deliveries(
            event: &DomainEvent,
            _: Option<UserId>,
+           _: Option<&Notified>,
            tx: &mut DatabaseTransaction<'_>,
        ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
            let DomainEvent::SessionRevoked { session_id, .. } = event else {
@@ -219,7 +224,8 @@ The examples follow the back-channel logout channel
    ```
 
    `deliveries` runs inside the event's transaction, so it sees the rows as the
-   change left them. Copy everything a send needs; a send must not read rows that
+   change left them. It also receives the subject and the notification `record`
+   just wrote, if any, which the `email` channel sends. Copy everything a send needs; a send must not read rows that
    can change or disappear. Set `ordering_key` only if receivers need deliveries
    in order, such as a future provisioning channel's changes per client and user,
    since a failure blocks the key. Neither channel today sets one.
