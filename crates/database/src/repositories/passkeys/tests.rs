@@ -1,5 +1,5 @@
 use super::{InsertPasskey, PasskeyRepository};
-use crate::{Database, InsertUser, repositories::UserRepository};
+use crate::{Database, DatabaseError, InsertUser, repositories::UserRepository};
 use piquel_common::PasskeyId;
 
 /// A disabled account and an account whose only passkey is revoked list no
@@ -77,7 +77,10 @@ async fn accounts_keep_at_most_100_passkeys() {
     };
     let mut passkeys = PasskeyRepository::from_pool(&pool);
     assert!(
-        passkeys.insert(&another()).await.is_err(),
+        matches!(
+            passkeys.insert(&another()).await,
+            Err(DatabaseError::Refused(_))
+        ),
         "a 101st passkey"
     );
     sqlx::query(

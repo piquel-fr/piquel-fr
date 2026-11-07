@@ -178,6 +178,7 @@ impl OAuthError {
         match error {
             DatabaseError::NotFound => expected.reject_with(description, error),
             DatabaseError::Conflict(_)
+            | DatabaseError::Refused(_)
             | DatabaseError::Timeout(_)
             | DatabaseError::Cancelled(_)
             | DatabaseError::LockUnavailable(_)
