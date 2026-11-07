@@ -64,9 +64,25 @@ Any account can register apps in the developer console, at
 Connect, with the Rust SDK (`piquel-auth`), the TypeScript SDK
 (`@piquel/auth`), or any OpenID Connect library:
 
-- [Registering an app](apps/register-an-app.md) covers the console.
+- [How sign-in works](apps/how-sign-in-works.md) explains the concepts, and
+  which SDK to pick.
+- [Registering an app](apps/register-an-app.md) covers the console, then
+  [changing an app's settings](apps/app-settings.md) and
+  [rotating its secret](apps/rotate-secrets.md).
+- [Signing in with Rust](apps/sign-in-rust.md),
+  [signing in with TypeScript](apps/sign-in-typescript.md) and
+  [browser apps](apps/browser-apps.md) sign users in with the SDKs.
+- [Protecting an API](apps/protect-an-api.md) validates access tokens.
+- [Developing on your machine](apps/local-development.md) and
+  [deploying with piqueld](apps/deploying-with-piqueld.md) cover where your
+  app runs.
 - [Step-up authentication](apps/step-up.md) asks for a fresh passkey before a
   sensitive action.
 - [Back-channel logout](apps/back-channel-logout.md) ends an app's session when
   the user's session at auth ends.
+- [Troubleshooting sign-in](apps/troubleshooting.md) explains the errors your
+  app may see.
 - [OpenID Connect](reference/oidc.md) lists the endpoints, tokens and claims.
+
+Building with an AI coding agent? [Building with coding agents](agents/overview.md)
+explains what it can do for you, with skills to give it.
