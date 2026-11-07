@@ -24,9 +24,14 @@
 # Building apps
 
 - [Registering an app](user/apps/register-an-app.md)
+  - [Changing an app's settings](user/apps/app-settings.md)
+  - [Rotating a client secret](user/apps/rotate-secrets.md)
+- [Developing on your machine](user/apps/local-development.md)
+- [Deploying with piqueld](user/apps/deploying-with-piqueld.md)
 - [Step-up authentication](user/apps/step-up.md)
 - [Back-channel logout](user/apps/back-channel-logout.md)
 - [Passkey sign-in on your own pages](user/apps/passkey-sign-in.md)
+- [Troubleshooting sign-in](user/apps/troubleshooting.md)
 
 # Reference
 
