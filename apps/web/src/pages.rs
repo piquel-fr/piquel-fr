@@ -55,7 +55,7 @@ pub(crate) struct HomeLinks<'a> {
 }
 
 /// The developer documentation.
-const DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
+const DOCUMENTATION: &str = "https://docs.piquel.fr";
 
 /// The body of `page`; the homepage links auth's pages at `links`.
 #[component]
