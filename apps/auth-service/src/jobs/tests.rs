@@ -226,3 +226,63 @@ async fn failing_purges_raise_their_alert_until_none_fail() {
     assert_eq!(current().await, None);
     lock.release().await.expect("release");
 }
+
+/// The third cleanup pass in a row that runs out of time raises the alert of
+/// cleanup falling behind, the fourth marks it seen without raising another,
+/// and a pass that deletes everything due clears it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn cleanup_that_keeps_falling_behind_raises_its_alert() {
+    let database = crate::admin::tests::Harness::isolated().await.database;
+    let mut lock = database
+        .try_exclusive(LockKey::Cleanup)
+        .await
+        .expect("lock")
+        .expect("the cleanup lock");
+    let shutdown = Shutdown(watch::Sender::new(false).subscribe());
+    // Out of time as soon as it deletes anything.
+    let cleanup = Cleanup {
+        budget: Duration::ZERO,
+        overruns: AtomicU32::new(0),
+        raised: AtomicBool::new(false),
+    };
+    let current = async || {
+        let mut tx = database.begin().await.expect("transaction");
+        let current = tx
+            .alerts()
+            .current(AlertKind::CleanupBehind)
+            .await
+            .expect("current");
+        tx.commit().await.expect("commit");
+        current
+    };
+    let mut raised = None;
+    for pass in 1..=Cleanup::BEHIND_AFTER + 1 {
+        // An expired invitation, for the pass to delete.
+        let digest = UserId::new().as_uuid().as_u128().to_be_bytes().repeat(2);
+        let expired = Utc::now() - chrono::Duration::days(1);
+        database
+            .security()
+            .create_invitation(piquel_common::TokenId::new(), &digest, expired)
+            .await
+            .expect("invitation");
+        cleanup.run(&mut lock, &shutdown).await.expect("run");
+        let found = current().await;
+        match pass.cmp(&Cleanup::BEHIND_AFTER) {
+            std::cmp::Ordering::Less => assert_eq!(found, None, "after pass {pass}"),
+            std::cmp::Ordering::Equal => {
+                let found = found.expect("raised");
+                assert_eq!(found.alert, Some(Alert::CleanupBehind {}));
+                raised = Some(found);
+            }
+            std::cmp::Ordering::Greater => {
+                let (found, raised) = (found.expect("current"), raised.take().expect("raised"));
+                assert_eq!(found.id, raised.id, "not raised again");
+                assert!(found.seen_at > raised.seen_at, "seen again");
+            }
+        }
+    }
+    cleanup.run(&mut lock, &shutdown).await.expect("run");
+    assert_eq!(current().await, None);
+    lock.release().await.expect("release");
+}

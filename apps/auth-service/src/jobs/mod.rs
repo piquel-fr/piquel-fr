@@ -19,7 +19,10 @@ use piquel_repository::{
 };
 use piquel_telemetry::{Counter, Gauge, Histogram};
 use std::{
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
     time::Duration,
 };
 use tokio::{
@@ -95,7 +98,7 @@ impl Jobs {
         keys: &SigningKeys,
     ) -> Result<Self, StartupError> {
         let mut jobs = Self::new();
-        jobs.exclusive(Cleanup, database.clone());
+        jobs.exclusive(Cleanup::new(), database.clone());
         AccountPurge::observe();
         jobs.exclusive(AccountPurge, database.clone());
         jobs.exclusive(Sealer::new(&config.audit), database.clone());
@@ -268,15 +271,36 @@ static CLEANUP_OVERRUNS: Counter = Counter::new(
 /// one-minute budget runs out.
 /// Short pauses between batches keep cleanup from monopolizing the database under
 /// heavy churn.
-struct Cleanup;
+struct Cleanup {
+    /// Maximum time spent draining one pass.
+    budget: Duration,
+    /// Passes in a row on this replica that ran out of time.
+    overruns: AtomicU32,
+    /// Whether those passes raised [`Alert::CleanupBehind`].
+    raised: AtomicBool,
+}
 
 impl Cleanup {
-    /// Maximum time spent draining one pass.
+    /// Maximum time spent draining one pass in production.
     const BUDGET: Duration = Duration::from_mins(1);
+    /// Passes in a row that run out of time before the [`Alert::CleanupBehind`]
+    /// alert is raised: the next pass picks up what one leaves, so a single
+    /// burst is no problem.
+    const BEHIND_AFTER: u32 = 3;
+
     /// Pause between full batches, allowing live requests to use the pool.
     const PAUSE: Duration = Duration::from_millis(100);
     /// Per-table batch bound.
     const BATCH_SIZE: u32 = 1_000;
+
+    /// Cleanup with the production budget.
+    const fn new() -> Self {
+        Self {
+            budget: Self::BUDGET,
+            overruns: AtomicU32::new(0),
+            raised: AtomicBool::new(false),
+        }
+    }
 
     /// Runs one batch and returns how many rows it changed. Abandoning stuck keys
     /// needs a transaction of its own, so its locks last until it decides.
@@ -298,30 +322,78 @@ impl ExclusiveJob for Cleanup {
     const EVERY: Duration = Duration::from_mins(5);
     type Error = DatabaseError;
 
-    /// Stops after the current batch once shutdown is requested.
+    /// Stops after the current batch once shutdown is requested. The
+    /// [`Self::BEHIND_AFTER`]th pass in a row that runs out of time raises the
+    /// [`Alert::CleanupBehind`] alert, and one that deletes everything due clears
+    /// it.
     async fn run(
         &self,
         connection: &mut ExclusiveConnection,
         shutdown: &Shutdown,
     ) -> Result<(), DatabaseError> {
         let started = Instant::now();
-        let deadline = started + Self::BUDGET;
+        let deadline = started + self.budget;
+        // Whether the pass fell behind, unless shutdown stopped it.
+        let mut behind = Some(false);
         let mut changed = Self::batch(connection).await?;
         while changed > 0 {
             CLEANUP_CHANGED.add(changed, &());
             if Instant::now() >= deadline {
                 CLEANUP_OVERRUNS.add(1, &());
                 tracing::warn!("expired authentication state cleanup is falling behind");
+                behind = Some(true);
                 break;
             }
             tokio::select! {
                 biased;
-                () = shutdown.requested() => break,
+                () = shutdown.requested() => {
+                    behind = None;
+                    break;
+                },
                 () = tokio::time::sleep(Self::PAUSE) => {}
             }
             changed = Self::batch(connection).await?;
         }
         CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
+        let Some(behind) = behind else {
+            return Ok(());
+        };
+        let overruns = if behind {
+            self.overruns.fetch_add(1, Ordering::Relaxed) + 1
+        } else {
+            self.overruns.swap(0, Ordering::Relaxed);
+            self.raised.store(false, Ordering::Relaxed);
+            0
+        };
+        if behind && overruns < Self::BEHIND_AFTER {
+            return Ok(());
+        }
+        // A streak raises the alert once, then only marks it seen while it is
+        // current. Once another replica clears it, the streak starts over, so it
+        // takes as many passes again to raise it, and email every administrator,
+        // again.
+        let alert = Alert::CleanupBehind {};
+        let mut tx = connection.begin().await?;
+        let context = EventContext::system(JobName::Cleanup);
+        let mut alerts = Alerts::new(&mut tx, &context);
+        let holds = if !behind {
+            alerts.clear(AlertKind::CleanupBehind).await?;
+            false
+        } else if self.raised.load(Ordering::Relaxed) {
+            alerts.seen(&alert).await?
+        } else {
+            alerts.raise(alert).await?;
+            true
+        };
+        tx.commit().await?;
+        if holds {
+            self.raised.store(true, Ordering::Relaxed);
+        } else {
+            // A pass that fell behind and found the alert cleared starts the
+            // next streak.
+            self.overruns.store(u32::from(behind), Ordering::Relaxed);
+            self.raised.store(false, Ordering::Relaxed);
+        }
         Ok(())
     }
 }

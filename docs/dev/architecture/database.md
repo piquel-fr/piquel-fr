@@ -207,8 +207,14 @@ Every five minutes, one replica drains expired ephemeral state in bounded batche
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
 personal data older than 90 days; the events themselves are kept indefinitely. It
 also deletes finished deliveries: succeeded ones after 7 days, failed or cancelled
-ones after 30. Deleting a failed ordered delivery cancels the ones behind it. Jobs like it that must run
-on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
+ones after 30. Deleting a failed ordered delivery cancels the ones behind it.
+One pass that runs out of its minute is no problem, since the next picks up
+what it leaves, so only the third in a row on one replica raises the
+`cleanup_behind` alert. The passes after it only mark it seen, so it is raised
+once; if another replica clears it meanwhile, the streak starts over. A pass
+that deletes everything due clears it.
+
+Jobs like cleanup that must run on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
 session-level advisory lock on a dedicated connection outside the pool. The lock
 ends with that connection, even when the job is cancelled or the process dies, so
 it needs no lease or expiry, and a lock holder never returns to the pool. Give each
@@ -603,4 +609,5 @@ verification with keys given with `--key`, such as another environment's,
 changes neither.
 The sealer raises `checkpoint_refused` when it refuses to sign a checkpoint over
 events that no longer match, and clears it once they match again. The account
-purge raises `purges_failing` while accounts keep failing to be purged.
+purge raises `purges_failing` while accounts keep failing to be purged, and
+cleanup raises `cleanup_behind` once its passes keep running out of time.
