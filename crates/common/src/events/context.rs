@@ -87,7 +87,7 @@ pub enum JobName {
     /// The purge of accounts whose deletion grace period ended.
     AccountPurge,
     /// Signing key rotation. Nothing records it yet: a release may write a new
-    /// value only once the previous release reads it (see `database-crate.md`).
+    /// value only once the previous release reads it (see `docs/dev/architecture/database.md`).
     KeyRotation,
 }
 
