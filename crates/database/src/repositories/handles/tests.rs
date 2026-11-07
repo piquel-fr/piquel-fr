@@ -172,17 +172,17 @@ async fn locked_lookups_read_a_rename_they_waited_for() {
             .await
             .expect("rename")
     );
+    let mut tx = crate::DatabaseTransaction::new(pool.begin().await.expect("lookup transaction"));
+    let backend = Database::backend(&mut tx.inner).await;
     let lookup = tokio::spawn(async move {
-        let database = Database { pool };
-        let mut tx = database.begin().await.expect("lookup transaction");
         tx.users()
             .find_active_by_id_for_update(account.id)
             .await
             .expect("lookup")
             .expect("user")
     });
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert!(!lookup.is_finished(), "the lookup must wait for the rename");
+    // The lookup waits for the rename.
+    Database::wait_for_lock(&pool, backend).await;
     rename.commit().await.expect("commit");
     let user = lookup.await.expect("lookup task");
     assert_eq!((user.handle, user.profile_version), (renamed, 2));
