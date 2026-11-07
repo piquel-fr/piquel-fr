@@ -176,8 +176,9 @@ back-channel logout tokens.
 - A code is tried once, and every step re-reads the client's registration
   ([codes, tokens and consent](../../user/reference/oidc.md#codes-tokens-and-consent)).
 - Only the claims a client asked for, and the user consented to, are released.
-  Apps registered in the developer console are never trusted, so they always ask
-  for consent, and their scopes are limited ([OIDC clients](../operations/clients.md)).
+  Apps registered in the developer console are never trusted, so they ask for
+  consent unless the user already gave it for the scopes asked, and their scopes
+  are limited ([OIDC clients](../operations/clients.md)).
 - Browsers may call the token, revocation and UserInfo endpoints only from an
   enabled public client's redirect origins. Related-origin passkey sign-in is
   open only to the origins an administrator approved for a trusted client

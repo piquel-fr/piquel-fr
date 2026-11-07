@@ -109,8 +109,9 @@ link was used, cancelled or expired, or the account was disabled.
 Every notification an event gives its subject (`DomainEvent::notification`) is
 emailed too: `record` hands the notification it just wrote to the channels, and
 the `email` channel queues one `EmailMessage::Notification` per address that
-`Notification::addressees` names, each once. A recovery's notifications go to
-every verified address, so a compromised one cannot hide them; a replaced or
+`Notification::addressees` names, each once. A recovery that secured the account
+or added a passkey (`AccountSecured`, `Recovered`) goes to every verified
+address, so a compromised one cannot hide it; a replaced or
 removed address's to that address, so whoever reads it hears of it; any other to
 the primary verified address, and an account without one gets no email. The
 message copies the address and the notification, read in the event's

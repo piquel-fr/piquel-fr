@@ -61,8 +61,9 @@ channel (`crates/database/src/repositories/deliveries/email.rs`) receives the
 notification `record` just wrote and queues one `EmailMessage::Notification` per
 address `Notification::addressees` names, each once:
 
-- `Verified`: every verified address, for a recovery, so one compromised mailbox
-  cannot hide it.
+- `Verified`: every verified address, for `AccountSecured` and `Recovered`, so
+  one compromised mailbox cannot hide a recovery. An undone recovery
+  (`RecoveryUndone`) goes to the primary address, like the rest.
 - `Affected`: the address the event replaced or removed, so whoever reads that
   mailbox hears of it.
 - `Primary`: the primary verified address, for every other notification. An
