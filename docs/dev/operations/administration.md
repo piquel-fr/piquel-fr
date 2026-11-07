@@ -399,6 +399,7 @@ Each alert says what to look at. Auth raises these:
 | --- | --- | --- |
 | **The audit chain is broken** | a verification, other than one with `--key`, finds the chain broken | such a verification finds it intact |
 | **The audit chain's checkpoints stopped** | the sealer refuses to sign a checkpoint over events that no longer match | the sealer signs a checkpoint again |
+| **Accounts keep failing to be purged** | accounts whose deletion is due failed to be purged 3 times in a row | no account has |
 
 ## The command line
 

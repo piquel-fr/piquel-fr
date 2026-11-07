@@ -3,6 +3,7 @@
 
 use crate::{
     AuditKeys, AuthConfig, KeyStore, SigningKeys, StartupError,
+    alerts::Alerts,
     audit::{Sealer, Verifier},
     deletion::{DeletionError, Deletions},
     deliveries::{AnnouncementSender, BackchannelLogoutSender, EmailSender, OutboundClient},
@@ -10,6 +11,7 @@ use crate::{
 use chrono::Utc;
 use piquel_common::{
     AccountStatus, ErrorChain, UserId,
+    alerts::{Alert, AlertKind},
     events::{EventContext, JobName},
 };
 use piquel_repository::{
@@ -397,7 +399,8 @@ impl ExclusiveJob for AccountPurge {
 
     /// Stops after the current account once shutdown is requested. A failing
     /// account is logged and recorded, which delays its next attempt, so it cannot
-    /// hold back the others. Then counts the accounts that keep failing.
+    /// hold back the others. Then counts the accounts that keep failing, which
+    /// raise the [`Alert::PurgesFailing`] alert, or clear it once there are none.
     async fn run(
         &self,
         connection: &mut ExclusiveConnection,
@@ -424,7 +427,14 @@ impl ExclusiveJob for AccountPurge {
         *FAILING_PURGES_COUNT
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some((failing, Instant::now()));
-        Ok(())
+        let mut tx = connection.begin().await?;
+        let context = EventContext::system(JobName::AccountPurge);
+        let mut alerts = Alerts::new(&mut tx, &context);
+        match failing {
+            0 => alerts.clear(AlertKind::PurgesFailing).await,
+            _ => alerts.raise(Alert::PurgesFailing {}).await,
+        }?;
+        Ok(tx.commit().await?)
     }
 }
 
