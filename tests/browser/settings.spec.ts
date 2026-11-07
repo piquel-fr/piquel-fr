@@ -1,3 +1,8 @@
+/**
+ * Auth's own settings pages: passkeys, devices, an email link and signing out;
+ * removing a connected app, `browser-e2e`, which then asks for consent again; and
+ * reporting a change in the security history, which signs every other device out.
+ */
 import { expect, test } from '@playwright/test';
 import {
   addPasskeys,
