@@ -1,8 +1,8 @@
 /**
  * The Profile tab's dialogs, which open without a script: uploading a picture,
- * which the pages load under their Content-Security-Policy, changing the display
- * name and removing the picture; then the picture script's crop, where zooming
- * and dragging change the square the form sends.
+ * which the pages load under their Content-Security-Policy, and removing it; then
+ * the picture script's crop, where zooming and dragging change the square the
+ * form sends.
  */
 import { expect, test } from '@playwright/test';
 import { signedUp } from './helpers';
