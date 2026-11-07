@@ -88,7 +88,7 @@ watch, and fix forward if it fails: a retry reuses the new secret.
 
 | Secret | Mounted by | What it is | Regenerating it |
 | --- | --- | --- | --- |
-| `database-password` | `postgres`, the `migrate` job | the superuser `piquel`'s password | **don't**: the database keeps the password it stored when its volume was created, so the `migrate` job, which logs in with the new value, fails and every deployment after it stops. Change it inside PostgreSQL first (`ALTER ROLE piquel PASSWORD …` in the `postgres` container), then regenerate it |
+| `database-password` | `postgres`, the `migrate` job | the superuser `piquel`'s password | **never**: the database keeps the password it stored when its volume was created, so the `migrate` job, which logs in with the new value, fails and every deployment after it stops. Regenerating makes a value nobody sees, so it can't be set in PostgreSQL first either: there is no supported way to change this password yet |
 | `database-runtime-password` | `auth` | `piquel_auth`'s password | takes effect on the next deployment: see [the database runtime password](#the-database-runtime-password) |
 | `key-encryption-key` | `auth` | `AUTH_KEY_ENCRYPTION_KEY`, which seals the signing keys in the database | **never**: the stored signing keys would no longer open, and auth can't change it |
 | `token-digest-key` | `auth` | `AUTH_TOKEN_DIGEST_KEY` | ends every refresh token and login in progress under it: change it in two deployments instead, as [changing the token digest key](signing-keys.md#change-the-token-digest-key) describes |
