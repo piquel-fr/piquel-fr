@@ -286,8 +286,9 @@ tailnet, PostgreSQL, DNS, the tunnel, Grafana and Resend (see
 ### Check that it's over
 
 - `piquelctl --timeout 10m env wait piquel-fr production --ready routes`
-  returns: the deployment runs healthy, and every route answers. It follows the
-  newest deployment, so if that one failed and production rolled back, check
+  returns: the deployment runs healthy, and every route answers. It waits for
+  the deployment that was newest when it started, so if that one failed and
+  production rolled back, check
   `piquelctl env history piquel-fr production` and
   `piquelctl env url piquel-fr production` instead.
 - `https://auth.piquel.fr/health/ready` answers `204`.

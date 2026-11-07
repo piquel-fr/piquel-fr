@@ -182,8 +182,8 @@ Promoting staging would also ship whatever `main` built since, and is refused
 while staging's current deployment is unhealthy. To pick up the new value
 without new code, deploy production's own release again:
 
-1. Find the release production runs: the top entry of
-   `piquelctl env history piquel-fr production --limit 1`.
+1. Find the release production runs: the newest deployment that succeeded in
+   `piquelctl env history piquel-fr production --limit 10`.
 2. Check what it would deploy, and that it can use every secret:
 
    ```sh
