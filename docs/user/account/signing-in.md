@@ -56,7 +56,8 @@ five minutes, even though you are signed in:
 - adding or removing a passkey,
 - linking or unlinking GitHub or Google,
 - adding an email address, choosing your primary address, or removing one,
-- registering an app in the developer console, or changing one.
+- registering an app in the developer console, or changing one,
+- downloading your data or deleting your account.
 
 Signing in with a passkey counts. Signing in with GitHub or Google never does.
 

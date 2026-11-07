@@ -6,7 +6,7 @@ once, and is deleted for good 30 days later. Until then, you can restore it.
 ## Before you start
 
 - You need one of your account's passkeys: deleting needs a
-  [passkey confirmation](../introduction.md#words-this-guide-uses).
+  [passkey confirmation](../account/signing-in.md#passkey-confirmation).
 - [Download your data](export-your-data.md) first if you want to keep a copy.
   Once the account is deleted for good, nobody can get it back.
 - The apps you registered in the developer console are deleted with your

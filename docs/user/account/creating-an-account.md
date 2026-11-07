@@ -42,9 +42,10 @@ a passkey: it is created only once you add one.
 1. Open `auth.piquel.fr/login` and select **GitHub** or **Google**.
 2. Sign in at the provider and allow Piquel.
 3. Back on Piquel, **Create your account** says **Finish creating your account
-   to add GitHub sign-in** (or Google). Fill in **Handle**, **Passkey name**
-   and **Invitation** as above, then select **Create account with a
-   passkey**.
+   to add GitHub sign-in** (or Google). Fill in **Handle** and **Passkey name**
+   as above. The **Invitation** field is empty on this path: paste the code
+   from your invitation link, the part after `invitation=`. Then select
+   **Create account with a passkey**.
 
 The account is created with its passkey, and GitHub or Google is linked to it,
 so either signs you in from then on. Your profile picture there becomes your
@@ -71,7 +72,9 @@ can always get back in.
   can't use passkeys here. Open it in a browser that supports passkeys, with
   scripts allowed, over `https://`.
 - **"A valid invitation is required."** The **Invitation** field is empty or
-  wrong. Open the invitation link again rather than typing the invitation.
+  wrong. Open the invitation link again rather than typing the invitation. If
+  you started with GitHub or Google, paste only the code after `invitation=`
+  instead: opening the link would start a new account without them.
 - **"This invitation has expired or has already been used."** Ask for a new
   invitation.
 - **"This handle is taken. Choose another one."** Another account has it.

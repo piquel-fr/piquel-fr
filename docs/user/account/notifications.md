@@ -26,8 +26,9 @@ The sidebar's **Notifications** tab shows how many are unread, and the
 **Overview** says **You have an unread notification** while one is.
 
 1. Open **Notifications**. The newest come first, with unread ones in bold.
-2. Select one to open it. Opening it from your settings marks it read. A link
-   to it from another website, such as your webmail, doesn't.
+2. Select one to open it. Opening it from Piquel, a bookmark or the address
+   bar marks it read. A link to it on another website, such as your webmail,
+   doesn't.
 
 A notification's page says what happened and shows its entry in your
 [security history](security-history.md), with **This wasn’t me** if you can

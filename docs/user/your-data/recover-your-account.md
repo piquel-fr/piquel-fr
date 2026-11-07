@@ -18,7 +18,7 @@ that you lost every passkey.
 
 Support then checks that you own the account. They confirm your request through
 a channel that existed before you asked, and may ask you questions about your
-account. None of these is enough on its own:
+account. Support never accepts these as proof:
 
 - an email from the account's own address, which may be the one someone else
   took over,
@@ -48,7 +48,7 @@ passkey signs you in."
 ## The first 15 days
 
 For 15 days after you used the link, your new passkey signs you in, but it gives
-no [passkey confirmation](../introduction.md#words-this-guide-uses). So, until
+no [passkey confirmation](../account/signing-in.md#passkey-confirmation). So, until
 then, you can't:
 
 - add or remove a passkey,
@@ -88,7 +88,8 @@ to the app.
 ## If someone else had your account
 
 If someone else got into your account, for example with your stolen phone,
-support may secure it before recovering it. They:
+support may secure it before recovering it. Because this takes away your own
+way to undo the recovery, support asks for stronger proof first. They:
 
 - sign every device out,
 - remove every passkey, except those you tell them are yours,

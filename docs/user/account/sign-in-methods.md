@@ -50,6 +50,11 @@ Your last passkey can't be removed: its **Remove** button is disabled. Add
 another passkey first. A linked GitHub or Google account doesn't count, since
 only a passkey can authorize changes to your settings.
 
+While a [recovery](../your-data/recover-your-account.md) of your account can
+still be undone, only the recovery's own passkey can be removed: the others
+keep their power to [undo it](../your-data/undo-a-recovery.md), and their card
+says so.
+
 Where the browser supports it, your password manager then forgets the removed
 passkey, so it stops offering it. A security key keeps its copy, which no
 longer works.
