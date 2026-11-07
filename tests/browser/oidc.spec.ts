@@ -1,8 +1,9 @@
 /**
- * Signing in through `browser-e2e`, a public, untrusted client: consent, the `iss`
- * of each authorization response, a PKCE exchange, an ID token verified with the
- * JWKS, userinfo with no email claims for a passkey-only account, a replayed code
- * refused, `prompt=none` with remembered consent, and step-up re-authentication.
+ * Signing in through `browser-e2e`, a public, untrusted client whose pages the
+ * test serves, so its fetches to auth are cross-origin: consent, posted once on a
+ * double click, the `iss` of each authorization response, a PKCE exchange and
+ * userinfo, with no email claims for a passkey-only account, and `prompt=none`
+ * with remembered consent.
  */
 import { expect, test } from '@playwright/test';
 import { addPasskeys, authorization, authUrl, serveClient, signUp } from './helpers';
