@@ -188,6 +188,7 @@ impl PasskeyApplication {
             .await
             .map_err(|error| match error {
                 DatabaseError::Conflict(_) => PasskeyError::PasskeyAlreadyRegistered(error),
+                DatabaseError::Refused(_) => PasskeyError::TooManyPasskeys(error),
                 DatabaseError::NotFound
                 | DatabaseError::Timeout(_)
                 | DatabaseError::Cancelled(_)

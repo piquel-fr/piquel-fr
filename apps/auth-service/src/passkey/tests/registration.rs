@@ -140,3 +140,45 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
         );
     }
 }
+
+/// An account keeps at most 100 active passkeys: enrolling a 101st answers why,
+/// and stores nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn enrollment_refuses_a_101st_passkey() {
+    let mut fixture = Fixture::new().await;
+    let signed_in = fixture.login().await;
+    let (started, browser) = fixture
+        .start("/account/passkeys/enroll/start", &signed_in, json!({}))
+        .await;
+    // The fixture's passkey is the first of 100.
+    for _ in 1..100 {
+        fixture
+            .database()
+            .passkeys()
+            .insert(&crate::tests::unusable_passkey(fixture.user_id))
+            .await
+            .expect("passkey");
+    }
+    let credential = fixture.credential(&started);
+    let response = fixture
+        .request(
+            "/account/passkeys/enroll/finish",
+            Method::POST,
+            &format!("{signed_in}; {browser}"),
+            json!({"ceremony_id":started["ceremony_id"],"friendly_name":"One more","credential":credential}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        Fixture::json(response).await["error"],
+        "This account already has 100 passkeys. Remove one before adding another."
+    );
+    let active = fixture
+        .database()
+        .passkeys()
+        .list_active(fixture.user_id)
+        .await
+        .expect("passkeys");
+    assert_eq!(active.len(), 100);
+}
