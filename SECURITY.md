@@ -18,6 +18,8 @@ it. Please give us time to fix the issue before you disclose it.
 Only what is deployed and the SDKs' latest releases are supported: fixes go to
 `main`, then to production and the next SDK release.
 
-The contributor guide's [security pages](docs/dev/security/properties.md)
-describe what auth guarantees, and the designs behind account recovery and the
-audit history.
+The contributor guide's [threat model](docs/dev/security/threat-model.md) says
+what auth protects, from whom, and which risks it accepts. The pages beside it
+describe its [security boundaries](docs/dev/security/boundaries.md), what auth
+[guarantees](docs/dev/security/properties.md), and the designs behind account
+recovery and the audit history.

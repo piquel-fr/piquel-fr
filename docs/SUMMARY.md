@@ -73,6 +73,8 @@
 
 # Security
 
+- [Security boundaries](dev/security/boundaries.md)
+- [Threat model](dev/security/threat-model.md)
 - [Security properties](dev/security/properties.md)
 - [Account recovery](dev/security/account-recovery.md)
 - [Tamper-evident audit history](dev/security/audit-history.md)
