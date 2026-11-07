@@ -6,8 +6,10 @@ down, or mail stops going out. Each runbook says how you notice, what to do in
 order, and how to check that it's over.
 
 Run every `auth-service` command below in the affected environment, with
-`piquelctl app exec piquel-fr auth --env production -- auth-service …` (see
-[running auth-service commands](deploying.md#running-auth-service-commands)). The
+`piquelctl app exec -t piquel-fr auth --env production -- auth-service …` (see
+[running auth-service commands](deploying.md#running-auth-service-commands)).
+`-t` gives the command a terminal: most commands below ask you to confirm what
+they will change, and refuse without one. The
 command line needs only the database, so it works while auth's pages and the
 admin dashboard don't.
 
@@ -50,8 +52,9 @@ compromised when both may have leaked: a copy of the database and the
 4. Restart the first-party resource servers, which drops the keys they cached.
    The SDKs keep a known key until their cache expires.
 
-Every token the revoked keys signed stops working at auth, so their users sign
-in again through SSO.
+Every access and ID token the revoked keys signed stops working at auth,
+including as an `id_token_hint`. Refresh tokens don't depend on signing keys, so
+apps refresh and receive tokens signed by the new key.
 
 ### Check that it's over
 
@@ -92,7 +95,9 @@ with a code or a refresh token the app was given.
    **Secrets** tab in the developer console.
 
    The app can't sign anyone in until it has the new secret.
-3. Give the app the new secret, printed once, and deploy it.
+3. Give the app the new secret, printed once, and deploy it. For a client a
+   deployment registers with `client apply`, regenerate the deployment's secret
+   instead: its next `client apply` would register the leaked value again.
 4. If more than the secret leaked, such as the app's server with the refresh
    tokens it holds, also stop the client until the server is clean:
    `auth-service client disable <client-id>` stops it from authorizing and
@@ -101,8 +106,8 @@ with a code or a refresh token the app was given.
 
 ### Check that it's over
 
-- `auth-service client show <client-id>` lists one secret, the new one, without
-  an end.
+- `auth-service client show <client-id>` lists the new secret without an end,
+  and every earlier one ending at the rotation.
 - The app signs users in again.
 
 ## A leaked token digest key
@@ -134,20 +139,31 @@ For a leaked key, replace it at once instead:
    imported as `primary`, so if `auth-service keys list` still lists `primary`
    unretired, revoke it as [a compromised signing key](#a-compromised-signing-key)
    describes.
-2. Deploy production by [promoting](deploying.md#promote-to-production) staging.
-   For staging, run `piquelctl --timeout 30m env deploy piquel-fr staging`.
+2. Deploy production's own release again, as
+   [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)
+   describes. For staging, run `piquelctl --timeout 30m env deploy piquel-fr staging`.
 
    Every refresh token, code and login in progress under the old key ends, so
    apps sign their users in again. During the rollout, each release refuses what
    the other issued.
-3. Cancel the recovery links still in flight. List the recoveries of the last
-   day with `auth-service audit list --kind recovery_started`, and cancel each
-   unused link with `auth-service user undo-recovery <user> --reason "…"`. Start
-   it again with `auth-service user recover` once the new key is deployed: the
-   new link derives from the new key.
+3. Deal with the recoveries started in the last day, which
+   `auth-service audit list --kind recovery_started` lists. For each account,
+   run `auth-service user undo-recovery <user> --reason "…"` without `--yes`:
+   it prints the account's recent recoveries with where each stands, then asks
+   to confirm what it will do.
+   - If the recovery says **link not used**, and the prompt says it will cancel
+     its unused link, confirm. Start a new recovery with `auth-service user
+     recover` once the new key is deployed: the new link derives from it.
+   - If the link was used since the leak, the passkey it enrolled may be the
+     attacker's. Don't confirm: undoing removes that passkey and every session,
+     which locks the account holder out if the passkey was theirs. Ask the
+     holder, through a channel support already trusts, whether they used it,
+     and undo it only if they didn't.
 
 Links already sent are checked against the digest stored when they were made,
-so they keep working until they expire, within 24 hours.
+so they keep working until they expire, within 24 hours. That includes the
+links that confirm an email address: for that day, someone with the old key
+could confirm an address an account added but hasn't confirmed yet.
 
 ### Check that it's over
 
@@ -270,7 +286,10 @@ tailnet, PostgreSQL, DNS, the tunnel, Grafana and Resend (see
 ### Check that it's over
 
 - `piquelctl --timeout 10m env wait piquel-fr production --ready routes`
-  returns: the deployment runs healthy, and every route answers.
+  returns: the deployment runs healthy, and every route answers. It follows the
+  newest deployment, so if that one failed and production rolled back, check
+  `piquelctl env history piquel-fr production` and
+  `piquelctl env url piquel-fr production` instead.
 - `https://auth.piquel.fr/health/ready` answers `204`.
 - **Server errors** on the Auth overview dashboard are back to their usual
   level.

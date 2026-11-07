@@ -175,6 +175,30 @@ which stops the deployment before its rollout, so production keeps running what
 it ran. Once a migration has run since that release, restore a deployment
 instead.
 
+## Pick up a changed secret in production
+
+Production's services read a secret's new value at their next deployment.
+Promoting staging would also ship whatever `main` built since, and is refused
+while staging's current deployment is unhealthy. To pick up the new value
+without new code, deploy production's own release again:
+
+1. Find the release production runs: the top entry of
+   `piquelctl env history piquel-fr production --limit 1`.
+2. Check what it would deploy, and that it can use every secret:
+
+   ```sh
+   piquelctl --timeout 30m env promote piquel-fr production --release <release-id> --plan
+   ```
+
+3. Deploy it:
+
+   ```sh
+   piquelctl --timeout 30m env promote piquel-fr production --release <release-id>
+   ```
+
+It deploys the same images with production's current secrets. Its `migrate`
+job finds nothing to apply, since production already ran that release.
+
 ## Previews
 
 A preview is a disposable copy of piquel.fr, with its own database and secrets,
