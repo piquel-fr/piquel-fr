@@ -5,26 +5,28 @@
 # User guide
 
 - [Introduction](user/introduction.md)
-- [Creating an account](user/account/creating-an-account.md)
-- [Signing in](user/account/signing-in.md)
-- [Sign-in methods](user/account/sign-in-methods.md)
-- [Profile](user/account/profile.md)
-- [Email addresses](user/account/email-addresses.md)
-- [Devices](user/account/devices.md)
-- [Connected apps](user/account/connected-apps.md)
-- [Notifications](user/account/notifications.md)
-- [Security history](user/account/security-history.md)
+- [Your account]()
+  - [Creating an account](user/account/creating-an-account.md)
+  - [Signing in](user/account/signing-in.md)
+  - [Sign-in methods](user/account/sign-in-methods.md)
+  - [Profile](user/account/profile.md)
+  - [Email addresses](user/account/email-addresses.md)
+  - [Devices](user/account/devices.md)
+  - [Connected apps](user/account/connected-apps.md)
+  - [Notifications](user/account/notifications.md)
+  - [Security history](user/account/security-history.md)
+- [Your data]()
+  - [Recover your account](user/your-data/recover-your-account.md)
+  - [Undo a recovery](user/your-data/undo-a-recovery.md)
+  - [Download your data](user/your-data/export-your-data.md)
+  - [Delete your account](user/your-data/delete-your-account.md)
+
+# Building apps
+
 - [Registering an app](user/apps/register-an-app.md)
 - [Step-up authentication](user/apps/step-up.md)
 - [Back-channel logout](user/apps/back-channel-logout.md)
 - [Passkey sign-in on your own pages](user/apps/passkey-sign-in.md)
-
-# Your data
-
-- [Recover your account](user/your-data/recover-your-account.md)
-- [Undo a recovery](user/your-data/undo-a-recovery.md)
-- [Download your data](user/your-data/export-your-data.md)
-- [Delete your account](user/your-data/delete-your-account.md)
 
 # Reference
 

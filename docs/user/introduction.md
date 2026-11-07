@@ -47,7 +47,7 @@ the apps you signed in to, your notifications and your data.
 - [Security history](account/security-history.md): every sign-in and change,
   and reporting what wasn't you.
 
-## Your account and your data
+## Your data
 
 - [Recover your account](your-data/recover-your-account.md) if you lost every
   passkey.
