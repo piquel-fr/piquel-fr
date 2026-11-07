@@ -746,6 +746,60 @@ async fn forged_checkpoints_are_passed_over_and_not_served() {
     );
 }
 
+/// The latest checkpoint is verified once per checkpoint stored: a replica keeps
+/// serving the note it verified until another checkpoint is stored, and then
+/// serves the newest that verifies.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_latest_checkpoint_is_verified_once_per_checkpoint() {
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    let mut fixture = Fixture::sealed_six().await;
+    let router = fixture.router().await;
+    let latest = async |router: &axum::Router| {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get("/audit/checkpoints/latest")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        String::from_utf8(body.to_vec()).expect("UTF-8")
+    };
+    let verified = latest(&router).await;
+    assert!(
+        fixture
+            .keys
+            .verifiers
+            .open(&verified)
+            .expect("a signed note")
+            .contains("\nposition 6\n")
+    );
+    // No checkpoint was stored since, so the replica does not read it again, and
+    // a fresh one finds the one before.
+    fixture
+        .tamper(Tamper::EditCheckpointNote(6, "forged".into()))
+        .await;
+    assert_eq!(latest(&router).await, verified);
+    let fresh = latest(&fixture.router().await).await;
+    let text = fixture.keys.verifiers.open(&fresh).expect("a signed note");
+    assert!(text.contains("\nposition 3\n"), "{text}");
+    fixture.record(1).await;
+    fixture.seal().await;
+    let text = latest(&router).await;
+    let text = fixture.keys.verifiers.open(&text).expect("a signed note");
+    assert!(text.contains("\nposition 7\n"), "{text}");
+}
+
 /// A forged checkpoint over a tampered event, as someone with auth's database
 /// role can seal one, is never built on: the sealer recomputes from the newest
 /// checkpoint that verifies and refuses to sign the broken chain.
