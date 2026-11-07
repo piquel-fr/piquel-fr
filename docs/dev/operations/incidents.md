@@ -54,9 +54,11 @@ too.
    ```
 
    On the dashboard, select **Revoke** next to it on the **Signing keys** page.
-   The `next` and `retiring` keys go with it, since their private keys were
-   stored beside it, and a new key signs at once. A retired key's private key is
-   already erased.
+   When the revoked key was `active`, the `next` and `retiring` keys go with it,
+   since their private keys were stored beside it, and a new key signs at once.
+   Revoking any other key removes only that key. A retired key is never in the
+   key set auth publishes, so after revoking a retired `primary`, skip steps 4
+   and 5.
 4. Wait 15 minutes after the revocation. Each replica serves its own copy of
    the key set and reloads it each minute, and one that can't reload stops
    serving within 15 minutes, so only then has every replica dropped the
@@ -74,8 +76,8 @@ apps refresh and receive tokens signed by the new key.
 
 ### Check that it's over
 
-- `auth-service keys list` shows a new `active` key, and none of the revoked
-  ones.
+- `auth-service keys list` lists none of the revoked keys, and a new `active`
+  key if you revoked the active one.
 - `https://auth.piquel.fr/.well-known/jwks.json` no longer lists their IDs.
 - An hour after step 5, verifiers that respect `Cache-Control` have dropped them. Until
   then, whoever holds a revoked key can mint tokens that third parties accept,
