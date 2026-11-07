@@ -226,3 +226,58 @@ async fn failing_purges_raise_their_alert_until_none_fail() {
     assert_eq!(current().await, None);
     lock.release().await.expect("release");
 }
+
+/// The third cleanup pass in a row that runs out of time raises the alert of
+/// cleanup falling behind, and a pass that deletes everything due clears it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn cleanup_that_keeps_falling_behind_raises_its_alert() {
+    let database = crate::admin::tests::Harness::isolated().await.database;
+    // The database crate's lock tests take the same lock, on the same cluster.
+    let mut lock = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(lock) = database
+                .try_exclusive(LockKey::Cleanup)
+                .await
+                .expect("lock")
+            {
+                return lock;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the cleanup lock");
+    let shutdown = Shutdown(watch::Sender::new(false).subscribe());
+    // Out of time as soon as it deletes anything.
+    let cleanup = Cleanup {
+        budget: Duration::ZERO,
+        overruns: AtomicU32::new(0),
+    };
+    let current = async || {
+        let mut tx = database.begin().await.expect("transaction");
+        let current = tx
+            .alerts()
+            .current(AlertKind::CleanupBehind)
+            .await
+            .expect("current");
+        tx.commit().await.expect("commit");
+        current.and_then(|current| current.alert)
+    };
+    for pass in 1..=Cleanup::BEHIND_AFTER {
+        // An expired invitation, for the pass to delete.
+        let digest = UserId::new().as_uuid().as_u128().to_be_bytes().repeat(2);
+        let expired = Utc::now() - chrono::Duration::days(1);
+        database
+            .security()
+            .create_invitation(piquel_common::TokenId::new(), &digest, expired)
+            .await
+            .expect("invitation");
+        cleanup.run(&mut lock, &shutdown).await.expect("run");
+        let raised = (pass == Cleanup::BEHIND_AFTER).then_some(Alert::CleanupBehind {});
+        assert_eq!(current().await, raised, "after pass {pass}");
+    }
+    cleanup.run(&mut lock, &shutdown).await.expect("run");
+    assert_eq!(current().await, None);
+    lock.release().await.expect("release");
+}
