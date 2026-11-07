@@ -99,11 +99,12 @@ impl Jobs {
     ) -> Result<Self, StartupError> {
         let mut jobs = Self::new();
         jobs.exclusive(Cleanup::new(), database.clone());
-        AccountPurge::observe();
+        FAILING_PURGES.observe();
         jobs.exclusive(AccountPurge, database.clone());
         jobs.exclusive(Sealer::new(&config.audit), database.clone());
         let audit_keys = AuditKeys::for_server(&config.passkey.origin, config.audit.verifier())
             .map_err(StartupError::AuditKeys)?;
+        Verifier::observe();
         jobs.exclusive(Verifier::new(audit_keys), database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
         jobs.spawn(|shutdown| store.run(reloaded, shutdown));
@@ -372,15 +373,57 @@ impl ExclusiveJob for Cleanup {
     }
 }
 
-/// Accounts whose purge keeps failing, from [`FAILING_PURGES_COUNT`].
-static FAILING_PURGES: Gauge = Gauge::new(
-    "piquel.auth.account_purge.failing",
-    "{account}",
-    "Accounts scheduled for deletion whose purge failed at least 3 times in a row.",
+/// A count the replica running a periodic job takes after each run, which its
+/// gauge reports. Every replica runs the job in turn, so each reports the count
+/// of its own latest run, at most one run older than the newest; one whose count
+/// is older than two runs, because it stopped running the job, reports none.
+/// Alerts read the minimum across replicas, or wait one run, before taking a
+/// count as current.
+pub(crate) struct JobCount {
+    /// The gauge reporting it.
+    gauge: Gauge,
+    /// How often the job runs.
+    every: Duration,
+    /// The latest count on this replica, and when it was taken.
+    counted: Mutex<Option<(u64, Instant)>>,
+}
+
+impl JobCount {
+    /// A count `gauge` reports, of a job that runs `every` so often.
+    pub(crate) const fn new(gauge: Gauge, every: Duration) -> Self {
+        Self {
+            gauge,
+            every,
+            counted: Mutex::new(None),
+        }
+    }
+
+    /// Registers the gauge.
+    pub(crate) fn observe(&'static self) {
+        self.gauge.observe(|| {
+            let counted = *self.counted.lock().unwrap_or_else(PoisonError::into_inner);
+            counted
+                .filter(|(_, at)| at.elapsed() < self.every * 2)
+                .map(|(count, _)| (count, ()))
+        });
+    }
+
+    /// Keeps `count`, taken now.
+    pub(crate) fn set(&self, count: u64) {
+        *self.counted.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((count, Instant::now()));
+    }
+}
+
+/// Accounts whose purge keeps failing, counted after each purge run.
+static FAILING_PURGES: JobCount = JobCount::new(
+    Gauge::new(
+        "piquel.auth.account_purge.failing",
+        "{account}",
+        "Accounts scheduled for deletion whose purge failed at least 3 times in a row.",
+    ),
+    AccountPurge::EVERY,
 );
-/// The latest count of [`FAILING_PURGES`] on this replica, and when it was taken.
-/// The replica running the purge counts after each run.
-static FAILING_PURGES_COUNT: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
 
 /// Purges the accounts whose deletion grace period ended, each in a transaction of
 /// its own, attributed to [`JobName::AccountPurge`]. One run purges at most
@@ -398,22 +441,6 @@ impl AccountPurge {
     const MAX_BACKOFF: chrono::Duration = chrono::Duration::days(1);
     /// Failures in a row after which [`FAILING_PURGES`] counts an account.
     const FAILING_ATTEMPTS: u16 = 3;
-
-    /// Registers [`FAILING_PURGES`]. Every replica runs the job in turn, so each
-    /// reports the count of its own latest run, at most one run older than the
-    /// newest; one whose count is older than two runs, because it stopped running
-    /// the job, reports none. Alerts read the minimum across replicas, or wait one
-    /// run, before taking a count as current.
-    fn observe() {
-        FAILING_PURGES.observe(|| {
-            let counted = *FAILING_PURGES_COUNT
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            counted
-                .filter(|(_, at)| at.elapsed() < Self::EVERY * 2)
-                .map(|(count, _)| (count, ()))
-        });
-    }
 
     /// Purges `user_id` in `tx` if it is still scheduled for deletion and due,
     /// rechecked under the account lock, since it may have been restored meanwhile.
@@ -470,9 +497,7 @@ impl ExclusiveJob for AccountPurge {
             .deletions()
             .count_failing(Self::FAILING_ATTEMPTS)
             .await?;
-        *FAILING_PURGES_COUNT
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some((failing, Instant::now()));
+        FAILING_PURGES.set(failing);
         let mut tx = connection.begin().await?;
         let context = EventContext::system(JobName::AccountPurge);
         let mut alerts = Alerts::new(&mut tx, &context);
