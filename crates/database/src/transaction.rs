@@ -9,7 +9,7 @@ use crate::{
     telemetry::Committed,
 };
 use piquel_common::{
-    UserId,
+    EventId, UserId,
     events::{Actor, DomainEvent, EventContext, HistoryActor},
 };
 use sqlx::{Postgres, Transaction};
@@ -40,6 +40,7 @@ impl<'a> DatabaseTransaction<'a> {
     /// changes nothing, such as a failed sign-in, records its event in a
     /// transaction of its own. Once the transaction commits, each event is logged
     /// and counted in telemetry, with the current trace ID it is also stored with.
+    /// Returns the event's ID, for a row that refers to it.
     ///
     /// # Errors
     ///
@@ -50,7 +51,7 @@ impl<'a> DatabaseTransaction<'a> {
         context: &EventContext,
         subject: Option<UserId>,
         event: DomainEvent,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<EventId, DatabaseError> {
         self.record_to::<Registered>(context, subject, event).await
     }
 
@@ -60,7 +61,7 @@ impl<'a> DatabaseTransaction<'a> {
         context: &EventContext,
         subject: Option<UserId>,
         event: DomainEvent,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<EventId, DatabaseError> {
         let id = self.events().insert(context, subject, &event).await?;
         let notified = match subject.zip(event.notification(&context.actor)) {
             Some((user, notification)) => self
@@ -81,7 +82,7 @@ impl<'a> DatabaseTransaction<'a> {
             subject,
             event,
         });
-        Ok(())
+        Ok(id)
     }
 
     /// Counts the other transactions waiting for a lock this one holds, directly

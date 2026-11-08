@@ -3,7 +3,11 @@
 //! notification, an alert concerns no account: it is the administrators' to
 //! acknowledge, and clears once its condition no longer holds.
 
-use crate::admin::{ChainBreak, ChainProblem};
+use crate::{
+    AlertId, Handle,
+    admin::{ChainBreak, ChainProblem},
+};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 crate::str_enum! {
@@ -23,11 +27,15 @@ crate::str_enum! {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Alert {
-    /// The newest verification of the audit chain found it broken.
+    /// The newest verification of the audit chain, other than one with keys given
+    /// with `--key`, found it broken.
     AuditChainBroken(ChainBreak),
 }
 
 impl Alert {
+    /// What an alert a newer release raised says, since this one cannot show it.
+    pub const UNKNOWN: &'static str = "An alert this release cannot show";
+
     /// The condition it is about.
     #[must_use]
     pub const fn kind(&self) -> AlertKind {
@@ -60,6 +68,128 @@ impl Alert {
     pub const fn subject(&self) -> &'static str {
         match self {
             Self::AuditChainBroken(_) => "The audit chain is broken",
+        }
+    }
+
+    /// What it says, below its subject.
+    #[must_use]
+    pub fn body(&self) -> String {
+        match self {
+            Self::AuditChainBroken(broken) => format!(
+                "A verification found the chain broken at position {}: {}. The change \
+                 may also be a removal or insertion just before it. Find out what changed \
+                 before relying on the history: the dashboard's Audit tab shows the chain, \
+                 and the audit history documentation says what each problem means. It \
+                 clears once a verification, other than one with keys given with --key, \
+                 finds the chain intact.",
+                broken.position, broken.problem
+            ),
+        }
+    }
+}
+
+crate::str_enum! {
+    /// Where the handling of an alert stands, as the update an administrator
+    /// posted says.
+    pub enum AlertStatus {
+        /// Someone is finding out what happened.
+        Investigating = "investigating",
+        /// Someone is fixing it.
+        Fixing = "fixing",
+        /// It was fixed, and someone watches for the alert to clear.
+        Monitoring = "monitoring",
+    }
+}
+
+/// Who posted an update on an alert.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AlertAuthor {
+    /// An administrator, on the dashboard.
+    Administrator {
+        /// Their handle, unless their account was purged since.
+        handle: Option<Handle>,
+    },
+    /// An operator at the terminal.
+    Operator {
+        /// The operating system user.
+        os_user: String,
+        /// The machine's host name.
+        host: String,
+    },
+}
+
+/// An update an administrator posted on an alert: where its handling stands.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AlertUpdate {
+    /// Where its handling stands.
+    pub status: AlertStatus,
+    /// What they added, if anything.
+    pub note: Option<String>,
+    /// Who posted it.
+    pub author: AlertAuthor,
+    /// When.
+    pub posted_at: DateTime<Utc>,
+}
+
+/// An alert, with the updates administrators posted on it, oldest first, as the
+/// dashboard and the CLI show it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AlertDetail {
+    /// The alert.
+    #[serde(flatten)]
+    pub alert: StoredAlert,
+    /// Its updates, oldest first.
+    pub updates: Vec<AlertUpdate>,
+}
+
+/// An alert as stored. At most one alert of each kind is current, the one not
+/// cleared yet.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StoredAlert {
+    /// Alert identifier.
+    pub id: AlertId,
+    /// What it says; `None` for a kind a newer release raised, which this one
+    /// cannot show.
+    pub alert: Option<Alert>,
+    /// When it was raised.
+    pub raised_at: DateTime<Utc>,
+    /// When auth last found its condition holding.
+    pub seen_at: DateTime<Utc>,
+    /// When an administrator posted its first update, which acknowledges it.
+    pub acknowledged_at: Option<DateTime<Utc>>,
+    /// When its condition stopped holding, or changed, if it did.
+    pub cleared_at: Option<DateTime<Utc>>,
+}
+
+/// Which alerts a list shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlertsShown {
+    /// The current ones, newest first.
+    Current,
+    /// Those that cleared, the most recently cleared first.
+    Previous,
+}
+
+/// Where an alert stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlertState {
+    /// It needs an administrator's attention: nobody posted an update yet.
+    Open,
+    /// An administrator posted an update, and its condition still holds.
+    Acknowledged,
+    /// Its condition no longer holds as it says.
+    Cleared,
+}
+
+impl StoredAlert {
+    /// Where it stands.
+    #[must_use]
+    pub const fn state(&self) -> AlertState {
+        match (self.cleared_at, self.acknowledged_at) {
+            (Some(_), _) => AlertState::Cleared,
+            (None, Some(_)) => AlertState::Acknowledged,
+            (None, None) => AlertState::Open,
         }
     }
 }

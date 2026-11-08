@@ -2,7 +2,7 @@
 
 This page helps you run piquel.fr's accounts: grant administrators, invite
 people, help an owner who lost their passkeys, act on an account that breaks the
-rules, send announcements, and repair auth's own state.
+rules, send announcements, respond to alerts, and repair auth's own state.
 
 Two surfaces run the same code (`AdminService` in
 `apps/auth-service/src/admin`, and `AccountService` in
@@ -346,8 +346,49 @@ On the dashboard, the **Events** page lists events, and **Show views** adds the
 views. The **Audit** page shows the last verification, and **Verify now** runs
 another. Auth also verifies the chain on its own once no verification has been
 recorded for six hours, so the page always shows a recent one; `audit verify`
-and **Verify now** push the next automatic run back. See [audit history](../security/audit-history.md), which also explains
-pruning.
+and **Verify now** push the next automatic run back. A verification that finds
+the chain broken, other than one with `--key`, raises an alert (see
+[respond to an alert](#respond-to-an-alert)). See
+[audit history](../security/audit-history.md), which also explains pruning.
+
+## Respond to an alert
+
+An alert tells administrators about a condition that needs their attention,
+such as a broken audit chain. It stays current while its condition holds, and
+clears on its own once the condition no longer does. If the condition changes,
+or clears and comes back, a new alert is raised.
+
+Post updates on an alert to say where its handling stands: **Investigating**,
+**Fixing** or **Monitoring**, with an optional note such as who is on it. The
+first update acknowledges the alert: it stops counting as a warning, though it
+stays current while its condition holds.
+
+On the dashboard:
+
+1. Open **Alerts**. Each current alert shows what it says, its ID, when it was
+   raised and last seen, and its updates, newest first.
+2. Select **Post an update** on the alert, choose its **Status**, and add a
+   note if you want.
+3. Select **Post an update** in the dialog to post it.
+4. Select **See previous alerts** to read the alerts that cleared, with the
+   updates posted on them.
+
+At the terminal:
+
+```sh
+auth-service alerts list                 # the current alerts; --previous for those that cleared
+auth-service alerts update <id> --status fixing --note "Restoring from backup"
+```
+
+A note is personal data, like a change's reason: it is deleted after 90 days,
+or sooner if its author's account is purged, and the update itself stays. See
+[alerts](../architecture/database.md#alerts) for how they are stored.
+
+Each alert says what to look at. Auth raises these:
+
+| Alert | Raised when | Clears when |
+| --- | --- | --- |
+| **The audit chain is broken** | a verification, other than one with `--key`, finds the chain broken | such a verification finds it intact |
 
 ## The command line
 
@@ -371,7 +412,8 @@ pruning.
   `piquel_common::admin`: `user search` (`UserPage`), `user show`
   (`UserDetail`), `audit list` (`EventPage`), `client list`, `invite list`,
   `admin list`, `announcement list`, `announcement show`
-  (`AnnouncementDetail`), and `audit verify`'s result.
+  (`AnnouncementDetail`), `audit verify`'s result, and `alerts list`
+  (`AlertDetail`, from `piquel_common::alerts`).
 - Each change is recorded as an event with its operator: `$USER` and the host
   name.
 - Failures print their causes and exit with 1. Usage errors exit with 2.

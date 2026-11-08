@@ -56,16 +56,38 @@ impl Harness {
 
     /// Builds auth as `config` sets it up, and its dashboard, over the test
     /// database.
-    async fn of(mut config: AuthConfig) -> Self {
-        config.dashboard = Some(DashboardConfig {
-            listener: SocketAddr::from(([127, 0, 0, 1], 0)),
-            origin: DASHBOARD.parse().expect("dashboard origin"),
-        });
+    async fn of(config: AuthConfig) -> Self {
+        let config = Self::with_dashboard(config);
         Self {
             auth: Replicas::of(&config).await,
             dashboard: Replicas::dashboard(&config).await,
             database: Replicas::database().await,
         }
+    }
+
+    /// Builds auth and its dashboard over a schema of their own, for a scenario
+    /// no other may disturb, such as one on the current alerts, which a
+    /// verification of the shared test database clears.
+    async fn isolated() -> Self {
+        let config =
+            Self::with_dashboard(AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin")));
+        let database = Database::isolated(Replicas::database_config(5))
+            .await
+            .expect("isolated database");
+        Self {
+            auth: Replicas::over(&config, &database).await,
+            dashboard: Replicas::dashboard_over(&config, database.clone()).await,
+            database,
+        }
+    }
+
+    /// `config` with a dashboard at [`DASHBOARD`].
+    fn with_dashboard(mut config: AuthConfig) -> AuthConfig {
+        config.dashboard = Some(DashboardConfig {
+            listener: SocketAddr::from(([127, 0, 0, 1], 0)),
+            origin: DASHBOARD.parse().expect("dashboard origin"),
+        });
+        config
     }
 
     /// A browser signed in to auth with a passkey, of a new administrator.
@@ -1861,4 +1883,77 @@ async fn announcements_are_drafted_then_sent_from_the_dashboard() {
     let item = routes::page::settings::NOTIFICATION.replace("{id}", &received.id.to_string());
     let shown = html(owner.visit(&harness.auth.a, &item).await).await;
     assert!(shown.contains("<p>Nothing else changes.</p>"), "{shown}");
+}
+
+/// The Alerts page shows an open alert as needing attention, with posting an
+/// update on it. An update is recorded as the administrator's, and the alert
+/// then shows its status and note. The alerts that cleared are on a page of
+/// their own.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn alerts_take_updates_from_the_dashboard() {
+    use piquel_common::{
+        admin::{ChainBreak, ChainProblem},
+        alerts::{Alert, AlertKind},
+        events::{EventContext, JobName, RequestOrigin},
+    };
+    let harness = Harness::isolated().await;
+    let admin = harness.admin().await;
+    // A position to find on the page.
+    let position = Utc::now().timestamp_micros().unsigned_abs();
+    let context = EventContext {
+        actor: Actor::System {
+            job: JobName::AuditVerification,
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let mut tx = harness.database.begin().await.expect("transaction");
+    let alert = Alert::AuditChainBroken(ChainBreak {
+        position,
+        problem: ChainProblem::EventChanged,
+    });
+    crate::alerts::Alerts::new(&mut tx, &context)
+        .raise(alert)
+        .await
+        .expect("raise");
+    let id = tx
+        .alerts()
+        .current(AlertKind::AuditChainBroken)
+        .await
+        .expect("current")
+        .expect("raised")
+        .id;
+    tx.commit().await.expect("commit");
+    let update = format!("/alerts/{id}/update");
+    let dashboard = harness.confirmed(&admin, &update, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, "/alerts").await).await;
+    assert!(page.contains(&format!(r#"action="{update}""#)), "{page}");
+    assert!(page.contains(&position.to_string()), "{page}");
+    assert!(page.contains("Needs attention"), "{page}");
+
+    let url = format!("{DASHBOARD}{update}");
+    let fields = [("status", "fixing"), ("note", "Restoring from backup")];
+    let done = dashboard
+        .submit(&harness.dashboard, &url, &fields, OWN_PAGE)
+        .await;
+    assert_eq!(redirect(&done), "/alerts");
+    let page = html(harness.visit(&dashboard, "/alerts").await).await;
+    assert!(
+        page.contains("Fixing") && page.contains("Restoring from backup"),
+        "{page}"
+    );
+    let actor = harness
+        .actor_of(
+            "alert_updated",
+            |event| matches!(event, DomainEvent::AlertUpdated { alert_id, .. } if *alert_id == id),
+        )
+        .await;
+    assert!(
+        matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
+        "{actor:?}"
+    );
+    let previous = html(harness.visit(&dashboard, "/alerts/previous").await).await;
+    assert!(previous.contains("Previous alerts"), "{previous}");
+    assert!(!previous.contains(&position.to_string()), "{previous}");
 }

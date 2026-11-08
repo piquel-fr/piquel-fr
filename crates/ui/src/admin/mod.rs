@@ -9,6 +9,8 @@
 //! [`Confirmation`] says; without the script, the browser confirms on auth's
 //! handoff page, and comes back. Every page works without it.
 
+/// The alerts administrators are shown.
+mod alerts;
 /// Announcements to accounts.
 mod announcements;
 /// The audit chain's state and its checkpoints.
@@ -32,6 +34,7 @@ mod recoveries;
 /// Account search and one account.
 mod users;
 
+pub use alerts::{AlertCard, alert_list, alert_update_fields, previous_alerts};
 pub use announcements::{
     AdminAnnouncementRow, DraftActions, FoundAccount, announcement_form, announcement_list,
     announcement_page,
@@ -134,6 +137,8 @@ pub enum Tab {
     Audit,
     /// Announcements to accounts.
     Announcements,
+    /// What needs an administrator's attention.
+    Alerts,
 }
 
 impl Tab {
@@ -151,6 +156,7 @@ impl Tab {
             Self::SigningKeys => Icon::Key,
             Self::Audit => Icon::Audit,
             Self::Announcements => Icon::Megaphone,
+            Self::Alerts => Icon::Warning,
         }
     }
 }
@@ -170,6 +176,7 @@ impl Label for Tab {
             Self::SigningKeys => "Signing keys",
             Self::Audit => "Audit",
             Self::Announcements => "Announcements",
+            Self::Alerts => "Alerts",
         }
     }
 }
@@ -397,6 +404,8 @@ pub enum Change {
     SendAnnouncement,
     /// Deleting a draft announcement, which needs no confirmation.
     DiscardAnnouncement,
+    /// Posting an update on a current alert, saying where its handling stands.
+    UpdateAlert,
 }
 
 impl Change {
@@ -436,6 +445,7 @@ impl Change {
             Self::EditAnnouncement => "Edit the draft",
             Self::SendAnnouncement => "Send this announcement",
             Self::DiscardAnnouncement => "Discard this draft",
+            Self::UpdateAlert => "Post an update",
         }
     }
 
@@ -526,6 +536,9 @@ impl Change {
                 "Puts it in every recipient's inbox, and emails it to each with a primary verified address who receives announcements by email, or to all of them if it is essential. Nobody can change or take it back once it is sent."
             }
             Self::DiscardAnnouncement => "It is deleted, and goes to nobody.",
+            Self::UpdateAlert => {
+                "Say who is handling it and how. The first update acknowledges it: it stops counting as a warning, though it stays current while its condition holds. If the condition changes, or clears and comes back, a new alert is raised."
+            }
         }
     }
 
@@ -561,6 +574,7 @@ impl Change {
             Self::DraftAnnouncement | Self::EditAnnouncement => "Save draft",
             Self::SendAnnouncement => "Send",
             Self::DiscardAnnouncement => "Discard",
+            Self::UpdateAlert => "Post an update",
         }
     }
 
@@ -597,7 +611,8 @@ impl Change {
             | Self::DraftAnnouncement
             | Self::EditAnnouncement
             | Self::SendAnnouncement
-            | Self::DiscardAnnouncement => self.button(),
+            | Self::DiscardAnnouncement
+            | Self::UpdateAlert => self.button(),
         }
     }
 
@@ -669,7 +684,8 @@ impl Change {
             | Self::DraftAnnouncement
             | Self::EditAnnouncement
             | Self::SendAnnouncement
-            | Self::DiscardAnnouncement => None,
+            | Self::DiscardAnnouncement
+            | Self::UpdateAlert => None,
         }
     }
 }

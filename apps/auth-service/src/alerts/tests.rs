@@ -1,10 +1,15 @@
-//! How raising and clearing change the current alert of a kind, and what they
-//! record. Each test uses a schema of its own, since an alert concerns the whole
-//! database.
+//! How raising, clearing and acknowledging change the current alert of a kind,
+//! and what they record. Each test uses a schema of its own, since an alert
+//! concerns the whole database.
 use super::*;
-use crate::admin::tests::Harness;
+use crate::{
+    AdminError, Reason,
+    admin::tests::{Harness, operator},
+};
+use chrono::Utc;
 use piquel_common::{
     admin::{ChainBreak, ChainProblem},
+    alerts::{AlertAuthor, AlertState, AlertStatus, AlertsShown},
     events::{Actor, JobName, RequestOrigin},
 };
 use piquel_repository::{Database, EventFilter, RecordedEvent};
@@ -145,4 +150,85 @@ async fn concurrent_raises_leave_one_alert() {
         matches!(raised.as_slice(), [DomainEvent::AlertRaised { .. }]),
         "{raised:?}"
     );
+}
+
+/// The first update posted on a current alert acknowledges it, and each is kept
+/// and recorded with who posted it, its status and note. The alert stays
+/// current: finding the same condition again leaves it acknowledged, and a
+/// change clears it, so it takes no more updates, and raises a new alert.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn updates_acknowledge_an_alert_until_its_condition_changes() {
+    let harness = Harness::isolated().await;
+    let (database, service) = (&harness.database, harness.service());
+    let admin = operator(harness.admin().await, Utc::now());
+    let current = async || {
+        service
+            .alerts(&admin, AlertsShown::Current)
+            .await
+            .expect("alerts")
+    };
+    found(database, Some(broken(5))).await;
+    let id = current().await[0].alert.id;
+    let update = async |status, note: Option<&str>| {
+        let note = note.map(|note| Reason::parse(note.to_owned()).expect("note"));
+        service.update_alert(&admin, id, status, note).await
+    };
+    update(AlertStatus::Investigating, Some("Looking into it"))
+        .await
+        .expect("first update");
+    update(AlertStatus::Fixing, None)
+        .await
+        .expect("second update");
+    let [detail] = <[_; 1]>::try_from(current().await).expect("one current alert");
+    assert_eq!(detail.alert.state(), AlertState::Acknowledged);
+    let posted: Vec<_> = detail
+        .updates
+        .iter()
+        .map(|update| (update.status, update.note.as_deref()))
+        .collect();
+    assert_eq!(
+        posted,
+        [
+            (AlertStatus::Investigating, Some("Looking into it")),
+            (AlertStatus::Fixing, None),
+        ]
+    );
+    assert!(matches!(
+        detail.updates[0].author,
+        AlertAuthor::Administrator { handle: Some(_) }
+    ));
+    let recorded = database
+        .events()
+        .list(&EventFilter::default(), 1)
+        .await
+        .expect("events")
+        .remove(0);
+    assert!(matches!(recorded.actor, Actor::Admin { .. }));
+    assert_eq!(
+        recorded.event,
+        RecordedEvent::Known(DomainEvent::AlertUpdated {
+            alert_id: id,
+            alert: broken(5),
+            status: AlertStatus::Fixing,
+        })
+    );
+
+    found(database, Some(broken(5))).await;
+    assert_eq!(current().await[0].alert.state(), AlertState::Acknowledged);
+    found(database, Some(broken(3))).await;
+    let [raised] = <[_; 1]>::try_from(current().await).expect("one current alert");
+    assert_eq!(raised.alert.alert, Some(broken(3)));
+    assert_eq!(raised.alert.state(), AlertState::Open);
+    assert!(matches!(
+        update(AlertStatus::Monitoring, None).await,
+        Err(AdminError::AlertNotFound)
+    ));
+    let previous = service
+        .alerts(&admin, AlertsShown::Previous)
+        .await
+        .expect("previous");
+    assert_eq!(previous.len(), 1);
+    assert_eq!(previous[0].alert.id, id);
+    assert_eq!(previous[0].updates.len(), 2);
 }

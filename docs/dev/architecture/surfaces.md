@@ -133,6 +133,12 @@ it, unless they turned announcements' email off and it is not essential, which
 its sender chooses on the draft (see
 [the delivery queue](delivery-queue.md#announcements)).
 
+Administrators also follow alerts: conditions auth's background jobs find that
+need their attention, such as a broken audit chain. The dashboard's **Alerts**
+page lists the current ones, on which administrators post status updates until
+each clears, and links those that cleared; `auth-service alerts` does the same
+(see [respond to an alert](../operations/administration.md#respond-to-an-alert)).
+
 Administrators manage the administrator list too, but never their own rights or
 the last active administrator's, and the dashboard never changes an administrator's
 account. Nothing, the CLI included, disables or deletes the last active

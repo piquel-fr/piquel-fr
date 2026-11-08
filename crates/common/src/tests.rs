@@ -325,6 +325,11 @@ fn event_kinds_match_their_serde_tags() {
             alert_id: AlertId::new(),
             alert: alert.clone(),
         },
+        DomainEvent::AlertUpdated {
+            alert_id: AlertId::new(),
+            alert: alert.clone(),
+            status: alerts::AlertStatus::Fixing,
+        },
         DomainEvent::AlertCleared {
             alert_id: AlertId::new(),
             alert,

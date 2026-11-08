@@ -3,10 +3,10 @@
 //! clears it once it no longer does, each change recorded as an event.
 
 use piquel_common::{
-    alerts::{Alert, AlertKind},
+    alerts::{Alert, AlertKind, StoredAlert},
     events::{DomainEvent, EventContext},
 };
-use piquel_repository::{DatabaseError, DatabaseTransaction, StoredAlert};
+use piquel_repository::{DatabaseError, DatabaseTransaction};
 
 /// Raises and clears alerts in a transaction, recording each change as caused
 /// as its context says.
@@ -39,7 +39,8 @@ impl<'t, 'c> Alerts<'t, 'c> {
         }
         let alert_id = self.tx.alerts().raise(&alert).await?;
         let raised = DomainEvent::AlertRaised { alert_id, alert };
-        self.tx.record(self.context, None, raised).await
+        self.tx.record(self.context, None, raised).await?;
+        Ok(())
     }
 
     /// Says no alert of `kind` holds: its current one, if any, clears.
@@ -61,7 +62,8 @@ impl<'t, 'c> Alerts<'t, 'c> {
             alert_id: current.id,
             alert,
         };
-        self.tx.record(self.context, None, cleared).await
+        self.tx.record(self.context, None, cleared).await?;
+        Ok(())
     }
 }
 
