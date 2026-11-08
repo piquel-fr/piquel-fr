@@ -632,8 +632,8 @@ impl Change {
     }
 
     /// What it is, acting on `target` if it names one, as the passkey dialog
-    /// says it: "Disable this account: @alice (0193…)".
-    fn confirming(self, target: Option<&str>) -> String {
+    /// says it: "Disable this account: alice (0193…)".
+    pub(crate) fn confirming(self, target: Option<&str>) -> String {
         match target {
             Some(target) => format!("{}: {target}", self.title()),
             None => self.title().to_owned(),
@@ -832,7 +832,8 @@ async fn reason_field<'a>(
 /// confirmed a passkey, which the browser opens and closes with no script; a
 /// link to the change's page otherwise. When several rows of a page make the
 /// same change to different things, each names its `subject`, which its dialog
-/// shows and its button is named by.
+/// shows and its button is named by. The passkey dialog names the `subject`, or
+/// else the `target` the page acts on, such as its account.
 #[component]
 pub(crate) async fn confirm<'a>(
     action: &'a Action,
@@ -840,6 +841,9 @@ pub(crate) async fn confirm<'a>(
     #[into]
     #[default]
     subject: Option<&'a str>,
+    #[into]
+    #[default]
+    target: Option<&'a str>,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
     let class = if change.danger() {
@@ -849,7 +853,7 @@ pub(crate) async fn confirm<'a>(
     };
     let dialog = action.dialog(subject);
     let name = subject.map(|subject| change.confirming(Some(subject)));
-    let confirming = change.confirming(subject);
+    let confirming = change.confirming(subject.or(target));
     Ok(view! {
         if action.inline {
             <button type="button" class=(class) popovertarget=(dialog.as_str()) aria-label=(name.as_deref())>(change.label())</button>

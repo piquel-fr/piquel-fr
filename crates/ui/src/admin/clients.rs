@@ -495,3 +495,30 @@ async fn client_actions<'a>(
         </div>
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A client's form, kept as JSON across auth's handoff page, comes back as it
+    /// was posted: its unchecked boxes stay unchecked, and its lines its lines.
+    #[test]
+    fn a_kept_form_comes_back_as_posted() {
+        let posted = NewClientForm {
+            id: "notes".into(),
+            kind: None,
+            settings: OperatorDraft {
+                draft: ClientDraft {
+                    display_name: "Notes".into(),
+                    redirect_uris: Lines::from("https://notes.example/cb"),
+                    ..ClientDraft::default()
+                },
+                other_scopes: Lines::from("notes.read\nnotes.write"),
+                trusted: Checkbox(false),
+            },
+        };
+        let kept = serde_json::to_string(&posted).expect("kept");
+        let shown: NewClientForm = serde_json::from_str(&kept).expect("shown");
+        assert_eq!(shown, posted, "{kept}");
+    }
+}

@@ -162,6 +162,8 @@ pub async fn user_page<'a>(
     all_events: &'a str,
 ) -> Result<impl View> {
     let user = &detail.user;
+    // The account, as the passkey dialog names it.
+    let named = format!("{} ({})", user.handle, user.id);
     let who = Who {
         name: &user.display_name,
         handle: user.handle.as_str(),
@@ -194,13 +196,13 @@ pub async fn user_page<'a>(
                         }
                     }
                 </dl>
-                account_actions(user: user, pages: pages)
+                account_actions(user: user, pages: pages, named: named.as_str())
             </div>
         </section>
         <div class="two">
             credentials(detail: detail)
         </div>
-        session_list(sessions: sessions, pages: pages)
+        session_list(sessions: sessions, pages: pages, account: named.as_str())
         <section class="card">
             <header><h2>"Consents " <span class="count">(detail.consents.len().to_string())</span></h2></header>
             if detail.consents.is_empty() {
@@ -229,11 +231,13 @@ pub async fn user_page<'a>(
 }
 
 /// An account's `sessions`, each with the change ending it, and the one ending
-/// them all, or why the `pages` offer none.
+/// them all, or why the `pages` offer none. The passkey dialog names the
+/// `account`, and the session.
 #[component]
 async fn session_list<'a>(
     sessions: &'a [SessionRow<'a>],
     pages: Result<AccountPages<'a>, &'a str>,
+    account: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
     <section class="card">
@@ -242,7 +246,7 @@ async fn session_list<'a>(
             if !sessions.is_empty() {
                 match pages {
                     Ok(pages) => {
-                        confirm(action: pages.revoke_sessions, change: Change::RevokeSessions)
+                        confirm(action: pages.revoke_sessions, change: Change::RevokeSessions, target: account)
                     },
                     Err(reason) => {
                         refused_action(label: "Revoke all", reason: reason)
@@ -274,7 +278,8 @@ async fn session_list<'a>(
                                 <td>moment(at: row.session.expires_at)</td>
                                 <td class="right">
                                     if let Some(revoke) = &row.revoke {
-                                        confirm(action: revoke, change: Change::RevokeSession)
+                                        let session = format!("{account}, session {}", row.session.id);
+                                        confirm(action: revoke, change: Change::RevokeSession, target: session.as_str())
                                     }
                                 </td>
                             </tr>
@@ -287,38 +292,42 @@ async fn session_list<'a>(
         })
 }
 
-/// What may be done to `user`, by its `pages`, or why nothing may.
+/// What may be done to `user`, by its `pages`, or why nothing may. The passkey
+/// dialog names the account as `named`.
 #[component]
 async fn account_actions<'a>(
     user: &'a User,
     pages: Result<AccountPages<'a>, &'a str>,
+    named: &'a str,
 ) -> Result<impl View> {
+    let target = Some(named);
+    let opening = move |what: &str| format!("{what}: {named}");
     Ok(view! {
         <div class="row actions">
             match pages {
                 Ok(pages) => {
                     match user.status {
                         AccountStatus::Active => {
-                            confirm(action: pages.status, change: Change::Disable)
-                            confirm(action: pages.delete, change: Change::Delete)
+                            confirm(action: pages.status, change: Change::Disable, target: target)
+                            confirm(action: pages.delete, change: Change::Delete, target: target)
                         },
                         AccountStatus::Disabled => {
-                            confirm(action: pages.status, change: Change::Enable)
+                            confirm(action: pages.status, change: Change::Enable, target: target)
                         },
                         AccountStatus::Deleting => {
-                            confirm(action: pages.status, change: Change::Restore)
+                            confirm(action: pages.status, change: Change::Restore, target: target)
                         },
                     }
-                    <a data-confirm-first="" class="button secondary small" href=(pages.recover)>"Recover"</a>
-                    <a data-confirm-first="" class="button secondary small" href=(pages.undo_recovery)>"Undo recovery"</a>
-                    <a data-confirm-first="" class="button secondary small" href=(pages.sign_in)>"Sign-in methods"</a>
-                    <a data-confirm-first="" class="button secondary small" href=(pages.profile)>"Profile"</a>
-                    <a data-confirm-first="" class="button secondary small" href=(pages.emails)>"Email addresses"</a>
-                    <a data-confirm-first="" class="button secondary small" href=(pages.apps)>"Connected apps"</a>
+                    <a data-confirm-first="" data-confirming=(Change::Recover.confirming(target)) class="button secondary small" href=(pages.recover)>"Recover"</a>
+                    <a data-confirm-first="" data-confirming=(Change::UndoRecovery.confirming(target)) class="button secondary small" href=(pages.undo_recovery)>"Undo recovery"</a>
+                    <a data-confirm-first="" data-confirming=(opening("Sign-in methods")) class="button secondary small" href=(pages.sign_in)>"Sign-in methods"</a>
+                    <a data-confirm-first="" data-confirming=(opening("Profile")) class="button secondary small" href=(pages.profile)>"Profile"</a>
+                    <a data-confirm-first="" data-confirming=(opening("Email addresses")) class="button secondary small" href=(pages.emails)>"Email addresses"</a>
+                    <a data-confirm-first="" data-confirming=(opening("Connected apps")) class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>
                     <a class="button secondary small" href=(pages.notifications)>"Notifications"</a>
-                    <a data-confirm-first="" class="button secondary small" href=(pages.handle)>"Change handle"</a>
-                    <a data-confirm-first="" class="button secondary small" href=(pages.display_name)>"Change display name"</a>
+                    <a data-confirm-first="" data-confirming=(Change::ChangeHandle.confirming(target)) class="button secondary small" href=(pages.handle)>"Change handle"</a>
+                    <a data-confirm-first="" data-confirming=(Change::ChangeDisplayName.confirming(target)) class="button secondary small" href=(pages.display_name)>"Change display name"</a>
                 },
                 Err(reason) => {
                     refused_action(label: "Change", reason: reason)

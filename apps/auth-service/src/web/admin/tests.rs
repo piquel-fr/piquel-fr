@@ -2065,7 +2065,8 @@ async fn a_change_page_names_its_target() {
 
 /// A change posted once the dashboard's confirmation ended, such as without its
 /// script, goes through auth's handoff page, and its page then shows the form as
-/// it was posted, once, saying nothing changed yet.
+/// it was posted, once, saying nothing changed yet: to its administrator alone,
+/// on its page alone.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_form_posted_without_a_confirmation_comes_back_after_it() {
@@ -2100,6 +2101,15 @@ async fn a_form_posted_without_a_confirmation_comes_back_after_it() {
         .expect("handed off");
     let browser = dashboard.with_cookie(BrowserCookie::DashboardState, state);
     let confirmed = harness.redeem(&browser, &code_url, &back).await;
+
+    // Neither another administrator, nor this one on another page, sees it.
+    let other = harness.admin().await;
+    let elsewhere = harness.confirmed(&other, &back, Utc::now()).await;
+    let page = html(harness.visit(&elsewhere, &back).await).await;
+    assert!(!page.contains("Typed before it ended"), "{page}");
+    let enable = format!("/users/{}/enable", user.user_id);
+    let page = html(harness.visit(&confirmed, &enable).await).await;
+    assert!(!page.contains("Nothing has changed yet"), "{page}");
 
     let shown = harness.visit(&confirmed, &back).await;
     assert_eq!(shown.status(), StatusCode::OK);
@@ -2151,7 +2161,8 @@ async fn a_session_is_revoked_only_from_its_own_account() {
 }
 
 /// The same form posted twice within seconds, such as by a double click, makes
-/// its change once: the second goes where the change is listed.
+/// its change once: the second goes where the change is listed. The same form
+/// to another target is another change, and a refused one is refused each time.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_change_posted_twice_is_made_once() {
@@ -2173,6 +2184,37 @@ async fn a_change_posted_twice_is_made_once() {
     assert_eq!(answers, ["/invitations", new]);
     let after = harness.database.security().list_invitations().await;
     assert_eq!(after.expect("invitations").len(), before + 1, "made once");
+
+    // The same empty form, to two handles the query names, is two changes.
+    let suffix = &admin.user_id.to_string()[24..];
+    for handle in [format!("one-{suffix}"), format!("two-{suffix}")] {
+        let reserve = [("handle", handle.as_str()), ("reason", "Kept")];
+        let url = format!("{DASHBOARD}/handles/reserve");
+        let reserved = dashboard
+            .submit(&harness.dashboard, &url, &reserve, OWN_PAGE)
+            .await;
+        assert_eq!(redirect(&reserved), "/handles");
+    }
+    for handle in [format!("one-{suffix}"), format!("two-{suffix}")] {
+        let url = format!("{DASHBOARD}/handles/unreserve?handle={handle}");
+        let unreserved = dashboard
+            .submit(&harness.dashboard, &url, &[], OWN_PAGE)
+            .await;
+        assert_eq!(redirect(&unreserved), "/handles", "{handle}");
+    }
+
+    // Two refused at once are each refused, keeping what was typed: the second
+    // waits for the first, which changed nothing, then is made itself.
+    let user = Browser::new_account(&harness.database).await;
+    let url = format!("{DASHBOARD}/users/{}/disable", user.user_id);
+    let long = "x".repeat(501);
+    let fields = [("reason", long.as_str())];
+    let post = || dashboard.submit(&harness.dashboard, &url, &fields, OWN_PAGE);
+    let (first, second) = tokio::join!(post(), post());
+    for refused in [first, second] {
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        assert!(html(refused).await.contains(&format!(r#"value="{long}""#)));
+    }
 }
 
 /// The invitations pages find who is signed in before whether signup needs

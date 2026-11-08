@@ -134,16 +134,18 @@ being misread, lost or made twice:
 - **Its target.** A change's page names what it acts on beside its button, such
   as the account's handle and ID, so two pages left open cannot be told apart
   only by their address. The account or client comes from the crumb's parent.
+  The passkey dialog names it too, from the account's own page as well.
 - **A form kept across the handoff.** A change posted once the confirmation
   ended, or the session, is refused by the service. The dashboard keeps the
-  form as a draft, for its administrator and page, for ten minutes. It goes to
+  form as a draft, for its administrator, page and query, for ten minutes. It goes to
   the handoff page and back, and the page shows the draft once, saying nothing
   has changed yet.
 - **Made once.** The dashboard claims each change by the digest of its
-  administrator, page and form, for ten seconds. The same form posted again
-  meanwhile, such as by a double click or a reload, changes nothing, and goes
-  where the first one went. A change that is refused gives up its claim, so
-  posting it again tries again.
+  administrator, page, query and form, such as `/handles/release?handle=alice`,
+  for ten seconds after it is made. The same form posted again meanwhile, such
+  as by a double click or a reload, waits for the first. If the first was made,
+  the repeat changes nothing and goes where the first one went. If it was
+  refused, the repeat is made itself, and meets the same refusal.
 - **Its status.** A refused change shows its form again with the refusal's
   status, such as `400`, not `200`.
 

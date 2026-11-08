@@ -452,9 +452,10 @@ impl AdminApplication {
     }
 
     /// Makes the change a posted `form` asks for, with `call`, once: the same form
-    /// posted again to the same page within seconds, such as by a double click or
-    /// a reload, changes nothing, and goes to `again`. Every change the dashboard
-    /// makes comes through here.
+    /// posted again to the same page and query within seconds, such as by a
+    /// double click or a reload, waits for this one, then changes nothing and goes
+    /// to `again`, or, if this one changed nothing, is made itself. Every change
+    /// the dashboard makes comes through here.
     ///
     /// A `GET` only shows the form, so it returns nothing: a link, even with a
     /// query, never changes anything. It shows the page's draft, if the
@@ -478,9 +479,11 @@ impl AdminApplication {
     {
         let app = Self::of(cx);
         let admin = Self::admin(cx).await?;
-        let path = uri(cx).path();
+        // The page and its query, which may name what the change acts on, such
+        // as `/handles/release?handle=alice`.
+        let page = uri(cx).path_and_query().map_or("/", |page| page.as_str());
         let Some(Form(input)) = form.filter(|_| method(cx) == Method::POST) else {
-            let kept = app.forms.take(admin.user_id, path).await?;
+            let kept = app.forms.take(admin.user_id, page).await?;
             return Ok(kept.map(|form| {
                 Err(Refused {
                     message: DRAFT_KEPT.to_owned(),
@@ -488,17 +491,24 @@ impl AdminApplication {
                 })
             }));
         };
-        let Some(claim) = app.forms.claim(admin.user_id, path, &input).await? else {
+        let Some(claim) = app.forms.claim(admin.user_id, page, &input).await? else {
             return Err(see_other(again).into());
         };
         let refused = match call(input.clone()).await {
-            Ok(value) => return Ok(Some(Ok(value))),
+            Ok(value) => {
+                // The change is made: a claim lost now only lets a repeat be
+                // refused by the service, or made again.
+                if let Err(error) = claim.keep().await {
+                    tracing::warn!(error = %ErrorChain(&error), "a dashboard change's claim was lost");
+                }
+                return Ok(Some(Ok(value)));
+            }
             Err(refused) => refused.into(),
         };
-        app.forms.release(claim).await?;
+        claim.release().await?;
         match refused {
             Refusal::HandOff => {
-                app.forms.keep(admin.user_id, path, &input).await?;
+                app.forms.keep(admin.user_id, page, &input).await?;
                 Err(app.hand_off(cx))
             }
             Refusal::Page(error) => Err(error.into()),
