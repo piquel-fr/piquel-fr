@@ -4,7 +4,7 @@
 use super::AdminService;
 use crate::{
     account::AccountService,
-    admin::{AdminError, InviteExpiry, Operator},
+    admin::{AdminError, DashboardSignIn, InviteExpiry, Operator},
     routes,
 };
 use chrono::Utc;
@@ -124,9 +124,11 @@ impl AdminService {
         Self::finish(tx, operator, Some(user_id), vec![granted]).await
     }
 
-    /// Removes the administrator rights of `user_id`. Administrators cannot remove
-    /// their own, and nobody can remove the last active administrator's: someone
-    /// must be left to administer.
+    /// Removes the administrator rights of `user_id`, and ends its dashboard
+    /// sessions with them, and the handoffs that would start one: rights granted
+    /// again later revive none. Administrators cannot remove their own, and
+    /// nobody can remove the last active administrator's: someone must be left
+    /// to administer.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, the account is not an
@@ -145,7 +147,16 @@ impl AdminService {
         if !tx.administrators().revoke(user_id).await? {
             return Err(AdminError::NotAnAdministrator);
         }
-        let revoked = DomainEvent::AdministratorRevoked {};
-        Self::finish(tx, operator, Some(user_id), vec![revoked]).await
+        let ended = tx
+            .dashboard()
+            .end_of_user(user_id, DashboardSignIn::idle_since())
+            .await?;
+        let signed_out = ended
+            .into_iter()
+            .map(|session_id| DomainEvent::DashboardSignedOut { session_id });
+        let events = std::iter::once(DomainEvent::AdministratorRevoked {})
+            .chain(signed_out)
+            .collect();
+        Self::finish(tx, operator, Some(user_id), events).await
     }
 }

@@ -2,11 +2,13 @@
 //! settings any administrator may also change, and the browser's own sign-out,
 //! which [`AccountService`] serves.
 use crate::account::{AccountError, AccountService, Subject, Viewer};
+use crate::admin::DashboardSignIn;
 use crate::security::{BrowserCookie, RequestContext, Session, SessionError};
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Utc};
 use piquel_common::{
     AuthenticationMethod, SessionId,
+    admin::DashboardSession,
     events::{RevocationReason, UserAgentFamily},
 };
 use piquel_repository::{SessionScope, StoredSession};
@@ -37,6 +39,9 @@ pub(crate) struct SessionItem {
     pub(crate) last_seen_at: DateTime<Utc>,
     /// When it expires.
     pub(crate) expires_at: DateTime<Utc>,
+    /// The admin dashboard's sessions resting on it, newest first: an
+    /// administrator's, while they last.
+    pub(crate) dashboard: Vec<DashboardSession>,
 }
 
 /// The answer to signing every other session out.
@@ -63,18 +68,27 @@ impl SignedOut {
 }
 
 impl SessionItem {
-    /// Shows `session`, marking it if it is the `current` one.
-    pub(crate) fn new(session: StoredSession, current: Option<SessionId>) -> Self {
-        Self {
-            current: Some(session.id) == current,
-            id: session.id,
-            device: session.user_agent_family,
-            ip: session.last_seen_ip,
-            methods: session.authentication_methods,
-            authenticated_at: session.authenticated_at,
-            last_seen_at: session.last_seen_at,
-            expires_at: session.expires_at,
-        }
+    /// Shows `sessions`, in order, marking the `current` one, each with those of
+    /// the `dashboard`'s sessions resting on it.
+    pub(crate) fn all(
+        sessions: Vec<StoredSession>,
+        dashboard: &[DashboardSession],
+        current: Option<SessionId>,
+    ) -> Vec<Self> {
+        sessions
+            .into_iter()
+            .map(|session| Self {
+                current: Some(session.id) == current,
+                id: session.id,
+                device: session.user_agent_family,
+                ip: session.last_seen_ip,
+                methods: session.authentication_methods,
+                authenticated_at: session.authenticated_at,
+                last_seen_at: session.last_seen_at,
+                expires_at: session.expires_at,
+                dashboard: DashboardSession::on(dashboard, session.id),
+            })
+            .collect()
     }
 }
 
@@ -82,18 +96,17 @@ impl SessionItem {
 /// confirmation: it only removes access, and a user who suspects a stolen cookie
 /// must be able to act at once.
 impl AccountService {
-    /// Lists the account's active sessions, most recently active first. On the
-    /// owner's routes, the extractor has just recorded the owner's own activity.
+    /// Lists the account's active sessions, most recently active first, each with
+    /// the dashboard sessions resting on it. On the owner's routes, the extractor
+    /// has just recorded the owner's own activity.
     pub(crate) async fn sessions(&self, viewer: &Viewer) -> Result<Vec<SessionItem>, AccountError> {
         viewer.authorize(&self.database).await?;
-        Ok(self
-            .database
-            .sessions()
-            .list_active_for_user(viewer.user())
-            .await?
-            .into_iter()
-            .map(|session| SessionItem::new(session, viewer.own_session()))
-            .collect())
+        let user = viewer.user();
+        let sessions = self.database.sessions().list_active_for_user(user).await?;
+        let dashboard = (self.database.dashboard())
+            .of_user(user, DashboardSignIn::idle_since())
+            .await?;
+        Ok(SessionItem::all(sessions, &dashboard, viewer.own_session()))
     }
 
     /// Signs one session of the account out, with its applications' refresh

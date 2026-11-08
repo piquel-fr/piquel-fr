@@ -2,6 +2,7 @@
 //! JSON document, read from one snapshot. It holds no secret, digest or key
 //! material: passkeys show their label, dates and backup state only.
 
+use crate::admin::DashboardSignIn;
 use crate::{
     clients::OwnedClientView, emails::EmailView, history::HistoryItem,
     notifications::NotificationItem, sessions::SessionItem,
@@ -13,8 +14,8 @@ use piquel_common::{
     AccountStatus, Handle, PasskeyId, PictureId, Provider, RecoveryId, SessionId, UserId,
 };
 use piquel_repository::{
-    DashboardSignIn, DatabaseError, DatabaseTransaction, RecentRecovery, RecoveryState,
-    StoredExternalIdentity, StoredGrant, StoredHandle, StoredPasskey, StoredPicture, StoredUser,
+    DatabaseError, DatabaseTransaction, RecentRecovery, RecoveryState, StoredExternalIdentity,
+    StoredGrant, StoredHandle, StoredPasskey, StoredPicture, StoredUser,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -22,15 +23,16 @@ use serde_json::Value;
 /// The `format` of every export.
 const FORMAT: &str = "piquel.account-export";
 /// The export's version; a change to its shape gets a new one.
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 /// Where the serialized credential holds whether the passkey may be synced.
 const BACKUP_ELIGIBLE_POINTER: &str = "/cred/backup_eligible";
 /// Where the serialized credential holds whether the passkey is synced.
 const BACKED_UP_POINTER: &str = "/cred/backup_state";
 
 /// Everything auth stores about an account, in one document:
-/// `{"format": "piquel.account-export", "version": 2, …}`. Version 2 added the
-/// profile picture.
+/// `{"format": "piquel.account-export", "version": 3, …}`. Version 2 added the
+/// profile picture; version 3 moved dashboard sessions under the sessions they
+/// rest on, with when each was last used and ends.
 #[derive(Serialize)]
 pub(crate) struct AccountExport {
     /// Always [`FORMAT`].
@@ -47,16 +49,15 @@ pub(crate) struct AccountExport {
     handles: Vec<HandleHeld>,
     /// Whether the account is an administrator.
     administrator: bool,
-    /// An administrator's sign-ins to the admin dashboard, newest first.
-    dashboard_sessions: Vec<DashboardSession>,
     /// Email addresses, verified or not, primary first.
     emails: Vec<EmailView>,
     /// Active passkeys.
     passkeys: Vec<Passkey>,
     /// Linked social identities.
     identities: Vec<Identity>,
-    /// Active browser sessions, most recently active first, with their devices
-    /// and IP addresses. The one that downloaded the export is `current`.
+    /// Active browser sessions, most recently active first, with their devices,
+    /// IP addresses and an administrator's dashboard sessions. The one that
+    /// downloaded the export is `current`.
     sessions: Vec<SessionItem>,
     /// The scopes approved for each application.
     consents: Vec<Consent>,
@@ -153,17 +154,6 @@ struct HandleHeld {
     released_at: Option<DateTime<Utc>>,
 }
 
-/// One of an administrator's sign-ins to the admin dashboard.
-#[derive(Debug, Serialize)]
-struct DashboardSession {
-    /// The browser session it rests on.
-    session_id: SessionId,
-    /// When it started.
-    created_at: DateTime<Utc>,
-    /// When a passkey last confirmed it, if one did.
-    confirmed_at: Option<DateTime<Utc>>,
-}
-
 impl From<StoredHandle> for HandleHeld {
     /// Keeps the handle and its dates.
     fn from(handle: StoredHandle) -> Self {
@@ -171,17 +161,6 @@ impl From<StoredHandle> for HandleHeld {
             handle: handle.handle,
             claimed_at: handle.claimed_at,
             released_at: handle.released_at,
-        }
-    }
-}
-
-impl From<DashboardSignIn> for DashboardSession {
-    /// Keeps its session and dates.
-    fn from(signed_in: DashboardSignIn) -> Self {
-        Self {
-            session_id: signed_in.session_id,
-            created_at: signed_in.created_at,
-            confirmed_at: signed_in.confirmed_at,
         }
     }
 }
@@ -302,10 +281,6 @@ impl AccountExport {
                 .map(HandleHeld::from)
                 .collect(),
             administrator: tx.administrators().contains(user_id).await?,
-            dashboard_sessions: (tx.dashboard().of_user(user_id).await?)
-                .into_iter()
-                .map(DashboardSession::from)
-                .collect(),
             emails: (tx.emails().list(user_id).await?)
                 .into_iter()
                 .map(EmailView::from)
@@ -318,10 +293,13 @@ impl AccountExport {
                 .into_iter()
                 .map(Identity::from)
                 .collect(),
-            sessions: (tx.sessions().list_active_for_user(user_id).await?)
-                .into_iter()
-                .map(|session| SessionItem::new(session, Some(current)))
-                .collect(),
+            sessions: SessionItem::all(
+                tx.sessions().list_active_for_user(user_id).await?,
+                &(tx.dashboard())
+                    .of_user(user_id, DashboardSignIn::idle_since())
+                    .await?,
+                Some(current),
+            ),
             consents: tx.oidc().list_consents(user_id).await?,
             grants: tx.tokens().list_for_user(user_id).await?,
             recoveries: (tx

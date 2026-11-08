@@ -98,6 +98,8 @@ impl DomainEvent {
             Self::AccountEnabled {} => HistoryEntry::AccountEnabled,
             Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,
             Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
+            Self::DashboardSignedIn { .. } => HistoryEntry::DashboardSignedIn,
+            Self::DashboardSignedOut { .. } => HistoryEntry::DashboardSignedOut,
             Self::HandleChanged { .. } => HistoryEntry::HandleChanged,
             Self::DisplayNameChanged { .. } => HistoryEntry::DisplayNameChanged,
             Self::PictureChanged { .. } => HistoryEntry::PictureChanged,
@@ -279,6 +281,12 @@ pub enum HistoryEntry {
     /// The account's administrator rights were removed.
     #[serde(rename = "administrator.revoked")]
     AdministratorRevoked,
+    /// The account signed in to the admin dashboard.
+    #[serde(rename = "administrator.dashboard_signed_in")]
+    DashboardSignedIn,
+    /// The account's dashboard session ended: it signed out, or lost its rights.
+    #[serde(rename = "administrator.dashboard_signed_out")]
+    DashboardSignedOut,
     /// The account's handle changed.
     #[serde(rename = "account.handle_changed")]
     HandleChanged,
@@ -366,6 +374,8 @@ impl HistoryEntry {
             | Self::AccountEnabled
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
+            | Self::DashboardSignedIn
+            | Self::DashboardSignedOut
             | Self::HandleChanged
             | Self::DisplayNameChanged
             | Self::PictureChanged
@@ -411,6 +421,8 @@ impl HistoryEntry {
             | Self::AccountEnabled
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
+            | Self::DashboardSignedIn
+            | Self::DashboardSignedOut
             | Self::HandleChanged
             | Self::DisplayNameChanged
             | Self::PictureChanged

@@ -3,7 +3,7 @@
 
 use super::AdminService;
 use crate::{
-    admin::{AdminError, HandleProblem, Operator, Reason, UserRef},
+    admin::{AdminError, DashboardSignIn, HandleProblem, Operator, Reason, UserRef},
     deletion::Deletions,
     handles::Handles,
     security::Session,
@@ -11,7 +11,8 @@ use crate::{
 use piquel_common::{
     AccountStatus, Handle, HandleError, Personal, SessionId, UserId,
     admin::{
-        Email, Paging, ReleasedHandle, ReservedHandle, ScheduledDeletion, UserDetail, UserPage,
+        DashboardSession, Email, Paging, ReleasedHandle, ReservedHandle, ScheduledDeletion,
+        UserDetail, UserPage,
     },
     email::NormalizedEmail,
     events::{DomainEvent, EventContext, RevocationReason},
@@ -125,13 +126,18 @@ impl AdminService {
                 .collect(),
             passkeys: Self::views(tx.passkeys().list_active(user_id).await?),
             identities: Self::views(tx.federation().list_active(user_id).await?),
-            sessions: tx
-                .sessions()
-                .list_active_for_user(user_id)
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            sessions: {
+                let dashboard = (tx.dashboard())
+                    .of_user(user_id, DashboardSignIn::idle_since())
+                    .await?;
+                (tx.sessions().list_active_for_user(user_id).await?)
+                    .into_iter()
+                    .map(|session| piquel_common::admin::Session {
+                        dashboard: DashboardSession::on(&dashboard, session.id),
+                        ..session.into()
+                    })
+                    .collect()
+            },
             consents: tx.oidc().list_consents(user_id).await?,
             deletion: match tx.deletions().find(user_id).await? {
                 Some(deletion) => Some(ScheduledDeletion {

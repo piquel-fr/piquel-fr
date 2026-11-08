@@ -198,6 +198,35 @@ pub struct Session {
     pub last_seen_at: DateTime<Utc>,
     /// When it expires.
     pub expires_at: DateTime<Utc>,
+    /// The admin dashboard's sessions resting on it, newest first: an
+    /// administrator's, while they last.
+    pub dashboard: Vec<DashboardSession>,
+}
+
+/// A session of the admin dashboard, which rests on an auth session: it lasts
+/// while that one does, until it goes unused too long or reaches `expires_at`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DashboardSession {
+    /// The auth session it rests on.
+    pub session_id: SessionId,
+    /// When the administrator signed in to the dashboard.
+    pub signed_in_at: DateTime<Utc>,
+    /// Its last request.
+    pub last_used_at: DateTime<Utc>,
+    /// When it ends, however busy.
+    pub expires_at: DateTime<Utc>,
+}
+
+impl DashboardSession {
+    /// Those of `sessions` resting on the auth session `session_id`, in order.
+    #[must_use]
+    pub fn on(sessions: &[Self], session_id: SessionId) -> Vec<Self> {
+        sessions
+            .iter()
+            .filter(|session| session.session_id == session_id)
+            .cloned()
+            .collect()
+    }
 }
 
 /// The scopes an account consented to for one application.

@@ -463,7 +463,8 @@ impl AccountCommand {
         }
     }
 
-    /// Prints one session per line.
+    /// Prints one session per line, then one per dashboard session resting on
+    /// it, indented, with when it signed in, was last used and ends.
     fn print_sessions(sessions: &[SessionItem]) {
         println!("ID\tMETHODS\tDEVICE\tIP\tSIGNED IN\tLAST SEEN\tEXPIRES");
         for session in sessions {
@@ -482,6 +483,14 @@ impl AccountCommand {
                 session.last_seen_at.to_rfc3339(),
                 session.expires_at.to_rfc3339()
             );
+            for dashboard in &session.dashboard {
+                println!(
+                    "  dashboard\t-\t-\t-\t{}\t{}\t{}",
+                    dashboard.signed_in_at.to_rfc3339(),
+                    dashboard.last_used_at.to_rfc3339(),
+                    dashboard.expires_at.to_rfc3339()
+                );
+            }
         }
     }
 

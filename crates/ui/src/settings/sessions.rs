@@ -6,7 +6,9 @@ use crate::{
     layout::page_head,
 };
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
+use piquel_common::{
+    AuthenticationMethod, SessionId, admin::DashboardSession, events::UserAgentFamily,
+};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use topcoat::{
@@ -45,6 +47,8 @@ pub struct DeviceRow<'a> {
     pub authenticated_at: DateTime<Utc>,
     /// Its last recorded activity.
     pub last_seen_at: DateTime<Utc>,
+    /// The admin dashboard's sessions resting on it, newest first.
+    pub dashboard: &'a [DashboardSession],
 }
 
 impl DeviceRow<'_> {
@@ -79,11 +83,29 @@ impl DeviceRow<'_> {
         .join(" · ")
     }
 
-    /// When it was last active, as of `now`. Activity is recorded every five minutes
-    /// at most, so anything closer is now.
+    /// When it was last active, as of `now`: now for the browser looking at the
+    /// page.
     fn activity(&self, now: DateTime<Utc>) -> String {
-        let ago = now - self.last_seen_at;
-        if self.current || ago < TimeDelta::minutes(5) {
+        if self.current {
+            return "Active now".to_owned();
+        }
+        Self::active(self.last_seen_at, now)
+    }
+
+    /// What a dashboard `session` resting on it says, as of `now`: when it was
+    /// last used, since it times out soon after.
+    pub(crate) fn dashboard_details(session: &DashboardSession, now: DateTime<Utc>) -> String {
+        format!(
+            "Admin dashboard · {}",
+            Self::active(session.last_used_at, now)
+        )
+    }
+
+    /// That something was last active at `last`, as of `now`. Activity is recorded
+    /// every five minutes at most, so anything closer is now.
+    fn active(last: DateTime<Utc>, now: DateTime<Utc>) -> String {
+        let ago = now - last;
+        if ago < TimeDelta::minutes(5) {
             return "Active now".to_owned();
         }
         let (count, unit) = if ago < TimeDelta::hours(1) {
@@ -136,6 +158,9 @@ pub async fn devices<'a>(
                                 " " <span class="badge ok">"This device"</span>
                             }
                             <small>(row.details(now))</small>
+                            for dashboard in row.dashboard {
+                                <small>(DeviceRow::dashboard_details(dashboard, now))</small>
+                            }
                             <small>
                                 "signed in "
                                 time(at: row.authenticated_at, precision: Precision::Day)

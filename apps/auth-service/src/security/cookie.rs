@@ -1,7 +1,7 @@
 //! Host-only browser cookies: the secrets binding server-side state, the notice
 //! of a change just made, and the preferences each origin keeps.
 
-use super::SESSION_LIFETIME_DAYS;
+use super::{DASHBOARD_LIFETIME_HOURS, SESSION_LIFETIME_DAYS};
 use axum::http::{
     HeaderMap, HeaderValue,
     header::{self, InvalidHeaderValue},
@@ -51,7 +51,8 @@ impl BrowserCookie {
     /// notice is shown on the page its change goes to, at once.
     const fn max_age(self) -> u32 {
         match self {
-            Self::Session | Self::Dashboard => SESSION_LIFETIME_DAYS * 24 * 60 * 60,
+            Self::Session => SESSION_LIFETIME_DAYS * 24 * 60 * 60,
+            Self::Dashboard => DASHBOARD_LIFETIME_HOURS * 60 * 60,
             Self::Ceremony
             | Self::Federation
             | Self::FederationPending

@@ -31,7 +31,7 @@ use piquel_repository::{
     SigningKeyState,
 };
 use piquel_telemetry::{HttpTelemetry, Telemetry};
-use piquel_ui::{Checkbox, HandoffQuery};
+use piquel_ui::HandoffQuery;
 use std::net::SocketAddr;
 use url::{Position, Url};
 
@@ -138,43 +138,43 @@ impl Harness {
 
     /// Opens the dashboard's `path` in a browser of its own, which goes through
     /// the handoff page as `auth`'s browser: the dashboard's browser, holding the
-    /// state of its sign-in, and auth's answer.
-    async fn hand_off(&self, auth: &Browser, path: &str) -> (Browser, Response) {
+    /// state of its sign-in, the handoff it asked for, and auth's answer.
+    async fn hand_off(&self, auth: &Browser, path: &str) -> (Browser, HandoffQuery, Response) {
         let started = self.visit(&Browser::signed_out(), path).await;
         assert_eq!(started.status(), StatusCode::SEE_OTHER);
         let handoff = location(&started);
         assert_eq!(handoff.path(), routes::page::ADMIN);
         assert_eq!(parameter(&handoff, "return_to"), path);
         let (state, _) = cookie(&started, BrowserCookie::DashboardState);
-        let dashboard = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, state);
-        (dashboard, self.to_auth(auth, &started).await)
-    }
-
-    /// Signs `auth`'s browser in to the dashboard, which opens its `path`: the
-    /// dashboard's browser, holding its session.
-    async fn sign_in(&self, auth: &Browser, path: &str) -> Browser {
-        let (dashboard, handed) = self.hand_off(auth, path).await;
-        self.redeem(&dashboard, &location(&handed), path).await
-    }
-
-    /// Signs `auth`'s browser in to the dashboard, which opens its `path`, with a
-    /// passkey proof of the handoff at `proved_at`: the dashboard's browser,
-    /// holding its session.
-    async fn confirmed(&self, auth: &Browser, path: &str, proved_at: DateTime<Utc>) -> Browser {
-        let sign_in = self.sign_in_service();
-        let state = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         let query = HandoffQuery {
             state: state.to_owned(),
             return_to: path.to_owned(),
-            confirm: Checkbox(true),
         };
+        let dashboard = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, state);
+        (dashboard, query, self.to_auth(auth, &started).await)
+    }
+
+    /// Signs `auth`'s browser in to the dashboard, which opens its `path`, with a
+    /// passkey proof of the handoff long past, so a change still needs a
+    /// confirmation: the dashboard's browser, holding its session.
+    async fn sign_in(&self, auth: &Browser, path: &str) -> Browser {
+        let long_ago = Utc::now() - chrono::Duration::hours(1);
+        self.confirmed(auth, path, long_ago).await
+    }
+
+    /// Signs `auth`'s browser in to the dashboard, which opens its `path`, with a
+    /// passkey proof of the handoff at `proved_at`, as the handoff page asks for
+    /// one: the dashboard's browser, holding its session.
+    async fn confirmed(&self, auth: &Browser, path: &str, proved_at: DateTime<Utc>) -> Browser {
+        let (dashboard, query, asked) = self.hand_off(auth, path).await;
+        assert_eq!(asked.status(), StatusCode::OK, "asks for a passkey");
         let proof = AdminProof::unverified(auth.session_id, proved_at);
-        let code_url = sign_in
-            .hand_off(&auth.owner(&self.database).await, &query, Some(proof))
+        let code_url = self
+            .sign_in_service()
+            .hand_off(&auth.owner(&self.database).await, &query, proof)
             .await
             .expect("handed off");
-        let browser = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, state);
-        self.redeem(&browser, &code_url, path).await
+        self.redeem(&dashboard, &code_url, path).await
     }
 
     /// The dashboard's sign-in, as auth's handoff page runs it.
@@ -239,22 +239,47 @@ async fn a_server_error_shows_its_trace_id() {
 }
 
 /// An administrator's passkey session signs in to the dashboard through auth's
-/// handoff page, silently. The code works once, only in the browser holding the
-/// state it was bound to. Every page loads the dashboard's script alone, and
-/// posts only to itself.
+/// handoff page, which asks for a passkey every time, and the sign-in is recorded
+/// as theirs. The code works once, only in the browser holding the state it was
+/// bound to. Every page loads the dashboard's script alone, and posts only to
+/// itself.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn signing_in_hands_off_through_auth_once() {
+async fn signing_in_asks_auth_for_a_passkey_once() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
-    let (dashboard, handed) = harness.hand_off(&admin, "/users").await;
-    let code_url = location(&handed);
+    let (dashboard, query, asked) = harness.hand_off(&admin, "/users").await;
+    assert_eq!(asked.status(), StatusCode::OK);
+    assert!(
+        html(asked)
+            .await
+            .contains(r#"data-passkey-assertion="/admin/proof""#),
+        "asks for a passkey"
+    );
+    let proof = AdminProof::unverified(admin.session_id, Utc::now());
+    let code_url = harness
+        .sign_in_service()
+        .hand_off(&admin.owner(&harness.database).await, &query, proof)
+        .await
+        .expect("handed off");
     let elsewhere = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, "AAAA");
     let refused = elsewhere.visit(&harness.dashboard, code_url.as_str()).await;
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST, "another browser");
     let signed_in = harness.redeem(&dashboard, &code_url, "/users").await;
     let replayed = dashboard.visit(&harness.dashboard, code_url.as_str()).await;
     assert_eq!(replayed.status(), StatusCode::BAD_REQUEST, "once only");
+    let recorded = harness
+        .actor_of("dashboard_signed_in", |event| {
+            *event
+                == DomainEvent::DashboardSignedIn {
+                    session_id: admin.session_id,
+                }
+        })
+        .await;
+    assert!(
+        matches!(recorded, Some(Actor::User { user_id, .. }) if user_id == admin.user_id),
+        "{recorded:?}"
+    );
 
     let page = harness.visit(&signed_in, "/users").await;
     assert_eq!(page.status(), StatusCode::OK);
@@ -275,11 +300,11 @@ async fn signing_in_hands_off_through_auth_once() {
     );
 }
 
-/// A dashboard session lasts while its auth session does, and the
-/// administrator's rights are checked again on every request.
+/// A dashboard session ends with its auth session, and with the account's
+/// rights: granting them again revives no old cookie.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_dashboard_rests_on_the_auth_session_and_live_rights() {
+async fn the_dashboard_ends_with_the_auth_session_and_the_rights() {
     let harness = Harness::new().await;
     let signed_out = harness.admin().await;
     let dashboard = harness.sign_in(&signed_out, "/users").await;
@@ -303,9 +328,47 @@ async fn the_dashboard_rests_on_the_auth_session_and_live_rights() {
         .revoke_administrator(&operator(), revoked.user_id)
         .await
         .expect("revoke");
+    let ended = DomainEvent::DashboardSignedOut {
+        session_id: revoked.session_id,
+    };
+    let recorded = harness
+        .actor_of("dashboard_signed_out", |event| *event == ended)
+        .await;
+    assert!(matches!(recorded, Some(Actor::Cli { .. })), "{recorded:?}");
+    harness.grant(revoked.user_id).await;
     let page = harness.visit(&dashboard, "/users").await;
-    assert_eq!(page.status(), StatusCode::FORBIDDEN);
-    assert!(html(page).await.contains("This account has no access"));
+    assert_eq!(
+        location(&page).path(),
+        routes::page::ADMIN,
+        "granting the rights again revives no session"
+    );
+}
+
+/// A dashboard session times out once unused for half an hour: each request
+/// keeps it going.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_idle_dashboard_session_expires() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.sign_in(&admin, "/users").await;
+    let database = &harness.database;
+    let idle = |minutes| async move {
+        database
+            .dashboard()
+            .backdate_use(admin.session_id, chrono::Duration::minutes(minutes))
+            .await
+            .expect("backdate");
+    };
+    idle(29).await;
+    let page = harness.visit(&dashboard, "/users").await;
+    assert_eq!(page.status(), StatusCode::OK, "still in use");
+    idle(29).await;
+    let page = harness.visit(&dashboard, "/users").await;
+    assert_eq!(page.status(), StatusCode::OK, "the last request counts");
+    idle(31).await;
+    let page = harness.visit(&dashboard, "/users").await;
+    assert_eq!(location(&page).path(), routes::page::ADMIN, "timed out");
 }
 
 /// A change needs the dashboard's own passkey confirmation: a passkey sign-in
@@ -324,7 +387,6 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
     let asked = harness.visit(&dashboard, &disable).await;
     let handoff = location(&asked);
     assert_eq!(handoff.path(), routes::page::ADMIN);
-    assert_eq!(parameter(&handoff, "confirm"), "on");
     let (state, _) = cookie(&asked, BrowserCookie::DashboardState);
     let page = harness.to_auth(&admin, &asked).await;
     assert_eq!(page.status(), StatusCode::OK);
@@ -344,17 +406,14 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
     let query = HandoffQuery {
         state: state.to_owned(),
         return_to: disable.clone(),
-        confirm: Checkbox(true),
     };
     let other = Browser::sign_in(&harness.database, admin.user_id).await;
     let elsewhere = AdminProof::unverified(other.session_id, Utc::now());
-    let refused = sign_in.hand_off(&owner, &query, Some(elsewhere)).await;
+    let refused = sign_in.hand_off(&owner, &query, elsewhere).await;
     assert!(refused.is_err(), "a proof of another session");
-    let refused = sign_in.hand_off(&owner, &query, None).await;
-    assert!(refused.is_err(), "no proof");
     let proof = AdminProof::unverified(admin.session_id, Utc::now());
     let code_url = sign_in
-        .hand_off(&owner, &query, Some(proof))
+        .hand_off(&owner, &query, proof)
         .await
         .expect("handed off");
     let browser = dashboard.with_cookie(BrowserCookie::DashboardState, state);
@@ -686,7 +745,7 @@ async fn the_audit_page_verifies_on_request_and_leaves_pruning_to_the_owner() {
 async fn only_administrators_signed_in_with_a_passkey_are_handed_off() {
     let harness = Harness::new().await;
     let user = Browser::new_account(&harness.database).await;
-    let (_, refused) = harness.hand_off(&user, "/users").await;
+    let (_, _, refused) = harness.hand_off(&user, "/users").await;
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     assert!(refused.headers().get(header::LOCATION).is_none());
     assert!(html(refused).await.contains("This account has no access"));
@@ -699,7 +758,7 @@ async fn only_administrators_signed_in_with_a_passkey_are_handed_off() {
         AuthenticationMethod::Federation,
     )
     .await;
-    let (_, asked) = harness.hand_off(&social, "/users").await;
+    let (_, _, asked) = harness.hand_off(&social, "/users").await;
     let login = Url::parse(AUTH_ORIGIN)
         .and_then(|auth| auth.join(redirect(&asked)))
         .expect("sign-in URL");
@@ -750,7 +809,8 @@ async fn a_form_shown_in_time_may_be_posted_until_the_confirmation_ends() {
 }
 
 /// The admin listener serves only the dashboard's host, takes forms only from
-/// its own pages, and signing out ends the dashboard's session alone.
+/// its own pages, and signing out ends the dashboard's session alone, recorded
+/// as the administrator's.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_admin_listener_keeps_to_its_host_forms_and_session() {
@@ -776,6 +836,16 @@ async fn the_admin_listener_keeps_to_its_host_forms_and_session() {
         .await;
     assert_eq!(redirect(&signed_out), "/sign-out");
     assert_eq!(cookie(&signed_out, BrowserCookie::Dashboard).0, "");
+    let ended = DomainEvent::DashboardSignedOut {
+        session_id: admin.session_id,
+    };
+    let recorded = harness
+        .actor_of("dashboard_signed_out", |event| *event == ended)
+        .await;
+    assert!(
+        matches!(recorded, Some(Actor::User { user_id, .. }) if user_id == admin.user_id),
+        "recorded as the administrator's: {recorded:?}"
+    );
     let page = harness.visit(&dashboard, "/users").await;
     assert_eq!(location(&page).path(), routes::page::ADMIN, "signed out");
     AccountService::new(harness.database.clone())

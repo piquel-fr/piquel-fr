@@ -33,6 +33,12 @@ pub(crate) use session::{Confirmed, Credential, OptionalSession, Session, Sessio
 pub(crate) const CSRF_HEADER: &str = "x-piquel-csrf";
 /// Browser session lifetime, also used by its host cookie.
 pub(crate) const SESSION_LIFETIME_DAYS: u32 = 30;
+/// How long an admin dashboard session lasts from its sign-in however busy, also
+/// used by its host cookie: an unattended browser or a stolen cookie stops working
+/// within a working day.
+pub(crate) const DASHBOARD_LIFETIME_HOURS: u32 = 12;
+/// How long an admin dashboard session lasts without a request.
+pub(crate) const DASHBOARD_IDLE_MINUTES: u32 = 30;
 pub(crate) use piquel_common::protocol::step_up::CONFIRMATION_MAX_AGE;
 
 /// Browser JSON error `{"error": message}`, plus a machine-readable `code` when the

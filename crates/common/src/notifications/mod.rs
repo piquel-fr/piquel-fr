@@ -144,6 +144,8 @@ impl DomainEvent {
             // Administrator rights show in the dashboard, which its holder uses.
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
+            | Self::DashboardSignedIn { .. }
+            | Self::DashboardSignedOut { .. }
             // A read changes nothing to tell.
             | Self::AccountViewed {}
             // Nobody reads the inbox of an account that no longer exists.

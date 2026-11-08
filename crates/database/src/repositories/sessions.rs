@@ -104,6 +104,7 @@ impl From<StoredSession> for Session {
             passkey_confirmed_at: session.passkey_confirmed_at,
             last_seen_at: session.last_seen_at,
             expires_at: session.expires_at,
+            dashboard: Vec::new(),
         }
     }
 }

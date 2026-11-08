@@ -198,6 +198,8 @@ impl HistoryRow<'_> {
             HistoryEntry::AccountEnabled => "Account re-enabled".to_owned(),
             HistoryEntry::AdministratorGranted => "Administrator rights granted".to_owned(),
             HistoryEntry::AdministratorRevoked => "Administrator rights removed".to_owned(),
+            HistoryEntry::DashboardSignedIn => "Signed in to the admin dashboard".to_owned(),
+            HistoryEntry::DashboardSignedOut => "Signed out of the admin dashboard".to_owned(),
             HistoryEntry::HandleChanged => "Handle changed".to_owned(),
             HistoryEntry::DisplayNameChanged => "Display name changed".to_owned(),
             HistoryEntry::PictureChanged => "Profile picture changed".to_owned(),

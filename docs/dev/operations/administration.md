@@ -117,13 +117,15 @@ Its pages call `AdminService` in-process; there is no admin API.
 
 An administrator signs in by a handoff from auth: the dashboard sends the browser
 to auth's `/admin` page, which needs a session signed in with a passkey, of an
-account that still holds administrator rights, and sends it back with a
-single-use code bound to that session and to the dashboard's state cookie. The
-dashboard's session lasts while that auth session does, and every request checks
-the administrator's rights again, so revoking either takes effect at once.
+account that still holds administrator rights, asks for the passkey again, and
+sends it back with a single-use code bound to that session and to the
+dashboard's state cookie. The dashboard's session lasts while that auth session
+does, at most 12 hours, and ends after 30 minutes without a request. Every
+request checks the administrator's rights again, and revoking them ends their
+dashboard sessions, so either takes effect at once.
 Changes also need the dashboard's own passkey confirmation from the last five
-minutes, which the administrator gives on auth's `/admin` page, for the dashboard
-only. See [surfaces](../architecture/surfaces.md#adminpiquelfr).
+minutes: signing in gives one, and the administrator gives the next in a dialog
+on the page, or on auth's `/admin` page, for the dashboard only. See [surfaces](../architecture/surfaces.md#adminpiquelfr).
 
 The dashboard never changes an administrator's account: revoke their rights first.
 Administrators cannot grant or revoke their own rights, and nobody can revoke the last
@@ -142,8 +144,11 @@ Only administrators can use it. Grant the first one with the CLI:
 piquelctl app exec piquel-fr auth --env production -- auth-service admin grant USERNAME
 ```
 
-An administrator's dashboard session lasts while their auth session does, and
-survives restarts and replicas: it is stored, as a digest, in PostgreSQL.
+An administrator's dashboard session lasts while their auth session does, for at
+most 12 hours, and ends after 30 minutes without a request or when their rights
+are revoked. It survives restarts and replicas: it is stored, as a digest, in
+PostgreSQL. Their security history records each sign-in and sign-out, and their
+devices list it under the session it rests on.
 
 ## Invitations
 

@@ -32,7 +32,7 @@ pub use repositories::{
     alerts::StoredAlert,
     announcements::{DraftedAnnouncement, Recipients},
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
-    dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
+    dashboard::{EndedDashboardSession, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},
     deliveries::{
         Announcement, AnnouncementEmail, BackchannelLogout, Channel, Delivery, DeliveryBacklog,

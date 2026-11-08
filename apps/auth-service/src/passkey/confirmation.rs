@@ -187,8 +187,9 @@ impl PasskeyApplication {
     /// Verifies `input`, a passkey assertion for `user_id`'s session `session_id`:
     /// the browser's admin proof ceremony, which that session started, is
     /// consumed, and its assertion, signed for `related`'s origin when given and
-    /// auth's own otherwise, accepted. The session stays as it was. A recovery's
-    /// passkey during its probation proves nothing.
+    /// auth's own otherwise, accepted, and recorded as a confirmation of the
+    /// session. The session stays as it was. A recovery's passkey during its
+    /// probation proves nothing.
     async fn prove(
         &self,
         headers: &HeaderMap,
@@ -225,13 +226,19 @@ impl PasskeyApplication {
                 .webauthn
                 .finish_passkey_authentication(&input.credential, &started.state),
         };
-        let (tx, credential) = self
-            .accept_credential::<Credential>(context, actor, user_id, verified)
+        let (mut tx, credential) = self
+            .accept_credential::<Credential>(context, actor.clone(), user_id, verified)
             .await?;
         if let Credential::Probation(probation) = credential {
             let settles_at = probation.settles_at();
             return Err(RecoveryError::Probation { settles_at }.into());
         }
+        tx.record(
+            &context.actor(actor),
+            Some(user_id),
+            DomainEvent::PasskeyConfirmed { session_id },
+        )
+        .await?;
         tx.commit().await.map_err(PasskeyError::from)?;
         Ok(AdminProof {
             session_id,

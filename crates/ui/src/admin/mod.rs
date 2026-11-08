@@ -56,7 +56,7 @@ pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
 pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
 
 use crate::{
-    Checkbox, Query,
+    Query,
     form::{Precision, time},
     icons::{Icon, icon},
     layout::{
@@ -76,18 +76,15 @@ use topcoat::{
     view::{Child, View, class, component, view},
 };
 
-/// What the dashboard asks auth's handoff page for: the `state` its cookie binds
-/// the handoff to, the dashboard path to go on to, and whether a passkey must
-/// confirm the handoff, for a change.
+/// What the dashboard asks auth's handoff page for, which always asks for a
+/// passkey: the `state` its cookie binds the handoff to, and the dashboard path
+/// to go on to.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandoffQuery {
     /// The state, which only the dashboard's cookie in the asking browser holds.
     pub state: String,
     /// The dashboard path to go on to.
     pub return_to: String,
-    /// Whether a passkey must confirm the handoff.
-    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
-    pub confirm: Checkbox,
 }
 
 impl Query for HandoffQuery {}
@@ -899,7 +896,7 @@ pub async fn dashboard_signed_out<'a>(
 }
 
 /// Auth's page asking an administrator to prove a passkey before going on to the
-/// dashboard to make a change: its form posts to `action` once the
+/// dashboard, to sign in or make a change: its form posts to `action` once the
 /// passkey script ran the ceremony `proof` starts, for this handoff only. It
 /// posts the handoff `query` asked for, and says why the last proof was refused,
 /// as `alert`, if it was.
@@ -915,7 +912,7 @@ pub async fn handoff_proof<'a>(
     Ok(view! {
         <div>
             <h1>"Confirm it's you"</h1>
-            <p class="lead">"The admin dashboard needs your passkey before it makes a change. It counts for the dashboard only, for five minutes."</p>
+            <p class="lead">"The admin dashboard needs your passkey to sign you in or make a change. It counts for the dashboard only."</p>
         </div>
         if let Some(alert) = alert {
             <p class="notice error" role="alert">(alert)</p>

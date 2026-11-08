@@ -13,6 +13,9 @@ test('admin dashboard', async ({ browser }) => {
   const account = handle('sam');
   const admin = await signedUp(browser, account);
   cli(grantAdmin, account);
+  // Signing in to the dashboard asks for the passkey on auth's handoff page.
   await admin.goto(adminUrl);
+  await admin.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  await admin.waitForURL((url) => url.origin === new URL(adminUrl).origin);
   await shoot(admin, 'admin/overview');
 });
