@@ -74,7 +74,8 @@ which also defines the small helpers they call, `env`, `page` and `escape`.
 The `mount` option moves the routes from `/auth`, and `afterLogin` sets where a
 sign-in lands when it came from no page, `/` by default. `Issuer.discover` takes
 `fetch` and `clock` options, to send its requests through another client or pin
-time in tests.
+time in tests. Whatever `fetch` you give it, the SDK sends only `https` requests,
+follows no redirect and gives up after 10 seconds.
 
 The session lives in the `__Host-piquel-<client ID>-session` cookie, which is
 `Secure`, `HttpOnly` and `SameSite=Lax`, so scripts can't read its tokens. It
