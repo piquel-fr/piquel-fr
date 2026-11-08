@@ -71,6 +71,7 @@ use crate::{
 };
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
+use forms::Claimed;
 use piquel_common::{ClientId, ErrorChain, UserId, config::Origin};
 use piquel_crypto::{KeyEncryptionKey, NoteVerifier};
 use piquel_repository::Database;
@@ -453,9 +454,10 @@ impl AdminApplication {
 
     /// Makes the change a posted `form` asks for, with `call`, once: the same form
     /// posted again to the same page and query within seconds, such as by a
-    /// double click or a reload, waits for this one, then changes nothing and goes
-    /// to `again`, or, if this one changed nothing, is made itself. Every change
-    /// the dashboard makes comes through here.
+    /// double click or a reload, changes nothing. It goes to `again` once this
+    /// one is made, or shows its form again, saying this one is being made, until
+    /// then. A refused change can be posted again at once. Every change the
+    /// dashboard makes comes through here.
     ///
     /// A `GET` only shows the form, so it returns nothing: a link, even with a
     /// query, never changes anything. It shows the page's draft, if the
@@ -491,21 +493,32 @@ impl AdminApplication {
                 })
             }));
         };
-        let Some(claim) = app.forms.claim(admin.user_id, page, &input).await? else {
-            return Err(see_other(again).into());
+        let claim = match app.forms.claim(admin.user_id, page, &input).await? {
+            Claimed::New(claim) => claim,
+            Claimed::Made => return Err(see_other(again).into()),
+            Claimed::Pending => {
+                Self::refused_with(cx, StatusCode::CONFLICT).await;
+                return Ok(Some(Err(Refused {
+                    message: BEING_MADE.to_owned(),
+                    form: input,
+                })));
+            }
         };
         let refused = match call(input.clone()).await {
             Ok(value) => {
-                // The change is made: a claim lost now only lets a repeat be
+                // The change is made: a claim not kept only lets a repeat be
                 // refused by the service, or made again.
                 if let Err(error) = claim.keep().await {
-                    tracing::warn!(error = %ErrorChain(&error), "a dashboard change's claim was lost");
+                    tracing::warn!(error = %ErrorChain(&error), "a dashboard change's claim was not kept");
                 }
                 return Ok(Some(Ok(value)));
             }
             Err(refused) => refused.into(),
         };
-        claim.release().await?;
+        // The refusal is answered whatever happens to the claim, which expires.
+        if let Err(error) = claim.release().await {
+            tracing::warn!(error = %ErrorChain(&error), "a dashboard change's claim was not released");
+        }
         match refused {
             Refusal::HandOff => {
                 app.forms.keep(admin.user_id, page, &input).await?;
@@ -517,10 +530,7 @@ impl AdminApplication {
                     Err(Error::msg("an admin change failed"))
                 }
                 (status, message) => {
-                    *Self::refused(cx)
-                        .await
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner) = Some(status);
+                    Self::refused_with(cx, status).await;
                     Ok(Some(Err(Refused {
                         message: Self::sentence(message),
                         form: input,
@@ -528,6 +538,14 @@ impl AdminApplication {
                 }
             },
         }
+    }
+
+    /// Records `status` as the refusal's of the change the request posted.
+    async fn refused_with(cx: &Cx, status: StatusCode) {
+        *Self::refused(cx)
+            .await
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(status);
     }
 
     /// The status a page at `status` answers with: the refusal's, for a page at
@@ -580,6 +598,11 @@ impl AdminApplication {
         }
     }
 }
+
+/// What a change's page says over a form posted again while the same change,
+/// posted moments before, is still being made: nothing was changed by this one.
+const BEING_MADE: &str =
+    "This change is already being made. Check its result before you send it again.";
 
 /// What a change's page says over the form a confirmation's trip through auth
 /// kept: nothing was changed yet.

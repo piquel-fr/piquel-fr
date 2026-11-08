@@ -19,10 +19,12 @@ CREATE TABLE dashboard_drafts (
 CREATE INDEX dashboard_drafts_expires_idx ON dashboard_drafts (expires_at);
 
 -- A change the dashboard made or is making, by the digest of its administrator,
--- page and form, for a few seconds: the same form posted again meanwhile, such as
--- by a double click, changes nothing.
+-- page, query and form, for a few seconds: the same form posted again meanwhile,
+-- such as by a double click, changes nothing. One being made is `made` once it
+-- is; one refused is deleted, so posting it again tries again.
 CREATE TABLE dashboard_submissions (
     digest BYTEA PRIMARY KEY,
+    made BOOLEAN NOT NULL DEFAULT FALSE,
     expires_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX dashboard_submissions_expires_idx ON dashboard_submissions (expires_at);

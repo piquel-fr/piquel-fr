@@ -392,32 +392,86 @@ impl DashboardRepository<'_> {
     }
 
     /// Claims the change whose administrator, page and form have the digest
-    /// `digest` until `expires_at`. Returns `false` if it is claimed already and
-    /// the claim has not expired: the same change, posted again meanwhile. A
-    /// claim another transaction is writing is waited for, until it commits or
-    /// gives up.
+    /// `digest`, as being made, until `expires_at`. Returns `None` if it is
+    /// claimed, else whether the claim already there, which has not expired, is
+    /// of a change that was made, or is being made still.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError`] if the query fails.
+    /// Returns [`DatabaseError`] if a query fails.
     pub async fn claim_submission(
         &mut self,
         digest: &[u8],
         expires_at: DateTime<Utc>,
-    ) -> Result<bool, DatabaseError> {
-        Ok(run!(
+    ) -> Result<Option<bool>, DatabaseError> {
+        let claimed = run!(
             self,
             execute,
             sqlx::query!(
                 "INSERT INTO dashboard_submissions (digest, expires_at) VALUES ($1, $2)
-                ON CONFLICT (digest) DO UPDATE SET expires_at = EXCLUDED.expires_at
+                ON CONFLICT (digest) DO UPDATE SET made = FALSE, expires_at = EXCLUDED.expires_at
                 WHERE dashboard_submissions.expires_at <= now()",
                 digest,
                 expires_at,
             )
         )?
         .rows_affected()
-            == 1)
+            == 1;
+        if claimed {
+            return Ok(None);
+        }
+        // Claimed by another request. One released since, a refused change, is
+        // taken as still being made: posting again, once told, tries again.
+        Ok(run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "SELECT made FROM dashboard_submissions WHERE digest = $1",
+                digest,
+            )
+        )?
+        .or(Some(false)))
+    }
+
+    /// Records that the change claimed with the digest `digest` was made, and
+    /// keeps its claim until `expires_at`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the update fails.
+    pub async fn made_submission(
+        &mut self,
+        digest: &[u8],
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE dashboard_submissions SET made = TRUE, expires_at = $2 WHERE digest = $1",
+                digest,
+                expires_at,
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Releases the claim of the change with the digest `digest`, which made no
+    /// change, so posting it again tries again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the delete fails.
+    pub async fn release_submission(&mut self, digest: &[u8]) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "DELETE FROM dashboard_submissions WHERE digest = $1",
+                digest,
+            )
+        )?;
+        Ok(())
     }
 
     /// Ends every claim on a change, as if its window had passed: a fixture for

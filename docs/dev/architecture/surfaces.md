@@ -142,10 +142,13 @@ being misread, lost or made twice:
   has changed yet.
 - **Made once.** The dashboard claims each change by the digest of its
   administrator, page, query and form, such as `/handles/release?handle=alice`,
-  for ten seconds after it is made. The same form posted again meanwhile, such
-  as by a double click or a reload, waits for the first. If the first was made,
-  the repeat changes nothing and goes where the first one went. If it was
-  refused, the repeat is made itself, and meets the same refusal.
+  while it is made and for ten seconds after. The same form posted again
+  meanwhile, such as by a double click or a reload, changes nothing. Once the
+  first is made, the repeat goes where the first one went. While the first is
+  still being made, the repeat shows its form again, at `409`, saying so. A
+  refused change gives up its claim, so posting it again tries again. No
+  transaction stays open while a change is made: the claim is written, then
+  marked made or deleted.
 - **Its status.** A refused change shows its form again with the refusal's
   status, such as `400`, not `200`.
 

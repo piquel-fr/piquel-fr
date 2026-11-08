@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE dashboard_submissions SET made = TRUE, expires_at = $2 WHERE digest = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f47d394797145383df130248d558680ddfef52072edef7c2c63d65cf6a9c768"
+}

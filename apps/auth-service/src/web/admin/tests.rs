@@ -2161,8 +2161,9 @@ async fn a_session_is_revoked_only_from_its_own_account() {
 }
 
 /// The same form posted twice within seconds, such as by a double click, makes
-/// its change once: the second goes where the change is listed. The same form
-/// to another target is another change, and a refused one is refused each time.
+/// its change once: the second goes where the change is listed, or, while the
+/// first is made, shows its form again. The same form to another target is
+/// another change, and a refused one can be posted again at once.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_change_posted_twice_is_made_once() {
@@ -2178,10 +2179,30 @@ async fn a_change_posted_twice_is_made_once() {
     let url = format!("{DASHBOARD}{new}");
     let post = || dashboard.submit(&harness.dashboard, &url, &[("expires_in", "2d")], OWN_PAGE);
     let (first, second) = tokio::join!(post(), post());
-    // One shows the new link, the other the invitations, where it is listed.
-    let mut answers = [redirect(&first), redirect(&second)];
-    answers.sort_unstable();
-    assert_eq!(answers, ["/invitations", new]);
+    // One shows the new link. The other goes to the invitations, where it is
+    // listed, or, while the first is still being made, shows its form again.
+    let shows_link = |posted: &Response| {
+        posted
+            .headers()
+            .get(header::LOCATION)
+            .is_some_and(|to| to == new)
+    };
+    let (made, repeat) = if shows_link(&first) {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(redirect(&made), new);
+    if repeat.status() == StatusCode::CONFLICT {
+        let page = html(repeat).await;
+        assert!(page.contains("already being made"), "{page}");
+        assert!(
+            page.contains(r#"value="2d""#),
+            "keeps what was typed: {page}"
+        );
+    } else {
+        assert_eq!(redirect(&repeat), "/invitations");
+    }
     let after = harness.database.security().list_invitations().await;
     assert_eq!(after.expect("invitations").len(), before + 1, "made once");
 
@@ -2203,8 +2224,8 @@ async fn a_change_posted_twice_is_made_once() {
         assert_eq!(redirect(&unreserved), "/handles", "{handle}");
     }
 
-    // Two refused at once are each refused, keeping what was typed: the second
-    // waits for the first, which changed nothing, then is made itself.
+    // Two refused at once each keep what was typed: the second is refused too,
+    // or, while the first is still being made, says so.
     let user = Browser::new_account(&harness.database).await;
     let url = format!("{DASHBOARD}/users/{}/disable", user.user_id);
     let long = "x".repeat(501);
@@ -2212,9 +2233,16 @@ async fn a_change_posted_twice_is_made_once() {
     let post = || dashboard.submit(&harness.dashboard, &url, &fields, OWN_PAGE);
     let (first, second) = tokio::join!(post(), post());
     for refused in [first, second] {
-        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        let status = refused.status();
+        assert!(
+            [StatusCode::BAD_REQUEST, StatusCode::CONFLICT].contains(&status),
+            "{status}"
+        );
         assert!(html(refused).await.contains(&format!(r#"value="{long}""#)));
     }
+    // Refused, the change can be posted again at once.
+    let again = post().await;
+    assert_eq!(again.status(), StatusCode::BAD_REQUEST);
 }
 
 /// The invitations pages find who is signed in before whether signup needs
