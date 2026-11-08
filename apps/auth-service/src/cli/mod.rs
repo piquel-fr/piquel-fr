@@ -56,7 +56,7 @@ use piquel_common::ErrorChain;
 use piquel_repository::Database;
 use piquel_telemetry::Telemetry;
 use session::SessionCommand;
-use std::process::ExitCode;
+use std::{process::ExitCode, time::Duration};
 use tracing::Instrument;
 use user::UserCommand;
 
@@ -287,16 +287,21 @@ impl Administration {
     }
 }
 
+/// How long telemetry may take to flush once a command ends. With `serve`'s
+/// drain ([`crate::Jobs::SHUTDOWN_GRACE`]), it bounds a stop to 9 seconds,
+/// under the 10 that piqueld waits before killing the container.
+const TELEMETRY_FLUSH: Duration = Duration::from_secs(3);
+
 impl Cli {
-    /// Installs telemetry, runs the selected command, then flushes telemetry, and
-    /// prints any failure with its causes. A failed flush, such as an unreachable
-    /// collector, is only reported: it must not fail a command, such as a deploy's
-    /// migration job.
+    /// Installs telemetry, runs the selected command, then flushes telemetry for up
+    /// to `TELEMETRY_FLUSH`, and prints any failure with its causes. A failed or
+    /// late flush, such as to an unreachable collector, is only reported: it must
+    /// not fail a command, such as a deploy's migration job.
     pub async fn run(self) -> ExitCode {
         let result = async {
             let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
             let result = self.command.unwrap_or(Command::Serve).run().await;
-            if let Err(error) = telemetry.shutdown().await {
+            if let Err(error) = telemetry.shutdown(TELEMETRY_FLUSH).await {
                 eprintln!("warning: {}", ErrorChain(&error));
             }
             result

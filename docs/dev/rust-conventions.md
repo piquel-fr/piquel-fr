@@ -111,8 +111,8 @@ response.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
-The router installs origin/CSRF checks, rate limits, a deadline and browser
-isolation headers. Public-client origins for CORS are looked up per request.
+The router installs origin/CSRF checks, rate limits, a limit on requests in
+flight, a deadline and browser isolation headers. Public-client origins for CORS are looked up per request.
 
 Server-rendered pages live in `src/web` (`WebApplication`). Each page path in
 `routes::page` gets a Topcoat `RouteFn` for `GET`, showing the page, and one for

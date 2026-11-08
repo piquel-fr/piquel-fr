@@ -191,6 +191,38 @@ removed picture stops being served at once. `Public` responses are the same for 
 the stylesheet and script carry no CORS headers. Staging and previews are private routes and bypass
 Cloudflare.
 
+## Timeouts and limits
+
+Auth bounds every connection, request and stop, so a slow client, a flood or a
+stuck job can't hang it. Each listener, public and admin, applies them on its
+own:
+
+| Limit | Value | When it passes |
+| --- | --- | --- |
+| Request headers | 10 s | The connection closes. This also closes a kept-alive connection that starts no new request. |
+| Response writes | 10 s without progress | The connection closes, as for a client that stopped reading. |
+| Request deadline | 30 s, checks and handler included | The request gets `504`. |
+| Requests in flight | 64 per listener | Further requests get `503` with `Retry-After: 1` at once, instead of queueing for the database pool's 10 connections. Health probes are exempt. |
+| Rate budgets | `AUTH_REQUESTS_PER_MINUTE` per client and category | The request gets `429` (see [security properties](../security/properties.md)). |
+| Database statements, locks and idle transactions | 15 s, 5 s and 30 s | See [the database's time limits](../architecture/database.md#time-limits). |
+
+The `piquel.auth.throttled` metric counts refused requests by category. A
+request refused for the in-flight limit counts as `overloaded`.
+
+Auth serves HTTP/1.1 only. piqueld's ingress terminates TLS and HTTP/2, and
+reaches auth over HTTP/1.1.
+
+### Stopping
+
+piqueld stops a container with `SIGTERM`, and kills it 10 seconds later. Auth
+always exits within 9 seconds:
+
+1. Both listeners stop accepting, and background jobs are told to stop, at once.
+2. Open requests and running jobs get 6 seconds, together, to finish. Requests
+   and jobs still running then are cancelled. A cancelled job closes its
+   connection, which releases its lock.
+3. Telemetry gets 3 seconds to flush. What it hasn't sent by then is lost.
+
 ## Running several replicas
 
 `auth_replicas` sets how many auth replicas run (default 1). Two already overlap
@@ -218,10 +250,9 @@ removes the restart gap after a crash; it adds no capacity.
   cleanup or the purge of deleted accounts, each every five minutes, or audit
   sealing every five seconds, holds a PostgreSQL advisory lock while it runs, so
   one replica at a time runs it and the others skip that run. A run that fails
-  or panics is logged and retried at the next interval. On shutdown, once
-  in-flight requests drain, running jobs get 10 seconds to finish (cleanup stops
-  after its current batch), then are cancelled, which closes their connection and
-  releases the lock. Signing key rotation runs on every replica each minute, in
+  or panics is logged and retried at the next interval. On shutdown, running
+  jobs get 6 seconds to finish (cleanup stops after its current batch), then are
+  cancelled (see [Stopping](#stopping)). Signing key rotation runs on every replica each minute, in
   a transaction that takes a transaction-level advisory lock if it is free, so
   one replica at a time advances it; the `keys` commands wait for the same lock.
 - **Migrations.** During a deploy the previous release runs against the new

@@ -238,7 +238,7 @@
     {
       "type": "stat",
       "title": "Throttled per minute",
-      "description": "Requests refused by rate limits.",
+      "description": "Requests refused by rate limits, or because too many were in flight.",
       "id": 5,
       "datasource": {
         "type": "prometheus",
@@ -451,7 +451,7 @@
     {
       "type": "timeseries",
       "title": "Throttled requests",
-      "description": "Requests refused by rate limits, by rate category.",
+      "description": "Requests refused by rate limits, by rate category, or because too many were in flight (overloaded).",
       "id": 9,
       "datasource": {
         "type": "prometheus",

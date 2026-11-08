@@ -94,4 +94,6 @@ detail.
   retained; the IP addresses, browser families and provider subjects recorded with
   them are deleted after 90 days. Readiness checks PostgreSQL and that the signing keys were reloaded in the last
   5 minutes; startup validates configured signing/provider
-  secrets. Request and provider calls have bounded timeouts.
+  secrets. Connections, requests, provider calls and shutdown have bounded timeouts,
+  and each listener refuses requests beyond 64 in flight (see [timeouts and
+  limits](../operations/deploying.md#timeouts-and-limits)).

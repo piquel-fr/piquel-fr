@@ -1,4 +1,5 @@
-//! Rate-limit budgets: which routes spend them, how they are shared and bounded.
+//! Rate-limit budgets: which routes spend them, how they are shared and bounded;
+//! and the limit on requests in flight.
 
 use super::*;
 use crate::routes::{audit, federation, passkey};
@@ -41,6 +42,48 @@ async fn rate_limit_deadline_includes_a_blocked_database_query() {
         StatusCode::ACCEPTED
     );
 }
+/// A listener running all the requests it may refuses the next at once, with
+/// `503` and a retry delay, while health probes still answer. A freed slot
+/// serves again.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_full_listener_refuses_requests_with_503() {
+    let mut fixture = SecurityFixture::new().await;
+    fixture.policy.in_flight = Arc::new(tokio::sync::Semaphore::new(1));
+    fixture.router = Router::new()
+        .route("/oauth/token", any(|| async { StatusCode::ACCEPTED }))
+        .route(service::READY, any(|| async { StatusCode::OK }))
+        .layer(middleware::from_fn_with_state(
+            fixture.policy.clone(),
+            HttpSecurity::protect,
+        ));
+    let busy = fixture
+        .policy
+        .in_flight
+        .try_acquire()
+        .expect("the one slot");
+    let refused = fixture
+        .request(Method::POST, "/oauth/token", None, false)
+        .await;
+    assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(refused.headers()[header::RETRY_AFTER], "1");
+    assert_eq!(
+        fixture
+            .request(Method::GET, service::READY, None, false)
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    drop(busy);
+    assert_eq!(
+        fixture
+            .request(Method::POST, "/oauth/token", None, false)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+}
+
 /// Unknown paths do not drain budgets. Each budget is spent on its own: exhausted
 /// reads get a retry delay and exhausted token requests are refused, while sign-in
 /// and the account stay available.

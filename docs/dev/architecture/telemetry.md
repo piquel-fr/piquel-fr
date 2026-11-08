@@ -112,7 +112,8 @@ Only the standard variables, read by `Telemetry::init`:
 
 Export goes through the workspace's `reqwest`, on the service's tokio runtime,
 in protobuf. A gRPC `OTEL_EXPORTER_OTLP_PROTOCOL` fails at startup. Shutdown
-flushes pending telemetry after the listeners stop.
+flushes pending telemetry after the listeners stop, for up to 3 seconds (see
+[Stopping](../operations/deploying.md#stopping)).
 
 ## Locally
 

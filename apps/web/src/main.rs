@@ -10,7 +10,7 @@ mod site;
 use piquel_common::config::{ConfigurationError, Origin};
 use piquel_telemetry::{Telemetry, TelemetryError};
 use site::Site;
-use std::{net::SocketAddr, process::ExitCode};
+use std::{net::SocketAddr, process::ExitCode, time::Duration};
 use tokio::{net::TcpListener, signal::unix::SignalKind};
 
 piquel_common::variables! {
@@ -31,6 +31,8 @@ const DEFAULT_LISTENER: &str = "127.0.0.1:8080";
 const SERVICE_NAME: &str = "piquel-web";
 /// What is traced, and logged unless `RUST_LOG` says otherwise.
 const TELEMETRY_FILTER: &str = "piquel_web=info";
+/// How long telemetry may take to flush on exit.
+const TELEMETRY_FLUSH: Duration = Duration::from_secs(3);
 
 /// Why the server stopped.
 #[derive(Debug, thiserror::Error)]
@@ -81,12 +83,12 @@ impl Web {
         Ok(())
     }
 
-    /// Installs telemetry, serves, then flushes telemetry. A failed flush is only
-    /// reported.
+    /// Installs telemetry, serves, then flushes telemetry for up to
+    /// [`TELEMETRY_FLUSH`]. A failed flush is only reported.
     async fn run() -> Result<(), WebError> {
         let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
         let result = async { Self::from_environment()?.serve().await }.await;
-        if let Err(error) = telemetry.shutdown().await {
+        if let Err(error) = telemetry.shutdown(TELEMETRY_FLUSH).await {
             eprintln!("warning: {}", Self::chain(&error));
         }
         result
