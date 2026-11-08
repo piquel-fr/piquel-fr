@@ -42,7 +42,8 @@ Announcements email is on, both when its deliveries are queued and when each is
 sent; an essential one goes to every recipient with a primary verified address
 (see [the delivery queue](delivery-queue.md#announcements)).
 
-The owner turns a category on or off under **Email** on the inbox, or with
+The owner turns a category on or off in the inbox's **Email preferences**
+dialog, which a change reopens, or with
 `PUT /account/notifications/preferences` and a body such as
 `{"category": "announcements", "email": false}`; their session is enough. A
 change records `NotificationPreferenceChanged`, which the security history

@@ -5,7 +5,7 @@ use super::{Audience, HistoryRow, Holdings, timeline::report_form};
 use crate::{
     form::{Checkbox, Precision, Query, change_form, open, time},
     icons::{Icon, icon},
-    layout::{announcement_text, page_head},
+    layout::{announcement_text, dialog, page_head},
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -41,12 +41,20 @@ pub enum InboxChange {
     },
 }
 
-/// Which page of the inbox shows, as its query names it.
+/// Which page of the inbox shows, and whether its email preferences dialog shows
+/// open, as its query names them.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct InboxState {
     /// The notification the page starts after, if not the newest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<NotificationId>,
+    /// Whether the email preferences dialog shows open, as after a change in it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub email: bool,
 }
+
+/// The element ID of the inbox's email preferences dialog.
+const EMAIL_DIALOG: &str = "dialog-email";
 
 impl Query for InboxState {}
 
@@ -114,7 +122,13 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
     let before = page.shown.before;
     let older = page
         .next
-        .map(|next| InboxState { before: Some(next) }.on(page.page))
+        .map(|next| {
+            InboxState {
+                before: Some(next),
+                email: false,
+            }
+            .on(page.page)
+        })
         .transpose()?;
     let empty = match (before, owner) {
         (Some(_), _) => "No older notifications.",
@@ -128,6 +142,7 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
             page_head(
                 title: "Notifications",
                 lead: "What Piquel tells you about your account. Opening one marks it read.".to_owned(),
+                actions: view! { email_button() },
             )
         }
         <section class="card" aria-labelledby="inbox-heading">
@@ -145,6 +160,9 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
                         label: "Mark all as read",
                         class: "secondary small",
                     )
+                }
+                if !owner {
+                    email_button()
                 }
             </header>
             <ul class="list inbox">
@@ -182,19 +200,29 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
     })
 }
 
-/// Which categories of notifications are emailed, each with a button turning its
-/// email on or off for the owner, read-only for an administrator.
+/// The button opening the email preferences dialog: in the page's head for the
+/// owner, in the inbox's for an administrator.
+#[component]
+async fn email_button() -> Result<impl View> {
+    Ok(view! {
+        <button type="button" class="secondary small" popovertarget=(EMAIL_DIALOG)>
+            icon(kind: Icon::Mail)
+            "Email preferences"
+        </button>
+    })
+}
+
+/// The dialog saying which categories of notifications are emailed, each with a
+/// button turning its email on or off for the owner, read-only for an
+/// administrator. A change reopens it, showing what changed.
 #[component]
 async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
     let owner = page.audience.owns();
     Ok(view! {
-        <section class="card" aria-labelledby="email-heading">
-            <header>
-                <h2 id="email-heading">"Email"</h2>
-            </header>
+        dialog(id: EMAIL_DIALOG, title: "Email preferences", shown: page.shown.email, back: page.page, focus_close: true,
             <p class="help">
                 (if owner {
-                    "Piquel always emails you about your account itself, at your primary address: its addresses, sign-in methods and recovery, and what support changes."
+                    "Piquel always emails you about your account itself, at your primary address: its addresses, sign-in methods and recovery, and what support changes. Choose what else it emails you."
                 } else {
                     "Piquel always emails the owner about their account itself. Only the owner turns the rest on or off."
                 })
@@ -231,7 +259,7 @@ async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
                     </li>
                 }
             </ul>
-        </section>
+        )
     })
 }
 

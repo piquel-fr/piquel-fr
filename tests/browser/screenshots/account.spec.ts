@@ -57,11 +57,10 @@ test('account settings', async ({ page, context, browser }) => {
   await shoot(page, 'account/security-history');
 
   await page.goto('/settings/notifications');
+  await page.getByRole('button', { name: 'Email preferences', exact: true }).click();
   await shoot(
     page,
     'account/notification-email',
-    page
-      .locator('section')
-      .filter({ has: page.getByRole('heading', { name: 'Email', exact: true }) })
+    page.getByRole('dialog', { name: 'Email preferences' })
   );
 });

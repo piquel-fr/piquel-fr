@@ -197,6 +197,10 @@
 .dialog h2 {
   font-size: 1.05rem;
 }
+/* A list in a dialog lines up with the dialog's text, not a card's edge. */
+.dialog .list > li {
+  padding-inline: 0;
+}
 /* The mark a dialog may start with, such as the passkey's. */
 .dialog-mark {
   display: grid;

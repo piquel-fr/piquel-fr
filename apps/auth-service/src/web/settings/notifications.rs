@@ -49,12 +49,17 @@ impl AccountPage for Inbox {
     type Change = InboxChange;
     type Row = InboxState;
 
-    fn reopened(_: &InboxChange) -> InboxState {
-        InboxState::default()
+    /// A refused change to the email preferences shows their dialog again.
+    fn reopened(change: &InboxChange) -> InboxState {
+        InboxState {
+            email: matches!(change, InboxChange::Email { .. }),
+            ..InboxState::default()
+        }
     }
 
-    /// Marking read or unread, or turning a category's email on or off, goes
-    /// back to the inbox's newest page, which shows the change.
+    /// Marking read or unread goes back to the inbox's newest page, which shows
+    /// the change; turning a category's email on or off reopens the email
+    /// preferences dialog, which shows it.
     async fn apply(
         web: &WebApplication,
         _: &Cx,
@@ -74,6 +79,10 @@ impl AccountPage for Inbox {
                 web.account
                     .set_notification_preference(&owner, preference)
                     .await?;
+                return Ok(Applied::Opened(InboxState {
+                    email: true,
+                    ..InboxState::default()
+                }));
             }
         }
         Ok(Applied::Opened(InboxState::default()))

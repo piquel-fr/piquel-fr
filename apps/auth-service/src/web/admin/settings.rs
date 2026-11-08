@@ -359,7 +359,14 @@ pub(super) async fn notifications(cx: &Cx) -> Result<Response> {
     };
     let rows = &rows;
     let section = view! { cx => piquel_ui::inbox(rows: rows, page: page) };
-    App::settings_page(cx, user, Tab::Notifications, None, section).await
+    Box::pin(App::settings_page(
+        cx,
+        user,
+        Tab::Notifications,
+        None,
+        section,
+    ))
+    .await
 }
 
 /// `/users/{account}/handle`: gives the account a new handle, such as one that
