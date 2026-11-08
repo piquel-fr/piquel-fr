@@ -101,12 +101,17 @@ pub struct ConsumedCeremony {
 }
 
 impl PasskeyRepository<'_> {
+    /// The most active passkeys an account keeps, which a trigger enforces.
+    pub const LIMIT: usize = 100;
+
     /// Stores a new credential.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError::Conflict`] if the credential ID is already
-    /// registered, or another [`DatabaseError`] if the query fails.
+    /// registered, [`DatabaseError::Refused`] if the account already has
+    /// [`Self::LIMIT`] active passkeys, or another [`DatabaseError`] if the query
+    /// fails.
     pub async fn insert(&mut self, input: &InsertPasskey) -> Result<StoredPasskey, DatabaseError> {
         run!(
             self,

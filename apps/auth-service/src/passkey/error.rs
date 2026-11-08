@@ -4,7 +4,7 @@ use crate::handles::HandlesError;
 use crate::security::{ApiError, SessionError};
 use piquel_common::{InvalidValue, events::SignInFailure};
 use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
+use piquel_repository::{DatabaseError, PasskeyRepository};
 use std::borrow::Cow;
 use webauthn_rs::prelude::WebauthnError;
 
@@ -18,6 +18,10 @@ pub(crate) enum PasskeyError {
     /// The authenticator's credential is already registered to an account.
     #[error("passkey credential is already registered")]
     PasskeyAlreadyRegistered(#[source] DatabaseError),
+    /// The account already has the most active passkeys it keeps: found as a
+    /// ceremony starts, or refused by the database when two finish at once.
+    #[error("account has the most passkeys it keeps")]
+    TooManyPasskeys(#[source] Option<DatabaseError>),
     /// The account's displayed name is blank, too long or contains controls.
     #[error("invalid display name")]
     InvalidDisplayName,
@@ -129,6 +133,11 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::PasskeyAlreadyRegistered(_) => {
                 Self::conflict("This passkey is already registered to an account.")
             }
+            PasskeyError::TooManyPasskeys(_) => Self::conflict(format!(
+                "This account already has {} passkeys, the most it can keep. Remove one in \
+                 your account settings, or ask Piquel support.",
+                PasskeyRepository::LIMIT
+            )),
             PasskeyError::InvalidDisplayName => {
                 Self::bad_request("Choose a display name of at most 80 characters.")
             }
@@ -218,6 +227,7 @@ impl PasskeyError {
             Self::Handle(_)
             | Self::UnknownHandle
             | Self::PasskeyAlreadyRegistered(_)
+            | Self::TooManyPasskeys(_)
             | Self::InvalidDisplayName
             | Self::InvalidPasskeyName
             | Self::InvitationRequired

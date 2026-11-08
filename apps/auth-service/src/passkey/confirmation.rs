@@ -252,12 +252,7 @@ impl PasskeyApplication {
             .find_by_id(session.user_id)
             .await?
             .ok_or(PasskeyError::AccountInactive)?;
-        let exclusions = app
-            .keys(user.id)
-            .await?
-            .iter()
-            .map(|key| key.cred_id().clone())
-            .collect();
+        let exclusions = app.exclusions(user.id).await?;
         let (challenge, state) = app.registration(
             user.id,
             user.handle.as_str(),

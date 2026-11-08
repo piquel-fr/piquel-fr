@@ -248,7 +248,8 @@ impl RepositoryExecutor<'_> {
         result: Result<T, crate::DatabaseError>,
     ) -> Result<T, crate::DatabaseError> {
         if let Err(
-            crate::DatabaseError::Timeout(_)
+            crate::DatabaseError::Refused(_)
+            | crate::DatabaseError::Timeout(_)
             | crate::DatabaseError::Cancelled(_)
             | crate::DatabaseError::LockUnavailable(_)
             | crate::DatabaseError::InvalidStoredData { .. }
