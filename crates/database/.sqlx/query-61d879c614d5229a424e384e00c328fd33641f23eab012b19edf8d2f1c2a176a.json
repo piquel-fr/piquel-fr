@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account_recoveries\n            WHERE ctid IN (\n                SELECT ctid\n                FROM account_recoveries\n                WHERE coalesce(undone_at, cancelled_at, settles_at, expires_at)\n                    < now() - interval '90 days'\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "61d879c614d5229a424e384e00c328fd33641f23eab012b19edf8d2f1c2a176a"
+}

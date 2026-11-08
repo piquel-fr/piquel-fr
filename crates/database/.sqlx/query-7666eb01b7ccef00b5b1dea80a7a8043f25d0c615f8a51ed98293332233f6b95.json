@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM external_login_identities\n            WHERE ctid IN (\n                SELECT ctid\n                FROM external_login_identities\n                WHERE revoked_at < now() - interval '90 days'\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7666eb01b7ccef00b5b1dea80a7a8043f25d0c615f8a51ed98293332233f6b95"
+}

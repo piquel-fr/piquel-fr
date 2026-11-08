@@ -25,4 +25,5 @@ The owner marks one unread, or every one read, in settings or through
 `/account/notifications/read`. `GET /account/notifications`, `…/{id}` and
 `…/unread` read them without marking anything. Administrators read an account's
 inbox on its dashboard page and operators with `account <user> notifications
-list|show`; neither marks anything read. The data export includes the inbox.
+list|show`; neither marks anything read. The data export includes the inbox, and
+cleanup deletes a notification a year after it arrives.

@@ -176,8 +176,9 @@ Operators rename without the 30-day cooldown of settings renames, but not to a
 handle another account holds or held, or one that looks like it (see
 [security properties](../security/properties.md)). A rename bumps the account's profile
 version, so relying parties refresh `preferred_username`. `release` deletes a
-handle no account holds anymore, the only way one returns to the pool, for cases
-like a trademark dispute; to free a current handle, rename its account first.
+handle no account holds anymore, so anyone may claim it, for cases like a
+trademark dispute; to free a current handle, rename its account first. A purged
+account's handles are freed on their own a year after the purge.
 Every change is recorded as a domain event with its operator; a rename also with
 its reason, which the owner sees in their history.
 

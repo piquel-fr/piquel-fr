@@ -13,14 +13,17 @@ use crate::{
 };
 use axum::http::header;
 use piquel_common::{
-    AuthenticationMethod, Provider, TokenId,
+    AuthenticationMethod, PictureId, Provider, RecoveryId, TokenId,
     clients::{ClientKind, ClientOwner},
-    events::{JobName, RequestOrigin},
+    events::{JobName, RequestOrigin, SignInFailure},
+    notifications::Notification,
 };
 use piquel_repository::{
-    Database, InsertExternalIdentity, InsertPasskey, RefreshRedemption, RefreshRedemptionError,
+    Database, Holds, InsertExternalIdentity, InsertPasskey, InsertRecovery, RefreshRedemption,
+    RefreshRedemptionError, Table,
 };
 use serde_json::json;
+use tokio_stream::StreamExt;
 
 /// The scenario database, and the operations under test.
 struct Fixture {
@@ -131,43 +134,110 @@ impl Fixture {
         client.id
     }
 
-    /// Gives `browser`'s account one record of every category an export holds
-    /// besides its sessions and history, and returns its grant's refresh token
-    /// digest.
+    /// Gives `browser`'s account a record in every table an export reads besides
+    /// its sessions, a revoked passkey and an unlinked identity among them, and
+    /// an event its history hides beside a view of it, which the export leaves
+    /// out too. Returns its grant's refresh token digest.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "One record in every table an export reads."
+    )]
     async fn seed(&self, browser: &Browser) -> Vec<u8> {
-        let address = format!("{}@example.com", browser.user_id);
-        verified_address(&self.database, browser.user_id, &address, true).await;
+        let user_id = browser.user_id;
+        let address = format!("{user_id}@example.com");
+        verified_address(&self.database, user_id, &address, true).await;
         let mut tx = self.database.begin().await.expect("transaction");
-        tx.passkeys()
-            .insert(&InsertPasskey {
-                id: PasskeyId::new(),
-                credential_id: browser.user_id.as_uuid().as_bytes().to_vec(),
-                user_id: browser.user_id,
-                credential: json!({"cred": {
-                    "backup_eligible": true,
-                    "backup_state": false,
-                    "key": "KEY-MATERIAL",
-                }}),
-                friendly_name: "Laptop".into(),
-            })
-            .await
-            .expect("passkey");
+        let revoked = PasskeyId::new();
+        for (id, last) in [(PasskeyId::new(), 1), (revoked, 2)] {
+            let mut credential_id = user_id.as_uuid().as_bytes().to_vec();
+            credential_id.push(last);
+            tx.passkeys()
+                .insert(&InsertPasskey {
+                    id,
+                    credential_id,
+                    user_id,
+                    credential: json!({"cred": {
+                        "backup_eligible": true,
+                        "backup_state": false,
+                        "key": "KEY-MATERIAL",
+                    }}),
+                    friendly_name: "Laptop".into(),
+                })
+                .await
+                .expect("passkey");
+        }
+        assert!(
+            tx.passkeys()
+                .revoke(revoked, user_id)
+                .await
+                .expect("revoke")
+        );
         tx.federation()
             .insert_identity(&InsertExternalIdentity {
                 id: TokenId::new(),
-                user_id: browser.user_id,
+                user_id,
                 provider: Provider::GitHub,
                 issuer: "https://github.com".into(),
-                subject: browser.user_id.to_string(),
+                subject: user_id.to_string(),
                 linked_email: None,
             })
             .await
             .expect("identity");
+        assert!((tx.federation().unlink(user_id, Provider::GitHub).await).expect("unlink"));
+        tx.pictures()
+            .set(user_id, PictureId::new(), b"jpeg")
+            .await
+            .expect("picture");
+        assert!(
+            tx.administrators()
+                .grant(user_id)
+                .await
+                .expect("administrator")
+        );
+        tx.dashboard()
+            .insert_session(user_id.as_uuid().as_bytes(), browser.session_id, None)
+            .await
+            .expect("dashboard session");
+        tx.recoveries()
+            .insert(&InsertRecovery {
+                id: RecoveryId::new(),
+                user_id,
+                secret_digest: user_id.as_uuid().as_bytes(),
+                expires_at: Utc::now() + Duration::days(1),
+            })
+            .await
+            .expect("recovery");
+        assert!(tx.recoveries().cancel_open(user_id).await.expect("cancel"));
+        tx.notifications()
+            .insert(user_id, None, &Notification::AccountEnabled)
+            .await
+            .expect("notification");
+        let hidden = DomainEvent::SignInFailed {
+            method: AuthenticationMethod::Passkey,
+            reason: SignInFailure::AccountUnavailable,
+        };
+        let admin = Actor::Admin {
+            user_id,
+            session_id: browser.session_id,
+        };
+        for (actor, event) in [
+            (Actor::Anonymous, hidden),
+            (admin, DomainEvent::AccountViewed {}),
+        ] {
+            let context = EventContext {
+                actor,
+                origin: RequestOrigin::default(),
+                reason: None,
+            };
+            tx.record(&context, Some(user_id), event)
+                .await
+                .expect("event");
+        }
         tx.commit().await.expect("commit");
         let (client, _, digest) = self.grant(browser).await;
         self.database
             .oidc()
-            .save_consent(browser.user_id, &client, "test", &["openid".into()])
+            .save_consent(user_id, &client, "test", &["openid".into()])
             .await
             .expect("consent");
         self.own_client(browser).await;
@@ -202,8 +272,10 @@ fn reason() -> Reason {
     Reason::parse("Asked by email".into()).expect("reason")
 }
 
-/// An export needs a recent passkey confirmation, and is recorded. It holds every
-/// category of the account's data and no credential, token or digest.
+/// An export needs a recent passkey confirmation, and is recorded. It holds a
+/// section for every table the inventory says it exports, what ended but is
+/// still stored, and every event about the account but views, and no
+/// credential, token or digest. A replica streams only so many at once.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn exports_hold_every_category_and_no_secret() {
@@ -224,36 +296,62 @@ async fn exports_hold_every_category_and_no_secret() {
     ));
 
     let digest = fixture.seed(&browser).await;
-    let export = fixture
-        .account
-        .export(&browser.owner(&fixture.database).await)
-        .await
-        .expect("export");
-    // Its file name and shape are checked in the export's own tests.
-    let export = serde_json::to_value(export).expect("JSON");
+    let owner = browser.owner(&fixture.database).await;
+    let export = fixture.account.export(&owner).await.expect("export");
+    // The streams are taken while their exports wait to download.
+    let second = fixture.account.export(&owner).await.expect("second export");
+    assert!(matches!(
+        fixture.account.export(&owner).await.map(drop),
+        Err(AccountError::Deletion(DeletionError::ExportsBusy))
+    ));
+    drop(second);
+    // Its file name and the sections' shapes are checked in the export's own tests.
+    let mut body = Vec::new();
+    let mut chunks = export.stream();
+    while let Some(chunk) = chunks.next().await {
+        body.extend_from_slice(&chunk.expect("chunk"));
+    }
+    let text = String::from_utf8(body).expect("UTF-8");
+    let export: serde_json::Value = serde_json::from_str(&text).expect("JSON");
     assert_eq!(
         export["profile"]["handle"],
         fixture.handle(&browser).await.as_str()
     );
+    for table in Table::ALL {
+        if let Holds::Exported(section) = table.holds() {
+            let value = &export[section];
+            let empty = value.is_null() || value.as_array().is_some_and(Vec::is_empty);
+            assert!(!empty, "{table} in {section}: {value}");
+        }
+    }
     let count = |category: &str| export[category].as_array().map_or(0, Vec::len);
     for (category, expected) in [
         ("handles", 1),
         ("emails", 1),
-        ("passkeys", 1),
+        ("passkeys", 2),
         ("identities", 1),
         ("sessions", 2),
         ("consents", 1),
         ("grants", 1),
         ("clients", 1),
+        ("recoveries", 1),
     ] {
         assert_eq!(count(category), expected, "{category}");
     }
-    assert!(
-        count("history") >= 2,
-        "both sign-ins: {}",
-        export["history"]
+    let revoked = |passkey: &serde_json::Value| passkey["revoked_at"].is_string();
+    let passkeys = export["passkeys"].as_array().expect("passkeys");
+    assert_eq!(
+        passkeys.iter().filter(|passkey| revoked(passkey)).count(),
+        1
     );
-    let text = export.to_string();
+    assert!(export["identities"][0]["revoked_at"].is_string());
+    let kinds: Vec<&str> = (export["events"].as_array().expect("events"))
+        .iter()
+        .filter_map(|event| event["kind"].as_str())
+        .collect();
+    assert!(kinds.contains(&"signed_in"), "{kinds:?}");
+    assert!(kinds.contains(&"sign_in_failed"), "{kinds:?}");
+    assert!(!kinds.contains(&"account_viewed"), "{kinds:?}");
     for secret in ["KEY-MATERIAL", "digest", "secret", "credential"] {
         assert!(!text.contains(secret), "{secret} in {text}");
     }

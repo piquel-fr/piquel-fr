@@ -128,7 +128,9 @@ async fn restore_tokens_expire_and_end_with_the_deletion() {
 
 /// After a purge no row of any table references the account through a foreign
 /// key, and its events, and those it caused about others, keep no personal data.
-/// The foreign keys are read from the catalog, so tables added later are covered.
+/// The foreign keys are read from the catalog, and each must hold a row of the
+/// account before the purge, so a table added later fails here until this test
+/// gives the account a row in it and the purge removes that row.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 #[expect(
@@ -145,8 +147,13 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
     let (alone, shared, everyone) = (TokenId::new(), TokenId::new(), TokenId::new());
     // Test-generated IDs only, so formatting them into the SQL is safe.
     sqlx::raw_sql(&format!(
-        "INSERT INTO oidc_clients (id, display_name, allowed_scopes, allowed_audiences)
-        VALUES ('{client}', 'Purge test', '[]', '[]');
+        "INSERT INTO oidc_clients (id, display_name, allowed_scopes, allowed_audiences, owner_id)
+        VALUES ('{client}', 'Purge test', '[]', '[]', '{user}');
+        INSERT INTO profile_pictures (user_id, id, image) VALUES ('{user}', uuidv7(), '\\x00');
+        -- Expired, so it does not refuse the administrator rights below.
+        INSERT INTO account_recoveries (id, user_id, secret_digest, started_at, expires_at)
+        VALUES (uuidv7(), '{user}', uuid_send('{user}'), now() - interval '2 days',
+            now() - interval '1 day');
         INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)
         VALUES (uuidv7(), '{user}', '{client}@example.com', now(), TRUE);
         INSERT INTO passkey_credentials (id, credential_id, user_id, credential, friendly_name)
@@ -169,6 +176,20 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         VALUES ('{session}', '{user}', '[\"passkey\"]', now(), now() + interval '1 day', now());
         INSERT INTO browser_session_secrets (session_id, secret_digest)
         VALUES ('{session}', uuid_send('{session}'));
+        INSERT INTO federation_transactions (
+            id, provider_name, state_digest, browser_digest, nonce, pkce_verifier, return_to,
+            link_user_id, link_session_id, expires_at
+        ) VALUES (
+            uuidv7(), 'github', sha256(uuid_send('{session}')), sha256(uuid_send('{user}')),
+            'nonce', 'verifier', '/settings', '{user}', '{session}', now() + interval '5 minutes'
+        );
+        INSERT INTO pending_federation (
+            id, browser_digest, provider_name, issuer, subject, display_name, return_to,
+            link_user_id, expires_at
+        ) VALUES (
+            uuidv7(), sha256(uuid_send('{user}')), 'github', 'https://github.com', '{client}',
+            'Purge test', '/settings', '{user}', now() + interval '5 minutes'
+        );
         INSERT INTO webauthn_ceremonies (id, user_id, session_id, ceremony_kind, challenge_digest, state, expires_at)
         VALUES (uuidv7(), '{user}', '{session}', 'enrollment', '\\x00', '{{}}', now() + interval '5 minutes');
         INSERT INTO authorization_codes (
@@ -254,14 +275,11 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         .expect("schedule");
     tx.commit().await.expect("commit");
 
-    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
-    assert!(tx.deletions().purge(user).await.expect("purge"));
-    tx.commit().await.expect("commit");
-
     // Every column with a foreign key to users(id), and how many rows hold the account.
     // Only this schema's: audit tests migrate schemas of their own beside it.
-    let references: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT
+    let references = || async {
+        sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT
             source.table_name::text, source.column_name::text,
             (xpath('/row/c/text()', query_to_xml(format(
                 'SELECT count(*) AS c FROM %I.%I WHERE %I = %L',
@@ -277,31 +295,30 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
             AND target.ordinal_position = source.position_in_unique_constraint
         WHERE target.table_schema = current_schema()
             AND target.table_name = 'users' AND target.column_name = 'id'",
-    )
-    .bind(user.to_string())
-    .fetch_all(&pool)
-    .await
-    .expect("references");
-    let referencing: Vec<String> = references
-        .iter()
-        .map(|(table, column, _)| format!("{table}.{column}"))
+        )
+        .bind(user.to_string())
+        .fetch_all(&pool)
+        .await
+        .expect("references")
+    };
+    let unseeded: Vec<_> = references()
+        .await
+        .into_iter()
+        .filter(|(_, _, rows)| *rows == 0)
         .collect();
-    for expected in [
-        "sessions.user_id",
-        "user_emails.user_id",
-        "passkey_credentials.user_id",
-        "oidc_consents.user_id",
-        "refresh_token_families.user_id",
-        "administrators.user_id",
-        "account_deletions.user_id",
-        "notifications.user_id",
-    ] {
-        assert!(
-            referencing.iter().any(|column| column == expected),
-            "{expected}"
-        );
-    }
-    let remaining: Vec<_> = references.iter().filter(|(_, _, rows)| *rows > 0).collect();
+    assert!(
+        unseeded.is_empty(),
+        "give the account a row in {unseeded:?}"
+    );
+
+    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    assert!(tx.deletions().purge(user).await.expect("purge"));
+    tx.commit().await.expect("commit");
+    let remaining: Vec<_> = references()
+        .await
+        .into_iter()
+        .filter(|(_, _, rows)| *rows > 0)
+        .collect();
     assert!(remaining.is_empty(), "{remaining:?}");
 
     // Events stay, with their personal data erased, except the bystander's own.

@@ -129,6 +129,8 @@ repositories! {
     alerts: AlertRepository;
     /// Announcements to accounts and their recipients.
     announcements: AnnouncementRepository;
+    /// An account's records its data export reads in full, ended ones included.
+    exports: ExportRepository;
 }
 
 /// How decoding `{"kind": …}` alone as a stored, `kind`-tagged enum fails, which
@@ -375,6 +377,8 @@ pub(crate) mod deliveries;
 pub(crate) mod emails;
 /// Typed domain events, personal data and the consumer cursor.
 pub(crate) mod events;
+/// An account's records its data export reads in full.
+pub(crate) mod exports;
 /// Provider transactions, pending signups and external identity links.
 pub(crate) mod federation;
 /// Every handle, current or released, and the rename that moves between them.

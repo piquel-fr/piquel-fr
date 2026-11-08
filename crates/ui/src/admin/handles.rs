@@ -118,7 +118,7 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
         </section>
         <section class="card" aria-labelledby="released-heading">
             <header><h2 id="released-heading">"Released"</h2></header>
-            <p class="help">"Handles no account uses anymore. Each stays with the account that held it, which can take it back, until it is released for anyone to claim."</p>
+            <p class="help">"Handles no account uses anymore. Each stays with the account that held it, which can take it back, until it is released for anyone to claim. A deleted account's handles are released a year after it is purged."</p>
             if page.released.is_empty() {
                 <p class="empty">"No released handle."</p>
             } else {
@@ -129,12 +129,16 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
                             <div class="text">
                                 <strong>(handle.as_str())</strong>
                                 <small>
-                                    // Only a purged account's last handle has no release time.
+                                    // A purge releases the account's handles; one an older
+                                    // release purged has no release time.
                                     match (&row.account, row.released.released_at) {
                                         (Some(account), Some(at)) => {
                                             "Held by " <a href=(account.as_str())>"an account"</a> " until " moment(at: at)
                                         },
-                                        _ => "Held by an account since purged",
+                                        (None, Some(at)) => {
+                                            "Held by an account purged " moment(at: at)
+                                        },
+                                        (_, None) => "Held by an account since purged",
                                     }
                                 </small>
                             </div>

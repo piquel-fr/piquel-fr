@@ -1,23 +1,23 @@
 //! The export's JSON shape, which downloads keep across releases.
 use super::*;
-use crate::history::{ClientView, HistoryItem};
 use crate::notifications::NotificationItem;
 use chrono::TimeZone;
 use piquel_common::{
-    AuthenticationMethod, ClientId, EmailId, EventId, NotificationId, TokenId,
-    events::{Browser, HistoryActor, HistoryEntry, Platform, UserAgentFamily},
+    AuthenticationMethod, EmailId, EventId, NotificationId, Provider, TokenId,
+    clients::ClientKind,
+    events::{Browser, Platform, UserAgentFamily},
     notifications::Notification,
 };
-use piquel_repository::{RecoveryPasskey, StoredSession};
+use piquel_repository::RecoveryPasskey;
 use serde_json::json;
 
-/// Every category serializes under its documented name and shape.
+/// Every section but the events serializes under its documented name and shape.
 #[test]
 #[expect(
     clippy::too_many_lines,
-    reason = "One literal per category of the document."
+    reason = "One literal per section of the document."
 )]
-fn serializes_every_category_in_its_documented_shape() {
+fn serializes_every_section_in_its_documented_shape() {
     let at = Utc
         .with_ymd_and_hms(2026, 10, 22, 9, 30, 0)
         .single()
@@ -36,13 +36,15 @@ fn serializes_every_category_in_its_documented_shape() {
         browser: Browser::Firefox,
         platform: Platform::Linux,
     };
-    let export = AccountExport {
+    let ip: std::net::IpAddr = [192, 0, 2, 1].into();
+    let records = Records {
         format: FORMAT,
         version: VERSION,
         exported_at: at,
         profile: Profile {
             id: user,
             handle: "ada".parse().expect("handle"),
+            handle_changed_at: at,
             display_name: "Ada".into(),
             status: AccountStatus::Active,
             created_at: at,
@@ -61,7 +63,7 @@ fn serializes_every_category_in_its_documented_shape() {
             claimed_at: at,
             released_at: None,
         })],
-        administrator: true,
+        administrator: Some(Administrator { granted_at: at }),
         dashboard_sessions: vec![DashboardSession::from(DashboardSignIn {
             session_id: session,
             created_at: at,
@@ -78,29 +80,35 @@ fn serializes_every_category_in_its_documented_shape() {
             friendly_name: "Laptop".into(),
             created_at: at,
             last_used_at: None,
+            revoked_at: Some(at),
             backup_eligible: Some(true),
             backed_up: Some(false),
         }],
-        identities: vec![Identity {
+        identities: vec![IdentityRecord {
             provider: Provider::GitHub,
             subject: "1234".into(),
             linked_email: Some("ada@example.com".into()),
+            linked_at: at,
+            last_login_at: at,
+            revoked_at: None,
         }],
-        sessions: vec![SessionItem::new(
-            StoredSession {
+        sessions: vec![Session {
+            record: SessionRecord {
                 id: session,
-                user_id: user,
                 authentication_methods: vec![AuthenticationMethod::Passkey],
                 authenticated_at: at,
-                expires_at: at,
+                device: Some(device),
+                created_ip: Some(ip),
                 last_seen_at: at,
-                revoked_at: None,
+                last_seen_ip: Some(ip),
                 passkey_confirmed_at: Some(at),
-                user_agent_family: Some(device),
-                last_seen_ip: Some([192, 0, 2, 1].into()),
+                passkey_id: Some(passkey),
+                expires_at: at,
+                revoked_at: None,
+                clients: vec![client.clone()],
             },
-            Some(session),
-        )],
+            current: true,
+        }],
         consents: vec![Consent {
             client_id: client.to_string(),
             audience: "notes".into(),
@@ -114,7 +122,27 @@ fn serializes_every_category_in_its_documented_shape() {
             created_at: at,
             revoked_at: None,
         }],
-        clients: Vec::new(),
+        clients: vec![Client {
+            client: OwnedClientView {
+                id: client.clone(),
+                display_name: "Notes".into(),
+                kind: ClientKind::Public,
+                redirect_uris: vec!["https://notes.example/callback".into()],
+                post_logout_uris: Vec::new(),
+                allowed_scopes: vec!["openid".into()],
+                allow_refresh: false,
+                require_pushed_authorization_requests: false,
+                backchannel_logout_uri: None,
+                enabled: true,
+                suspended_at: None,
+                last_used_at: Some(at),
+            },
+            related_origins: vec![ApprovedOrigin {
+                origin: "https://notes.example".parse().expect("origin"),
+                client_id: client.clone(),
+                approved_at: at,
+            }],
+        }],
         recoveries: vec![Recovery::from(RecentRecovery {
             id: recovery,
             started_at: at,
@@ -129,23 +157,6 @@ fn serializes_every_category_in_its_documented_shape() {
                 active: true,
             }),
         })],
-        history: vec![HistoryItem {
-            id: event,
-            occurred_at: at,
-            entry: HistoryEntry::SignedIn {
-                method: AuthenticationMethod::Passkey,
-                origin: None,
-            },
-            actor: HistoryActor::Account,
-            reason: None,
-            client: Some(ClientView {
-                id: client,
-                name: Some("Notes".into()),
-            }),
-            ip: Some([192, 0, 2, 1].into()),
-            device: Some(device),
-            erased: false,
-        }],
         notifications: vec![NotificationItem {
             id: notification,
             created_at: at,
@@ -156,17 +167,18 @@ fn serializes_every_category_in_its_documented_shape() {
             body: Notification::AccountEnabled.body(),
         }],
     };
-    assert_eq!(export.file_name(), "piquel-account-ada-2026-10-22.json");
+    assert_eq!(records.file_name(), "piquel-account-ada-2026-10-22.json");
     let time = "2026-10-22T09:30:00Z";
     assert_eq!(
-        serde_json::to_value(&export).expect("export"),
+        serde_json::to_value(&records).expect("export"),
         json!({
             "format": "piquel.account-export",
-            "version": 2,
+            "version": 3,
             "exported_at": time,
             "profile": {
                 "id": user,
                 "handle": "ada",
+                "handle_changed_at": time,
                 "display_name": "Ada",
                 "status": "active",
                 "created_at": time,
@@ -179,7 +191,7 @@ fn serializes_every_category_in_its_documented_shape() {
                 "data": "anBlZw==",
             },
             "handles": [{"handle": "ada", "claimed_at": time, "released_at": null}],
-            "administrator": true,
+            "administrator": {"granted_at": time},
             "dashboard_sessions": [
                 {"session_id": session, "created_at": time, "confirmed_at": time}
             ],
@@ -189,6 +201,7 @@ fn serializes_every_category_in_its_documented_shape() {
                 "friendly_name": "Laptop",
                 "created_at": time,
                 "last_used_at": null,
+                "revoked_at": time,
                 "backup_eligible": true,
                 "backed_up": false,
             }],
@@ -196,16 +209,24 @@ fn serializes_every_category_in_its_documented_shape() {
                 "provider": "github",
                 "subject": "1234",
                 "linked_email": "ada@example.com",
+                "linked_at": time,
+                "last_login_at": time,
+                "revoked_at": null,
             }],
             "sessions": [{
                 "id": session,
-                "current": true,
-                "device": {"browser": "firefox", "platform": "linux"},
-                "ip": "192.0.2.1",
-                "methods": ["passkey"],
+                "authentication_methods": ["passkey"],
                 "authenticated_at": time,
+                "device": {"browser": "firefox", "platform": "linux"},
+                "created_ip": "192.0.2.1",
                 "last_seen_at": time,
+                "last_seen_ip": "192.0.2.1",
+                "passkey_confirmed_at": time,
+                "passkey_id": passkey,
                 "expires_at": time,
+                "revoked_at": null,
+                "clients": ["notes"],
+                "current": true,
             }],
             "consents": [{"client_id": "notes", "audience": "notes", "scopes": ["openid"]}],
             "grants": [{
@@ -216,7 +237,25 @@ fn serializes_every_category_in_its_documented_shape() {
                 "created_at": time,
                 "revoked_at": null,
             }],
-            "clients": [],
+            "clients": [{
+                "id": "notes",
+                "display_name": "Notes",
+                "kind": "public",
+                "redirect_uris": ["https://notes.example/callback"],
+                "post_logout_uris": [],
+                "allowed_scopes": ["openid"],
+                "allow_refresh": false,
+                "require_pushed_authorization_requests": false,
+                "backchannel_logout_uri": null,
+                "enabled": true,
+                "suspended_at": null,
+                "last_used_at": time,
+                "related_origins": [{
+                    "origin": "https://notes.example",
+                    "client_id": "notes",
+                    "approved_at": time,
+                }],
+            }],
             "recoveries": [{
                 "id": recovery,
                 "started_at": time,
@@ -227,18 +266,6 @@ fn serializes_every_category_in_its_documented_shape() {
                 "undone_at": null,
                 "state": "probation",
                 "settles_at": time,
-            }],
-            "history": [{
-                "id": event,
-                "occurred_at": time,
-                "kind": "session.signed_in",
-                "method": "passkey",
-                "actor": "account",
-                "reason": null,
-                "client": {"id": "notes", "name": "Notes"},
-                "ip": "192.0.2.1",
-                "device": {"browser": "firefox", "platform": "linux"},
-                "erased": false,
             }],
             "notifications": [{
                 "id": notification,

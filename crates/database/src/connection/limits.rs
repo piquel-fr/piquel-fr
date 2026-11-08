@@ -37,7 +37,7 @@ impl Limit {
     /// the session, so a forgotten transaction cannot keep its locks and its
     /// connection, or hold back the event consumers and the audit sealer, which
     /// wait for every older transaction to end.
-    const IDLE_IN_TRANSACTION: Self = Self::new(
+    pub(crate) const IDLE_IN_TRANSACTION: Self = Self::new(
         "idle_in_transaction_session_timeout",
         Duration::from_secs(30),
     );
