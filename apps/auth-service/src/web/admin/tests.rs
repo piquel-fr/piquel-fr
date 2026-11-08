@@ -1682,7 +1682,7 @@ async fn administrators_read_an_accounts_inbox_and_history() {
 /// The draft form finds accounts to add, saving nothing; each result adds itself
 /// to the list, which also takes pasted accounts. "Send" saves the draft and
 /// sends it as saved once the dashboard is confirmed, and otherwise goes on to the
-/// send page, which confirms first.
+/// send page, which confirms first and says it is essential.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_draft_form_finds_accounts_and_sends_from_the_editor() {
@@ -1735,6 +1735,7 @@ async fn the_draft_form_finds_accounts_and_sends_from_the_editor() {
     let to = [
         ("audience", "accounts"),
         ("accounts", handle.as_str()),
+        ("essential", "on"),
         ("intent", "send"),
     ];
     let unconfirmed_send = post(&unconfirmed, &to).await;
@@ -1743,6 +1744,11 @@ async fn the_draft_form_finds_accounts_and_sends_from_the_editor() {
     let confirmed = harness
         .confirmed(&admin, "/announcements/new", Utc::now())
         .await;
+    let confirming = html(harness.visit(&confirmed, sending).await).await;
+    assert!(
+        confirming.contains("Yes: emailed whatever the recipient"),
+        "{confirming}"
+    );
     let sent = post(&confirmed, &to).await;
     let shown = html(harness.visit(&confirmed, redirect(&sent)).await).await;
     assert!(shown.contains("Sent"), "{shown}");

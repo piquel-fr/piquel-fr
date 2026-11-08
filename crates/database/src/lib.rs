@@ -30,7 +30,7 @@ pub use repositories::{
     SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
     alerts::StoredAlert,
-    announcements::{DraftedAnnouncement, Recipients},
+    announcements::{DraftedAnnouncement, Recipients, SentAnnouncement},
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},

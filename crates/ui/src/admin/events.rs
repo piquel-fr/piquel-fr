@@ -413,8 +413,16 @@ impl EventRow<'_> {
             DomainEvent::AnnouncementSent {
                 announcement_id,
                 recipients,
-            } => Description::new(format!("Announcement sent to {recipients} accounts"))
-                .with("announcement", announcement_id),
+                essential,
+            } => Description::new(if essential {
+                format!("Essential announcement sent to {recipients} accounts")
+            } else {
+                format!("Announcement sent to {recipients} accounts")
+            })
+            .with("announcement", announcement_id),
+            DomainEvent::NotificationPreferenceChanged(preference) => {
+                Description::new(preference.change())
+            }
             DomainEvent::AlertRaised { alert_id, alert } => {
                 Self::alert("Alert raised", alert_id, &alert)
             }

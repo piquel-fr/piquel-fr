@@ -40,6 +40,7 @@ just auth audit list --user alice --kind session_revoked
 just auth audit list --user alice --views # with administrators' views of the account
 just auth audit verify                    # recompute the tamper-evident chain, and record what it found
 just auth account alice passkeys list     # the account's settings, as its owner sees them
+just auth account alice notifications preferences  # which emails it receives; only its owner changes them
 just auth account alice name set "Alice B" --reason "Asked by email"
 just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
 just auth account alice emails remove <email-id> --reason "Asked by email"
@@ -198,8 +199,12 @@ Administrators tell accounts what they must know, such as a security incident or
 a change to the privacy policy, with an announcement: a subject and a plain text,
 to every account or to up to 1,000 chosen ones. Each recipient gets it as a
 notification in their inbox (see [Notifications](../architecture/notifications.md)),
-and by email at their primary verified address if they have one. It is not for
-support conversations, which happen elsewhere.
+and by email at their primary verified address if they have one and receive
+announcements by email, which they may turn off. An **essential** announcement
+is emailed to every recipient with such an address, whatever their preference,
+and carries no unsubscribe link: mark one essential only for a security
+incident, or a change to the privacy policy or terms. It is not for support
+conversations, which happen elsewhere.
 
 On the dashboard:
 
@@ -208,12 +213,14 @@ On the dashboard:
    paste a list, one handle, verified email or account ID per line, or type into
    the search box and select **Find**, then **Add** beside each account. Finding
    and adding save nothing.
-3. Select **Save draft** to check the email first, or **Send** to send it now.
+3. Check **Essential** if every recipient must receive it by email.
+4. Select **Save draft** to check the email first, or **Send** to send it now.
    Saving a draft needs no passkey; sending asks for one. Sending can't be taken
    back.
 
 A draft goes to nobody, and any administrator may change or discard it; its page
-shows the email exactly as it will be sent, and how many recipients it reaches.
+shows the email exactly as it will be sent, whether it is essential, and how
+many recipients its email reaches.
 Sending sends only the revision that was saved or checked: a draft changed
 meanwhile, by another administrator say, is refused, to be checked again. Once
 sent, nothing, not even the database's own role, changes its text, and its page
@@ -226,9 +233,9 @@ From the command line:
 
 ```sh
 just auth announcement draft --subject "Security incident on 2 November" \
-    --body-file incident.txt --everyone          # or --to alice --to bob; prints the draft's ID
+    --body-file incident.txt --everyone --essential  # or --to alice --to bob; prints the draft's ID
 just auth announcement show <id>                 # its text, recipients, and once sent, its emails
-just auth announcement edit <id> --subject "…" --body-file - --to alice
+just auth announcement edit <id> --subject "…" --body-file - --to alice  # without --essential, it is not
 just auth announcement send <id> --revision <n>  # the revision `show` printed; asks first
 just auth announcement discard <id>              # a draft only
 just auth announcement list

@@ -41,8 +41,19 @@ To mark every notification read, select **Mark all as read** in the inbox.
 
 ## Emails
 
-Each notification is also emailed. The email says what the inbox says and
-links to the notification's page; an announcement's email links your inbox.
+Each notification is also emailed, in one of two categories:
+
+- **Security:** everything about your account itself. You always receive these,
+  so nobody can hide one from you.
+- **Announcements:** news from Piquel, such as a new feature. You receive these
+  by default, and can [turn them off](#turn-announcement-emails-off).
+
+Some announcements are **essential**: a security incident, or a change to the
+privacy policy or terms. You receive those by email even with announcements
+turned off. Either way, every announcement stays in your inbox.
+
+The email says what the inbox says and links to the notification's page; an
+announcement's email links your inbox.
 
 - A change of primary address is emailed to the address that stopped being
   primary, and a removed address is told at that address.
@@ -50,14 +61,36 @@ links to the notification's page; an announcement's email links your inbox.
   to every confirmed address.
 - Everything else goes to your primary address.
 
-Piquel's emails are security notices only: no newsletters, no tracking and no
-remote images.
+Piquel's emails carry no tracking and no remote images.
+
+## Turn announcement emails off
+
+From your settings:
+
+1. Open **Notifications**.
+2. Under **Email**, select **Turn off** beside **Announcements**.
+
+![The Email section of the notifications page: Announcements, emailed, with a Turn off button](../../images/account/notification-email.png)
+
+From an announcement's email, select **Stop receiving announcements by email**
+at its end, then **Stop announcement emails** on the page it opens. Your mail
+app may also offer an **Unsubscribe** button beside the sender, which does the
+same in one click.
+
+The **Email** section then says **Not emailed** beside **Announcements**, and
+your security history lists **Announcements: emails turned off**. Turn them
+back on with **Turn on**, in the same place.
 
 ## Troubleshooting
 
 - **No emails arrive.** Check that you have a confirmed primary
   [email address](email-addresses.md), and look in your spam folder. The
   inbox keeps every notice either way.
+- **You still received an announcement.** It was essential, or its email had
+  already left when you turned announcements off.
+- **The unsubscribe page says "This link doesn’t work".** The link was cut off
+  or changed. Open it from the email again, or turn announcements off in your
+  settings.
 - **A notification you don't recognize.** Open it, then follow its advice. If
   it wasn't you, report the entry with **This wasn’t me**, or write to
   [contact@piquel.fr](mailto:contact@piquel.fr).

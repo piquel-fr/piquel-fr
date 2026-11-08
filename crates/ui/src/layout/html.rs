@@ -41,6 +41,8 @@ pub enum Title {
     Restore,
     /// The theme and sidebar preferences.
     Preferences,
+    /// Turning announcements' email off from an email's link.
+    Unsubscribe,
 }
 
 impl Title {
@@ -63,6 +65,7 @@ impl Title {
             Self::AccountDeleted => "Your account is scheduled for deletion",
             Self::Restore => "Restore your account",
             Self::Preferences => "Preferences",
+            Self::Unsubscribe => "Announcement emails",
         }
     }
 }

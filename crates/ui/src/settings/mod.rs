@@ -25,8 +25,8 @@ pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, con
 pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use notifications::{
-    InboxChange, InboxPage, InboxRow, InboxState, NotificationPage, NotificationState, inbox,
-    notification,
+    InboxChange, InboxPage, InboxRow, InboxState, NotificationPage, NotificationState,
+    UnsubscribeStep, inbox, notification, unsubscribe,
 };
 pub use overview::{AccountOverview, OverviewLinks, account_overview};
 pub use profile::{

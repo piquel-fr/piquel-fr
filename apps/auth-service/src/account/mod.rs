@@ -53,6 +53,7 @@ use chrono::{DateTime, Utc};
 use piquel_common::{
     ClientId, EmailId, Handle, NotificationId, PasskeyId, Personal, PictureId, SessionId,
     events::DomainEvent,
+    notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
 };
 use piquel_repository::{Database, StoredUser};
@@ -102,6 +103,9 @@ operations! {
         ListNotifications,
         /// Read one notification, without marking it read.
         ViewNotification,
+        /// Show which categories of notifications the account receives by
+        /// email. Only the owner changes them.
+        ViewNotificationPreferences,
     }
 }
 
@@ -264,6 +268,10 @@ impl AccountApplication {
             Op::RemovePicture => (pictures::OWN, delete(Self::remove_picture)),
             Op::ListNotifications => (notifications::LIST, get(Self::notifications)),
             Op::ViewNotification => (notifications::ITEM, get(Self::notification)),
+            Op::ViewNotificationPreferences => (
+                notifications::PREFERENCES,
+                get(Self::notification_preferences),
+            ),
         }
     }
 
@@ -449,6 +457,14 @@ impl AccountApplication {
         Path(id): Path<NotificationId>,
     ) -> Result<Json<NotificationView>, AccountError> {
         Ok(Json(app.service.notification(&viewer, id).await?))
+    }
+
+    /// Returns whether the account receives each category's email.
+    async fn notification_preferences(
+        State(app): State<Self>,
+        viewer: Viewer,
+    ) -> Result<Json<Vec<NotificationPreference>>, AccountError> {
+        Ok(Json(app.service.notification_preferences(&viewer).await?))
     }
 }
 

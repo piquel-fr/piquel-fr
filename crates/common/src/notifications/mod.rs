@@ -107,8 +107,10 @@ impl DomainEvent {
             },
             Self::AccountRestored {} => Notification::AccountRestored,
             // The owner made it, so they know. Only the owner, or their social
-            // signup, sets a picture.
+            // signup, sets a picture, and only the owner changes their
+            // notification preferences.
             Self::HandleChanged { .. }
+            | Self::NotificationPreferenceChanged(_)
             | Self::DisplayNameChanged { .. }
             | Self::PictureRemoved {}
             | Self::PictureChanged { .. }
@@ -178,6 +180,58 @@ impl DomainEvent {
     }
 }
 
+crate::str_enum! {
+    /// A category of notifications whose email the owner chooses to receive, on
+    /// by default. Everything about the account itself, its security category, is
+    /// not one: it is always emailed, so no switch can hide it.
+    pub enum EmailCategory {
+        /// Administrators' announcements. An essential one is emailed whatever
+        /// the preference.
+        Announcements = "announcements",
+    }
+}
+
+impl EmailCategory {
+    /// Its name, in settings and on the dashboard.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Announcements => "Announcements",
+        }
+    }
+
+    /// What it holds, and what turning its email off does.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Announcements => {
+                "News from Piquel, such as a new feature. Announcements about a security incident, or a change to the privacy policy or terms, reach you by email either way."
+            }
+        }
+    }
+}
+
+/// Whether the owner receives a category's email, e.g.
+/// `{"category": "announcements", "email": false}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationPreference {
+    /// The category.
+    pub category: EmailCategory,
+    /// Whether its notifications are emailed.
+    pub email: bool,
+}
+
+impl NotificationPreference {
+    /// What changing to it did, as the history says, e.g. "Announcements:
+    /// emails turned off".
+    #[must_use]
+    pub fn change(self) -> String {
+        let state = if self.email { "on" } else { "off" };
+        format!("{}: emails turned {state}", self.category.label())
+    }
+}
+
 /// Which of the account's verified addresses a notification's email goes to,
 /// each once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,8 +246,8 @@ pub enum Addressees {
 }
 
 impl Notification {
-    /// Where its email goes. Every notification is emailed: each is about the
-    /// account itself, so none can be turned off.
+    /// Where its email goes. Every notification is emailed, except an
+    /// announcement whose recipient turned [`EmailCategory::Announcements`] off.
     #[must_use]
     #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn addressees(&self) -> Addressees {

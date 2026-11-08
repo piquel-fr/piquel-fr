@@ -967,6 +967,7 @@ Options:
 - `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
 - `--everyone`: Send it to every account, as of its sending.
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
+- `--essential`: Email it to every recipient with a primary verified address, even those who turned announcements' email off: for a security incident, or a change to the privacy policy or terms. Without it, they only find it in their inbox.
 
 ## `auth-service announcement edit`
 
@@ -986,6 +987,7 @@ Options:
 - `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
 - `--everyone`: Send it to every account, as of its sending.
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
+- `--essential`: Email it to every recipient with a primary verified address, even those who turned announcements' email off: for a security incident, or a change to the privacy policy or terms. Without it, they only find it in their inbox.
 
 ## `auth-service announcement discard`
 
@@ -1386,6 +1388,7 @@ Commands:
 
 - [`auth-service account notifications list`](#auth-service-account-notifications-list): List the notifications, newest first.
 - [`auth-service account notifications show`](#auth-service-account-notifications-show): Show one notification, with its security history entry while kept.
+- [`auth-service account notifications preferences`](#auth-service-account-notifications-preferences): Show which categories of notifications the account receives by email. Only the owner changes them, since turning one off could hide a notice from them.
 
 ## `auth-service account notifications list`
 
@@ -1411,6 +1414,18 @@ auth-service account <USER> notifications show [OPTIONS] <NOTIFICATION>
 Arguments:
 
 - `<NOTIFICATION>`: The notification, as `list` shows it.
+
+Options:
+
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+
+## `auth-service account notifications preferences`
+
+Show which categories of notifications the account receives by email. Only the owner changes them, since turning one off could hide a notice from them.
+
+```text
+auth-service account <USER> notifications preferences [OPTIONS]
+```
 
 Options:
 

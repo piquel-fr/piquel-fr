@@ -85,7 +85,9 @@ what the other issues:
 3. Remove `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` once `keys digest-usage` lists only
    `current`: about 30 days later, since refresh tokens end with their session,
    and a redeemed code is kept while the grant it produced lives.
-   Removing it sooner ends the refresh tokens still under it.
+   Removing it sooner ends the refresh tokens still under it. Announcements'
+   unsubscribe links made under the old key stop working then, whenever it is
+   removed: their owners turn the email off in their settings instead.
 
 Each stored digest records a fingerprint of its key, and `keys digest-usage`
 counts them per key, until cleanup deletes them, named `current`, `accepted`, `unrecorded`

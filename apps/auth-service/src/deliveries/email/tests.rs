@@ -15,7 +15,9 @@ use piquel_common::{
     notifications::Notification,
 };
 use piquel_crypto::Secret;
-use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser};
+use piquel_repository::{
+    DraftedAnnouncement, InsertRecovery, InsertUnverifiedEmail, InsertUser, Recipients,
+};
 use std::{
     net::{IpAddr, Ipv6Addr},
     sync::{
@@ -530,5 +532,77 @@ async fn notifications_are_emailed_to_the_addresses_their_kind_names() {
             .iter()
             .any(|delivery| delivery.destination.starts_with(&to)),
         "no email without a verified address"
+    );
+}
+
+/// An announcement's email offers a one-click unsubscribe (RFC 8058) whose
+/// link turns only its recipient's announcements' email off, in its headers and
+/// its body; an essential one, which its recipient cannot turn off, offers none.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn announcement_emails_offer_unsubscribing_unless_essential() {
+    let database = Replicas::database().await;
+    let user_id = account(&database).await;
+    verified_address(&database, user_id, &format!("{user_id}@example.com"), true).await;
+    let sent = async |essential| {
+        let id = AnnouncementId::new();
+        let mut tx = database.begin().await.expect("transaction");
+        tx.announcements()
+            .insert_draft(&DraftedAnnouncement {
+                id,
+                subject: "News",
+                body: "Something changed.",
+                recipients: Recipients::Accounts(&[user_id]),
+                essential,
+            })
+            .await
+            .expect("draft");
+        tx.announcements().send(id, 1).await.expect("send");
+        tx.commit().await.expect("commit");
+        id
+    };
+    let origin: Origin = AUTH_ORIGIN.parse().expect("origin");
+    let config = EmailConfig::test(&origin, true);
+    let outbox = Arc::new(Outbox::default());
+    let sender = EmailSender::with_mailer(database.clone(), Some(outbox.clone()), &config);
+    for id in [sent(false).await, sent(true).await] {
+        sender
+            .announce(DeliveryId::new(), user_id, id)
+            .await
+            .expect("sent");
+    }
+    let sent = outbox.sent.lock().expect("outbox");
+    let [news, essential] = sent.as_slice() else {
+        panic!("two messages");
+    };
+    let header = |message: &Message, name| message.headers().get_raw(name).map(str::to_owned);
+    let link = header(news, "List-Unsubscribe").expect("an unsubscribe link");
+    let link = link
+        .strip_prefix('<')
+        .and_then(|link| link.strip_suffix('>'))
+        .expect("in angle brackets");
+    assert_eq!(
+        header(news, "List-Unsubscribe-Post").as_deref(),
+        Some("List-Unsubscribe=One-Click")
+    );
+    let url = url::Url::parse(link).expect("URL");
+    let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let unsubscribe = crate::notifications::Unsubscribe {
+        account: query["account"].parse().expect("account"),
+        token: query["token"].clone(),
+    };
+    assert_eq!(
+        config.unsubscribe_links.check(&unsubscribe).expect("check"),
+        Some(user_id)
+    );
+    let body = String::from_utf8_lossy(&news.formatted())
+        .replace("=\r\n", "")
+        .replace("=3D", "=")
+        .replace("&amp;", "&");
+    assert!(body.contains(link), "{body}");
+    assert_eq!(header(essential, "List-Unsubscribe"), None);
+    assert!(
+        !String::from_utf8_lossy(&essential.formatted()).contains("/unsubscribe"),
+        "no link in its body"
     );
 }

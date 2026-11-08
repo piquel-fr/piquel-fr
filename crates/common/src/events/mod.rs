@@ -31,6 +31,7 @@ use crate::{
     alerts::Alert,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
+    notifications::NotificationPreference,
     protocol::jwt::KeyId,
 };
 use chrono::{DateTime, Utc};
@@ -414,6 +415,11 @@ pub enum DomainEvent {
         announcement_id: AnnouncementId,
         /// How many accounts it went to.
         recipients: u64,
+        /// Whether it was emailed to every recipient with a primary verified
+        /// address, whatever their preference, as a security incident or a change
+        /// to the privacy policy or terms must be. Its sender chose so.
+        #[serde(default)]
+        essential: bool,
     },
     /// A condition that needs an administrator's attention began to hold, so the
     /// alert `alert_id` was raised. It concerns no account.
@@ -431,6 +437,9 @@ pub enum DomainEvent {
         /// What it said.
         alert: Alert,
     },
+    /// The owner turned a category of notifications' email on or off, in their
+    /// settings or with an email's unsubscribe link.
+    NotificationPreferenceChanged(NotificationPreference),
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -535,6 +544,7 @@ impl DomainEvent {
             | Self::AnnouncementSent { .. }
             | Self::AlertRaised { .. }
             | Self::AlertCleared { .. }
+            | Self::NotificationPreferenceChanged(_)
             | Self::Imported(_) => None,
         }
     }
@@ -603,6 +613,7 @@ impl DomainEvent {
             | Self::AnnouncementSent { .. }
             | Self::AlertRaised { .. }
             | Self::AlertCleared { .. }
+            | Self::NotificationPreferenceChanged(_)
             | Self::Imported(_) => None,
         }
     }
@@ -671,6 +682,7 @@ impl DomainEvent {
             Self::AnnouncementSent { .. } => "announcement_sent",
             Self::AlertRaised { .. } => "alert_raised",
             Self::AlertCleared { .. } => "alert_cleared",
+            Self::NotificationPreferenceChanged(_) => "notification_preference_changed",
             Self::Imported(_) => "imported",
         }
     }

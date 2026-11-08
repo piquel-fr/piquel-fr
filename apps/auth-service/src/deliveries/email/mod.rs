@@ -17,13 +17,17 @@ use super::{DeliveryError, Failure, Sender};
 use crate::{
     config::EmailConfig,
     emails::{VERIFICATION_LIFETIME, VerificationKeys},
+    notifications::UnsubscribeLinks,
     recovery::{self, RecoveryLinks},
-    routes::page::settings,
+    routes::page::{self, settings},
 };
 use askama::Template;
 use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-    message::{Mailbox, MultiPart},
+    message::{
+        Mailbox, MultiPart,
+        header::{HeaderName, HeaderValue},
+    },
 };
 use piquel_common::{
     AnnouncementId, DeliveryId, ErrorChain, Handle, UserId, admin, config::Origin,
@@ -84,6 +88,8 @@ pub(crate) struct EmailSender<M> {
     verification_keys: VerificationKeys,
     /// Builds recovery links.
     recovery_links: RecoveryLinks,
+    /// Builds announcements' unsubscribe links.
+    unsubscribe_links: UnsubscribeLinks,
 }
 
 impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
@@ -103,6 +109,7 @@ impl<M: Mailer> EmailSender<M> {
             origin: config.origin.clone(),
             verification_keys: config.verification_keys.clone(),
             recovery_links: config.recovery_links.clone(),
+            unsubscribe_links: config.unsubscribe_links.clone(),
         }
     }
 
@@ -150,7 +157,8 @@ impl<M: Mailer> EmailSender<M> {
     }
 
     /// What the announcement `id` says to `user_id`, at its primary verified
-    /// address now, if it still has one and still receives it.
+    /// address now, if it still has one and still receives it, with the link
+    /// turning announcements' email off unless it is essential.
     async fn announcement(
         &self,
         user_id: UserId,
@@ -162,15 +170,25 @@ impl<M: Mailer> EmailSender<M> {
             .announcement(user_id, id)
             .await
             .map_err(|error| Self::unread(&error))?;
-        Ok(email.map(|email| {
-            Content::announcement(
-                email.address,
-                email.subject,
-                email.body,
-                email.everyone,
-                &self.origin,
-            )
-        }))
+        let Some(email) = email else {
+            return Ok(None);
+        };
+        let unsubscribe = if email.essential {
+            None
+        } else {
+            let link = self.unsubscribe_links.link(user_id).map(Some);
+            Some(Self::rebuilt(link, "unsubscribe", &user_id)?)
+        };
+        Ok(Some(Content::announcement(
+            email.address,
+            Announced {
+                subject: email.subject,
+                body: email.body,
+                everyone: email.everyone,
+                unsubscribe,
+            },
+            &self.origin,
+        )))
     }
 
     /// What `message` says, with its links and the address it goes to: the one it
@@ -294,7 +312,25 @@ impl<M: Mailer> EmailSender<M> {
             .address()
             .parse()
             .map_err(|_| DeliveryError::Permanent(Failure::InvalidAddress))?;
-        Message::builder()
+        let mut message = Message::builder();
+        // RFC 8058: mail clients offer to unsubscribe, posting to the link in one
+        // click.
+        if let Content::Announcement {
+            unsubscribe: Some(link),
+            ..
+        } = content
+        {
+            message = message
+                .raw_header(HeaderValue::new(
+                    HeaderName::new_from_ascii_str("List-Unsubscribe"),
+                    format!("<{link}>"),
+                ))
+                .raw_header(HeaderValue::new(
+                    HeaderName::new_from_ascii_str("List-Unsubscribe-Post"),
+                    "List-Unsubscribe=One-Click".to_owned(),
+                ));
+        }
+        message
             .from(self.from.clone())
             .to(Mailbox::new(None, to))
             .subject(content.subject())
@@ -335,11 +371,17 @@ impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
         announcement: &admin::Announcement,
         auth: &Origin,
     ) -> Result<String, askama::Error> {
+        // The unsubscribe link names the recipient, so the preview shows the
+        // page it opens.
+        let unsubscribe = (!announcement.essential).then(|| auth.join(page::UNSUBSCRIBE));
         let content = Content::announcement(
             String::new(),
-            announcement.subject.clone(),
-            announcement.body.clone(),
-            announcement.everyone,
+            Announced {
+                subject: announcement.subject.clone(),
+                body: announcement.body.clone(),
+                everyone: announcement.everyone,
+                unsubscribe,
+            },
             auth,
         );
         Text { content: &content }.render()
@@ -416,19 +458,33 @@ enum Content {
         everyone: bool,
         /// The inbox, where the account reads it again.
         inbox: String,
+        /// The link turning announcements' email off, unless it is essential.
+        unsubscribe: Option<String>,
     },
 }
 
+/// What an announcement's email says, whoever it goes to.
+struct Announced {
+    /// Its subject, as administrators wrote it.
+    subject: String,
+    /// Its text, as they wrote it.
+    body: String,
+    /// Whether it went to every account, rather than to chosen ones.
+    everyone: bool,
+    /// The link turning announcements' email off, unless it is essential.
+    unsubscribe: Option<String>,
+}
+
 impl Content {
-    /// An announcement's email to `address`, saying `subject` and `body`, which
+    /// An announcement's email to `address`, saying what was `announced`, which
     /// links the account's inbox on `origin`.
-    fn announcement(
-        address: String,
-        subject: String,
-        body: String,
-        everyone: bool,
-        origin: &Origin,
-    ) -> Self {
+    fn announcement(address: String, announced: Announced, origin: &Origin) -> Self {
+        let Announced {
+            subject,
+            body,
+            everyone,
+            unsubscribe,
+        } = announced;
         let paragraphs = admin::Announcement::paragraphs(&body)
             .into_iter()
             .map(|lines| lines.into_iter().map(str::to_owned).collect())
@@ -440,6 +496,7 @@ impl Content {
             paragraphs,
             everyone,
             inbox: origin.join(settings::NOTIFICATIONS),
+            unsubscribe,
         }
     }
 

@@ -192,6 +192,9 @@ impl AccountOperation {
             ],
             Self::ListNotifications => &["account", "alice", "notifications", "list"],
             Self::ViewNotification => &["account", "alice", "notifications", "show", AN_ID],
+            Self::ViewNotificationPreferences => {
+                &["account", "alice", "notifications", "preferences"]
+            }
         }
     }
 }

@@ -12,7 +12,8 @@ test.use({ userAgent: mac });
 /**
  * The account's settings tabs, as the user guide's account pages show them: two
  * passkeys, a second device signed in with one of them, a display name of its own,
- * an address being added, and the history all of that left.
+ * an address being added, the history all of that left, and the inbox's email
+ * preferences.
  */
 test('account settings', async ({ page, context, browser }) => {
   const { cdp, authenticatorId } = await addPasskeys(context, page);
@@ -54,4 +55,13 @@ test('account settings', async ({ page, context, browser }) => {
 
   await page.goto('/settings/history');
   await shoot(page, 'account/security-history');
+
+  await page.goto('/settings/notifications');
+  await shoot(
+    page,
+    'account/notification-email',
+    page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Email', exact: true }) })
+  );
 });

@@ -33,6 +33,17 @@ pub struct DraftedAnnouncement<'a> {
     pub body: &'a str,
     /// Whom it goes to.
     pub recipients: Recipients<'a>,
+    /// Whether it is emailed to every recipient, whatever their preference.
+    pub essential: bool,
+}
+
+/// What sending an announcement did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SentAnnouncement {
+    /// How many accounts it went to.
+    pub recipients: u64,
+    /// Whether it is emailed to every recipient, whatever their preference.
+    pub essential: bool,
 }
 
 impl Recipients<'_> {
@@ -61,11 +72,13 @@ impl AnnouncementRepository<'_> {
             self,
             execute,
             sqlx::query!(
-                "INSERT INTO announcements (id, subject, body, everyone) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO announcements (id, subject, body, everyone, essential)
+                VALUES ($1, $2, $3, $4, $5)",
                 draft.id.as_uuid(),
                 draft.subject,
                 draft.body,
                 everyone,
+                draft.essential,
             )
         )?;
         self.choose(draft.id, &accounts).await
@@ -88,14 +101,15 @@ impl AnnouncementRepository<'_> {
             fetch_optional,
             sqlx::query_scalar!(
                 r#"UPDATE announcements
-                SET subject = $2, body = $3, everyone = $4, revision = revision + 1,
-                    updated_at = now()
+                SET subject = $2, body = $3, everyone = $4, essential = $5,
+                    revision = revision + 1, updated_at = now()
                 WHERE id = $1 AND sent_at IS NULL
                 RETURNING revision AS "revision: Unsigned""#,
                 draft.id.as_uuid(),
                 draft.subject,
                 draft.body,
                 everyone,
+                draft.essential,
             )
         )?;
         let Some(revision) = revision else {
@@ -152,7 +166,8 @@ impl AnnouncementRepository<'_> {
 
     /// Marks the draft `id` sent, if it is still at `revision`, the one its
     /// sender checked; makes every account a recipient of one to everyone; and
-    /// returns how many accounts it goes to, or `None` if no draft has this ID
+    /// returns how many accounts it goes to and whether it is essential, or
+    /// `None` if no draft has this ID
     /// and revision. Its row stays locked until the transaction ends, so an edit,
     /// a discard or another send waits, then finds it sent. Run it in the
     /// transaction that records the sending, whose event queues the emails.
@@ -168,14 +183,14 @@ impl AnnouncementRepository<'_> {
         &mut self,
         id: AnnouncementId,
         revision: u64,
-    ) -> Result<Option<u64>, DatabaseError> {
+    ) -> Result<Option<SentAnnouncement>, DatabaseError> {
         let sent = run!(
             self,
             fetch_optional,
             sqlx::query!(
                 "UPDATE announcements SET sent_at = now()
                 WHERE id = $1 AND sent_at IS NULL AND revision = $2
-                RETURNING everyone, subject, body",
+                RETURNING everyone, subject, body, essential",
                 id.as_uuid(),
                 Unsigned::bind(revision)?,
             )
@@ -228,7 +243,10 @@ impl AnnouncementRepository<'_> {
                 payload,
             )
         )?;
-        Ok(Some(recipients.into()))
+        Ok(Some(SentAnnouncement {
+            recipients: recipients.into(),
+            essential: sent.essential,
+        }))
     }
 
     /// The latest `limit` announcements, drafts and sent ones, newest first.
@@ -244,7 +262,7 @@ impl AnnouncementRepository<'_> {
             sqlx::query_as!(
                 Announcement,
                 r#"SELECT a.id AS "id: AnnouncementId", a.subject, a.body, a.everyone,
-                    a.revision AS "revision: Unsigned",
+                    a.essential, a.revision AS "revision: Unsigned",
                     CASE WHEN a.everyone AND a.sent_at IS NULL
                         THEN (SELECT count(*) FROM users)
                         ELSE (SELECT count(*) FROM announcement_recipients r
@@ -274,7 +292,7 @@ impl AnnouncementRepository<'_> {
             sqlx::query_as!(
                 Announcement,
                 r#"SELECT a.id AS "id: AnnouncementId", a.subject, a.body, a.everyone,
-                    a.revision AS "revision: Unsigned",
+                    a.essential, a.revision AS "revision: Unsigned",
                     CASE WHEN a.everyone AND a.sent_at IS NULL
                         THEN (SELECT count(*) FROM users)
                         ELSE (SELECT count(*) FROM announcement_recipients r
@@ -316,8 +334,9 @@ impl AnnouncementRepository<'_> {
         )
     }
 
-    /// How many of the recipients of `id` have a primary verified address now:
-    /// for a draft to everyone, how many accounts do.
+    /// How many of the recipients of `id` its email reaches now: those with a
+    /// primary verified address, who did not turn announcements' email off
+    /// unless it is essential. For a draft to everyone, how many accounts.
     ///
     /// # Errors
     ///
@@ -334,7 +353,7 @@ impl AnnouncementRepository<'_> {
                     OR EXISTS (SELECT FROM announcement_recipients r
                         WHERE r.announcement_id = a.id AND r.user_id = e.user_id)
                 )
-                WHERE a.id = $1"#,
+                WHERE a.id = $1 AND (a.essential OR announcements_emailed(e.user_id))"#,
                 id.as_uuid(),
             )
         )?
@@ -361,7 +380,8 @@ impl AnnouncementRepository<'_> {
     }
 
     /// The recipients of `id` with a primary verified address, whom its email
-    /// goes to. Their rows stay key-share locked until the transaction ends, so a
+    /// goes to: unless it is essential, only those who did not turn
+    /// announcements' email off. Their rows stay key-share locked until the transaction ends, so a
     /// purge of one waits for the emails to be queued, and then deletes its own.
     ///
     /// # Errors
@@ -377,8 +397,10 @@ impl AnnouncementRepository<'_> {
             sqlx::query_scalar!(
                 r#"SELECT r.user_id AS "user_id: UserId"
                 FROM announcement_recipients r
+                JOIN announcements a ON a.id = r.announcement_id
                 JOIN user_emails e ON e.user_id = r.user_id AND e.is_primary
                 WHERE r.announcement_id = $1
+                    AND (a.essential OR announcements_emailed(r.user_id))
                 ORDER BY r.user_id
                 FOR KEY SHARE OF r"#,
                 id.as_uuid(),
