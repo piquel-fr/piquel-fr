@@ -1,7 +1,8 @@
 /**
  * The admin dashboard, on an origin of its own: signing in through auth's handoff
  * page, confirming changes with a passkey, and what administrators change from it,
- * on accounts, rights, invitations, clients, origins, signing keys and handles. CI
+ * on accounts, rights, invitations, clients, origins, signing keys and handles,
+ * and an announcement drafted, sent and read in the recipient's inbox. CI
  * serves the dashboard on auth's host, `localhost`, so its passkey dialog needs no
  * list of related origins; a preview's dashboard has a host of its own, so there
  * the browser reads auth's `/.well-known/webauthn` first. Skipped without
