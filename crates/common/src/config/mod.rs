@@ -1,5 +1,9 @@
 //! Environment variables, validated origins and secret references, read once at startup.
 
+/// The configuration reference, rendered from the variables' declarations.
+mod reference;
+
+pub use reference::{Documented, GeneratedFile, Section, Stale};
 use std::{env, error::Error as StdError, fmt, fs, path::PathBuf, str::FromStr};
 use thiserror::Error;
 use url::Url;

@@ -27,6 +27,9 @@ mod handle;
 mod invite;
 /// Signing keys and token digest keys.
 mod keys;
+/// The generated command reference.
+#[cfg(test)]
+mod reference;
 /// Serving the public and admin listeners.
 mod serve;
 /// Ending sessions.

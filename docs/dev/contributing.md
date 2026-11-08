@@ -30,14 +30,16 @@ arm in `AdminApplication::page()` (`apps/auth-service/src/web/admin/mod.rs`), as
 
 ## Generated files
 
-Generated files are committed. Regenerate them in the same commit as their
-source:
+Generated files are committed, and `just test` fails while one is stale.
+Regenerate them in the same commit as their source, and list a new one in
+`.gitattributes`, so GitHub collapses it in diffs:
 
 | Files | Source | Recipe |
 | --- | --- | --- |
 | `crates/database/.sqlx/` | SQL queries and migrations | `just db prepare` |
 | `tests/sdk-vectors/` | `crates/common/tests/sdk_vectors.rs` | `just sdk-vectors` |
 | `packages/auth/src/protocol.ts` | the wire types in `crates/common` | `just sdk-types` |
+| `docs/dev/operations/variables/`, `docs/dev/operations/cli-commands.md` | the variables' doc comments, and the CLI's clap definitions | `just docs reference` |
 
 ## Pull requests
 
