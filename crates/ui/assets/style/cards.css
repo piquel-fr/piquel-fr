@@ -56,7 +56,8 @@
   border-top: 1px solid var(--line);
 }
 /* The inbox: a read notification's subject in the text's weight, an unread
-   one's bold, each a link to its own page. */
+   one's bold, each a link to its own page that covers the whole row, so the row
+   opens it wherever it is clicked. */
 .inbox > li {
   flex-wrap: nowrap;
 }
@@ -64,8 +65,20 @@
   color: var(--fg);
   text-decoration: none;
 }
-.inbox a:hover {
-  text-decoration: underline;
+/* Its card clips the last row's highlight to its rounded corners. */
+.card:has(> .inbox) {
+  overflow: hidden;
+}
+.inbox > li:has(.text > a) {
+  position: relative;
+}
+.inbox > li:has(.text > a):hover {
+  background: var(--surface-2);
+}
+.inbox .text > a::after {
+  content: '';
+  position: absolute;
+  inset: 0;
 }
 /* Only an unread notification shows its dot; a read one keeps the room. */
 .inbox li.read .dot {
