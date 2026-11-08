@@ -28,7 +28,7 @@ The owner marks one unread, or every one read, in settings or through
 `…/unread` read them without marking anything. Administrators read an account's
 inbox on its dashboard page and operators with `account <user> notifications
 list|show`; neither marks anything read. The data export includes the inbox.
-[Notifications and email](../../user/notifications.md) is the owner's guide.
+[Notifications](../../user/account/notifications.md) is the owner's guide.
 
 ## Email preferences
 
