@@ -36,10 +36,13 @@ The canonical event is the RFC 8785 (JCS) form of the event's row: `position`,
 Each sealed event records the format of its canonical event in `chain_format`,
 so a later format can add a field without breaking the hashes of events sealed
 before it. Format 1, the original, has no `format` field. Format 2 adds only
-`"format": 2`, and every later format names itself the same way. This release
-verifies both and still seals format 1, which the release before it verifies
-too; the next release seals format 2. Verification refuses a format it does not
-know, rather than report the chain broken.
+`"format": 2`, and every later format names itself the same way. Auth seals
+format 2 and verifies both. A format is sealed only once the release before
+verifies it, so a rolling deploy or a rollback by one release reads every
+event. Once format 2 is sealed, roll back no further than #369, the first
+release that reads it: an older one reports those events changed and stops
+signing. Verification refuses a format it does not know, rather than report the
+chain broken.
 
 The sealer works in the order event consumers use, `(txid, sequence)`, and only
 on events whose transaction, and every older one, has finished. No event can
