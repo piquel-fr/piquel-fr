@@ -31,6 +31,9 @@ losing one never locks you out.
 
 The page says **The passkey was added.**
 
+An account keeps at most 100 passkeys. With 100 already, Piquel refuses another
+before your device creates it, and says so: remove one you no longer use first.
+
 ## Rename a passkey
 
 1. Select **Rename** beside the passkey.

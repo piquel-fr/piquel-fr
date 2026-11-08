@@ -93,7 +93,7 @@ categories a reason naming the check that failed. Rust errors return both from
 | `insufficient_user_authentication` | A valid token's sign-in is too weak or too old. | [Step up](#step-up-challenges). |
 | `callback` | The redirect back to your app failed its checks before the code was exchanged: `state_mismatch`, `issuer_mismatch`, `missing_issuer` or `missing_code`. | For `state_mismatch`, the callback belongs to another sign-in attempt: start again from your app. |
 | `oauth` | Auth answered with an OAuth error. | Look up its `error` on this page. |
-| `network` | Auth couldn't be reached, or answered outside its protocol. | Check your server can reach `https://auth.piquel.fr`, then retry. |
+| `network` | Auth couldn't be reached, or answered outside its protocol. The SDKs also fail a request that takes over 10 seconds, or that answers with a redirect, which they never follow. | Check your server can reach `https://auth.piquel.fr` directly, not through a proxy that redirects, then retry. |
 
 The SDKs' login routes also answer `400` themselves, before any of these:
 

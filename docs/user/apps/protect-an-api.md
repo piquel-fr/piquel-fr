@@ -131,7 +131,10 @@ await keys.verify(jws, jws.requireAlgorithm(['RS256']));
 const claims: unknown = JSON.parse(new TextDecoder().decode(jws.payload));
 ```
 
-In Rust, `KeyCache::new(jwks_uri, http)` and `Jws` do the same. To pin keys, or
+In Rust, `KeyCache::new(jwks_uri, http)` and `Jws` do the same, where `http` is
+a `reqwest::ClientBuilder` for proxies or extra trusted roots. Either way, the
+JWKS URL must use `https`, and the SDKs follow no redirect and give up on a
+request after 10 seconds, whatever the HTTP client you give them. To pin keys, or
 verify without the network, give a parsed `KeySet` to `KeyCache.fixed` in
 TypeScript, or `KeyCache::fixed` in Rust: it never fetches, so a key ID the set
 lacks fails with `unknown_key`.

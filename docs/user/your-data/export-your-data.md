@@ -37,7 +37,8 @@ downloaded".
   grants,
 - the apps you registered in the developer console,
 - the recoveries support started for your account,
-- your security history and your notifications,
+- your security history and your notifications, with which kinds of
+  notifications you receive by email,
 - whether you are an administrator, and your sign-ins to the admin dashboard.
 
 ## What it doesn't hold
