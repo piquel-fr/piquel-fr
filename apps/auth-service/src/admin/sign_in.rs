@@ -46,7 +46,7 @@ use piquel_common::{
 };
 use piquel_crypto::Secret;
 use piquel_repository::{Database, DatabaseTransaction, InsertHandoff};
-use piquel_ui::{HandoffQuery, Query};
+use piquel_ui::{HandoffQuery, LegacyConfirm, Query};
 use url::Url;
 
 /// How long a handoff code works: the redirect from auth to the dashboard.
@@ -134,11 +134,9 @@ impl DashboardSignIn {
         let query = HandoffQuery {
             state: state.encoded(),
             return_to: return_to.to_owned(),
+            confirm: LegacyConfirm,
         };
-        let mut page = query.url(self.auth.as_url(), routes::page::ADMIN)?;
-        // The previous release's handoff page asks for a passkey only then, and a
-        // handoff without one never redeems: drop it once no release reads it.
-        page.query_pairs_mut().append_pair("confirm", "on");
+        let page = query.url(self.auth.as_url(), routes::page::ADMIN)?;
         Ok((page, DashboardCookie(Step::Started(state))))
     }
 

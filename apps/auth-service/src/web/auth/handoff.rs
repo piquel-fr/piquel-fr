@@ -18,7 +18,7 @@ use crate::{
     security::ApiError,
 };
 use piquel_common::protocol::claims::Acr;
-use piquel_ui::{HandoffProof, HandoffQuery, LoginQuery, Query, Title};
+use piquel_ui::{HandoffProof, HandoffQuery, LegacyConfirm, LoginQuery, Query, Title};
 use topcoat::{
     context::{Cx, app_context},
     router::{
@@ -86,6 +86,7 @@ impl WebApplication {
         let query = HandoffQuery {
             state: posted.state,
             return_to: posted.return_to,
+            confirm: LegacyConfirm,
         };
         let Some(owner) = web.owner(cx).await? else {
             return web
