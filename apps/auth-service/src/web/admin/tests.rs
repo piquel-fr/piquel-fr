@@ -2164,9 +2164,9 @@ async fn a_session_is_revoked_only_from_its_own_account() {
 /// The same form posted again within seconds, such as by a double click, makes
 /// its change once: while the first is being made, the repeat shows its form
 /// again, saying so; once it is made, the repeat goes where it is listed. A
-/// request whose claim expired cannot give up the claim a repeat took since. The
-/// same form to another target is another change, and a refused one can be
-/// posted again at once.
+/// request whose claim expired cannot give up the claim a repeat took since.
+/// Another invitation form shown, or the same form to another target, is
+/// another change, and a refused one can be posted again at once.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_change_posted_twice_is_made_once() {
@@ -2178,11 +2178,14 @@ async fn a_change_posted_twice_is_made_once() {
     let new = "/invitations/new";
     let dashboard = harness.confirmed(&admin, new, Utc::now()).await;
     let url = format!("{DASHBOARD}{new}");
-    let fields = [("expires_in", "2d")];
+    let fields = [("shown", "first"), ("expires_in", "2d")];
     let post = || dashboard.submit(&harness.dashboard, &url, &fields, OWN_PAGE);
     let forms = super::forms::DashboardForms::new(harness.database.clone());
-    let posted = CreateInvitation {
-        expires_in: Some("2d".into()),
+    let posted = super::invitations::InvitationForm {
+        invitation: CreateInvitation {
+            expires_in: Some("2d".into()),
+        },
+        shown: "first".into(),
     };
     let claim = async || match forms.claim(admin.user_id, new, &posted).await {
         Ok(super::forms::Claimed::New(claim)) => claim,
@@ -2224,6 +2227,14 @@ async fn a_change_posted_twice_is_made_once() {
     stale.release().await.expect("release");
     assert_eq!(redirect(&post().await), "/invitations");
     assert_eq!(created().await, 2);
+
+    // Another form shown, with the same validity, is another invitation.
+    let another = [("shown", "second"), ("expires_in", "2d")];
+    let posted = dashboard
+        .submit(&harness.dashboard, &url, &another, OWN_PAGE)
+        .await;
+    assert_eq!(redirect(&posted), new);
+    assert_eq!(created().await, 3);
 
     // The same empty form, to two handles the query names, is two changes.
     let suffix = &admin.user_id.to_string()[24..];

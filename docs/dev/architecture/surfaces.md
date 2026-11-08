@@ -149,7 +149,9 @@ being misread, lost or made twice:
   refused change gives up its claim, so posting it again tries again. No
   transaction stays open while a change is made: the claim is written, then
   marked made or deleted, by its own token, so a request whose claim expired
-  cannot touch the claim a repeat took since.
+  cannot touch the claim a repeat took since. The invitation form carries a
+  random value of its own, so inviting two people in a row with the same
+  validity is two changes.
 - **Its status.** A refused change shows its form again with the refusal's
   status, such as `400`, not `200`.
 

@@ -7,7 +7,9 @@ use piquel_common::{
     TokenId,
     admin::{CreateInvitation, CreatedInvitation},
 };
+use piquel_crypto::Secret;
 use piquel_ui::{Action, Change, InvitationRow, Target};
+use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
@@ -64,10 +66,23 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     App::render(cx, StatusCode::OK, "Invitations", page).await
 }
 
+/// The form creating an invitation, as the dashboard shows it.
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct InvitationForm {
+    /// The invitation.
+    #[serde(flatten)]
+    pub(super) invitation: CreateInvitation,
+    /// A random value of the form as shown: inviting two people in a row with
+    /// the same validity is two changes, which the dashboard would otherwise
+    /// take for one posted twice, while a double click on one form is still one.
+    #[serde(default)]
+    pub(super) shown: String,
+}
+
 /// `/invitations/new`: creates an invitation, then comes back here, which shows
 /// its link once.
 #[route([GET, POST] "/invitations/new")]
-pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Result<Response> {
+pub(super) async fn create(cx: &Cx, form: Option<Form<InvitationForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::invitations(cx)?;
     // The page showing a new link needs no confirmation: sending the browser to
@@ -78,23 +93,22 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
     }
     let app = App::of(cx);
     let back = href!(list).resolve(cx);
-    let created = App::change(
-        cx,
-        form,
-        back.clone(),
-        |input: CreateInvitation| async move {
-            let expires_in = match input.expires_in.filter(|value| !value.trim().is_empty()) {
-                Some(expires_in) => expires_in
-                    .trim()
-                    .parse::<InviteExpiry>()
-                    .map_err(AdminError::from)?,
-                None => InviteExpiry::default(),
-            };
-            app.service
-                .create_invitation(&admin.operator, &app.auth, expires_in)
-                .await
-        },
-    )
+    let created = App::change(cx, form, back.clone(), |input: InvitationForm| async move {
+        let expires_in = match input
+            .invitation
+            .expires_in
+            .filter(|value| !value.trim().is_empty())
+        {
+            Some(expires_in) => expires_in
+                .trim()
+                .parse::<InviteExpiry>()
+                .map_err(AdminError::from)?,
+            None => InviteExpiry::default(),
+        };
+        app.service
+            .create_invitation(&admin.operator, &app.auth, expires_in)
+            .await
+    })
     .await?;
     let back = &back;
     let (created, refused) = match created {
@@ -104,7 +118,12 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
     };
     let typed = refused
         .as_ref()
-        .and_then(|refused| refused.form.expires_in.clone());
+        .and_then(|refused| refused.form.invitation.expires_in.clone());
+    // A form posted again keeps its own, so it stays the same change.
+    let shown = match &refused {
+        Some(refused) => refused.form.shown.clone(),
+        None => Secret::generate().map_err(AdminError::from)?.encoded(),
+    };
     let (created, refused) = (&created, refused.as_deref());
     let page = view! { cx =>
         match created {
@@ -120,6 +139,7 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
                     change: Change::Invite,
                     back: back.as_str(),
                     refusal: refused,
+                    <input type="hidden" name="shown" value=(shown.as_str())>
                     <label>
                         "Valid for"
                         <input name="expires_in" placeholder="7d" pattern="[0-9]+[hd]" value=(typed)>
