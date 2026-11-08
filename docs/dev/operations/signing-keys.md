@@ -100,8 +100,8 @@ imports, so the private key never passes through a browser.
 ## Change the token digest key
 
 Auth stores refresh tokens, authorization codes and pending logins as HMAC
-digests under the token digest key, and email verification and recovery links
-derive from it (see [configuration](configuration.md)). Nothing rotates it.
+digests under the token digest key, and email verification, recovery and
+unsubscribe links derive from it (see [configuration](configuration.md)). Nothing rotates it.
 Change it by hand, rarely, in two deployments, so that during each rolling
 deployment, and after a rollback, every release accepts what the other issues:
 
