@@ -15,5 +15,20 @@ export default defineConfig({
     launchOptions: { executablePath: process.env.CHROMIUM_EXECUTABLE },
     ignoreHTTPSErrors: Boolean(process.env.E2E_ALLOW_SELF_SIGNED_TLS)
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }]
+  projects: [
+    {
+      name: 'chromium',
+      testIgnore: 'screenshots/**',
+      use: { browserName: 'chromium' }
+    },
+    // The documentation's screenshots, which `just docs screenshots` takes into
+    // docs/images. They are not tests, so the suite never runs them.
+    {
+      name: 'docs',
+      testDir: './tests/browser/screenshots',
+      snapshotPathTemplate: 'docs/images/{arg}{ext}',
+      // The pages follow the browser's preference, so they show their dark theme.
+      use: { browserName: 'chromium', colorScheme: 'dark' }
+    }
+  ]
 });
