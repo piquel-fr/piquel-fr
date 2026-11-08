@@ -209,16 +209,7 @@ async fn failing_purges_raise_their_alert_until_none_fail() {
         .expect("lock")
         .expect("no other test purges");
     let shutdown = Shutdown(watch::Sender::new(false).subscribe());
-    let current = async || {
-        let mut tx = database.begin().await.expect("transaction");
-        let current = tx
-            .alerts()
-            .current(AlertKind::PurgesFailing)
-            .await
-            .expect("current");
-        tx.commit().await.expect("commit");
-        current.and_then(|current| current.alert)
-    };
+    let current = async || current_alert(database, AlertKind::PurgesFailing).await;
     AccountPurge.run(&mut lock, &shutdown).await.expect("run");
     assert_eq!(current().await, Some(Alert::PurgesFailing {}));
     assert!(database.deletions().cancel(user_id).await.expect("cancel"));
@@ -234,16 +225,13 @@ async fn failing_purges_raise_their_alert_until_none_fail() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn cleanup_that_keeps_falling_behind_raises_its_alert() {
     let database = crate::admin::tests::Harness::isolated().await.database;
-    let mut lock = database
-        .try_exclusive(LockKey::Cleanup)
-        .await
-        .expect("lock")
-        .expect("the cleanup lock");
+    let mut lock = cleanup_lock(&database).await;
     let shutdown = Shutdown(watch::Sender::new(false).subscribe());
     // Out of time as soon as it deletes anything.
     let cleanup = Cleanup {
         budget: Duration::ZERO,
         overruns: Streak::new(Cleanup::BEHIND_AFTER),
+        failures: Streak::new(Cleanup::FAILING_AFTER),
     };
     let current = async || {
         let mut tx = database.begin().await.expect("transaction");
@@ -317,4 +305,52 @@ fn a_streak_raises_its_alert_once() {
         Some(Due::Raise),
         "a new streak raises it again"
     );
+}
+
+/// The third cleanup pass in a row that fails raises the alert of cleanup
+/// failing, and a pass that works clears it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn cleanup_that_keeps_failing_raises_its_alert() {
+    let database = crate::admin::tests::Harness::isolated().await.database;
+    let mut lock = cleanup_lock(&database).await;
+    let shutdown = Shutdown(watch::Sender::new(false).subscribe());
+    let cleanup = Cleanup::new();
+    let current = async || current_alert(&database, AlertKind::CleanupFailing).await;
+    for pass in 1..=Cleanup::FAILING_AFTER {
+        let failed = Err(DatabaseError::NotFound);
+        assert!(cleanup.ended(&mut lock, failed).await.is_err());
+        let raised = (pass == Cleanup::FAILING_AFTER).then_some(Alert::CleanupFailing {});
+        assert_eq!(current().await, raised, "after pass {pass}");
+    }
+    cleanup.run(&mut lock, &shutdown).await.expect("run");
+    assert_eq!(current().await, None);
+    lock.release().await.expect("release");
+}
+
+/// Takes cleanup's lock on `database`, waiting while another cleanup test,
+/// running at once on the same cluster, holds it.
+async fn cleanup_lock(database: &Database) -> ExclusiveConnection {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(lock) = database
+                .try_exclusive(LockKey::Cleanup)
+                .await
+                .expect("lock")
+            {
+                return lock;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the cleanup lock")
+}
+
+/// What the current alert of `kind` on `database` says, if one is current.
+async fn current_alert(database: &Database, kind: AlertKind) -> Option<Alert> {
+    let mut tx = database.begin().await.expect("transaction");
+    let current = tx.alerts().current(kind).await.expect("current");
+    tx.commit().await.expect("commit");
+    current.and_then(|current| current.alert)
 }

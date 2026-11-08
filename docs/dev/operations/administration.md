@@ -403,6 +403,7 @@ Each alert says what to look at. Auth raises these:
 | **Accounts keep failing to be purged** | accounts whose deletion is due failed to be purged 3 times in a row | no account has |
 | **Cleanup is falling behind** | 3 cleanup passes in a row on one replica run out of time | a pass deletes everything due |
 | **The audit chain can't be verified** | 3 automatic verifications in a row on one replica fail, finding the chain neither broken nor intact | a verification, other than one with `--key`, is recorded |
+| **Cleanup keeps failing** | 3 cleanup passes in a row on one replica fail | a pass works |
 
 ## The command line
 
