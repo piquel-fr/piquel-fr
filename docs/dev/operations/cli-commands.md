@@ -388,7 +388,7 @@ auth-service client <COMMAND>
 Commands:
 
 - [`auth-service client create`](#auth-service-client-create): Register a client. A confidential client's secret is printed once.
-- [`auth-service client apply`](#auth-service-client-apply): Register a client, or update it to match, with the secret its deployment generated: for clients a deployment manages, such as the admin dashboard. Records nothing when the client already matches.
+- [`auth-service client apply`](#auth-service-client-apply): Register a client, or update it to match, with the secret its deployment generated: for clients a deployment manages, from its deployment job. Records nothing when the client already matches.
 - [`auth-service client list`](#auth-service-client-list): List every client, deleted ones included.
 - [`auth-service client show`](#auth-service-client-show): Print a client's registration and its secrets' lifetimes as JSON.
 - [`auth-service client update`](#auth-service-client-update): Change a client's registration; what is not given keeps its value.
@@ -426,7 +426,7 @@ Options:
 
 ## `auth-service client apply`
 
-Register a client, or update it to match, with the secret its deployment generated: for clients a deployment manages, such as the admin dashboard. Records nothing when the client already matches.
+Register a client, or update it to match, with the secret its deployment generated: for clients a deployment manages, from its deployment job. Records nothing when the client already matches.
 
 ```text
 auth-service client apply [OPTIONS] --name <NAME> --redirect-uri <REDIRECT_URIS> <ID>

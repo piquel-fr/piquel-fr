@@ -27,7 +27,7 @@ recipient is purged. Today the variants are a replaced primary address, a
 removed address, a recovery that secured the account, enrolled a passkey or was
 undone, an account disabled, enabled, scheduled for deletion or restored,
 support changing the handle or display name or removing the picture, and
-[administrators' announcements](../operations/administration.md#announcements).
+[administrators' announcements](../operations/administration.md#send-an-announcement).
 
 ## Storage
 

@@ -26,7 +26,7 @@ executable too, on another listener and host (see admin.piquel.fr below).
 The account API is routes in the same executable. It is small next to the pages
 that use it, and keeping it there keeps one binary, one database owner and one
 policy layer per listener. Auth keeps its state in PostgreSQL, so it runs
-as several replicas (see [running several replicas](../operations/deploying.md#running-several-replicas)). Every page it
+as several replicas (see [running several replicas](../operations/replicas.md)). Every page it
 serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
 never cached. Their scripts are the passkey script, which runs the passkey
