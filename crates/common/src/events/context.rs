@@ -89,6 +89,12 @@ pub enum JobName {
     /// Signing key rotation. Nothing records it yet: a release may write a new
     /// value only once the previous release reads it (see `docs/dev/architecture/database.md`).
     KeyRotation,
+    /// The periodic verification of the audit chain. Nothing records it yet,
+    /// for the same reason.
+    AuditVerification,
+    /// The sealer of the audit chain, which refuses to sign a checkpoint over
+    /// events that no longer match. Nothing records it yet, for the same reason.
+    AuditSealer,
 }
 
 crate::str_enum! {
