@@ -31,6 +31,7 @@ Commands:
 - [`auth-service admin`](#auth-service-admin): Grant, revoke or list administrators.
 - [`auth-service handle`](#auth-service-handle): Check accounts against the handle rules, and change their handles.
 - [`auth-service deliveries`](#auth-service-deliveries): Inspect, retry and cancel outbound deliveries.
+- [`auth-service announcement`](#auth-service-announcement): Draft, send and read announcements to accounts, such as a security incident or a change to the privacy policy.
 - [`auth-service account`](#auth-service-account): Read or change one account's settings on its owner's behalf.
 
 ## `auth-service serve`
@@ -906,6 +907,114 @@ auth-service deliveries cancel <ID>
 Arguments:
 
 - `<ID>`: The delivery's ID.
+
+## `auth-service announcement`
+
+Draft, send and read announcements to accounts, such as a security incident or a change to the privacy policy.
+
+```text
+auth-service announcement <COMMAND>
+```
+
+Commands:
+
+- [`auth-service announcement list`](#auth-service-announcement-list): List announcements, drafts and sent ones, newest first.
+- [`auth-service announcement show`](#auth-service-announcement-show): Show an announcement: its text, whom it goes to, how many of them its email reaches, and once sent, how its emails fared.
+- [`auth-service announcement draft`](#auth-service-announcement-draft): Draft an announcement, and print its ID. Nothing is sent yet.
+- [`auth-service announcement edit`](#auth-service-announcement-edit): Replace a draft's subject, text and recipients.
+- [`auth-service announcement discard`](#auth-service-announcement-discard): Delete a draft.
+- [`auth-service announcement send`](#auth-service-announcement-send): Send a draft: email it to each recipient with a primary verified address, and put it in every recipient's inbox. It cannot be taken back.
+
+## `auth-service announcement list`
+
+List announcements, drafts and sent ones, newest first.
+
+```text
+auth-service announcement list [OPTIONS]
+```
+
+Options:
+
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+
+## `auth-service announcement show`
+
+Show an announcement: its text, whom it goes to, how many of them its email reaches, and once sent, how its emails fared.
+
+```text
+auth-service announcement show [OPTIONS] <ID>
+```
+
+Arguments:
+
+- `<ID>`: The announcement's ID, as `announcement list` shows it.
+
+Options:
+
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+
+## `auth-service announcement draft`
+
+Draft an announcement, and print its ID. Nothing is sent yet.
+
+```text
+auth-service announcement draft [OPTIONS] --subject <SUBJECT> --body-file <BODY_FILE>
+```
+
+Options:
+
+- `--subject <SUBJECT>`: The email's subject: one line of up to 150 characters. Required.
+- `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
+- `--everyone`: Send it to every account, as of its sending.
+- `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
+
+## `auth-service announcement edit`
+
+Replace a draft's subject, text and recipients.
+
+```text
+auth-service announcement edit [OPTIONS] --subject <SUBJECT> --body-file <BODY_FILE> <ID>
+```
+
+Arguments:
+
+- `<ID>`: The draft's ID.
+
+Options:
+
+- `--subject <SUBJECT>`: The email's subject: one line of up to 150 characters. Required.
+- `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
+- `--everyone`: Send it to every account, as of its sending.
+- `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
+
+## `auth-service announcement discard`
+
+Delete a draft.
+
+```text
+auth-service announcement discard <ID>
+```
+
+Arguments:
+
+- `<ID>`: The draft's ID.
+
+## `auth-service announcement send`
+
+Send a draft: email it to each recipient with a primary verified address, and put it in every recipient's inbox. It cannot be taken back.
+
+```text
+auth-service announcement send [OPTIONS] --revision <REVISION> <ID>
+```
+
+Arguments:
+
+- `<ID>`: The draft's ID.
+
+Options:
+
+- `--revision <REVISION>`: The revision `announcement show` printed, which is sent only if the draft has not changed since. Required.
+- `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 
 ## `auth-service account`
 
