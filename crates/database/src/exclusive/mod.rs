@@ -26,6 +26,9 @@ pub enum LockKey {
     /// Schema migrations, held by `Database::run_migrations` for its connection, so
     /// overlapping `migrate` runs take turns.
     Migrations = 7,
+    /// The periodic verification of the audit chain, apart from
+    /// [`Self::AuditChain`] so it never holds sealing back.
+    AuditVerification = 8,
     /// The job runner panic test; no release takes it.
     #[cfg(any(test, feature = "test-util"))]
     Test = -1,

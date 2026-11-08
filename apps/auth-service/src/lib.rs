@@ -119,6 +119,9 @@ pub enum StartupError {
     /// The OIDC metadata or signing keys could not be serialized.
     #[error("could not initialize OIDC application")]
     Oidc(#[from] oidc::OidcConfigError),
+    /// The audit keys committed to the repository are malformed.
+    #[error("could not read the committed audit keys")]
+    AuditKeys(#[source] AuditError),
     /// The HTTP client that sends deliveries could not initialize.
     #[error("could not initialize the outbound HTTP client")]
     Outbound(#[source] reqwest::Error),
