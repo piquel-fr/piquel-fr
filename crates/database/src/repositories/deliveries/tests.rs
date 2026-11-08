@@ -31,7 +31,7 @@ macro_rules! test_channels {
             fn deliveries(
                 _: &DomainEvent,
                 _: Option<UserId>,
-                _: Option<&Notified>,
+                _: &[Notified],
                 _: &mut DatabaseTransaction<'_>,
             ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
                 std::future::ready(Ok(vec![]))
@@ -68,7 +68,7 @@ impl Channel for Recorder {
     async fn deliveries(
         _: &DomainEvent,
         subject: Option<UserId>,
-        _: Option<&Notified>,
+        _: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
         let Some(subject) = subject else {

@@ -46,7 +46,7 @@ impl Channel for Announcement {
     async fn deliveries(
         event: &DomainEvent,
         _: Option<UserId>,
-        _: Option<&Notified>,
+        _: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
         let DomainEvent::AnnouncementSent {
