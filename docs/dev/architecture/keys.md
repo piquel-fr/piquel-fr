@@ -9,7 +9,7 @@ revoking and changing them are in [signing keys](../operations/signing-keys.md).
 | --- | --- | --- | --- |
 | Signing keys | `signing_keys`, sealed under the key-encryption key | ID, access and logout tokens | rotate every 90 days by themselves |
 | Key-encryption key | `AUTH_KEY_ENCRYPTION_KEY` | the signing keys' private keys at rest | cannot be changed yet |
-| Token digest keys | `AUTH_TOKEN_DIGEST_KEY`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` during a change | stored opaque tokens, and email verification and recovery links | by hand, in two deploys |
+| Token digest keys | `AUTH_TOKEN_DIGEST_KEY`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` during a change | stored opaque tokens, and email verification, recovery and unsubscribe links | by hand, in two deploys |
 | Audit key | `AUTH_AUDIT_KEY_PROVIDER` | the audit chain's checkpoints | by hand |
 
 Every replica must run with the same keys. The keys are read in
@@ -101,7 +101,7 @@ authorizations, authorization codes and refresh tokens
 which makes every new digest, and, during a change, an accepted one, which only
 checks digests. A presented token is looked up by its digest under each.
 
-`TokenDigestKey::derive` derives three keys from the configured bytes, each with
+`TokenDigestKey::derive` derives four keys from the configured bytes, each with
 HMAC-SHA256 under a context of its own, so none can stand in for another:
 
 - **The token digest key itself.** Its fingerprint, the first 8 bytes of its
@@ -109,8 +109,9 @@ HMAC-SHA256 under a context of its own, so none can stand in for another:
   counts.
 - **The email verification key** (`VerificationKeys` in `src/emails`).
 - **The recovery link key** (`RecoveryLinks` in `src/recovery`).
+- **The unsubscribe link key** (`UnsubscribeLinks` in `src/notifications`).
 
-The last two are `LinkKeys`. A link's token is an HMAC of the ID of what it acts
+The verification and recovery keys are `LinkKeys`. A link's token is an HMAC of the ID of what it acts
 on, an address or a recovery, under the current link key. Auth stores only the
 token's SHA-256 digest, and the email sender derives the token again when it
 sends the link, so the token is never stored, not even in the
@@ -118,6 +119,13 @@ sends the link, so the token is never stored, not even in the
 sender rebuilds a queued link under whichever configured key derives its stored
 digest, and a link already sent keeps working, since it is checked against that
 digest.
+
+An unsubscribe link's token is the HMAC of the account's ID under the
+unsubscribe link key. It is stored nowhere: auth checks a link by deriving the
+token again under the current key and the accepted one. So it never expires, and
+stops working only once neither configured key derives it. Holding one only
+turns that account's announcements' email off (see
+[email preferences](notifications.md#email-preferences)).
 
 Other secrets need no key: session cookies, the browser binding of passkey
 ceremonies, dashboard handoff codes and restore offers are random, and stored as

@@ -71,6 +71,13 @@ the events whose address the `email` channel reads, in the `affected` match of
 Use `Verified` for what an attacker holding one mailbox would want to hide, as a
 recovery's notifications do.
 
+A notification about the account itself is always emailed, and no preference
+can turn it off. Only a kind that isn't about the account, as an announcement
+isn't, may belong to an `EmailCategory` (`crates/common/src/notifications`),
+whose email the owner turns off in their inbox's **Email preferences**. A new
+category needs its variant, with its `label` and `description`, which settings
+and the dashboard show (see [email preferences](../architecture/notifications.md#email-preferences)).
+
 ## 4. Write its texts
 
 Add its arms to `Notification::subject`, one line, which is the inbox's line and
