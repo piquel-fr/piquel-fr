@@ -1886,9 +1886,9 @@ async fn announcements_are_drafted_then_sent_from_the_dashboard() {
 }
 
 /// The Alerts page shows an open alert as needing attention, with posting an
-/// update on it. An update is recorded as the administrator's, and the alert
-/// then shows its status and note. The alerts that cleared are on a page of
-/// their own.
+/// update on it, and the overview's banner leads there. An update is recorded
+/// as the administrator's, and the alert then shows its status and note. The
+/// alerts that cleared are on a page of their own.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn alerts_take_updates_from_the_dashboard() {
@@ -1931,6 +1931,11 @@ async fn alerts_take_updates_from_the_dashboard() {
     assert!(page.contains(&format!(r#"action="{update}""#)), "{page}");
     assert!(page.contains(&position.to_string()), "{page}");
     assert!(page.contains("Needs attention"), "{page}");
+    let overview = html(harness.visit(&dashboard, "/").await).await;
+    assert!(
+        overview.contains("1 alert needs attention") && overview.contains("See the alerts"),
+        "{overview}"
+    );
 
     let url = format!("{DASHBOARD}{update}");
     let fields = [("status", "fixing"), ("note", "Restoring from backup")];
@@ -1943,6 +1948,8 @@ async fn alerts_take_updates_from_the_dashboard() {
         page.contains("Fixing") && page.contains("Restoring from backup"),
         "{page}"
     );
+    let overview = html(harness.visit(&dashboard, "/").await).await;
+    assert!(!overview.contains("See the alerts"), "{overview}");
     let actor = harness
         .actor_of(
             "alert_updated",
@@ -1956,4 +1963,22 @@ async fn alerts_take_updates_from_the_dashboard() {
     let previous = html(harness.visit(&dashboard, "/alerts/previous").await).await;
     assert!(previous.contains("Previous alerts"), "{previous}");
     assert!(!previous.contains(&position.to_string()), "{previous}");
+}
+
+/// What every page shows keeps a read only if nothing forgot it meanwhile, so a
+/// read under way while an administrator posts an update never brings back
+/// what the update changed.
+#[test]
+fn a_read_started_before_forgetting_is_not_kept() {
+    let mut cache = super::AttentionCache::default();
+    let Err(started) = cache.fresh() else {
+        panic!("nothing found yet");
+    };
+    cache.forget();
+    cache.keep(started, super::Attention::default());
+    let Err(now) = cache.fresh() else {
+        panic!("the earlier read is dropped");
+    };
+    cache.keep(now, super::Attention::default());
+    assert!(cache.fresh().is_ok(), "a read started since is kept");
 }

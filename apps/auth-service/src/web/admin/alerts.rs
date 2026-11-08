@@ -105,7 +105,9 @@ pub(super) async fn update(cx: &Cx, form: Option<Form<UpdateForm>>) -> Result<Re
         };
         service
             .update_alert(&admin.operator, id, input.status, note)
-            .await
+            .await?;
+        App::forget_attention(cx);
+        Ok::<_, AdminError>(())
     })
     .await?;
     let (status, note) = refused.as_ref().map_or((None, ""), |refused| {

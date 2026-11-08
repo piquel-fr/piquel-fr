@@ -305,4 +305,21 @@ impl AlertRepository<'_> {
         )?;
         rows.into_iter().map(UpdateRow::decode).collect()
     }
+
+    /// How many alerts are open: current, and with no update posted on them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn open_count(&mut self) -> Result<u64, DatabaseError> {
+        let count = run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT count(*) AS "count!" FROM alerts
+                WHERE cleared_at IS NULL AND acknowledged_at IS NULL"#,
+            )
+        )?;
+        Ok(count.try_into().unwrap_or_default())
+    }
 }

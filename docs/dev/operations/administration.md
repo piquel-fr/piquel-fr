@@ -363,6 +363,9 @@ Post updates on an alert to say where its handling stands: **Investigating**,
 first update acknowledges the alert: it stops counting as a warning, though it
 stays current while its condition holds.
 
+While any alert has no update yet, the overview shows a banner counting them,
+the sidebar marks **Alerts**, and the status bar counts each one as a warning.
+
 On the dashboard:
 
 1. Open **Alerts**. Each current alert shows what it says, its ID, when it was
