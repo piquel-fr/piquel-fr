@@ -43,8 +43,8 @@ async fn rate_limit_deadline_includes_a_blocked_database_query() {
     );
 }
 /// A listener running all the requests it may refuses the next at once, with
-/// `503` and a retry delay, while health probes still answer. A freed slot
-/// serves again.
+/// `503` and a retry delay that an approved cross-origin client can read, while
+/// health probes still answer. A freed slot serves again.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_full_listener_refuses_requests_with_503() {
@@ -63,10 +63,23 @@ async fn a_full_listener_refuses_requests_with_503() {
         .try_acquire()
         .expect("the one slot");
     let refused = fixture
-        .request(Method::POST, "/oauth/token", None, false)
+        .request(
+            Method::POST,
+            "/oauth/token",
+            Some("https://external.example"),
+            false,
+        )
         .await;
     assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(refused.headers()[header::RETRY_AFTER], "1");
+    SecurityFixture::exact_cors(&refused, "https://external.example");
+    assert!(
+        refused
+            .headers()
+            .get_all(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .iter()
+            .any(|exposed| exposed == "retry-after")
+    );
     assert_eq!(
         fixture
             .request(Method::GET, service::READY, None, false)

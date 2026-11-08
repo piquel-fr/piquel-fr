@@ -417,11 +417,14 @@ impl HttpSecurity {
             Listener::Public => Endpoint::of(&request),
             Listener::Admin(_) => Endpoint::Dashboard,
         };
+        let slot = policy.admit(endpoint);
         // Set by the origin check, which runs under the deadline; an error response
-        // still carries CORS headers once the origin is known to be allowed.
-        let mut allowed = false;
+        // still carries CORS headers once the origin is known to be allowed. A
+        // refusal for overload skips the check, which may query the database, and
+        // any origin may read it: it says only when to try again.
+        let mut allowed = slot.is_err();
         let mut response = tokio::time::timeout(policy.request_timeout, async {
-            let _slot = policy.admit(endpoint)?;
+            let _slot = slot?;
             policy.check_host(&request)?;
             if let Some(value) = origin.as_ref().and_then(|value| value.to_str().ok()) {
                 allowed = policy.allowed_origin(endpoint, value).await?;
@@ -578,10 +581,14 @@ impl HttpSecurity {
             headers.insert(name, HeaderValue::from_static(value));
         }
         // Lets cross-origin callers, such as public clients, read the trace ID of a
-        // failed request.
+        // failed request, and when a refused one may try again.
         headers.insert(
             header::ACCESS_CONTROL_EXPOSE_HEADERS,
             HttpTelemetry::TRACE_ID_HEADER.into(),
+        );
+        headers.append(
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            HeaderValue::from_static("retry-after"),
         );
     }
 }

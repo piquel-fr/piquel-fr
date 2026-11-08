@@ -202,7 +202,7 @@ own:
 | Request headers | 10 s | The connection closes. This also closes a kept-alive connection that starts no new request. |
 | Response writes | 10 s without progress | The connection closes, as for a client that stopped reading. |
 | Request deadline | 30 s, checks and handler included | The request gets `504`. |
-| Requests in flight | 64 per listener | Further requests get `503` with `Retry-After: 1` at once, instead of queueing for the database pool's 10 connections. Health probes are exempt. |
+| Requests in flight | 64 per listener | Further requests get `503` with `Retry-After: 1` at once, instead of queueing for the database pool's 10 connections. Any origin may read the refusal. Health probes are exempt. |
 | Rate budgets | `AUTH_REQUESTS_PER_MINUTE` per client and category | The request gets `429` (see [security properties](../security/properties.md)). |
 | Database statements, locks and idle transactions | 15 s, 5 s and 30 s | See [the database's time limits](../architecture/database.md#time-limits). |
 
@@ -222,6 +222,8 @@ always exits within 9 seconds:
    and jobs still running then are cancelled. A cancelled job closes its
    connection, which releases its lock.
 3. Telemetry gets 3 seconds to flush. What it hasn't sent by then is lost.
+4. The process exits, without waiting for blocking work still running, such as
+   a DNS lookup.
 
 ## Running several replicas
 
