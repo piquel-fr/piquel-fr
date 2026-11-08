@@ -24,17 +24,17 @@ use crate::{
     SecretsChange, SignInChange, SignInState, UndoChange,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sourceorigin_common::{
     RecoveryId,
     handle::{MAX_LENGTH, MIN_LENGTH},
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
-pub use sourceorigin_common::form::Checkbox;
 /// Why a query could not be written as a link: one of its fields is not a name and
 /// a value.
 pub use serde_urlencoded::ser::Error as QueryError;
+pub use sourceorigin_common::form::Checkbox;
 use topcoat::{
     Result,
     view::{Child, View, component, view},

@@ -3,8 +3,8 @@
 use super::{PasskeyRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use sourceorigin_common::{Handle, PasskeyId, SessionId, TokenId, UserId, protocol::api::Passkey};
 use serde_json::Value;
+use sourceorigin_common::{Handle, PasskeyId, SessionId, TokenId, UserId, protocol::api::Passkey};
 
 sourceorigin_common::str_enum! {
     /// SQL-compatible `WebAuthn` ceremony purpose.

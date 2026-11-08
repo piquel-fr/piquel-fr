@@ -325,12 +325,13 @@ impl From<sourceorigin_repository::CodeRedemptionError> for OAuthError {
     fn from(error: sourceorigin_repository::CodeRedemptionError) -> Self {
         match error {
             sourceorigin_repository::CodeRedemptionError::Database(source) => source.into(),
-            error @ sourceorigin_repository::CodeRedemptionError::Invalid => OAuthCode::InvalidGrant
-                .reject_with(
+            error @ sourceorigin_repository::CodeRedemptionError::Invalid => {
+                OAuthCode::InvalidGrant.reject_with(
                     "code is unknown or expired, or its client, account or sign-in session no \
                      longer allows it",
                     error,
-                ),
+                )
+            }
             error @ sourceorigin_repository::CodeRedemptionError::Replay { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "code was already used, so any refresh tokens issued from it are revoked",
@@ -346,8 +347,10 @@ impl From<sourceorigin_repository::RefreshRedemptionError> for OAuthError {
     fn from(error: sourceorigin_repository::RefreshRedemptionError) -> Self {
         match error {
             sourceorigin_repository::RefreshRedemptionError::Database(source) => source.into(),
-            error @ sourceorigin_repository::RefreshRedemptionError::Invalid => OAuthCode::InvalidGrant
-                .reject_with("refresh_token is unknown, expired or revoked", error),
+            error @ sourceorigin_repository::RefreshRedemptionError::Invalid => {
+                OAuthCode::InvalidGrant
+                    .reject_with("refresh_token is unknown, expired or revoked", error)
+            }
             error @ sourceorigin_repository::RefreshRedemptionError::Replay { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "refresh_token was already used, so its whole token family is now revoked",

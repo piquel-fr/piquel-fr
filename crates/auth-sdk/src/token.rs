@@ -2,6 +2,7 @@
 
 use crate::{Issuer, KeyError, LEEWAY, keys::Jws, scope::ScopeSet};
 use chrono::{DateTime, TimeDelta, Utc};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sourceorigin_common::{
     ClientId, SessionId, TokenId, UserId,
     protocol::{
@@ -16,7 +17,6 @@ use sourceorigin_common::{
         step_up::StepUpRequirement,
     },
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::marker::PhantomData;
 use thiserror::Error;
 

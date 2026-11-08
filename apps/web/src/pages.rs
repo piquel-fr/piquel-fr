@@ -80,14 +80,14 @@ async fn policy(text: &'static str) -> Result<impl View> {
     })
 }
 
-/// The homepage: what SourceOrigin's sign-in is, and each part of it.
+/// The homepage: what Origin Auth, SourceOrigin's sign-in, is, and each part of it.
 #[component]
 async fn home(links: HomeLinks<'_>) -> Result<impl View> {
     Ok(view! {
         <section class="hero">
             <p class="eyebrow">"SourceOrigin"</p>
             <h1>"One passkey for every SourceOrigin app."</h1>
-            <p class="lead">"SourceOrigin is a passkey-first sign-in service. Your Origin Account signs you in to SourceOrigin's apps, and to other apps that use SourceOrigin, with a passkey instead of a password."</p>
+            <p class="lead">"Origin Auth is SourceOrigin's passkey-first sign-in service. Your Origin Account signs you in to SourceOrigin's apps, and to other apps that use Origin Auth, with a passkey instead of a password."</p>
             <div class="row">
                 <a class="button" href=(links.register)>"Create an account"</a>
                 <a class="button secondary" href=(links.sign_in)>"Sign in"</a>
@@ -97,7 +97,7 @@ async fn home(links: HomeLinks<'_>) -> Result<impl View> {
             feature(title: "Sign in with a passkey", text: "Your passkey stays on your device or in your password manager. There is no password to steal or reuse. You can also link GitHub or Google to sign in.", label: "Sign in", href: links.sign_in)
             feature(title: "Your account, in your hands", text: "See and remove your passkeys, linked providers, email addresses, signed-in devices and the apps you allowed. Review your security history, download your data, or delete your account.", label: "Account settings", href: links.settings)
             feature(title: "For developers", text: "Register your app as an OpenID Connect client, so its users sign in with their Origin Account. Apps only get what their users approve.", label: "Developer console", href: links.developers)
-            feature(title: "Open standards and SDKs", text: "SourceOrigin speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, sourceorigin-auth, validates tokens and signs users in for you.", label: "Documentation", href: DOCUMENTATION)
+            feature(title: "Open standards and SDKs", text: "Origin Auth speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, sourceorigin-auth, validates tokens and signs users in for you.", label: "Documentation", href: DOCUMENTATION)
             feature(title: "Public source", text: "All of SourceOrigin's code is public. Read exactly how your data is handled, report a problem, or contribute. You may use it for anything but commercial purposes, and the SDKs are free for any app under Apache 2.0.", label: "Source code", href: SOURCE, wide: true)
         </div>
     })

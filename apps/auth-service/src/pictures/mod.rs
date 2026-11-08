@@ -32,12 +32,12 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use encoding::Jpeg;
+use serde::Serialize;
 use sourceorigin_common::{
     PictureId, UserId,
     events::{DomainEvent, EventContext},
 };
 use sourceorigin_repository::{Database, DatabaseError, StoredPicture};
-use serde::Serialize;
 use thiserror::Error;
 
 /// Why a picture could not be set, removed or served.
@@ -173,7 +173,11 @@ impl AccountService {
         url: &ProviderPicture,
     ) -> Result<(), AccountError> {
         let upload = client
-            .get(url.as_str(), sourceorigin_ui::PICTURE_TYPES, MAX_UPLOAD_BYTES + 1)
+            .get(
+                url.as_str(),
+                sourceorigin_ui::PICTURE_TYPES,
+                MAX_UPLOAD_BYTES + 1,
+            )
             .await
             .map_err(PictureError::Fetch)?;
         let jpeg = Jpeg::encode(upload, None).await?;

@@ -7,10 +7,10 @@ use crate::oidc::{
     ResponseMode, ResponseType, Scopes, TokenPrefix,
 };
 use chrono::{Duration, Utc};
-use sourceorigin_common::{UserId, protocol::claims::Acr};
-use sourceorigin_repository::{InsertAuthorizationRequest, StoredOidcClient};
 use serde::Deserialize;
 use serde_json::Value;
+use sourceorigin_common::{UserId, protocol::claims::Acr};
+use sourceorigin_repository::{InsertAuthorizationRequest, StoredOidcClient};
 use url::Url;
 
 /// Authorization request parameters, from the browser or pushed by the client.

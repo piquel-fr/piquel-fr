@@ -174,7 +174,10 @@ async fn retries_resend_the_same_message_to_the_current_address() {
         Err(DeliveryError::Retryable { .. })
     ));
     assert_eq!(sender.deliver(id, user_id, &verify).await, Ok(()));
-    let expected = (format!("<{id}@sourceorigin.dev>"), "ada@example.com".to_owned());
+    let expected = (
+        format!("<{id}@sourceorigin.dev>"),
+        "ada@example.com".to_owned(),
+    );
     assert_eq!(outbox.headers(), [expected.clone(), expected]);
 
     sender.assert_renders(user_id, &verify).await;

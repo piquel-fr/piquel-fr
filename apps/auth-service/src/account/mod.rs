@@ -50,6 +50,7 @@ use axum::{
     routing::{MethodRouter, delete, get, patch, post},
 };
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use sourceorigin_common::{
     ClientId, EmailId, Handle, NotificationId, PasskeyId, Personal, PictureId, SessionId,
     events::DomainEvent,
@@ -57,7 +58,6 @@ use sourceorigin_common::{
     protocol::api::{Identity, Passkey},
 };
 use sourceorigin_repository::{Database, StoredUser};
-use serde::Deserialize;
 
 operations! {
     /// Every shared settings operation of the settings API. The owner's router

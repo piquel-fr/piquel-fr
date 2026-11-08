@@ -30,10 +30,10 @@ use axum::{
     http::HeaderMap,
     response::Redirect,
 };
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{RecoveryId, protocol::claims::Acr};
 use sourceorigin_repository::StoredAuthorizationRequest;
 use sourceorigin_ui::{Checkbox, LoginQuery};
-use serde::{Deserialize, Serialize};
 use url::Url;
 
 /// Rejection of a pending authorization that cannot be found.

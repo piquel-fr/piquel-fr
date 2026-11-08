@@ -2,8 +2,8 @@
 
 use super::PasskeyError;
 use axum::Json;
-use sourceorigin_common::{RecoveryId, TokenId, clients::RelatedOrigin};
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::{RecoveryId, TokenId, clients::RelatedOrigin};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
 /// Maximum Unicode characters in display names and credential labels.
