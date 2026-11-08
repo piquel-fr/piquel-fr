@@ -844,7 +844,10 @@ async fn only_administrators_signed_in_with_a_passkey_are_handed_off() {
     assert_eq!(parameter(&login, "acr"), "phr");
     let back = parameter(&login, "return_to");
     assert!(back.starts_with(routes::page::ADMIN), "{back}");
-    assert!(back.contains("confirm=on"), "kept for the previous release: {back}");
+    assert!(
+        back.contains("confirm=on"),
+        "kept for the previous release: {back}"
+    );
     let page = social
         .visit(&harness.auth.a, &login[Position::BeforePath..])
         .await;
