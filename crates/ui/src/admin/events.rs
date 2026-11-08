@@ -449,7 +449,9 @@ impl EventRow<'_> {
             Alert::AuditChainBroken(broken) | Alert::CheckpointRefused(broken) => description
                 .with("position", broken.position)
                 .with("problem", broken.problem),
-            Alert::PurgesFailing {} | Alert::CleanupBehind {} => description,
+            Alert::PurgesFailing {} | Alert::CleanupBehind {} | Alert::VerificationFailing {} => {
+                description
+            }
         }
     }
 

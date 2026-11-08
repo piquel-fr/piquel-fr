@@ -2,9 +2,12 @@
 //! verification without an operator asking for one.
 
 use super::{AuditChain, AuditError, AuditKeys, AuditVerification};
-use crate::jobs::{ExclusiveJob, JobCount, Shutdown};
+use crate::jobs::{ExclusiveJob, JobCount, Shutdown, Streak};
 use chrono::{TimeDelta, Utc};
-use piquel_common::events::{DomainEvent, EventContext, JobName};
+use piquel_common::{
+    alerts::Alert,
+    events::{DomainEvent, EventContext, JobName},
+};
 use piquel_repository::{ExclusiveConnection, LockKey, RecordedEvent, Verifications};
 use piquel_telemetry::Gauge;
 use std::time::Duration;
@@ -23,20 +26,48 @@ static BROKEN: JobCount = JobCount::new(
 
 /// Verifies the whole chain, on one replica at a time, once the newest recorded
 /// verification, whoever made it, other than one with keys given with `--key`,
-/// is [`Self::VERIFY_EVERY`] old, and records
-/// what it found as [`JobName::AuditVerification`].
+/// is [`Self::VERIFY_EVERY`] old, and records what it found as
+/// [`JobName::AuditVerification`]. Runs that keep failing raise the
+/// [`Alert::VerificationFailing`] alert, which such a recorded verification
+/// clears.
 pub(crate) struct Verifier {
     /// The keys it verifies with, the dashboard's (see [`AuditKeys::for_server`]).
     keys: AuditKeys,
+    /// Runs in a row on this replica that failed.
+    failures: Streak,
 }
 
 impl Verifier {
     /// How old the newest recorded verification may get.
     const VERIFY_EVERY: TimeDelta = TimeDelta::hours(6);
+    /// Failed runs in a row that raise [`Alert::VerificationFailing`]: a single
+    /// one may be the database's passing failure.
+    const FAILING_AFTER: u32 = 3;
 
     /// A verifier checking checkpoints against `keys`.
     pub(crate) const fn new(keys: AuditKeys) -> Self {
-        Self { keys }
+        Self {
+            keys,
+            failures: Streak::new(Self::FAILING_AFTER),
+        }
+    }
+
+    /// Counts a run that ended with `ran`, raising the alert of a verification
+    /// that keeps failing once enough fail in a row, and returns how it ended.
+    pub(super) async fn ended<T>(
+        &self,
+        connection: &mut ExclusiveConnection,
+        ran: Result<T, AuditError>,
+    ) -> Result<T, AuditError> {
+        if ran.is_ok() {
+            self.failures.reset();
+        } else {
+            let alert = Alert::VerificationFailing {};
+            self.failures
+                .failed(connection, JobName::AuditVerification, alert)
+                .await;
+        }
+        ran
     }
 
     /// Registers the [`BROKEN`] gauge.
@@ -91,6 +122,7 @@ impl ExclusiveJob for Verifier {
         connection: &mut ExclusiveConnection,
         _: &Shutdown,
     ) -> Result<(), AuditError> {
-        self.pass(connection).await.map(drop)
+        let ran = self.pass(connection).await;
+        self.ended(connection, ran).await.map(drop)
     }
 }

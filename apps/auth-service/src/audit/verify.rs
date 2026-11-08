@@ -167,9 +167,10 @@ impl AuditChain {
 
     /// Records `verification`, made as `context`, in `tx`, and commits: the
     /// dashboard's audit page shows the newest one recorded. A broken chain raises
-    /// its alert, and an intact one clears it, unless the keys were given with
-    /// `--key`, such as another environment's, which say nothing of this one's
-    /// checkpoints.
+    /// its alert, and an intact one clears it; either clears the alert of a
+    /// verification that keeps failing. None of this happens when the keys were
+    /// given with `--key`, such as another environment's, which say nothing of
+    /// this one's checkpoints.
     pub(crate) async fn record(
         mut tx: DatabaseTransaction<'_>,
         context: &EventContext,
@@ -183,6 +184,7 @@ impl AuditChain {
                 Some(broken) => alerts.raise(Alert::AuditChainBroken(broken.clone())).await,
                 None => alerts.clear(AlertKind::AuditChainBroken).await,
             }?;
+            alerts.clear(AlertKind::VerificationFailing).await?;
         }
         Ok(tx.commit().await?)
     }

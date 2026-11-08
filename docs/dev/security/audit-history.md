@@ -220,8 +220,11 @@ nothing, so an absent gauge does not mean intact. A verification that
 finds the chain broken raises the `audit_chain_broken` alert, which the
 dashboard's Alerts tab and `auth-service alerts list` show,
 and the next one that finds it intact clears it. One with keys given with
-`--key` changes neither. The admin dashboard's
-Audit tab shows the newest one and when it was made, beside the chain as stored,
+`--key` changes neither. When the verifier itself fails three runs in a row on
+one replica, finding the chain neither broken nor intact, it raises the
+`verification_failing` alert once, and the next recorded verification, other
+than one with `--key`, clears it. The admin dashboard's Audit tab shows the
+newest one and when it was made, beside the chain as stored,
 so loading it costs the same however long the history. It recomputes nothing
 until an administrator presses **Verify now**, which runs the same
 `AdminService` operation as the CLI, within

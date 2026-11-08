@@ -276,9 +276,7 @@ struct Cleanup {
     /// Maximum time spent draining one pass.
     budget: Duration,
     /// Passes in a row on this replica that ran out of time.
-    overruns: AtomicU32,
-    /// Whether those passes raised [`Alert::CleanupBehind`].
-    raised: AtomicBool,
+    overruns: Streak,
 }
 
 impl Cleanup {
@@ -298,8 +296,7 @@ impl Cleanup {
     const fn new() -> Self {
         Self {
             budget: Self::BUDGET,
-            overruns: AtomicU32::new(0),
-            raised: AtomicBool::new(false),
+            overruns: Streak::new(Self::BEHIND_AFTER),
         }
     }
 
@@ -359,43 +356,138 @@ impl ExclusiveJob for Cleanup {
         let Some(behind) = behind else {
             return Ok(());
         };
-        let overruns = if behind {
-            self.overruns.fetch_add(1, Ordering::Relaxed) + 1
+        let due = if behind {
+            let Some(due) = self.overruns.extend() else {
+                return Ok(());
+            };
+            Some(due)
         } else {
-            self.overruns.swap(0, Ordering::Relaxed);
-            self.raised.store(false, Ordering::Relaxed);
-            0
+            self.overruns.reset();
+            None
         };
-        if behind && overruns < Self::BEHIND_AFTER {
-            return Ok(());
-        }
-        // A streak raises the alert once, then only marks it seen while it is
-        // current. Once another replica clears it, the streak starts over, so it
-        // takes as many passes again to raise it, and email every administrator,
-        // again.
-        let alert = Alert::CleanupBehind {};
         let mut tx = connection.begin().await?;
         let context = EventContext::system(JobName::Cleanup);
         let mut alerts = Alerts::new(&mut tx, &context);
-        let holds = if !behind {
-            alerts.clear(AlertKind::CleanupBehind).await?;
-            false
-        } else if self.raised.load(Ordering::Relaxed) {
-            alerts.seen(&alert).await?
+        let holds = if let Some(due) = due {
+            Some(due.apply(&mut alerts, Alert::CleanupBehind {}).await?)
         } else {
-            alerts.raise(alert).await?;
-            true
+            alerts.clear(AlertKind::CleanupBehind).await?;
+            None
         };
         tx.commit().await?;
-        if holds {
-            self.raised.store(true, Ordering::Relaxed);
-        } else {
-            // A pass that fell behind and found the alert cleared starts the
-            // next streak.
-            self.overruns.store(u32::from(behind), Ordering::Relaxed);
-            self.raised.store(false, Ordering::Relaxed);
+        if let Some(holds) = holds {
+            self.overruns.settle(holds);
         }
         Ok(())
+    }
+}
+
+/// What a streak long enough calls for after another run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Due {
+    /// Raising its alert.
+    Raise,
+    /// Marking the alert it raised seen, while that is current.
+    Seen,
+}
+
+impl Due {
+    /// Raises `alert` in `alerts`, or marks it seen, as due, and says whether it
+    /// holds as raised: `false` when it was no longer current to be seen, as it
+    /// cleared meanwhile, such as by another replica's run or an operator's
+    /// verification.
+    async fn apply(self, alerts: &mut Alerts<'_, '_>, alert: Alert) -> Result<bool, DatabaseError> {
+        match self {
+            Self::Raise => alerts.raise(alert).await.map(|()| true),
+            Self::Seen => alerts.seen(&alert).await,
+        }
+    }
+}
+
+/// Runs in a row on this replica that ended one way, such as cleanup passes that
+/// ran out of time, which raise an alert once there are enough of them. A job's
+/// lock may move between replicas, so it counts this replica's runs only, and a
+/// count lasts until this replica's next run. A streak raises its alert once,
+/// then only marks it seen while it is current. Once it clears meanwhile, such
+/// as by another replica's run or an operator's verification, the run that
+/// found it cleared starts a new streak, so it takes as many runs again to raise
+/// it, and email every administrator, again.
+pub(crate) struct Streak {
+    /// Runs in the streak so far.
+    runs: AtomicU32,
+    /// Runs in a row that raise the alert.
+    alert_after: u32,
+    /// Whether this streak raised its alert.
+    raised: AtomicBool,
+}
+
+impl Streak {
+    /// A streak that raises its alert after `alert_after` runs in a row.
+    pub(crate) const fn new(alert_after: u32) -> Self {
+        Self {
+            runs: AtomicU32::new(0),
+            alert_after,
+            raised: AtomicBool::new(false),
+        }
+    }
+
+    /// Counts one more run, and says what it calls for once the streak is long
+    /// enough: raising the alert, until it was raised, then marking it seen.
+    fn extend(&self) -> Option<Due> {
+        if self.runs.fetch_add(1, Ordering::Relaxed) + 1 < self.alert_after {
+            None
+        } else if self.raised.load(Ordering::Relaxed) {
+            Some(Due::Seen)
+        } else {
+            Some(Due::Raise)
+        }
+    }
+
+    /// Settles a run whose alert was raised or seen, once that committed: the
+    /// streak goes on while the alert `holds`, and once it cleared, this run
+    /// starts a new one.
+    fn settle(&self, holds: bool) {
+        if !holds {
+            self.runs.store(1, Ordering::Relaxed);
+        }
+        self.raised.store(holds, Ordering::Relaxed);
+    }
+
+    /// Ends the streak.
+    pub(crate) fn reset(&self) {
+        self.runs.store(0, Ordering::Relaxed);
+        self.raised.store(false, Ordering::Relaxed);
+    }
+
+    /// Counts a run of `job` that failed, and raises `alert` on `connection`
+    /// once enough failed in a row, or marks it seen once raised. Raising may
+    /// fail as the run did, such as while the database is down: that is logged,
+    /// since the run returns its own failure.
+    pub(crate) async fn failed(
+        &self,
+        connection: &mut ExclusiveConnection,
+        job: JobName,
+        alert: Alert,
+    ) {
+        let Some(due) = self.extend() else {
+            return;
+        };
+        let context = EventContext::system(job);
+        let applied = async {
+            let mut tx = connection.begin().await?;
+            let holds = due
+                .apply(&mut Alerts::new(&mut tx, &context), alert)
+                .await?;
+            tx.commit().await?;
+            Ok::<_, DatabaseError>(holds)
+        };
+        match applied.await {
+            Ok(holds) => self.settle(holds),
+            Err(error) => {
+                let error = ErrorChain(&error);
+                tracing::error!(%error, ?job, "could not raise the alert of a failing job");
+            }
+        }
     }
 }
 

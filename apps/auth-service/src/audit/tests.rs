@@ -654,6 +654,53 @@ async fn the_verifier_verifies_when_no_verification_is_recent() {
     lock.release().await.expect("release");
 }
 
+/// The verifier's third failed run in a row raises the alert of a verification
+/// that keeps failing; a run that works in between starts the count again, and a
+/// recorded verification clears the alert.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_verification_that_keeps_failing_raises_its_alert() {
+    let fixture = Fixture::sealed_six().await;
+    let verifier = Verifier::new(AuditKeys {
+        source: VerificationKeys::Uncommitted,
+        ..(*fixture.keys).clone()
+    });
+    let mut lock = fixture
+        .database
+        .try_exclusive(LockKey::AuditVerification)
+        .await
+        .expect("lock")
+        .expect("no other test verifies");
+    let current = async || {
+        let mut tx = fixture.database.begin().await.expect("transaction");
+        let current = tx
+            .alerts()
+            .current(AlertKind::VerificationFailing)
+            .await
+            .expect("current");
+        tx.commit().await.expect("commit");
+        current.and_then(|current| current.alert)
+    };
+    let failed = || Err::<(), _>(AuditError::NoKeys);
+    for _ in 0..2 {
+        assert!(verifier.ended(&mut lock, failed()).await.is_err());
+    }
+    verifier
+        .ended(&mut lock, Ok(()))
+        .await
+        .expect("a run that works");
+    for _ in 0..2 {
+        assert!(verifier.ended(&mut lock, failed()).await.is_err());
+    }
+    assert_eq!(current().await, None);
+    assert!(verifier.ended(&mut lock, failed()).await.is_err());
+    assert_eq!(current().await, Some(Alert::VerificationFailing {}));
+
+    verifier.pass(&mut lock).await.expect("verification");
+    assert_eq!(current().await, None);
+    lock.release().await.expect("release");
+}
+
 /// A verification that finds the chain broken with this environment's keys
 /// raises the chain's alert. One with keys an operator gave changes nothing.
 #[tokio::test]

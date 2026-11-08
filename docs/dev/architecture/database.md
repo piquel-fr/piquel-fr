@@ -610,4 +610,8 @@ changes neither.
 The sealer raises `checkpoint_refused` when it refuses to sign a checkpoint over
 events that no longer match, and clears it once they match again. The account
 purge raises `purges_failing` while accounts keep failing to be purged, and
-cleanup raises `cleanup_behind` once its passes keep running out of time.
+cleanup raises `cleanup_behind` once its passes keep running out of time. The
+verifier raises `verification_failing` once its runs keep failing, and a
+recorded verification, other than one with `--key`, clears it. Cleanup and
+the verifier count runs in a row with `Streak`, on each replica: a streak raises
+its alert once, and starts over when it finds the alert cleared.
