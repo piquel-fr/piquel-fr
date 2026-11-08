@@ -138,8 +138,9 @@ need their attention, such as a broken audit chain. The dashboard's **Alerts**
 page lists the current ones, on which administrators post status updates until
 each clears, and links those that cleared; `auth-service alerts` does the same
 (see [respond to an alert](../operations/administration.md#respond-to-an-alert)).
-While an alert has no update yet, the overview's banner and the sidebar's dot
-point to the page.
+Raising an alert notifies every active administrator, in their inbox and by
+email. While an alert has no update yet, the overview's banner and the
+sidebar's dot point to the page.
 
 Administrators manage the administrator list too, but never their own rights or
 the last active administrator's, and the dashboard never changes an administrator's

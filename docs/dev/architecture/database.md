@@ -555,10 +555,14 @@ passkey it added, which still needs a passkey confirmation.
 ### Notifications
 
 [Notifications](notifications.md) explains the inbox as a whole.
-`DomainEvent::notification` decides which events tell their subject something,
+`DomainEvent::notification` decides which events tell someone something,
 naming every variant as `history_entry` does. `record` writes that notification
-to the subject's inbox (`notifications`) in the event's transaction, so a
-committed event has its notification and a rolled-back one has none; an account
+to the inbox (`notifications`) of each account its audience
+(`Notification::audience`) names, in the event's transaction, so a committed
+event has its notifications and a rolled-back one has none. The audience is the
+event's subject, or for a raised alert every active administrator, whose rights
+and accounts stay key-share locked until the event commits, so a purge waits for
+their notifications and emails and deletes them with the account. A subject
 purged while a request was in flight gets none. A notification stores the
 serialized `Notification` and no personal data, and `event_id` is no foreign key:
 it renders the same once its event's personal data is erased or the event is

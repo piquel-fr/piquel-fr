@@ -106,18 +106,18 @@ active, is not sent, and the delivery succeeds without a send. A recovery's
 link stores the recovery's ID and the primary address's, and is not sent once the
 link was used, cancelled or expired, or the account was disabled.
 
-Every notification an event gives its subject (`DomainEvent::notification`) is
-emailed too: `record` hands the notification it just wrote to the channels, and
-the `email` channel queues one `EmailMessage::Notification` per address that
-`Notification::addressees` names, each once. A recovery that secured the account
-or added a passkey (`AccountSecured`, `Recovered`) goes to every verified
-address, so a compromised one cannot hide it; a replaced or
-removed address's to that address, so whoever reads it hears of it; any other to
-the primary verified address, and an account without one gets no email. The
-message copies the address and the notification, read in the event's
-transaction, so removing the address right after cannot cancel it, and says what
-the inbox says, linking the notification's page and,
-while a passkey can still undo a recovery, its undo page. The copied addresses
+Every notification an event gives (`DomainEvent::notification`) is emailed
+too: `record` hands the notifications it just wrote, each with its account, to
+the channels, and the `email` channel queues one `EmailMessage::Notification`
+per address of that account that `Notification::addressees` names, each once.
+A recovery that secured the account or added a passkey (`AccountSecured`,
+`Recovered`) goes to every verified address, so a compromised one cannot hide
+it; a replaced or removed address's to that address, so whoever reads it hears
+of it; any other to the primary verified address, and an account without one
+gets no email. The message copies the address and the notification, read in the
+event's transaction, so removing the address right after cannot cancel it, and
+says what the inbox says, linking the notification's page and, while a passkey
+can still undo a recovery, its undo page. The copied addresses
 are the channel's only personal data, deleted with the delivery. The `destination` column names the
 account and the address's ID, for operators.
 

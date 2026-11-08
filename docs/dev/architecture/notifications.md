@@ -1,9 +1,9 @@
 # Notifications
 
 This page explains how auth tells an account's owner what happened to their
-account: where notifications come from, how they are stored and emailed, and who
-reads and marks them. Read it before adding an event that should notify its
-subject, or changing the inbox.
+account, and administrators what happened to the service: where notifications
+come from, how they are stored and emailed, and who reads and marks them. Read
+it before adding an event that should notify someone, or changing the inbox.
 
 ## Where notifications come from
 
@@ -11,31 +11,42 @@ A notification comes from a domain event, except an announcement: sending one
 writes each recipient's notification directly, since no event about the account
 does. Every other notification comes from a domain event.
 `DomainEvent::notification(&actor)` (`crates/common/src/notifications`) decides
-which events tell their subject something, and what. It names every variant
-under `#[deny(clippy::wildcard_enum_match_arm)]`, so a new event does not compile
-until someone decides whether its subject is told. Some depend on who acted: a
-display name, handle or picture changed by the owner tells them nothing, but one
-changed by an administrator or operator does.
+which events tell someone something, and what. It names every variant under
+`#[deny(clippy::wildcard_enum_match_arm)]`, so a new event does not compile until
+someone decides whether anyone is told. `Notification::audience` says whose
+inbox it goes to: the event's subject, or for a raised alert, which concerns the
+service rather than one account, every active administrator. Some depend on who
+acted: a display name, handle or picture changed by the owner tells them nothing,
+but one changed by an administrator or operator does.
 
 `Notification` is a closed enum, serialized with a `kind` tag. A variant holds
 only IDs, enums, flags and timestamps, never a secret, an address or a `Personal`
-value, so a notification renders from itself alone. The exception is
-`Announcement`, which holds the subject and text administrators wrote; a
-targeted announcement's text may name its recipients, so it goes with them:
-purging an account deletes its notifications, and the announcement once its last
-recipient is purged. Today the variants are a replaced primary address, a
-removed address, a recovery that secured the account, enrolled a passkey or was
-undone, an account disabled, enabled, scheduled for deletion or restored,
-support changing the handle or display name or removing the picture, and
-[administrators' announcements](../operations/administration.md#send-an-announcement).
+value, so a notification renders from itself alone. There are two exceptions.
+`Announcement` holds the subject and text administrators wrote. A targeted
+announcement's text may name its recipients, so it goes with them: purging an
+account deletes its notifications, and the announcement once its last
+recipient is purged. `AlertRaised` holds the alert's subject and text, which
+name no account, rather than the `Alert`, so an older release's inbox never
+meets an alert it cannot decode. Today the variants are a replaced primary
+address, a removed address, a recovery that secured the account, enrolled a
+passkey or was undone, an account disabled, enabled, scheduled for deletion or restored,
+support changing the handle or display name or removing the picture,
+[administrators' announcements](../operations/administration.md#send-an-announcement),
+and, in administrators' inboxes, each
+[alert](../operations/administration.md#respond-to-an-alert) when it is raised,
+titled **Alert:** and the alert's subject. An alert's notification has no
+security history entry, since its event concerns no account.
 
 ## Storage
 
 `DatabaseTransaction::record` (`crates/database/src/transaction.rs`) writes the
-event, then, when the event has a subject and a notification, writes the
-notification to the subject's inbox, then fans the event out to the delivery
-channels, all in the event's transaction. So a committed event has its
-notification and its email, and a rolled-back one has neither.
+event, then, when the event gives a notification, writes it to the inbox of each
+account of its audience, then fans the event out to the delivery channels, all
+in the event's transaction. So a committed event has its notifications and
+their emails, and a rolled-back one has neither. For a raised alert, it reads
+the active administrators and key-share locks their rights and accounts until
+the event commits, so a purge of one waits, then deletes its notification and
+email with the account.
 
 Each notification is a row of `notifications` (`NotificationRepository`):
 
@@ -56,18 +67,20 @@ ordering of pages and the indexes.
 
 Every notification is also emailed, except an announcement whose recipient
 turned announcements' email off (see [email preferences](#email-preferences)).
-Notifications about the account itself can't be turned off. The `email`
-channel (`crates/database/src/repositories/deliveries/email.rs`) receives the
-notification `record` just wrote and queues one `EmailMessage::Notification` per
-address `Notification::addressees` names, each once:
+Notifications about the account itself can't be turned off, and neither can an
+alert's. The `email` channel
+(`crates/database/src/repositories/deliveries/email.rs`) receives the
+notifications `record` just wrote, each with its account, and queues one
+`EmailMessage::Notification` per address of that account that
+`Notification::addressees` names, each once:
 
 - `Verified`: every verified address, for `AccountSecured` and `Recovered`, so
   one compromised mailbox cannot hide a recovery. An undone recovery
   (`RecoveryUndone`) goes to the primary address, like the rest.
 - `Affected`: the address the event replaced or removed, so whoever reads that
   mailbox hears of it.
-- `Primary`: the primary verified address, for every other notification. An
-  account without one gets no email.
+- `Primary`: the primary verified address, for every other notification, an
+  alert's included. An account without one gets no email.
 
 An announcement's email goes out on the `announcement` channel instead, which
 has workers of its own and links the inbox (see
@@ -151,6 +164,7 @@ The owner's data export includes the inbox, with when each was read
 ## Adding a notification
 
 1. Add the variant to `Notification` (`crates/common/src/notifications`), with
-   its `subject`, its `body` and its `addressees`. The inbox, the dashboard and
+   its `subject`, its `body`, its `audience` and its `addressees`. The inbox,
+   the dashboard and
    the email all show the subject and the body, so none needs a view of its own.
 2. Return it from `DomainEvent::notification` for the events that give it.

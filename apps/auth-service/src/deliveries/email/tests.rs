@@ -535,6 +535,89 @@ async fn notifications_are_emailed_to_the_addresses_their_kind_names() {
     );
 }
 
+/// A raised alert notifies every active administrator, in their inbox and at
+/// their primary verified address only, and nobody else: not a disabled
+/// administrator, nor an account that administers nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_raised_alert_notifies_active_administrators() {
+    use piquel_common::{
+        AlertId,
+        admin::{ChainBreak, ChainProblem},
+        alerts::Alert,
+        events::JobName,
+    };
+    let database = Replicas::database().await;
+    let addressed = async || {
+        let user_id = account(&database).await;
+        let primary =
+            verified_address(&database, user_id, &format!("{user_id}@example.com"), true).await;
+        let other = format!("other-{user_id}@example.com");
+        let other = verified_address(&database, user_id, &other, false).await;
+        (user_id, primary, other)
+    };
+    let (admin, primary, other) = addressed().await;
+    let (disabled, disabled_primary, _) = addressed().await;
+    let (member, member_primary, _) = addressed().await;
+    for user_id in [admin, disabled] {
+        database
+            .administrators()
+            .grant(user_id)
+            .await
+            .expect("grant");
+    }
+    database
+        .users()
+        .set_status(disabled, AccountStatus::Disabled)
+        .await
+        .expect("disable");
+    let alert = Alert::AuditChainBroken(ChainBreak {
+        position: 5,
+        problem: ChainProblem::EventChanged,
+    });
+    let alert_id = AlertId::new();
+    let context = EventContext {
+        actor: Actor::System {
+            job: JobName::AuditVerification,
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let raised = DomainEvent::AlertRaised {
+        alert_id,
+        alert: alert.clone(),
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    tx.record(&context, None, raised).await.expect("record");
+    tx.commit().await.expect("commit");
+
+    let notified = async |user_id: UserId| {
+        let inbox = database.notifications().list(user_id, None, 10).await;
+        inbox
+            .expect("inbox")
+            .into_iter()
+            .filter_map(|stored| stored.notification)
+            .collect::<Vec<_>>()
+    };
+    let expected = Notification::AlertRaised {
+        alert_id,
+        title: format!("Alert: {}", alert.subject()),
+        text: alert.body(),
+    };
+    assert_eq!(notified(admin).await, [expected]);
+    assert_eq!(notified(disabled).await, []);
+    assert_eq!(notified(member).await, []);
+    let emailed = async |user_id: UserId, email_id: EmailId| {
+        let destination = format!("account {user_id}, address {email_id}");
+        let payloads = database.deliveries().payloads(&destination).await;
+        payloads.expect("payloads").len()
+    };
+    assert_eq!(emailed(admin, primary).await, 1);
+    assert_eq!(emailed(admin, other).await, 0);
+    assert_eq!(emailed(disabled, disabled_primary).await, 0);
+    assert_eq!(emailed(member, member_primary).await, 0);
+}
+
 /// An announcement's email offers a one-click unsubscribe (RFC 8058) whose
 /// link turns only its recipient's announcements' email off, in its headers and
 /// its body; an essential one, which its recipient cannot turn off, offers none.

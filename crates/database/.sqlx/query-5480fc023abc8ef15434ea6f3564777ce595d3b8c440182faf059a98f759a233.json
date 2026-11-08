@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM deliveries\n            WHERE (channel = 'email' OR channel = 'announcement')\n            AND recipient = to_jsonb($1::uuid::text)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5480fc023abc8ef15434ea6f3564777ce595d3b8c440182faf059a98f759a233"
+}

@@ -11,6 +11,7 @@ use crate::{
 use piquel_common::{
     EventId, UserId,
     events::{Actor, DomainEvent, EventContext, HistoryActor},
+    notifications::{Audience, Notification},
 };
 use sqlx::{Postgres, Transaction};
 
@@ -63,18 +64,8 @@ impl<'a> DatabaseTransaction<'a> {
         event: DomainEvent,
     ) -> Result<EventId, DatabaseError> {
         let id = self.events().insert(context, subject, &event).await?;
-        let notified: Vec<_> = match subject.zip(event.notification(&context.actor)) {
-            Some((user_id, notification)) => self
-                .notifications()
-                .insert(user_id, Some(id), &notification)
-                .await?
-                .map(|id| Notified {
-                    user_id,
-                    id,
-                    notification,
-                })
-                .into_iter()
-                .collect(),
+        let notified = match event.notification(&context.actor) {
+            Some(notification) => self.notify(id, subject, notification).await?,
             None => Vec::new(),
         };
         C::fan_out(self, id, subject, &event, &notified).await?;
@@ -89,6 +80,35 @@ impl<'a> DatabaseTransaction<'a> {
             event,
         });
         Ok(id)
+    }
+
+    /// Writes `notification`, from the event `event_id` about `subject`, to the
+    /// inbox of each account of its audience, and returns what it wrote.
+    async fn notify(
+        &mut self,
+        event_id: EventId,
+        subject: Option<UserId>,
+        notification: Notification,
+    ) -> Result<Vec<Notified>, DatabaseError> {
+        let accounts = match notification.audience() {
+            Audience::Subject => subject.into_iter().collect(),
+            Audience::Administrators => self.administrators().active().await?,
+        };
+        let mut notified = Vec::new();
+        for user_id in accounts {
+            let written = self
+                .notifications()
+                .insert(user_id, Some(event_id), &notification)
+                .await?;
+            if let Some(id) = written {
+                notified.push(Notified {
+                    user_id,
+                    id,
+                    notification: notification.clone(),
+                });
+            }
+        }
+        Ok(notified)
     }
 
     /// Counts the other transactions waiting for a lock this one holds, directly

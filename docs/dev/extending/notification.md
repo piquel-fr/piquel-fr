@@ -1,7 +1,8 @@
 # Adding a notification
 
 This guide adds a kind of notification: something Piquel tells an account's
-owner about their account, in their inbox and by email. [Notifications](../architecture/notifications.md)
+owner about their account, or administrators about the service, in their inbox
+and by email. [Notifications](../architecture/notifications.md)
 describes what the owner sees; [domain events](../architecture/database.md#notifications)
 how notifications are stored.
 
@@ -55,9 +56,17 @@ Self::PictureRemoved {} if by_support => Notification::PictureRemoved,
 on it when only support's change is news to the owner, and keep the owner's own
 case in the `return None` list, with a comment saying why.
 
-## 3. Choose who receives the email
+## 3. Choose who receives it
 
-Add its arm to `Notification::addressees`:
+Add its arm to `Notification::audience`, which says whose inbox it goes to:
+
+| `Audience` | Whose inbox |
+| --- | --- |
+| `Subject` | the account the event is about |
+| `Administrators` | every active administrator, for an event about the service rather than one account, as a raised alert is |
+
+Then add its arm to `Notification::addressees`, which says which of each
+account's addresses receive its email:
 
 | `Addressees` | Who receives the email |
 | --- | --- |
