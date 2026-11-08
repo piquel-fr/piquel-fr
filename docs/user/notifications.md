@@ -42,6 +42,8 @@ From your settings:
 1. Open **Notifications**.
 2. Under **Email**, select **Turn off** beside **Announcements**.
 
+![The Email section of the notifications page: Announcements, emailed, with a Turn off button](../images/account/notification-email.png)
+
 From an announcement's email, select **Stop receiving announcements by email**
 at its end, then **Stop announcement emails** on the page it opens. Your mail
 app may also offer an **Unsubscribe** button beside the sender, which does the
