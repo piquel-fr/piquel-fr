@@ -19,6 +19,8 @@ emails, you need a [confirmed email address](email-addresses.md).
   a passkey, or a recovery was undone.
 - Your account was disabled, enabled again, scheduled for deletion or
   restored.
+- Piquel sent an announcement, such as news of a security incident or a change
+  to its privacy policy, to every account or to yours.
 
 ## Read your inbox
 
@@ -40,7 +42,7 @@ To mark every notification read, select **Mark all as read** in the inbox.
 ## Emails
 
 Each notification is also emailed. The email says what the inbox says and
-links to the notification's page.
+links to the notification's page; an announcement's email links your inbox.
 
 - A change of primary address is emailed to the address that stopped being
   primary, and a removed address is told at that address.
