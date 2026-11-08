@@ -136,9 +136,10 @@ The `token-digest-key` secret, `AUTH_TOKEN_DIGEST_KEY`, appears outside the
 environment: in a backup, a log, or on a compromised host.
 
 Auth stores refresh tokens, authorization codes and pending logins as HMAC
-digests under this key, and email verification and recovery links derive from
-it. With the key and the ID of an address or a recovery, someone can rebuild
-the link auth sent for it.
+digests under this key, and email verification, recovery and unsubscribe links
+derive from it. With the key and the ID of an address, a recovery or an account,
+someone can rebuild the link auth sent for it. An unsubscribe link only turns
+that account's announcements' email off, but it never expires.
 
 ### What to do
 
@@ -182,6 +183,8 @@ Links already sent are checked against the digest stored when they were made,
 so they keep working until they expire, within 24 hours. That includes the
 links that confirm an email address: for that day, someone with the old key
 could confirm an address an account added but hasn't confirmed yet.
+Unsubscribe links are checked by deriving them again, so those built from the
+old key stop working once the new key replaces it.
 
 ### Check that it's over
 
