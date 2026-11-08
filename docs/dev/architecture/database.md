@@ -1,5 +1,9 @@
 # PostgreSQL boundary
 
+This page explains how auth uses PostgreSQL: the database crate's boundary, its
+queries, locks and invariants, migrations and roles, and how domain events are
+stored. Read it before writing a query or a migration.
+
 `crates/database` is the only crate that runs SQL. It exposes `Database`, validated
 `DatabaseConfig`, typed repository handles, and `DatabaseTransaction`. Pools,
 connections, rows and raw SQL remain private. Application modules choose policy;
@@ -20,6 +24,8 @@ absolute `host` path with `localhost` in the URL. Parser failures retain their
 sources. Client registrations are written only from a `ClientRegistration`, whose
 field types (`ClientId`, `RedirectUri`, `ScopeName`, bounded lists) reject invalid
 values before any SQL runs.
+
+## Repositories and queries
 
 Each repository has its own module under `src/repositories/` (`users`, `handles`, `emails`,
 `sessions`, `events`, `audit`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
@@ -64,6 +70,8 @@ that breaks a cached query, and fails on a cached query the code no longer uses.
 
 Repository tests live in `<module>/tests.rs` or an inline module for small pure
 validation tests.
+
+## Locks and invariants
 
 User, session and credential locks serialize security-sensitive changes. Acquire
 account locks before session and credential locks. Credentials are rechecked under lock before authentication
@@ -170,6 +178,8 @@ Important invariants:
   a family it produced is unrevoked and its session live, so a replay is detected
   while it could still revoke tokens.
 
+## Migrations
+
 The schema starts with the initial migration, `migrations/0001_initial.sql`. The
 prototype schema is disposable and the release requires a fresh database. Released
 migrations are immutable; later schema changes go in new numbered files. Numbers
@@ -190,6 +200,8 @@ deployed code uses the old shape. A migration that breaks this rule says why in
 its own comments. Migrations take
 `LockKey::Migrations`, waiting up to 30 minutes for another run, and provisioning
 the runtime role takes another lock, so concurrent `migrate` runs take turns.
+
+## Background work
 
 Every five minutes, one replica drains expired ephemeral state in bounded batches
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
@@ -218,6 +230,9 @@ verifies the whole chain once the newest recorded verification is six hours old
 (see [audit-history.md](../security/audit-history.md)). Its lock is not the
 sealer's, and its read-only snapshot holds no transaction ID, so it never holds
 sealing back.
+
+## Tests
+
 Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-util` feature. `just db test` runs them in a
@@ -339,13 +354,6 @@ events. `Imported` holds the rows of `security_audit_log`, the log events replac
 verbatim; only migrations write it, and its fields are private, so it can only be
 read back. `repositories/events/` stores events: the personal data split below,
 `read_after` and `acknowledge`.
-Migration `0005` imported the log but kept the table, which the previous release
-wrote to during a deploy; `0018` imports the rows written since and drops it.
-Migration `0008` likewise kept `oidc_clients.client_secret_hash` for the previous
-release, with a trigger mirroring its writes into `oidc_client_secrets`, and left
-the origins of older redirect URIs for `run_migrations` to fill in. `0018` drops
-the trigger and makes `oidc_redirect_uris.origin` NOT NULL, and `0025` drops the
-column once no deployed release wrote it.
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
@@ -373,9 +381,7 @@ still version 1. A release reads an event as known only if it decodes to an even
 whose `version()` is the stored one, so a version it does not write reads as
 unknown. Adding a field is not one, since older releases ignore fields they do not
 know, but the field must be an `Option` or `#[serde(default)]`, so that the new
-release still reads the rows already stored. The tolerance only protects a release
-that has it: ship a new variant in a later deploy than #149, so that a rollback
-never lands on a release without it.
+release still reads the rows already stored.
 
 Closed vocabularies stored in other columns, such as `AccountStatus` and the
 `JobName` of an `Actor::System`, have no such tolerance: a release fails to decode
@@ -426,7 +432,9 @@ chain order.
 
 ### Sessions
 
-`SessionRepository::revoke(user_id, scope)` is the only way a session ends early.
+[Sessions](sessions.md) explains sessions as a whole; this section covers their
+storage. `DatabaseTransaction::revoke_sessions` is the only way a session ends
+early.
 `SessionScope` names one session, every other session or all of them, and the
 query always filters on `user_id`, so no scope reaches another account's session.
 It skips expired sessions, which are already over, so the count it returns is what
@@ -546,6 +554,7 @@ passkey it added, which still needs a passkey confirmation.
 
 ### Notifications
 
+[Notifications](notifications.md) explains the inbox as a whole.
 `DomainEvent::notification` decides which events tell their subject something,
 naming every variant as `history_entry` does. `record` writes that notification
 to the subject's inbox (`notifications`) in the event's transaction, so a

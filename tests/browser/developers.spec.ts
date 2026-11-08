@@ -1,3 +1,9 @@
+/**
+ * The developer console: registering a confidential app, its secret shown once,
+ * in an answer no cache keeps and nowhere in the URL, history or storage, and the
+ * app then signing a user in through its consent page; rotating its secret with
+ * no grace, disabling the app, which then signs nobody in, and deleting it.
+ */
 import { expect, type Page, type Request, test } from '@playwright/test';
 import { addPasskeys, authorization, authUrl, consent, serveClient, signUp } from './helpers';
 

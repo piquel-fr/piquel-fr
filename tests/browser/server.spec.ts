@@ -1,3 +1,9 @@
+/**
+ * The example app of `@piquel/auth/server`, `packages/auth/examples/server.ts`,
+ * signing in, keeping its session across a reload, stepping up and signing out of
+ * both itself and auth. Skipped without `E2E_SERVER_CLIENT_SECRET`. Back-channel
+ * logout needs a public address auth can post to, so the SDK's unit tests cover it.
+ */
 import { type BrowserContext, expect, test } from '@playwright/test';
 import { type ChildProcess, spawn } from 'node:child_process';
 import { once } from 'node:events';
