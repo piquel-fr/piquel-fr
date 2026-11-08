@@ -68,8 +68,8 @@ service sets:
 Every other `OTEL_*` variable keeps its default; see
 [telemetry](../architecture/telemetry.md#configuration). An unreachable collector never blocks a deploy: until the
 collector is deployed and linked, export fails, the SDK logs a warning on
-stderr, and the services serve normally. A malformed `OTEL_*` variable, by
-contrast, stops `serve`, while `migrate` and the administrative commands warn and
+stderr, and the services serve normally. A malformed endpoint, timeout or
+`OTEL_SDK_DISABLED`, by contrast, stops `serve`, while `migrate` and the administrative commands warn and
 log to stderr only.
 
 ## Setup

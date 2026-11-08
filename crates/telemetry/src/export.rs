@@ -43,8 +43,7 @@ pub enum ExportError {
     /// Telemetry was installed outside a tokio runtime, which sends OTLP.
     #[error("telemetry export needs a tokio runtime")]
     Runtime(#[from] TryCurrentError),
-    /// An `OTEL_EXPORTER_OTLP_*` variable is invalid, e.g. a malformed endpoint or
-    /// a gRPC protocol.
+    /// An `OTEL_EXPORTER_OTLP_*` variable is invalid, e.g. a malformed endpoint.
     #[error("could not configure OTLP export")]
     Exporter(#[from] ExporterBuildError),
     /// The HTTP client sending OTLP could not be built.

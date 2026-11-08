@@ -100,7 +100,9 @@ Some errors quote personal data, so they are logged with care:
   chain, never a type's `Debug`. `DatabaseError`'s `Debug` is that chain too, so
   even `?error` on it, or on an error holding it, leaves out PostgreSQL's
   `detail`, which quotes the rejected values (`Key (address)=(…) already
-  exists`).
+  exists`). A stored value that does not decode keeps only its column and, for
+  JSON, the failure's category and position (`DecodeFailure`), never the
+  decoder's message, which can quote the value.
 - **SMTP failures** keep only the reply code or failure category, as the
   delivery's error. The relay's reply text can quote the recipient, so it is
   never logged, at any level.
@@ -131,7 +133,7 @@ telemetry its alerts read. Every other `auth-service` command, such as
 only, so broken telemetry never blocks a break-glass fix.
 
 Export goes through the workspace's `reqwest`, on the service's tokio runtime,
-in protobuf. A gRPC `OTEL_EXPORTER_OTLP_PROTOCOL` fails at startup. Shutdown
+in protobuf, whatever `OTEL_EXPORTER_OTLP_PROTOCOL` says. Shutdown
 flushes pending telemetry after the listeners stop.
 
 ## Locally

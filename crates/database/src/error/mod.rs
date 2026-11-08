@@ -44,13 +44,60 @@ pub enum DatabaseError {
         /// The column that failed to decode, as `SQLx` reports it: its index in
         /// the query's result row.
         column: String,
-        /// Why decoding failed.
+        /// Why decoding failed, without the value.
         #[source]
-        source: Source,
+        source: DecodeFailure,
     },
     /// Any other driver, query, migration or event serialization failure.
     #[error("database operation failed")]
     Operation(#[source] Source),
+}
+
+/// Why a stored value did not decode, without the value: a decoder's message can
+/// quote it, as `serde_json`'s `invalid type: string "alice@example.com"` does.
+/// Only `serde_json`'s category and position are kept; query the column to see
+/// the value itself.
+#[derive(Debug, Error)]
+pub enum DecodeFailure {
+    /// A JSON column that does not parse, or does not match its type.
+    #[error("{category} at line {line} column {column}")]
+    Json {
+        /// What went wrong, such as a missing field or a wrong type.
+        category: &'static str,
+        /// Where, in the column's JSON.
+        line: usize,
+        /// Where, on that line.
+        column: usize,
+    },
+    /// Any other decoder's failure.
+    #[error("the stored value does not decode")]
+    Other,
+}
+
+impl From<serde_json::Error> for DecodeFailure {
+    /// Keeps the category and position, dropping the message.
+    fn from(error: serde_json::Error) -> Self {
+        let category = match error.classify() {
+            serde_json::error::Category::Io => "JSON I/O error",
+            serde_json::error::Category::Syntax => "JSON syntax error",
+            serde_json::error::Category::Data => "JSON that does not match its type",
+            serde_json::error::Category::Eof => "JSON that ends early",
+        };
+        Self::Json {
+            category,
+            line: error.line(),
+            column: error.column(),
+        }
+    }
+}
+
+impl From<Source> for DecodeFailure {
+    /// Keeps what a `serde_json` error would, and nothing of any other error.
+    fn from(error: Source) -> Self {
+        error
+            .downcast::<serde_json::Error>()
+            .map_or(Self::Other, |error| Self::from(*error))
+    }
 }
 
 impl fmt::Debug for DatabaseError {
@@ -121,7 +168,7 @@ impl From<sqlx::Error> for DatabaseError {
             sqlx::Error::RowNotFound => Self::NotFound,
             sqlx::Error::ColumnDecode { index, source } => Self::InvalidStoredData {
                 column: index,
-                source,
+                source: source.into(),
             },
             sqlx::Error::Database(error) if error.is_unique_violation() => {
                 Self::Conflict(Box::new(sqlx::Error::Database(error)))
@@ -141,28 +188,4 @@ impl From<sqlx::Error> for DatabaseError {
 }
 
 #[cfg(test)]
-mod tests {
-    //! What a database error shows when logged.
-    use super::*;
-
-    /// A driver error whose `Debug`, like `PostgreSQL`'s, quotes the values.
-    #[derive(Debug, Error)]
-    #[error("duplicate key value violates unique constraint \"emails_address_key\"")]
-    struct Duplicate {
-        /// Like `PgDatabaseError`'s `detail`.
-        detail: &'static str,
-    }
-
-    /// `Debug` is the error chain: its messages, never the driver's details.
-    #[test]
-    fn debug_leaves_out_driver_details() {
-        let error = DatabaseError::Conflict(Box::new(Duplicate {
-            detail: "Key (address)=(alice@example.com) already exists.",
-        }));
-        assert_eq!(
-            format!("{error:?}"),
-            "the operation conflicts with existing data: duplicate key value violates \
-             unique constraint \"emails_address_key\""
-        );
-    }
-}
+mod tests;
