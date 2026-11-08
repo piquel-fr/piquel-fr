@@ -344,7 +344,9 @@ auth-service audit verify                      # recompute the tamper-evident ch
 
 On the dashboard, the **Events** page lists events, and **Show views** adds the
 views. The **Audit** page shows the last verification, and **Verify now** runs
-another. See [audit history](../security/audit-history.md), which also explains
+another. Auth also verifies the chain on its own once no verification has been
+recorded for six hours, so the page always shows a recent one; `audit verify`
+and **Verify now** push the next automatic run back. See [audit history](../security/audit-history.md), which also explains
 pruning.
 
 ## The command line
