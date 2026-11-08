@@ -247,3 +247,50 @@ async fn updates_acknowledge_an_alert_until_its_condition_changes() {
     assert_eq!(previous[0].alert.id, id);
     assert_eq!(previous[0].updates.len(), 2);
 }
+
+/// An alert a newer release raised, at a payload version this one does not
+/// write, reads as one it cannot show. Raising its kind again clears it without
+/// an event, which this release could not write, and raises what this release
+/// found.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_alert_of_a_newer_version_reads_as_unknown() {
+    let database = Harness::isolated().await.database;
+    found(&database, Some(broken(5))).await;
+    let current = async || {
+        let mut tx = database.begin().await.expect("transaction");
+        let current = tx
+            .alerts()
+            .current(AlertKind::AuditChainBroken)
+            .await
+            .expect("current")
+            .expect("current alert");
+        tx.commit().await.expect("commit");
+        current
+    };
+    let newer = current().await;
+    database
+        .alerts()
+        .set_version(newer.id, i16::MAX)
+        .await
+        .expect("version");
+    assert_eq!(current().await.alert, None);
+
+    found(&database, Some(broken(5))).await;
+    let raised = current().await;
+    assert_ne!(raised.id, newer.id);
+    assert_eq!(raised.alert, Some(broken(5)));
+    assert_eq!(
+        recorded(&database).await,
+        [
+            DomainEvent::AlertRaised {
+                alert_id: newer.id,
+                alert: broken(5)
+            },
+            DomainEvent::AlertRaised {
+                alert_id: raised.id,
+                alert: broken(5)
+            },
+        ]
+    );
+}
