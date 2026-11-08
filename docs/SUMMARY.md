@@ -23,10 +23,25 @@
 
 # Building apps
 
+- [How sign-in works](user/apps/how-sign-in-works.md)
 - [Registering an app](user/apps/register-an-app.md)
+  - [Changing an app's settings](user/apps/app-settings.md)
+  - [Rotating a client secret](user/apps/rotate-secrets.md)
+- [Signing in with Rust](user/apps/sign-in-rust.md)
+- [Signing in with TypeScript](user/apps/sign-in-typescript.md)
+- [Browser apps](user/apps/browser-apps.md)
+- [Protecting an API](user/apps/protect-an-api.md)
 - [Step-up authentication](user/apps/step-up.md)
 - [Back-channel logout](user/apps/back-channel-logout.md)
 - [Passkey sign-in on your own pages](user/apps/passkey-sign-in.md)
+- [Developing on your machine](user/apps/local-development.md)
+- [Deploying with piqueld](user/apps/deploying-with-piqueld.md)
+- [Troubleshooting sign-in](user/apps/troubleshooting.md)
+- [Building with coding agents](user/agents/overview.md)
+  - [Adding sign-in](user/agents/piquel-sign-in.md)
+  - [Running your app locally](user/agents/piquel-dev-setup.md)
+  - [Deploying on piqueld](user/agents/piquel-deploy.md)
+  - [Debugging a sign-in](user/agents/piquel-debug-sign-in.md)
 
 # Reference
 
