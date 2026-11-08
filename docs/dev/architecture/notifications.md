@@ -138,6 +138,7 @@ browser that sends no fetch metadata marks nothing.
 
 The owner's data export includes the inbox, with when each was read
 ([account deletion](account-deletion.md)).
+[Notifications](../../user/account/notifications.md) is the owner's guide.
 
 ## Guarantees
 

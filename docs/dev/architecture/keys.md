@@ -111,14 +111,14 @@ HMAC-SHA256 under a context of its own, so none can stand in for another:
 - **The recovery link key** (`RecoveryLinks` in `src/recovery`).
 - **The unsubscribe link key** (`UnsubscribeLinks` in `src/notifications`).
 
-The verification and recovery keys are `LinkKeys`. A link's token is an HMAC of the ID of what it acts
-on, an address or a recovery, under the current link key. Auth stores only the
-token's SHA-256 digest, and the email sender derives the token again when it
-sends the link, so the token is never stored, not even in the
-[delivery](delivery-queue.md#email). During a change of token digest key, the
-sender rebuilds a queued link under whichever configured key derives its stored
-digest, and a link already sent keeps working, since it is checked against that
-digest.
+All three link keys are `LinkKeys`. A verification or recovery link's token is
+an HMAC of the ID of what it acts on, an address or a recovery, under the
+current link key. Auth stores only the token's SHA-256 digest, and the email
+sender derives the token again when it sends the link, so the token is never
+stored, not even in the [delivery](delivery-queue.md#email). During a change of
+token digest key, the sender rebuilds a queued link under whichever configured
+key derives its stored digest, and a link already sent keeps working, since it
+is checked against that digest.
 
 An unsubscribe link's token is the HMAC of the account's ID under the
 unsubscribe link key. It is stored nowhere: auth checks a link by deriving the

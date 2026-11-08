@@ -74,9 +74,20 @@ recovery's notifications do.
 A notification about the account itself is always emailed, and no preference
 can turn it off. Only a kind that isn't about the account, as an announcement
 isn't, may belong to an `EmailCategory` (`crates/common/src/notifications`),
-whose email the owner turns off in their inbox's **Email preferences**. A new
-category needs its variant, with its `label` and `description`, which settings
-and the dashboard show (see [email preferences](../architecture/notifications.md#email-preferences)).
+whose email the owner turns off in their inbox's **Email preferences**. Only
+announcements are wired today. A new category needs more than its variant, with
+its `label` and `description`, which settings and the dashboard show:
+
+- a migration widening the `CHECK` on `notification_preferences.category`
+  (`0039_notification_preferences.sql`), or saving the preference fails;
+- a check in the channel that sends its email, when the email is queued and
+  when it is sent, as the `announcements_emailed` SQL function does for the
+  `announcement` channel: the `email` channel checks no preference;
+- a decision about its unsubscribe link, which `AccountService::unsubscribe`
+  (`apps/auth-service/src/notifications/preferences.rs`) only handles for
+  announcements.
+
+See [email preferences](../architecture/notifications.md#email-preferences).
 
 ## 4. Write its texts
 
