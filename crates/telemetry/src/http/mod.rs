@@ -32,6 +32,11 @@ const METHODS: [(Method, &str); 9] = [
     (Method::PATCH, "PATCH"),
 ];
 
+/// Stands for the path of a request that matched no route, in its access log
+/// line. The path itself is never recorded: it is whatever the client sent, such
+/// as a mistyped link with an address in it.
+const UNMATCHED: &str = "unmatched";
+
 /// How long requests take, until the response head is ready. Labelled by method,
 /// route template and status: route templates come from the router's own table and
 /// unmatched paths have none, so the label set stays bounded.
@@ -47,9 +52,9 @@ static REQUEST_DURATION: Histogram = Histogram::new(
 /// `HttpTelemetry::default().quiet(&["/health"]).wrap(router)`.
 ///
 /// Each request gets a root span named after its method and route template, with
-/// the HTTP semantic conventions' `http.request.method`, `http.route` (or
-/// `url.path` when no route matched) and `http.response.status_code`. Query strings
-/// and headers are never recorded. A 5xx response marks the span failed and
+/// the HTTP semantic conventions' `http.request.method`, `http.route` (absent when
+/// no route matched) and `http.response.status_code`. Paths, query strings and
+/// headers are never recorded. A 5xx response marks the span failed and
 /// carries its trace ID in [`Self::TRACE_ID_HEADER`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HttpTelemetry {
@@ -127,13 +132,11 @@ impl HttpTelemetry {
             this.listener
                 .map(|listener| KeyValue::new("piquel.listener", listener)),
         );
-        // Unmatched paths go on the span and log line only: they are unbounded.
-        let path = route.is_none().then(|| request.uri().path().to_owned());
-        match (&route, &path) {
-            (Some(route), _) => labels.push(KeyValue::new("http.route", route.clone())),
-            (None, Some(path)) => span.set_attribute("url.path", path.clone()),
-            (None, None) => {}
-        }
+        labels.extend(
+            route
+                .as_ref()
+                .map(|route| KeyValue::new("http.route", route.clone())),
+        );
         let mut response = next.run(request).instrument(span.clone()).await;
         let status = i64::from(response.status().as_u16());
         labels.push(KeyValue::new("http.response.status_code", status));
@@ -155,9 +158,9 @@ impl HttpTelemetry {
             .is_some_and(|route| this.quiet.contains(&route));
         // Entered, so the exported log record carries the span's trace context.
         span.in_scope(|| {
-            // e.g. `GET /account/passkeys/{id}`: the route template, or the
-            // path when no route matched, never the query.
-            let target = route.as_deref().or(path.as_deref()).unwrap_or_default();
+            // e.g. `GET /account/passkeys/{id}`: the route template, never the
+            // path or query.
+            let target = route.as_deref().unwrap_or(UNMATCHED);
             macro_rules! access {
                 ($level:ident) => {
                     tracing::$level!(

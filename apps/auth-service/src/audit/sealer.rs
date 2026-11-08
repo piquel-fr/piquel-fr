@@ -6,6 +6,7 @@ use crate::{
     jobs::{ExclusiveJob, Shutdown},
 };
 use chrono::{SubsecRound, TimeDelta, Utc};
+use piquel_common::ErrorChain;
 use piquel_crypto::NoteKey;
 use piquel_repository::{
     ChainLink, Checkpoint, EventContent, ExclusiveConnection, LockKey, SealedEvent,
@@ -244,7 +245,7 @@ impl Sealer {
                 Ok(sealed) => sealed,
                 Err(error) => {
                     if let Some(failed) = failed {
-                        tracing::error!(error = ?failed, "could not sign an audit checkpoint");
+                        tracing::error!(error = %ErrorChain(&failed), "could not sign an audit checkpoint");
                     }
                     return Err(error);
                 }

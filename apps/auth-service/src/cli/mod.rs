@@ -54,7 +54,7 @@ use invite::InviteCommand;
 use keys::KeysCommand;
 use piquel_common::ErrorChain;
 use piquel_repository::Database;
-use piquel_telemetry::Telemetry;
+use piquel_telemetry::{Export, Telemetry};
 use session::SessionCommand;
 use std::process::ExitCode;
 use tracing::Instrument;
@@ -289,13 +289,21 @@ impl Administration {
 
 impl Cli {
     /// Installs telemetry, runs the selected command, then flushes telemetry, and
-    /// prints any failure with its causes. A failed flush, such as an unreachable
-    /// collector, is only reported: it must not fail a command, such as a deploy's
-    /// migration job.
+    /// prints any failure with its causes. Telemetry never stops a command other
+    /// than `serve`: when OTLP export cannot start, it logs to stderr only, and a
+    /// failed flush, such as an unreachable collector, is only reported, so a
+    /// deploy's migration job and break-glass repairs still run.
     pub async fn run(self) -> ExitCode {
         let result = async {
-            let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
-            let result = self.command.unwrap_or(Command::Serve).run().await;
+            let command = self.command.unwrap_or(Command::Serve);
+            let export = match command {
+                Command::Serve => Export::Required,
+                Command::Migrate | Command::Keys(_) | Command::Administration(_) => {
+                    Export::Optional
+                }
+            };
+            let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER, export)?;
+            let result = command.run().await;
             if let Err(error) = telemetry.shutdown().await {
                 eprintln!("warning: {}", ErrorChain(&error));
             }

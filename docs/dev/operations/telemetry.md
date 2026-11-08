@@ -5,7 +5,7 @@
 
 | Service | Image | Role |
 | --- | --- | --- |
-| `collector` | `otel/opentelemetry-collector-contrib` | OTLP/HTTP on port 4318; memory limit, batching, and deletion of query strings, headers and client addresses |
+| `collector` | `otel/opentelemetry-collector-contrib` | OTLP/HTTP on port 4318; memory limit, batching, and deletion of paths, query strings, headers and client addresses |
 | `prometheus` | `prom/prometheus` | Metrics, received over OTLP, kept 30 days |
 | `tempo` | `grafana/tempo` | Traces, kept 14 days |
 | `loki` | `grafana/loki` | Logs, received over OTLP, kept 30 days |
@@ -66,9 +66,11 @@ service sets:
 | `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=${{ env.name }}`, so dashboards tell staging and production apart |
 
 Every other `OTEL_*` variable keeps its default; see
-[telemetry](../architecture/telemetry.md#configuration). Telemetry never blocks a deploy: until the
+[telemetry](../architecture/telemetry.md#configuration). An unreachable collector never blocks a deploy: until the
 collector is deployed and linked, export fails, the SDK logs a warning on
-stderr, and the services serve normally.
+stderr, and the services serve normally. A malformed `OTEL_*` variable, by
+contrast, stops `serve`, while `migrate` and the administrative commands warn and
+log to stderr only.
 
 ## Setup
 

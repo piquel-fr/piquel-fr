@@ -8,7 +8,7 @@ mod pages;
 mod site;
 
 use piquel_common::config::{ConfigurationError, Origin};
-use piquel_telemetry::{Telemetry, TelemetryError};
+use piquel_telemetry::{Export, Telemetry, TelemetryError};
 use site::Site;
 use std::{net::SocketAddr, process::ExitCode};
 use tokio::{net::TcpListener, signal::unix::SignalKind};
@@ -84,7 +84,7 @@ impl Web {
     /// Installs telemetry, serves, then flushes telemetry. A failed flush is only
     /// reported.
     async fn run() -> Result<(), WebError> {
-        let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
+        let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER, Export::Required)?;
         let result = async { Self::from_environment()?.serve().await }.await;
         if let Err(error) = telemetry.shutdown().await {
             eprintln!("warning: {}", Self::chain(&error));

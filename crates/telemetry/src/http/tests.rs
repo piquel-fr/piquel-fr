@@ -41,11 +41,12 @@ async fn spans_name_the_route_and_mark_failures() {
     assert!(exported.iter().all(|text| !text.contains("secret")));
 }
 
-/// An unmatched request records only its path, without the query.
+/// An unmatched request records neither its path nor its query: its access log
+/// line names it `unmatched`.
 #[tokio::test]
-async fn unmatched_requests_record_their_path() {
+async fn unmatched_requests_record_no_path() {
     let capture = Telemetry::capture("info");
-    let response = send("/missing?token=secret-token").await;
+    let response = send("/alice@example.com?token=secret-token").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert!(
         !response
@@ -55,6 +56,10 @@ async fn unmatched_requests_record_their_path() {
     let span = capture.spans().pop().expect("server span");
     assert_eq!(span.name, "GET");
     let exported = capture.exported_text();
-    assert!(exported.contains(&"url.path=/missing".to_owned()));
-    assert!(exported.iter().all(|text| !text.contains("secret")));
+    assert!(exported.iter().any(|text| text.contains("GET unmatched")));
+    assert!(
+        exported
+            .iter()
+            .all(|text| !text.contains("alice") && !text.contains("secret"))
+    );
 }

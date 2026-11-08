@@ -10,6 +10,7 @@ use super::{DeliveryError, Failure, Sender, outbound::OutboundClient};
 use crate::{SigningKeys, oidc::OAuthError};
 use axum::http::Method;
 use chrono::{DateTime, TimeDelta, Utc};
+use piquel_common::ErrorChain;
 use piquel_common::protocol::{
     claims::{Absent, Audience, LogoutEvents, LogoutTokenClaims},
     jwt::TokenType,
@@ -76,7 +77,7 @@ impl Sender for BackchannelLogoutSender {
     /// Posts the token. Any 2xx is success; a 400 or other 4xx is final.
     async fn send(&self, delivery: &Delivery<BackchannelLogout>) -> Result<(), DeliveryError> {
         let token = self.token(delivery, Utc::now()).map_err(|error| {
-            tracing::error!(?error, id = %delivery.id, "could not sign a logout token");
+            tracing::error!(error = %ErrorChain(&error), id = %delivery.id, "could not sign a logout token");
             DeliveryError::Retryable {
                 failure: Failure::Signing,
                 retry_after: None,

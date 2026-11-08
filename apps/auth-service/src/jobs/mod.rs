@@ -198,7 +198,7 @@ impl Jobs {
                     }
                     Ok(None) => tracing::debug!(job = J::NAME, "another replica runs this job"),
                     Err(error) => {
-                        tracing::error!(?error, job = J::NAME, "could not take job lock");
+                        tracing::error!(error = %ErrorChain(&error), job = J::NAME, "could not take job lock");
                     }
                 }
             }
@@ -225,14 +225,16 @@ impl Jobs {
         match run.join_next().await {
             Some(Ok((connection, result))) => {
                 if let Err(error) = result {
-                    tracing::error!(?error, job = J::NAME, "background job failed");
+                    tracing::error!(error = %ErrorChain(&error), job = J::NAME, "background job failed");
                 }
                 if let Err(error) = connection.release().await {
-                    tracing::error!(?error, job = J::NAME, "could not release job lock");
+                    tracing::error!(error = %ErrorChain(&error), job = J::NAME, "could not release job lock");
                 }
             }
             // Unwinding dropped the connection, which releases the lock.
-            Some(Err(error)) => tracing::error!(?error, job = J::NAME, "background job panicked"),
+            Some(Err(error)) => {
+                tracing::error!(error = %ErrorChain(&error), job = J::NAME, "background job panicked");
+            }
             // The set holds exactly one task.
             None => {}
         }
@@ -413,7 +415,7 @@ impl ExclusiveJob for AccountPurge {
             }
             let tx = connection.begin().await?;
             if let Err(error) = Self::purge(tx, user_id).await {
-                tracing::error!(?error, %user_id, "could not purge account");
+                tracing::error!(error = %ErrorChain(&error), %user_id, "could not purge account");
                 let message = ErrorChain(&error).to_string();
                 connection
                     .deletions()

@@ -1,6 +1,7 @@
 //! Typed persistence and startup failures, retaining driver causes.
 
-use std::error::Error as StdError;
+use piquel_common::ErrorChain;
+use std::{error::Error as StdError, fmt};
 use thiserror::Error;
 
 /// A boxed underlying error kept as the source for diagnostics.
@@ -12,8 +13,9 @@ const QUERY_CANCELED: &str = "57014";
 /// SQLSTATE of a lock not granted within the lock timeout.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
 
-/// Stable, non-SQL database failure categories.
-#[derive(Debug, Error)]
+/// Stable, non-SQL database failure categories. Its `Debug` is its error chain,
+/// so it is safe to log either way (see the `Debug` impl).
+#[derive(Error)]
 pub enum DatabaseError {
     /// No row matched, or a single-use record is missing, expired or consumed.
     #[error("the requested record was not found")]
@@ -49,6 +51,18 @@ pub enum DatabaseError {
     /// Any other driver, query, migration or event serialization failure.
     #[error("database operation failed")]
     Operation(#[source] Source),
+}
+
+impl fmt::Debug for DatabaseError {
+    /// Writes the error chain, as `Display` through [`ErrorChain`] would. The
+    /// driver's own `Debug` would add `PostgreSQL`'s diagnostic fields, whose
+    /// `detail` quotes the rejected values, e.g. `Key (address)=(…) already
+    /// exists`: an address in a log line. Only the messages remain, which name a
+    /// constraint but no value. Every error wrapping this one, and every `?error`
+    /// log field holding it, is then safe too.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", ErrorChain(self))
+    }
 }
 
 /// Errors that can occur while constructing the database boundary.
@@ -123,5 +137,32 @@ impl From<sqlx::Error> for DatabaseError {
             }
             error => Self::Operation(Box::new(error)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! What a database error shows when logged.
+    use super::*;
+
+    /// A driver error whose `Debug`, like `PostgreSQL`'s, quotes the values.
+    #[derive(Debug, Error)]
+    #[error("duplicate key value violates unique constraint \"emails_address_key\"")]
+    struct Duplicate {
+        /// Like `PgDatabaseError`'s `detail`.
+        detail: &'static str,
+    }
+
+    /// `Debug` is the error chain: its messages, never the driver's details.
+    #[test]
+    fn debug_leaves_out_driver_details() {
+        let error = DatabaseError::Conflict(Box::new(Duplicate {
+            detail: "Key (address)=(alice@example.com) already exists.",
+        }));
+        assert_eq!(
+            format!("{error:?}"),
+            "the operation conflicts with existing data: duplicate key value violates \
+             unique constraint \"emails_address_key\""
+        );
     }
 }

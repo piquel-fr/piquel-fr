@@ -48,9 +48,9 @@ impl Mailer for AsyncSmtpTransport<Tokio1Executor> {
         let Err(error) = AsyncTransport::send(self, message).await else {
             return Ok(());
         };
-        // The relay's reply text can quote the recipient, so it stays out of the
-        // delivery and the default logs.
-        tracing::debug!(error = %ErrorChain(&error), "SMTP send failed");
+        // The relay's reply text can quote the recipient, so only its status code
+        // or failure category is kept, as the delivery's error, which the worker
+        // logs. The error itself is never logged, at any level.
         let code = error.status().map(u16::from);
         let failure = match code {
             Some(code) => Failure::Smtp(code),

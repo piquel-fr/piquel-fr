@@ -131,7 +131,7 @@ A permanent (5xx) SMTP reply fails the delivery. Temporary (4xx) replies, a
 rejected login (`530`, `534`, `535`), timeouts, and connection or TLS failures
 retry, for up to 24 hours, as long as a link works: a login fails on the relay's
 key, not the message, so sending resumes once the key is fixed. The error recorded is the reply code, never its text, which can quote
-the recipient. Without `AUTH_SMTP_URL`, the workers still run and drop every
+the recipient and is never logged either. Without `AUTH_SMTP_URL`, the workers still run and drop every
 delivery, so none waits forever.
 
 Templates live in `apps/auth-service/templates/email/` and are checked at

@@ -298,6 +298,9 @@ Helpers return the feature's domain error. Browser handlers return `ApiError`
 through `From<DomainError>`; that exhaustive mapping owns public statuses and
 messages. OAuth endpoints return `OAuthError`. Log internal failures once at the
 HTTP boundary through `ApiError::log_error`, which includes the source chain.
+Log any other error as `error = %ErrorChain(&error)`, never `?error`: a type's
+`Debug` can quote personal data, as PostgreSQL's does (see
+[telemetry](architecture/telemetry.md#what-never-goes-in-telemetry)).
 OAuth rejections that carry a cause log it at debug level; clients trigger them.
 
 Rejections tell the client what to fix: name the parameter or rule and its limit.

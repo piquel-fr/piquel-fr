@@ -1,19 +1,56 @@
 //! OTLP/HTTP exporters sending protobuf through the workspace's `reqwest`.
 
-use crate::TelemetryError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use opentelemetry_http::{HttpClient, HttpError, Request, Response};
-use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithHttpConfig};
-use piquel_common::config::Variable;
+use opentelemetry_otlp::{
+    ExporterBuildError, LogExporter, MetricExporter, SpanExporter, WithHttpConfig,
+};
+use piquel_common::config::{ConfigurationError, Variable};
 use std::{sync::Arc, time::Duration};
-use tokio::runtime::Handle;
+use thiserror::Error;
+use tokio::runtime::{Handle, TryCurrentError};
 
+/// `true` keeps telemetry on stderr only, as the SDK specification says.
+const SDK_DISABLED: Variable = Variable::new("OTEL_SDK_DISABLED");
+/// Where OTLP is sent; unset or empty means nothing is exported.
+const ENDPOINT: Variable = Variable::new("OTEL_EXPORTER_OTLP_ENDPOINT");
 /// Bound on one export request in milliseconds, which only this client enforces.
 /// The per-signal `OTEL_EXPORTER_OTLP_*_TIMEOUT` variables are not supported.
 const TIMEOUT: Variable = Variable::new("OTEL_EXPORTER_OTLP_TIMEOUT");
 /// The specification's default [`TIMEOUT`].
 const DEFAULT_TIMEOUT_MS: &str = "10000";
+
+/// What [`Telemetry::init`](crate::Telemetry::init) does when OTLP export is
+/// configured but cannot start, such as on a malformed endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Export {
+    /// Fail: a server must not run without the telemetry its alerts read, so a
+    /// broken configuration stops the deployment instead.
+    Required,
+    /// Log to stderr only, with a warning: a command-line run, such as a
+    /// migration or an account repair, must work while telemetry is broken.
+    Optional,
+}
+
+/// Why OTLP export could not start.
+#[derive(Debug, Error)]
+pub enum ExportError {
+    /// `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_TIMEOUT` or
+    /// `OTEL_SDK_DISABLED` is invalid.
+    #[error(transparent)]
+    Configuration(#[from] ConfigurationError),
+    /// Telemetry was installed outside a tokio runtime, which sends OTLP.
+    #[error("telemetry export needs a tokio runtime")]
+    Runtime(#[from] TryCurrentError),
+    /// An `OTEL_EXPORTER_OTLP_*` variable is invalid, e.g. a malformed endpoint or
+    /// a gRPC protocol.
+    #[error("could not configure OTLP export")]
+    Exporter(#[from] ExporterBuildError),
+    /// The HTTP client sending OTLP could not be built.
+    #[error("could not build the OTLP HTTP client")]
+    Client(#[from] reqwest::Error),
+}
 
 /// One exporter per signal, sharing one HTTP client.
 pub(crate) struct Exporters {
@@ -26,9 +63,21 @@ pub(crate) struct Exporters {
 }
 
 impl Exporters {
+    /// The exporters, while [`ENDPOINT`] is set and [`SDK_DISABLED`] is not `true`
+    /// (it must be `true` or `false`).
+    pub(crate) fn from_environment() -> Result<Option<Self>, ExportError> {
+        let endpoint = ENDPOINT
+            .optional()?
+            .is_some_and(|endpoint| !endpoint.trim().is_empty());
+        if !endpoint || SDK_DISABLED.flag(false)? {
+            return Ok(None);
+        }
+        Self::new().map(Some)
+    }
+
     /// Builds the exporters from the `OTEL_EXPORTER_OTLP_*` variables, sending on
     /// the current tokio runtime.
-    pub(crate) fn new() -> Result<Self, TelemetryError> {
+    fn new() -> Result<Self, ExportError> {
         let client: Arc<dyn HttpClient> = Arc::new(Transport {
             client: reqwest::Client::builder()
                 .timeout(Duration::from_millis(TIMEOUT.parse_or(DEFAULT_TIMEOUT_MS)?))

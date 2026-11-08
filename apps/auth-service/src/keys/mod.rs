@@ -18,6 +18,7 @@ use crate::{
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::{
+    ErrorChain,
     events::{DomainEvent, EventContext, SigningKeyChange},
     protocol::jwt::KeyId,
 };
@@ -257,7 +258,7 @@ impl KeyStore {
                 _ = interval.tick() => {}
             }
             if let Err(error) = self.tick().await {
-                tracing::error!(?error, "signing key rotation failed");
+                tracing::error!(error = %ErrorChain(&error), "signing key rotation failed");
             }
             self.reload(&keys).await;
         }
@@ -268,7 +269,9 @@ impl KeyStore {
     async fn reload(&self, keys: &SigningKeys) {
         match self.list().await.and_then(|stored| self.key_set(&stored)) {
             Ok(set) => keys.replace(set),
-            Err(error) => tracing::error!(?error, "could not reload signing keys"),
+            Err(error) => {
+                tracing::error!(error = %ErrorChain(&error), "could not reload signing keys");
+            }
         }
     }
 
@@ -363,7 +366,7 @@ impl KeyStore {
                 SigningKeyState::Next | SigningKeyState::Retiring => match self.open(key) {
                     Ok(private) => published.push(private.public_key().clone()),
                     Err(error) => tracing::error!(
-                        ?error,
+                        error = %ErrorChain(&error),
                         key_id = %key.id,
                         state = %key.state,
                         "leaving out a signing key that cannot be opened",
@@ -602,7 +605,7 @@ impl<'t, 'c> Change<'t, 'c> {
     fn refused(error: KeyError) -> Result<(), KeyError> {
         match error {
             KeyError::Stored { .. } | KeyError::Mismatched(_) => {
-                tracing::error!(?error, "next signing key cannot sign; revoke it");
+                tracing::error!(error = %ErrorChain(&error), "next signing key cannot sign; revoke it");
                 Ok(())
             }
             error => Err(error),

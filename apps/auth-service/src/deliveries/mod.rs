@@ -26,6 +26,7 @@ pub(crate) use outbound::OutboundClient;
 use crate::jobs::{Jobs, Shutdown};
 use axum::http::StatusCode;
 use chrono::{DateTime, TimeDelta, Utc};
+use piquel_common::ErrorChain;
 use piquel_repository::{
     Channel, Database, DatabaseError, Delivery, DeliveryBacklog, DeliveryOutcome,
 };
@@ -263,7 +264,7 @@ impl<S: Sender> Worker<S> {
                 Ok(None) => {}
                 Err(error) => {
                     tracing::error!(
-                        ?error,
+                        error = %ErrorChain(&error),
                         channel = S::Channel::NAME,
                         "could not claim delivery"
                     );
@@ -294,7 +295,7 @@ impl<S: Sender> Worker<S> {
         );
         if let Some(Err(error)) = attempt.join_next().await {
             tracing::error!(
-                ?error,
+                error = %ErrorChain(&error),
                 channel = S::Channel::NAME,
                 "delivery attempt panicked"
             );
@@ -359,7 +360,7 @@ impl<S: Sender> Worker<S> {
                 "lease_lost"
             }
             Err(error) => {
-                tracing::error!(?error, %id, channel, "could not record delivery outcome");
+                tracing::error!(error = %ErrorChain(&error), %id, channel, "could not record delivery outcome");
                 return;
             }
         };
@@ -419,7 +420,7 @@ impl Backlogs {
                 Err(error) => {
                     self.lock().remove(C::NAME);
                     tracing::error!(
-                        ?error,
+                        error = %ErrorChain(&error),
                         channel = C::NAME,
                         "could not count pending deliveries"
                     );
