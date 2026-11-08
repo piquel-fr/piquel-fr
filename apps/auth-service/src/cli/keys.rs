@@ -3,13 +3,14 @@
 //! Signing key commands run their admin operation, as the dashboard's signing
 //! keys page does.
 
-use super::{CliError, Console};
+use super::{CliError, Confirm, Console};
 use crate::{
-    AuditConfig, AuthConfig, KeyStore, PUBLIC_BASE_URL, TokenDigestKeys, admin::AdminOperation,
+    AuditConfig, AuthConfig, KeyStore, PUBLIC_BASE_URL, TokenDigestKeys,
+    admin::{AdminOperation, OperatorName},
 };
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
-use piquel_common::{config::SecretReference, protocol::jwt::KeyId};
+use piquel_common::{admin::SigningKey, config::SecretReference, protocol::jwt::KeyId};
 use piquel_crypto::Rs256Key;
 use piquel_repository::Database;
 use std::sync::Arc;
@@ -28,8 +29,12 @@ pub(super) enum KeysCommand {
     Rotate {
         /// Sign with it at once, skipping pre-publication: verifiers that cached
         /// the previous key set reject its tokens until they fetch keys again.
+        /// Asks first.
         #[arg(long)]
         now: bool,
+        /// Confirmation, which `--now` needs.
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// Delete a signing key at once, e.g. a compromised one. When it was the active
     /// key, the `next` and `retiring` keys go with it, since their private keys
@@ -38,6 +43,9 @@ pub(super) enum KeysCommand {
     Revoke {
         /// The key's ID.
         id: KeyId,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// Count stored token digests per token digest key, to tell when
     /// `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` can be removed.
@@ -58,6 +66,22 @@ pub(super) enum KeysCommand {
 }
 
 impl KeysCommand {
+    /// What revoking the key `id`, among `keys`, does, for its confirmation. It
+    /// names the key's state as read now, and says what revoking an active key
+    /// does whatever that state, since a waiting key may start signing before the
+    /// operator answers. Sessions and refresh grants stay: applications refresh
+    /// into tokens the new key signs.
+    fn revoking(id: &KeyId, keys: &[SigningKey]) -> String {
+        let state = keys
+            .iter()
+            .find(|key| key.id == *id)
+            .map(|key| format!(", now {},", key.state))
+            .unwrap_or_default();
+        format!(
+            "Revoke signing key {id}{state} at once: every replica stops accepting the tokens it signed within a minute, and verifiers that cached it within an hour. If it signs when revoked, the keys waiting and retiring beside it go too, and a new key signs at once"
+        )
+    }
+
     /// The admin operation this command runs, if any. Checking token digest keys
     /// and printing the audit key's verifier read the deployment's configuration,
     /// which operators change outside auth, so neither is one.
@@ -72,15 +96,19 @@ impl KeysCommand {
     }
 
     /// Runs this command on `database`, a signing key's as the operator at this
-    /// terminal.
-    pub(super) async fn run(self, database: Database) -> Result<(), CliError> {
+    /// terminal, `operator` when given.
+    pub(super) async fn run(
+        self,
+        database: Database,
+        operator: Option<OperatorName>,
+    ) -> Result<(), CliError> {
         let store = || -> Result<KeyStore, CliError> {
             Ok(KeyStore::new(
                 database.clone(),
                 Arc::new(AuthConfig::key_encryption_key_from_environment()?),
             ))
         };
-        let console = || Console::new(database.clone());
+        let console = || Console::new(database.clone(), operator);
         match self {
             Self::List => {
                 let Console {
@@ -103,17 +131,24 @@ impl KeysCommand {
                     );
                 }
             }
-            Self::Rotate { now } => {
+            Self::Rotate { now, confirm } => {
                 let Console {
                     service, operator, ..
                 } = &console()?;
+                if now {
+                    confirm.ask(
+                        "Make a new signing key sign at once: verifiers that cached the key set reject its tokens until they fetch it again, for up to an hour",
+                    )?;
+                }
                 let id = service.rotate_signing_key(operator, &store()?, now).await?;
                 println!("{id}");
             }
-            Self::Revoke { id } => {
+            Self::Revoke { id, confirm } => {
                 let Console {
                     service, operator, ..
                 } = &console()?;
+                let keys = service.list_signing_keys(operator).await?;
+                confirm.ask(&Self::revoking(&id, &keys))?;
                 match service.revoke_signing_key(operator, &store()?, &id).await? {
                     Some(replacement) => {
                         eprintln!("Key {id} revoked; key {replacement} signs from now on.");

@@ -27,7 +27,9 @@ pub enum Actor {
     },
     /// An operator, through the service's command line.
     Cli {
-        /// The operating system user, from `$USER`.
+        /// Who the operator is: the name `--operator` or `AUTH_OPERATOR` gave, or
+        /// else the operating system user, `$USER`. Named `os_user` in the events
+        /// already sealed.
         os_user: String,
         /// The machine's host name.
         host: String,

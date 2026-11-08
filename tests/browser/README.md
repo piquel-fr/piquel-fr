@@ -153,6 +153,6 @@ undoes the recovery, which signs the second browser out. Set `E2E_RECOVER` to a
 command that runs `auth-service user recover` on the deployment, to which the
 test appends the handle, a reason and `--yes`, e.g. `just auth user recover`
 with the deployment's configuration, or `piquelctl preview exec piquel-fr
-<branch> auth -- auth-service user recover` for a preview. CI sets it to
+<branch> auth -- auth-service --operator <you> user recover` for a preview. CI sets it to
 `target/debug/auth-service user recover`, which shares the service's
 configuration, its token digest key included. Without it, the test is skipped.

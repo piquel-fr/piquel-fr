@@ -13,15 +13,22 @@ use piquel_common::{
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, SessionAuthentication, StoredSession, StoredUser,
 };
+use std::str::FromStr;
+use thiserror::Error;
 
-/// The operating system user running a command, recorded on the events it causes.
+/// Who runs commands at this terminal, when `--operator` does not say.
+const OPERATOR: Variable = Variable::new("AUTH_OPERATOR");
+/// The operating system user, who runs commands when neither `--operator` nor
+/// `AUTH_OPERATOR` says who does.
 const OS_USER: Variable = Variable::new("USER");
 /// The machine's host name, for systems without `/proc`.
 const HOST_NAME: Variable = Variable::new("HOSTNAME");
 /// Where Linux exposes the host name.
 const HOST_NAME_FILE: &str = "/proc/sys/kernel/hostname";
-/// Recorded when the operator's user or host name cannot be read.
-const UNKNOWN_OPERATOR: &str = "unknown";
+/// What nobody may be named, and the host recorded when its name cannot be read.
+const UNKNOWN: &str = "unknown";
+/// Maximum characters in an operator's name.
+const MAX_OPERATOR_CHARS: usize = 64;
 
 /// Any passkey sign-in, however old: what every read needs.
 const PASSKEY: StepUpRequirement = StepUpRequirement {
@@ -43,11 +50,51 @@ pub enum Operator {
     Admin(AdminSession),
     /// An operator running `auth-service`.
     Cli {
-        /// The operating system user, from `$USER`.
-        os_user: String,
+        /// Who they are.
+        name: OperatorName,
         /// The machine's host name.
         host: String,
     },
+}
+
+/// Who runs a command at the terminal, as the events it causes record them: 1 to
+/// 64 characters, without whitespace or control characters, and never
+/// `unknown`, so no change is recorded as nobody's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OperatorName(String);
+
+/// An operator's name that breaks [`OperatorName`]'s rule.
+#[derive(Debug, Error)]
+#[error("must be 1 to 64 characters without spaces, and not `unknown`")]
+pub struct InvalidOperatorName;
+
+impl FromStr for OperatorName {
+    type Err = InvalidOperatorName;
+    /// Accepts `value` unchanged if it satisfies the rule.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.is_empty()
+            || value.chars().count() > MAX_OPERATOR_CHARS
+            || value.chars().any(|c| c.is_whitespace() || c.is_control())
+            || value.eq_ignore_ascii_case(UNKNOWN)
+        {
+            return Err(InvalidOperatorName);
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+impl OperatorName {
+    /// The operator the environment names: `AUTH_OPERATOR`, else `$USER`, which
+    /// `piquelctl app exec` sets neither of.
+    ///
+    /// # Errors
+    /// [`ConfigurationError`] when the variable read is not a valid name.
+    pub(crate) fn from_environment() -> Result<Option<Self>, ConfigurationError> {
+        match OPERATOR.parse_optional()? {
+            Some(name) => Ok(Some(name)),
+            None => OS_USER.parse_optional(),
+        }
+    }
 }
 
 /// An administrator signed in to the admin dashboard. Its fields are private to
@@ -68,19 +115,17 @@ pub struct AdminSession {
 }
 
 impl Operator {
-    /// The operator running a command at this terminal: `$USER` and the host name,
-    /// or `unknown` where they cannot be read, as in some containers.
-    pub(crate) fn terminal() -> Result<Self, ConfigurationError> {
+    /// `name` running a command at this terminal, on this host, or `unknown` where
+    /// its name cannot be read.
+    pub(crate) fn terminal(name: OperatorName) -> Result<Self, ConfigurationError> {
         let host = std::fs::read_to_string(HOST_NAME_FILE)
             .ok()
             .map(|host| host.trim().to_owned())
             .or(HOST_NAME.optional()?)
             .filter(|host| !host.is_empty());
         Ok(Self::Cli {
-            os_user: OS_USER
-                .optional()?
-                .unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
-            host: host.unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
+            name,
+            host: host.unwrap_or_else(|| UNKNOWN.to_owned()),
         })
     }
 
@@ -93,8 +138,11 @@ impl Operator {
                 user_id: session.user_id,
                 session_id: session.session_id,
             }),
-            Self::Cli { os_user, host } => EventContext {
-                actor: Actor::Cli { os_user, host },
+            Self::Cli { name, host } => EventContext {
+                actor: Actor::Cli {
+                    os_user: name.0,
+                    host,
+                },
                 origin: RequestOrigin::default(),
                 reason: None,
             },

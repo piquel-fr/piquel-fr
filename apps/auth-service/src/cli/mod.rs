@@ -38,7 +38,9 @@ mod session;
 mod user;
 
 use crate::{
-    AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, account::AccountOperation, admin::AdminOperation,
+    AuthConfig, SERVICE_NAME, TELEMETRY_FILTER,
+    account::AccountOperation,
+    admin::{AdminOperation, OperatorName},
 };
 use account::AccountCommand;
 use admin::AdminCommand;
@@ -67,6 +69,10 @@ use user::UserCommand;
                   AUTH_DATABASE_OWNER_URL is set. See https://docs.piquel.fr/dev/operations/administration.html."
 )]
 pub struct Cli {
+    /// Who runs the command, as its events record them, such as your handle.
+    /// Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+    #[arg(long, global = true, value_name = "NAME")]
+    operator: Option<OperatorName>,
     /// Defaults to serving when no administrative command is supplied.
     #[command(subcommand)]
     command: Option<Command>,
@@ -90,8 +96,9 @@ enum Command {
     Administration(Administration),
 }
 
-/// Administrative commands. They record what they change as the operator at this
-/// terminal: `$USER` and the host name.
+/// Administrative commands. They record what they change, and what they show of
+/// an account, as the operator at this terminal: `--operator`, `AUTH_OPERATOR` or
+/// `$USER`, and the host name.
 #[derive(Subcommand)]
 enum Administration {
     /// Search, show, disable, reactivate and recover accounts.
@@ -136,8 +143,9 @@ enum Operation {
 }
 
 impl Command {
-    /// Executes this command and returns the original startup or operation failure.
-    async fn run(self) -> Result<(), CliError> {
+    /// Executes this command, an administrative one as `operator` when given, and
+    /// returns the original startup or operation failure.
+    async fn run(self, operator: Option<OperatorName>) -> Result<(), CliError> {
         // `migrate` connects as the schema owner when one is configured, then
         // provisions the role every other command connects as. Pruning connects
         // as the owner too, since that role may not delete events.
@@ -161,9 +169,9 @@ impl Command {
             }
             Self::Keys(command) => {
                 let span = tracing::info_span!("keys command", admin.operation = ?operation);
-                command.run(database).instrument(span).await
+                command.run(database, operator).instrument(span).await
             }
-            Self::Administration(command) => command.run(&Console::new(database)?).await,
+            Self::Administration(command) => command.run(&Console::new(database, operator)?).await,
         }
     }
 
@@ -295,7 +303,8 @@ impl Cli {
     pub async fn run(self) -> ExitCode {
         let result = async {
             let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
-            let result = self.command.unwrap_or(Command::Serve).run().await;
+            let command = self.command.unwrap_or(Command::Serve);
+            let result = command.run(self.operator).await;
             if let Err(error) = telemetry.shutdown().await {
                 eprintln!("warning: {}", ErrorChain(&error));
             }

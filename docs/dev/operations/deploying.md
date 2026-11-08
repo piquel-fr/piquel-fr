@@ -126,16 +126,19 @@ manifest: auth keeps them in its database and rotates them on its own (see
 key):
 
 ```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service keys list
+piquelctl app exec piquel-fr auth --env production -- auth-service --operator alice keys list
 ```
 
 ## Running auth-service commands
 
 Every [administration](administration.md) command runs in an auth container,
-through `piquelctl app exec`. Staging and production require invitations:
+through `piquelctl app exec`. The container knows nothing of who you are, so name
+yourself with `--operator`: every event the command causes records it, and an
+administrative command refuses to run without it. Staging and production
+require invitations:
 
 ```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service invite create
+piquelctl app exec piquel-fr auth --env production -- auth-service --operator alice invite create
 ```
 
 OIDC clients are registered and changed the same way, with the `client` command
@@ -143,7 +146,7 @@ OIDC clients are registered and changed the same way, with the `client` command
 deploy:
 
 ```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service client list
+piquelctl app exec piquel-fr auth --env production -- auth-service --operator alice client list
 ```
 
 An environment needs no OIDC client: the dashboard signs administrators in

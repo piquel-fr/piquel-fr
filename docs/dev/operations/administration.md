@@ -19,7 +19,7 @@ auth's own domain apart; and `audit verify` and `audit prune` need it to pick th
 environment's audit key. `audit prune` connects as the schema owner (see
 [audit history](../security/audit-history.md#pruning)). In deployed
 environments, run them with `piquelctl app exec piquel-fr auth --env ENV --
-auth-service …` (see [deploying](deploying.md#running-auth-service-commands)).
+auth-service --operator <you> …` (see [deploying](deploying.md#running-auth-service-commands)).
 
 ```sh
 just auth admin grant alice               # the first administrator is granted here
@@ -58,8 +58,8 @@ just auth account alice picture remove --reason "Impersonates someone"
   the schema owner when `AUTH_DATABASE_OWNER_URL` is set, since auth's own role
   may not delete events.
 - `user disable|delete`, `user recover`, `user undo-recovery`, `session revoke-all`,
-  `admin revoke`, `client disable|suspend|delete`, `audit prune`, `announcement
-  send`, and `account …
+  `admin revoke`, `client disable|suspend|delete`, `client rotate-secret --grace
+  0`, `keys revoke`, `keys rotate --now`, `handle release`, `audit prune`, `announcement send`, and `account …
   passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -98,8 +98,11 @@ just auth account alice picture remove --reason "Impersonates someone"
     with `admin revoke` first (grant another administrator first if it is the
     last). `admin grant` refuses while a recovery of the account can still be
     undone; grant the rights again once it settles.
-- Each change is recorded as a domain event with the operator: `$USER` and the host
-  name. Unlike the dashboard, the CLI may act on administrators' accounts, except
+- Each change, and each view of an account, is recorded as a domain event with
+  the operator: `--operator`, else `AUTH_OPERATOR`, else `$USER`, and the host
+  name. Without any of them, as inside `piquelctl app exec`, which sets no
+  `$USER`, administrative commands refuse to run, so nothing is recorded as an
+  unknown operator's. Unlike the dashboard, the CLI may act on administrators' accounts, except
   to recover one.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
@@ -139,7 +142,7 @@ so it needs no OIDC client or secret.
 Only administrators can use it. Grant the first one with the CLI:
 
 ```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service admin grant USERNAME
+piquelctl app exec piquel-fr auth --env production -- auth-service --operator alice admin grant USERNAME
 ```
 
 An administrator's dashboard session lasts while their auth session does, and

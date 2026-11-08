@@ -15,8 +15,12 @@ Every command also accepts `-h` and `--help`.
 Piquel authentication service. Runs `serve` when no command is given.
 
 ```text
-auth-service [COMMAND]
+auth-service [OPTIONS] [COMMAND]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -39,24 +43,36 @@ Commands:
 Serve the authentication service.
 
 ```text
-auth-service serve
+auth-service serve [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service migrate`
 
 Apply database migrations. Connected as the schema owner, also create or reset the role other commands connect as.
 
 ```text
-auth-service migrate
+auth-service migrate [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service keys`
 
 Inspect, rotate, revoke and import signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
 
 ```text
-auth-service keys <COMMAND>
+auth-service keys [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -72,8 +88,12 @@ Commands:
 List signing keys with their state and dates, oldest first.
 
 ```text
-auth-service keys list
+auth-service keys list [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service keys rotate`
 
@@ -85,27 +105,38 @@ auth-service keys rotate [OPTIONS]
 
 Options:
 
-- `--now`: Sign with it at once, skipping pre-publication: verifiers that cached the previous key set reject its tokens until they fetch keys again.
+- `--now`: Sign with it at once, skipping pre-publication: verifiers that cached the previous key set reject its tokens until they fetch keys again. Asks first.
+- `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service keys revoke`
 
 Delete a signing key at once, e.g. a compromised one. When it was the active key, the `next` and `retiring` keys go with it, since their private keys were stored alongside, and a new one signs at once. Verifiers that cached it keep accepting it until their cache expires, up to an hour.
 
 ```text
-auth-service keys revoke <ID>
+auth-service keys revoke [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The key's ID.
 
+Options:
+
+- `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
 ## `auth-service keys digest-usage`
 
 Count stored token digests per token digest key, to tell when `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` can be removed.
 
 ```text
-auth-service keys digest-usage
+auth-service keys digest-usage [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service keys import`
 
@@ -122,22 +153,31 @@ Arguments:
 Options:
 
 - `--id <ID>`: The key's ID, as tokens it signed name it. Default: `primary`.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service keys audit`
 
 Print the verifier key of the audit key `AUTH_AUDIT_KEY_PROVIDER` names, for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/dev/security/audit-key.pub.
 
 ```text
-auth-service keys audit
+auth-service keys audit [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user`
 
 Search, show, disable, reactivate and recover accounts.
 
 ```text
-auth-service user <COMMAND>
+auth-service user [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -166,6 +206,7 @@ Options:
 
 - `--page <PAGE>`: The page to list, counting from 1.
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user show`
 
@@ -182,6 +223,7 @@ Arguments:
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user disable`
 
@@ -199,18 +241,23 @@ Options:
 
 - `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user enable`
 
 Let a disabled account sign in again.
 
 ```text
-auth-service user enable <USER>
+auth-service user enable [OPTIONS] <USER>
 ```
 
 Arguments:
 
 - `<USER>`: The account: its handle, ID or verified email.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user recover`
 
@@ -232,6 +279,7 @@ Options:
 - `--revoke`: The account was in someone else's hands: also revoke every passkey not kept with `--keep`, the last included, unlink every social identity and withdraw every consent. The link is then only printed, and every verified address is told at once. Remove the addresses the owner does not recognize afterwards, before handing the link over.
 - `--keep <KEEP>`: With `--revoke`, a passkey the owner vouches for, which stays and can still undo the recovery. Repeatable.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user delete`
 
@@ -250,6 +298,7 @@ Options:
 - `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
 - `--immediately`: Purge the account now, in any status, without a grace period. This cannot be undone.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user undo-recovery`
 
@@ -269,13 +318,14 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with each change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user restore`
 
 Restore an account scheduled for deletion, so it can sign in again.
 
 ```text
-auth-service user restore --reason <REASON> <USER>
+auth-service user restore [OPTIONS] --reason <REASON> <USER>
 ```
 
 Arguments:
@@ -285,14 +335,19 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service session`
 
 End an account's sessions.
 
 ```text
-auth-service session <COMMAND>
+auth-service session [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -304,12 +359,16 @@ Commands:
 End one session and its applications' refresh tokens.
 
 ```text
-auth-service session revoke <SESSION>
+auth-service session revoke [OPTIONS] <SESSION>
 ```
 
 Arguments:
 
 - `<SESSION>`: The session's ID, as `user show` lists it.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service session revoke-all`
 
@@ -326,14 +385,19 @@ Arguments:
 Options:
 
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service invite`
 
 Create, list and revoke signup invitations.
 
 ```text
-auth-service invite <COMMAND>
+auth-service invite [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -352,6 +416,7 @@ auth-service invite create [OPTIONS]
 Options:
 
 - `--expires-in <EXPIRES_IN>`: How long the link stays valid, e.g. 24h or 7d. Default: `7d`.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service invite list`
 
@@ -364,26 +429,35 @@ auth-service invite list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service invite revoke`
 
 Revoke an unredeemed invitation.
 
 ```text
-auth-service invite revoke <ID>
+auth-service invite revoke [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The invitation's ID, as `invite list` shows it.
 
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
 ## `auth-service client`
 
 Register, inspect and change OIDC clients. Changes apply to the next request.
 
 ```text
-auth-service client <COMMAND>
+auth-service client [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -423,6 +497,7 @@ Options:
 - `--trusted`: The client skips the consent screen. Only for first-party clients.
 - `--require-par`: The client must push its authorization requests (RFC 9126), so none of their parameters travel through the browser.
 - `--backchannel-logout-uri <BACKCHANNEL_LOGOUT_URI>`: Where auth posts a logout token when a session the client holds tokens from ends (OIDC Back-Channel Logout); HTTPS with a public address.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client apply`
 
@@ -449,6 +524,7 @@ Options:
 - `--backchannel-logout-uri <BACKCHANNEL_LOGOUT_URI>`: Where auth posts a logout token when a session the client holds tokens from ends (OIDC Back-Channel Logout); HTTPS with a public address.
 - `--secret <REFERENCE>`: A confidential client's secret, at `file://PATH` or `env://NAME`: 32 random bytes in unpadded base64url, generated by its deployment. Never printed.
 - `--grace <GRACE>`: How long earlier secrets keep working once the secret changes, so the running deployment keeps signing in until it rolls out. Default: `1h`.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client list`
 
@@ -461,18 +537,23 @@ auth-service client list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client show`
 
 Print a client's registration and its secrets' lifetimes as JSON.
 
 ```text
-auth-service client show <ID>
+auth-service client show [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The client's ID.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client update`
 
@@ -502,6 +583,7 @@ Options:
 - `--no-require-par`: Accept authorization requests sent through the browser again.
 - `--backchannel-logout-uri <BACKCHANNEL_LOGOUT_URI>`: Post logout tokens to this URI instead.
 - `--no-backchannel-logout-uri`: Stop posting logout tokens to the client.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client disable`
 
@@ -518,6 +600,7 @@ Arguments:
 Options:
 
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client delete`
 
@@ -534,18 +617,23 @@ Arguments:
 Options:
 
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client enable`
 
 Let a disabled client work again.
 
 ```text
-auth-service client enable <ID>
+auth-service client enable [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The client's ID.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client suspend`
 
@@ -562,18 +650,23 @@ Arguments:
 Options:
 
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client unsuspend`
 
 Lift a client's suspension. It stays disabled until enabled.
 
 ```text
-auth-service client unsuspend <ID>
+auth-service client unsuspend [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The client's ID.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client rotate-secret`
 
@@ -589,15 +682,21 @@ Arguments:
 
 Options:
 
-- `--grace <GRACE>`: How long earlier secrets keep working, e.g. 30m, 24h or 7d; 0 revokes them now. Default: `24h`.
+- `--grace <GRACE>`: How long earlier secrets keep working, e.g. 30m, 24h or 7d; 0 revokes them now, which asks first. Default: `24h`.
+- `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client origin`
 
 Approve, remove or list the origins whose pages may sign users in with their passkeys, without sending them to auth's pages.
 
 ```text
-auth-service client origin <COMMAND>
+auth-service client origin [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -610,7 +709,7 @@ Commands:
 Approve an origin. The client must be trusted and have a redirect URI on it, and approved origins may span at most 5 domains, as browsers honour.
 
 ```text
-auth-service client origin add <ID> <ORIGIN>
+auth-service client origin add [OPTIONS] <ID> <ORIGIN>
 ```
 
 Arguments:
@@ -618,18 +717,26 @@ Arguments:
 - `<ID>`: The client's ID.
 - `<ORIGIN>`: The origin, as browsers send it, e.g. `https://notes.example`.
 
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
 ## `auth-service client origin remove`
 
 Remove an origin: its pages stop signing users in.
 
 ```text
-auth-service client origin remove <ID> <ORIGIN>
+auth-service client origin remove [OPTIONS] <ID> <ORIGIN>
 ```
 
 Arguments:
 
 - `<ID>`: The client's ID.
 - `<ORIGIN>`: The origin, as approved.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client origin list`
 
@@ -642,14 +749,19 @@ auth-service client origin list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service audit`
 
 Page through, verify and prune the audit history.
 
 ```text
-auth-service audit <COMMAND>
+auth-service audit [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -672,6 +784,7 @@ Options:
 - `--views`: List administrators' and operators' views of accounts too, which are left out unless `--kind account_viewed` asks for them.
 - `--page <PAGE>`: The page to list, counting from 1 at the newest events.
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service audit verify`
 
@@ -685,6 +798,7 @@ Options:
 
 - `--key <KEY>`: A file of verifier keys, one per line, to use instead of the keys committed to the repository for `AUTH_PUBLIC_BASE_URL`'s host, e.g. a preview's, as `keys audit` prints it.
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service audit prune`
 
@@ -699,14 +813,19 @@ Options:
 - `--through <THROUGH>`: The position of the checkpoint to prune through. Required.
 - `--key <KEY>`: A file of verifier keys, one per line, to use instead of the keys committed to the repository for `AUTH_PUBLIC_BASE_URL`'s host, e.g. a preview's, as `keys audit` prints it.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service admin`
 
 Grant, revoke or list administrators.
 
 ```text
-auth-service admin <COMMAND>
+auth-service admin [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -721,12 +840,16 @@ Make an active account an administrator.
 Refuses while a recovery of the account can still be undone: granted during its probation, the rights would go live for whoever used its link once it settles.
 
 ```text
-auth-service admin grant <USER>
+auth-service admin grant [OPTIONS] <USER>
 ```
 
 Arguments:
 
 - `<USER>`: The account: its handle, ID or verified email.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service admin revoke`
 
@@ -743,6 +866,7 @@ Arguments:
 Options:
 
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service admin list`
 
@@ -755,20 +879,25 @@ auth-service admin list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service handle`
 
 Check accounts against the handle rules, and change their handles.
 
 ```text
-auth-service handle <COMMAND>
+auth-service handle [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
 - [`auth-service handle check`](#auth-service-handle-check): List accounts whose handle is reserved.
 - [`auth-service handle rename`](#auth-service-handle-rename): Give an account a new handle, without the settings cooldown, and record the change.
-- [`auth-service handle release`](#auth-service-handle-release): Delete a released handle, or a purged account's last one, so anyone may claim it again, e.g. after a trademark dispute. An account's current handle is never released: rename the account first.
+- [`auth-service handle release`](#auth-service-handle-release): Delete a released handle, or a purged account's last one, so anyone may claim it again, e.g. after a trademark dispute. An account's current handle is never released: rename the account first. Asks first.
 - [`auth-service handle released`](#auth-service-handle-released): List released handles and purged accounts' last ones, which `release` frees.
 - [`auth-service handle reserved`](#auth-service-handle-reserved): List the handles administrators reserved, then the built-in reserved names.
 - [`auth-service handle reserve`](#auth-service-handle-reserve): Reserve a handle: signup and the settings refuse it and its look-alikes until an administrator gives it with `rename --allow-reserved`, or `unreserve`s it.
@@ -779,8 +908,12 @@ Commands:
 List accounts whose handle is reserved.
 
 ```text
-auth-service handle check
+auth-service handle check [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service handle rename`
 
@@ -799,41 +932,55 @@ Options:
 
 - `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
 - `--allow-reserved`: Allow a reserved name, or one that looks like it.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service handle release`
 
-Delete a released handle, or a purged account's last one, so anyone may claim it again, e.g. after a trademark dispute. An account's current handle is never released: rename the account first.
+Delete a released handle, or a purged account's last one, so anyone may claim it again, e.g. after a trademark dispute. An account's current handle is never released: rename the account first. Asks first.
 
 ```text
-auth-service handle release <HANDLE>
+auth-service handle release [OPTIONS] <HANDLE>
 ```
 
 Arguments:
 
 - `<HANDLE>`: The released handle.
 
+Options:
+
+- `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
 ## `auth-service handle released`
 
 List released handles and purged accounts' last ones, which `release` frees.
 
 ```text
-auth-service handle released
+auth-service handle released [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service handle reserved`
 
 List the handles administrators reserved, then the built-in reserved names.
 
 ```text
-auth-service handle reserved
+auth-service handle reserved [OPTIONS]
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service handle reserve`
 
 Reserve a handle: signup and the settings refuse it and its look-alikes until an administrator gives it with `rename --allow-reserved`, or `unreserve`s it.
 
 ```text
-auth-service handle reserve --reason <REASON> <HANDLE>
+auth-service handle reserve [OPTIONS] --reason <REASON> <HANDLE>
 ```
 
 Arguments:
@@ -843,26 +990,35 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Who or what it is kept for: 1 to 500 characters. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service handle unreserve`
 
 Remove a handle from the reserved list, so anyone may claim it again.
 
 ```text
-auth-service handle unreserve <HANDLE>
+auth-service handle unreserve [OPTIONS] <HANDLE>
 ```
 
 Arguments:
 
 - `<HANDLE>`: The handle.
 
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
 ## `auth-service deliveries`
 
 Inspect, retry and cancel outbound deliveries.
 
 ```text
-auth-service deliveries <COMMAND>
+auth-service deliveries [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -883,38 +1039,51 @@ Options:
 - `--status <STATUS>`: Only deliveries with this status: pending, succeeded, failed or cancelled.
 - `--channel <CHANNEL>`: Only deliveries on this channel.
 - `--limit <LIMIT>`: The most deliveries to list. Default: `100`.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service deliveries retry`
 
 Attempt a failed delivery, or a cancelled unordered one, again now.
 
 ```text
-auth-service deliveries retry <ID>
+auth-service deliveries retry [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The delivery's ID.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service deliveries cancel`
 
 Cancel a pending or failed delivery, which unblocks the deliveries ordered after it.
 
 ```text
-auth-service deliveries cancel <ID>
+auth-service deliveries cancel [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The delivery's ID.
 
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
 ## `auth-service announcement`
 
 Draft, send and read announcements to accounts, such as a security incident or a change to the privacy policy.
 
 ```text
-auth-service announcement <COMMAND>
+auth-service announcement [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -936,6 +1105,7 @@ auth-service announcement list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service announcement show`
 
@@ -952,6 +1122,7 @@ Arguments:
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service announcement draft`
 
@@ -967,6 +1138,7 @@ Options:
 - `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
 - `--everyone`: Send it to every account, as of its sending.
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service announcement edit`
 
@@ -986,18 +1158,23 @@ Options:
 - `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
 - `--everyone`: Send it to every account, as of its sending.
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service announcement discard`
 
 Delete a draft.
 
 ```text
-auth-service announcement discard <ID>
+auth-service announcement discard [OPTIONS] <ID>
 ```
 
 Arguments:
 
 - `<ID>`: The draft's ID.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service announcement send`
 
@@ -1015,18 +1192,23 @@ Options:
 
 - `--revision <REVISION>`: The revision `announcement show` printed, which is sent only if the draft has not changed since. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account`
 
 Read or change one account's settings on its owner's behalf.
 
 ```text
-auth-service account <USER> <COMMAND>
+auth-service account [OPTIONS] <USER> <COMMAND>
 ```
 
 Arguments:
 
 - `<USER>`: The account: its handle, ID or verified email.
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1045,8 +1227,12 @@ Commands:
 Change the display name.
 
 ```text
-auth-service account <USER> name <COMMAND>
+auth-service account <USER> name [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1057,7 +1243,7 @@ Commands:
 Change the display name, which applications receive as `name` once they refresh the profile.
 
 ```text
-auth-service account <USER> name set --reason <REASON> <NAME>
+auth-service account <USER> name set [OPTIONS] --reason <REASON> <NAME>
 ```
 
 Arguments:
@@ -1067,14 +1253,19 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account passkeys`
 
 List, rename or remove passkeys.
 
 ```text
-auth-service account <USER> passkeys <COMMAND>
+auth-service account <USER> passkeys [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1093,13 +1284,14 @@ auth-service account <USER> passkeys list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account passkeys rename`
 
 Rename a passkey.
 
 ```text
-auth-service account <USER> passkeys rename --reason <REASON> <PASSKEY> <NAME>
+auth-service account <USER> passkeys rename [OPTIONS] --reason <REASON> <PASSKEY> <NAME>
 ```
 
 Arguments:
@@ -1110,6 +1302,7 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account passkeys revoke`
 
@@ -1127,14 +1320,19 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account identities`
 
 List or unlink social sign-ins.
 
 ```text
-auth-service account <USER> identities <COMMAND>
+auth-service account <USER> identities [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1152,6 +1350,7 @@ auth-service account <USER> identities list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account identities unlink`
 
@@ -1169,14 +1368,19 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account emails`
 
 List email addresses, choose the primary one, or remove one.
 
 ```text
-auth-service account <USER> emails <COMMAND>
+auth-service account <USER> emails [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1195,13 +1399,14 @@ auth-service account <USER> emails list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account emails primary`
 
 Make a verified address the primary one, which applications receive. The previous one is told.
 
 ```text
-auth-service account <USER> emails primary --reason <REASON> <EMAIL>
+auth-service account <USER> emails primary [OPTIONS] --reason <REASON> <EMAIL>
 ```
 
 Arguments:
@@ -1211,13 +1416,14 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account emails remove`
 
 Remove an address, which is told if it was verified. The primary address goes last.
 
 ```text
-auth-service account <USER> emails remove --reason <REASON> <EMAIL>
+auth-service account <USER> emails remove [OPTIONS] --reason <REASON> <EMAIL>
 ```
 
 Arguments:
@@ -1227,14 +1433,19 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account sessions`
 
 List sessions, or sign them out.
 
 ```text
-auth-service account <USER> sessions <COMMAND>
+auth-service account <USER> sessions [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1253,13 +1464,14 @@ auth-service account <USER> sessions list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account sessions revoke`
 
 Sign one session out, with its applications' refresh tokens.
 
 ```text
-auth-service account <USER> sessions revoke --reason <REASON> <SESSION>
+auth-service account <USER> sessions revoke [OPTIONS] --reason <REASON> <SESSION>
 ```
 
 Arguments:
@@ -1269,6 +1481,7 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account sessions revoke-all`
 
@@ -1282,14 +1495,19 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account apps`
 
 List the apps that keep access, or remove one's access.
 
 ```text
-auth-service account <USER> apps <COMMAND>
+auth-service account <USER> apps [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1307,13 +1525,14 @@ auth-service account <USER> apps list [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account apps remove`
 
 Remove an app's access: its refresh grants end and it asks for consent again. The account's sessions stay signed in.
 
 ```text
-auth-service account <USER> apps remove --reason <REASON> <CLIENT>
+auth-service account <USER> apps remove [OPTIONS] --reason <REASON> <CLIENT>
 ```
 
 Arguments:
@@ -1323,14 +1542,19 @@ Arguments:
 Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account picture`
 
 Show or remove the profile picture.
 
 ```text
-auth-service account <USER> picture <COMMAND>
+auth-service account <USER> picture [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1348,18 +1572,20 @@ auth-service account <USER> picture show [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account picture remove`
 
 Remove the picture, such as one that impersonates someone.
 
 ```text
-auth-service account <USER> picture remove --reason <REASON>
+auth-service account <USER> picture remove [OPTIONS] --reason <REASON>
 ```
 
 Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account history`
 
@@ -1373,14 +1599,19 @@ Options:
 
 - `--before <BEFORE>`: Continue with entries older than this one, the last one listed.
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account notifications`
 
 Read the account's notifications, as its inbox shows them. Reading one never marks it read.
 
 ```text
-auth-service account <USER> notifications <COMMAND>
+auth-service account <USER> notifications [OPTIONS] <COMMAND>
 ```
+
+Options:
+
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 Commands:
 
@@ -1399,6 +1630,7 @@ Options:
 
 - `--before <BEFORE>`: Continue with notifications older than this one, the last one listed.
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account notifications show`
 
@@ -1415,3 +1647,4 @@ Arguments:
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common::admin`'s).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.

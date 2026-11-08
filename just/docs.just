@@ -45,5 +45,5 @@ screenshots *args:
     just preview --slot docs
     url() { piquelctl preview url piquel-fr "$branch" --slot docs --route "$1"; }
     E2E_AUTH_URL=$(url auth) E2E_ADMIN_URL=$(url admin) \
-        E2E_GRANT_ADMIN="piquelctl preview exec piquel-fr $branch --slot docs auth -- auth-service admin grant" \
+        E2E_GRANT_ADMIN="piquelctl preview exec piquel-fr $branch --slot docs auth -- auth-service --operator docs-screenshots admin grant" \
         pnpm exec playwright test --project docs --update-snapshots=changed {{ args }}

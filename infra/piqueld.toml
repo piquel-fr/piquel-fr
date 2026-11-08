@@ -221,6 +221,10 @@ service = "auth"
 command = ["auth-service", "keys", "import", "file:///run/secrets/signing-key"]
 run = "before-rollout"
 
+# The import is recorded as the deployment's, which sets no $USER.
+[spec.jobs.environment]
+AUTH_OPERATOR = "deploy"
+
 [[spec.services]]
 name = "auth"
 depends_on = ["postgres"]

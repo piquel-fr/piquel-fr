@@ -25,7 +25,7 @@ that auth generates; both require S256 PKCE. `create` and `rotate-secret` print
 the secret once, and auth stores only its SHA-256 digest. Secrets start with
 `pqcs_` so secret scanners can recognize them. After `rotate-secret`, the earlier
 secrets keep working for the grace period (24 hours by default, at most 30 days;
-`--grace 0` revokes them at once), so the client can switch without downtime.
+`--grace 0` revokes them at once, and asks first), so the client can switch without downtime.
 
 A client that a deployment manages, such as the admin dashboard, is registered
 with `client apply` instead, which takes the same options as `create`. It
