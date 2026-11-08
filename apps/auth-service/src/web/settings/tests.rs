@@ -20,8 +20,8 @@ use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
     Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
-    HistoryChange, HistoryState, InboxChange, NotificationState, PICTURE_FIELD, ProfileChange,
-    ProfileDialog, ProfileState, Query, SignInChange,
+    HistoryChange, HistoryState, InboxChange, InboxState, NotificationState, PICTURE_FIELD,
+    ProfileChange, ProfileDialog, ProfileState, Query, SignInChange,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the
@@ -540,7 +540,14 @@ async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
         let changed = browser
             .post(&replicas, settings::NOTIFICATIONS, &change)
             .await;
-        assert_eq!(redirect(&changed), settings::NOTIFICATIONS);
+        let reopened = InboxState {
+            email: true,
+            ..InboxState::default()
+        };
+        assert_eq!(
+            redirect(&changed),
+            reopened.on(settings::NOTIFICATIONS).expect("link")
+        );
         assert_eq!(emailed().await, email);
     }
 

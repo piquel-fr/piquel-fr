@@ -67,17 +67,18 @@ Piquel's emails carry no tracking and no remote images.
 
 From your settings:
 
-1. Open **Notifications**.
-2. Under **Email**, select **Turn off** beside **Announcements**.
+1. Open **Notifications**, then select **Email preferences** at the top of the
+   page.
+2. Select **Turn off** beside **Announcements**.
 
-![The Email section of the notifications page: Announcements, emailed, with a Turn off button](../../images/account/notification-email.png)
+![The Email preferences dialog: Announcements, emailed, with a Turn off button](../../images/account/notification-email.png)
 
 From an announcement's email, select **Stop receiving announcements by email**
 at its end, then **Stop announcement emails** on the page it opens. Your mail
 app may also offer an **Unsubscribe** button beside the sender, which does the
 same in one click.
 
-The **Email** section then says **Not emailed** beside **Announcements**, and
+**Email preferences** then says **Not emailed** beside **Announcements**, and
 your security history lists **Announcements: emails turned off**. Turn them
 back on with **Turn on**, in the same place.
 

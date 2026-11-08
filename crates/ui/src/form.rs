@@ -146,6 +146,23 @@ pub struct Messages<'a> {
 }
 
 impl<'a> Messages<'a> {
+    /// The page's alert, taken out when a dialog is `shown` again, so the
+    /// dialog says the refusal instead of the page behind its scrim; with no
+    /// dialog open, the page keeps it.
+    #[must_use]
+    pub fn into_dialog(self, shown: bool) -> (Option<&'a str>, Self) {
+        match self.alert {
+            Some(Alert::Page(alert)) if shown => (
+                Some(alert),
+                Self {
+                    alert: None,
+                    ..self
+                },
+            ),
+            _ => (None, self),
+        }
+    }
+
     /// Only an `alert`.
     #[must_use]
     pub const fn alert(alert: Alert<'a>) -> Self {
@@ -671,4 +688,23 @@ pub(crate) async fn open<'a>(
             </button>
         </form>
     })
+}
+
+/// What a page says, and where.
+#[cfg(test)]
+mod tests {
+    use super::{Alert, Messages};
+
+    /// A dialog shown again says the page's alert instead of the page behind its
+    /// scrim; with no dialog shown, the page keeps it.
+    #[test]
+    fn a_dialog_shown_again_takes_the_page_alert() {
+        let refused = Messages::alert(Alert::Page("Refused"));
+        let (said, page) = refused.into_dialog(true);
+        assert_eq!(said, Some("Refused"));
+        assert!(page.alert.is_none());
+        let (said, page) = refused.into_dialog(false);
+        assert_eq!(said, None);
+        assert!(matches!(page.alert, Some(Alert::Page("Refused"))));
+    }
 }
