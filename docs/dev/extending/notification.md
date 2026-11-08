@@ -141,10 +141,12 @@ surface needs a change.
 
 ## Limits
 
-- **Links.** A notification's email links its page in the inbox. Only a
-  recovery's notifications link to something else, the recovery's undo page,
-  through the `recovery_id` the `email` channel finds for them and the
-  notification page's `about_recovery`. A new kind of link needs both.
+- **Links.** A notification's email links its page in the inbox. Only two
+  kinds link to something else: a recovery's notifications link the recovery's
+  undo page, through the `recovery_id` the `email` channel finds for them and
+  the notification page's `about_recovery`, and an alert's links the
+  dashboard's Alerts tab, through `Notification::links_alerts`. A new kind of
+  link needs its email and its page both.
 - **During a deploy.** The previous release's email workers may claim the email
   of a kind they don't know. They can't decode it, so they mark the delivery
   failed. An operator retries it with `auth-service deliveries retry <id>` once

@@ -360,7 +360,8 @@ or clears and comes back, a new alert is raised.
 
 When an alert is raised, every active administrator gets a notification in
 their Piquel inbox, emailed to their primary verified address. Its email can't
-be turned off. An alert raises no new notification while it stays current, so
+be turned off. Both link the dashboard's **Alerts** tab, unless auth serves no
+dashboard. An alert raises no new notification while it stays current, so
 follow it on the dashboard's **Alerts** tab, or with `auth-service alerts list`.
 
 Post updates on an alert to say where its handling stands: **Investigating**,

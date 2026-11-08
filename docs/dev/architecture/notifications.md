@@ -89,7 +89,9 @@ has workers of its own and links the inbox (see
 The delivery copies the address and the notification when they are written, so
 removing the address right after cannot cancel it. The email links the
 notification's page, and, while a passkey can still undo a recovery, the undo
-page. [The delivery queue](delivery-queue.md#email) describes how it is sent.
+page. An alert's email, and its page in the inbox, link the dashboard's Alerts
+tab while auth serves a dashboard (`Notification::links_alerts`).
+[The delivery queue](delivery-queue.md#email) describes how it is sent.
 
 ## Email preferences
 

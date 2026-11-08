@@ -14,7 +14,7 @@ Piquel support started a recovery of the Piquel account @{{ handle }}, so its ow
 The link works once, for {{ hours }} hours. If you didn't ask for this, contact Piquel support. If you still have a passkey, you can also cancel the recovery:
 
 {{ undo }}
-{%- when Content::Notification { address: _, subject, body, page, undo } %}
+{%- when Content::Notification { address: _, subject, body, page, undo, alerts } %}
 {{ subject }}.
 
 {{ body }}
@@ -26,6 +26,12 @@ Undo the recovery:
 {{ undo }}
 {%- when None %}
 {%- endmatch %}
+{%- if let Some(alerts) = alerts %}
+
+See the alerts on the admin dashboard:
+
+{{ alerts }}
+{%- endif %}
 
 Read it in your Piquel notifications:
 

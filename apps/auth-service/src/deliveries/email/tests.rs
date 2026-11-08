@@ -618,6 +618,40 @@ async fn a_raised_alert_notifies_active_administrators() {
     assert_eq!(emailed(member, member_primary).await, 0);
 }
 
+/// An alert's email links the dashboard's Alerts tab, and only when auth serves
+/// a dashboard.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_alerts_email_links_the_dashboard() {
+    let database = Replicas::database().await;
+    let user_id = account(&database).await;
+    let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
+    let message = EmailMessage::Notification {
+        address: format!("{user_id}@example.com"),
+        notification_id: NotificationId::new(),
+        notification: Notification::AlertRaised {
+            alert_id: piquel_common::AlertId::new(),
+            title: "The audit chain is broken".into(),
+            text: "A verification found the chain broken.".into(),
+        },
+        recovery_id: None,
+    };
+    let dashboard: Origin = "https://admin.piquel.fr".parse().expect("origin");
+    for (linked, expected) in [
+        (Some(&dashboard), Some("https://admin.piquel.fr/alerts")),
+        (None, None),
+    ] {
+        let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config)
+            .linking(linked);
+        let content = sender.content(user_id, &message).await.expect("content");
+        assert!(
+            matches!(&content, Some(Content::Notification { alerts, .. }) if alerts.as_deref() == expected),
+            "{linked:?}"
+        );
+        sender.assert_renders(user_id, &message).await;
+    }
+}
+
 /// An announcement's email offers a one-click unsubscribe (RFC 8058) whose
 /// link turns only its recipient's announcements' email off, in its headers and
 /// its body; an essential one, which its recipient cannot turn off, offers none.

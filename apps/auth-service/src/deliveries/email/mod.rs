@@ -15,11 +15,14 @@
 
 use super::{DeliveryError, Failure, Sender};
 use crate::{
-    config::EmailConfig,
+    config::{DashboardConfig, EmailConfig},
     emails::{VERIFICATION_LIFETIME, VerificationKeys},
     notifications::UnsubscribeLinks,
     recovery::{self, RecoveryLinks},
-    routes::page::{self, settings},
+    routes::{
+        self,
+        page::{self, settings},
+    },
 };
 use askama::Template;
 use lettre::{
@@ -90,12 +93,21 @@ pub(crate) struct EmailSender<M> {
     recovery_links: RecoveryLinks,
     /// Builds announcements' unsubscribe links.
     unsubscribe_links: UnsubscribeLinks,
+    /// The admin dashboard's Alerts tab, which an alert's notification links,
+    /// unless the dashboard is off.
+    alerts: Option<String>,
 }
 
 impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
-    /// Sends through the configured relay, or drops everything without one.
-    pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
+    /// Sends through the configured relay, or drops everything without one,
+    /// linking alerts on the `dashboard`, if auth serves one.
+    pub(crate) fn new(
+        database: Database,
+        config: &EmailConfig,
+        dashboard: Option<&DashboardConfig>,
+    ) -> Self {
         Self::with_mailer(database, config.smtp.clone(), config)
+            .linking(dashboard.map(|dashboard| &dashboard.origin))
     }
 }
 
@@ -110,7 +122,15 @@ impl<M: Mailer> EmailSender<M> {
             verification_keys: config.verification_keys.clone(),
             recovery_links: config.recovery_links.clone(),
             unsubscribe_links: config.unsubscribe_links.clone(),
+            alerts: None,
         }
+    }
+
+    /// Links alerts' notifications to the Alerts tab of the dashboard at
+    /// `dashboard`.
+    pub(crate) fn linking(self, dashboard: Option<&Origin>) -> Self {
+        let alerts = dashboard.map(|dashboard| dashboard.join(routes::dashboard::ALERTS));
+        Self { alerts, ..self }
     }
 
     /// Sends `message` about `user_id`'s account, as the delivery `id`. Does
@@ -266,6 +286,7 @@ impl<M: Mailer> EmailSender<M> {
                     .origin
                     .join(&settings::NOTIFICATION.replace("{id}", &notification_id.to_string())),
                 undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
+                alerts: self.alerts.clone().filter(|_| notification.links_alerts()),
             },
         }))
     }
@@ -359,7 +380,7 @@ pub(crate) struct AnnouncementSender<M>(EmailSender<M>);
 impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
     /// Sends through the configured relay, or drops everything without one.
     pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
-        Self(EmailSender::new(database, config))
+        Self(EmailSender::new(database, config, None))
     }
 
     /// The plain-text body of `announcement`'s email, linking the inbox on
@@ -443,6 +464,8 @@ enum Content {
         page: String,
         /// The undo page of the recovery it is about, while a passkey can undo it.
         undo: Option<String>,
+        /// The dashboard's Alerts tab, for an alert's, unless the dashboard is off.
+        alerts: Option<String>,
     },
     /// An announcement administrators sent, to the account's primary address.
     Announcement {
