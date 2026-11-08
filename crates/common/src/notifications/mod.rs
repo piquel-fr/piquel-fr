@@ -171,6 +171,8 @@ impl DomainEvent {
             | Self::AuditChainVerified(_)
             // It concerns no one account: sending writes each recipient's.
             | Self::AnnouncementSent { .. }
+            | Self::AlertRaised { .. }
+            | Self::AlertCleared { .. }
             | Self::Imported(_) => return None,
         })
     }

@@ -7,6 +7,7 @@ use crate::{
     tests::{Replicas, operator},
 };
 use chrono::{SubsecRound, TimeDelta};
+use piquel_common::alerts::{Alert, AlertKind};
 use piquel_common::{
     Personal, Provider,
     config::Origin,
@@ -585,10 +586,7 @@ async fn the_audit_page_shows_the_newest_recorded_verification() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_verifier_verifies_when_no_verification_is_recent() {
     let fixture = Fixture::sealed_six().await;
-    let verifier = Verifier::new(AuditKeys {
-        verifiers: fixture.keys.verifiers.clone(),
-        source: fixture.keys.source,
-    });
+    let verifier = Verifier::new((*fixture.keys).clone());
     let mut lock = fixture
         .database
         .try_exclusive(LockKey::AuditVerification)
@@ -612,6 +610,48 @@ async fn the_verifier_verifies_when_no_verification_is_recent() {
     );
     assert_eq!(verifier.pass(&mut lock).await.expect("pass"), None);
     lock.release().await.expect("release");
+}
+
+/// A verification that finds the chain broken with this environment's keys
+/// raises the chain's alert. One with keys an operator gave changes nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_broken_verification_raises_the_chains_alert() {
+    let fixture = Fixture::sealed_six().await;
+    fixture
+        .tamper(Tamper::EditPayload(5, serde_json::json!({})))
+        .await;
+    let service = AdminService::new(fixture.database.clone(), false);
+    let current = async || {
+        let mut tx = fixture.database.begin().await.expect("transaction");
+        let current = tx
+            .alerts()
+            .current(AlertKind::AuditChainBroken)
+            .await
+            .expect("current");
+        tx.commit().await.expect("commit");
+        current.and_then(|current| current.alert)
+    };
+    let verify = async |keys: &AuditKeys| {
+        service
+            .verify_audit_chain(&operator(), keys)
+            .await
+            .expect("verification")
+    };
+    verify(&fixture.keys).await;
+    assert_eq!(current().await, None);
+    let own = AuditKeys {
+        source: VerificationKeys::Uncommitted,
+        ..(*fixture.keys).clone()
+    };
+    verify(&own).await;
+    assert_eq!(
+        current().await,
+        Some(Alert::AuditChainBroken(ChainBreak {
+            position: 5,
+            problem: ChainProblem::EventChanged,
+        }))
+    );
 }
 
 /// The newest checkpoint is served as its signed note, and the list pages through

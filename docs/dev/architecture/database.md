@@ -557,3 +557,24 @@ pruned. Pages order by `(created_at, id)`, since notifications written in one
 transaction share `now()`. A kind a newer release wrote reads as unknown, as
 events' kinds do, and the inbox skips it. Purging an account deletes its
 notifications by cascade.
+
+### Alerts
+
+An alert is a condition that needs an administrator's attention, such as a
+broken audit chain. Unlike a notification, it concerns no account. Auth's
+`Alerts` says, in a transaction, that a condition holds (`raise`) or no longer
+does (`clear`), and records `AlertRaised` and `AlertCleared` events beside the
+change. `alerts` keeps at most one current alert of each kind, the one not
+cleared yet, under a unique index on its kind. `alerts().current` takes
+`LockKey::Alerts` for the transaction, so whatever changes alerts next waits,
+even while none is current. Raising what the current alert already says
+only marks it seen again (`seen_at`). Raising anything else clears it first.
+The payload holds no personal data. Like an event's, it is stored with its
+version (`Alert::version`): a new kind, or a new variant inside one, gets the
+next version, and a kind or version a release does not write reads as an alert
+it cannot show. The events that carry an alert take its version.
+
+Recording a verification of the audit chain raises `audit_chain_broken` when it
+found the chain broken, and clears it when it found the chain intact. A
+verification with keys given with `--key`, such as another environment's,
+changes neither.
