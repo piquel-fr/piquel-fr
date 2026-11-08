@@ -4,7 +4,7 @@
 
 use super::AdminApplication;
 use crate::{
-    AdminService, AuthConfig, DashboardConfig, Reason,
+    AdminError, AdminService, AuthConfig, DashboardConfig, Reason,
     account::AccountService,
     admin::DashboardSignIn,
     assets::EmbeddedAssets,
@@ -13,7 +13,7 @@ use crate::{
     security::{BrowserCookie, RequestContext},
     tests::{
         AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, operator, parameter,
-        policy, redirect,
+        policy, redirect, until_blocked,
     },
 };
 use axum::{
@@ -342,6 +342,79 @@ async fn the_dashboard_ends_with_the_auth_session_and_the_rights() {
         routes::page::ADMIN,
         "granting the rights again revives no session"
     );
+}
+
+/// A sign-in and a revocation of the account's rights at once: whichever holds
+/// the rights first, no handoff or dashboard session outlives the revocation.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_sign_in_racing_a_revocation_never_outlives_it() {
+    let harness = Harness::new().await;
+    // Another administrator, so the rights revoked are not the last.
+    harness.admin().await;
+    let service = AdminService::new(harness.database.clone(), true);
+    let database = &harness.database;
+    let in_use = |user_id| async move {
+        (database.dashboard())
+            .of_user(user_id, DashboardSignIn::idle_since())
+            .await
+            .expect("sessions")
+    };
+
+    // A redemption holding the rights writes its session before the revocation,
+    // which waited for it, ends it.
+    let admin = harness.admin().await;
+    let mut redeeming = harness.database.begin().await.expect("transaction");
+    let held = redeeming
+        .administrators()
+        .contains_for_share(admin.user_id)
+        .await;
+    assert!(held.expect("rights"));
+    let cli = operator();
+    let (revoked, ()) = tokio::join!(service.revoke_administrator(&cli, admin.user_id), async {
+        until_blocked(&mut redeeming, 1).await;
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        (redeeming.dashboard())
+            .insert_session(b"in flight", admin.session_id, Utc::now(), expires_at)
+            .await
+            .expect("session");
+        redeeming.commit().await.expect("commit");
+    });
+    revoked.expect("revoke");
+    assert!(
+        in_use(admin.user_id).await.is_empty(),
+        "ended by the revocation"
+    );
+
+    // A revocation holding the rights first refuses both the handoff and the
+    // redemption waiting for it.
+    let admin = harness.admin().await;
+    let (dashboard, query, _) = harness.hand_off(&admin, "/users").await;
+    let owner = admin.owner(&harness.database).await;
+    let sign_in = harness.sign_in_service();
+    let proof = || AdminProof::unverified(admin.session_id, Utc::now());
+    let code_url = sign_in
+        .hand_off(&owner, &query, proof())
+        .await
+        .expect("handed off");
+    let mut revoking = harness.database.begin().await.expect("transaction");
+    let revoked = revoking.administrators().revoke(admin.user_id).await;
+    assert!(revoked.expect("revoke"));
+    let (handed, redeemed, ()) = tokio::join!(
+        sign_in.hand_off(&owner, &query, proof()),
+        dashboard.visit(&harness.dashboard, code_url.as_str()),
+        async {
+            until_blocked(&mut revoking, 2).await;
+            revoking.commit().await.expect("commit");
+        }
+    );
+    assert!(
+        matches!(handed, Err(AdminError::NotAdministrator)),
+        "{handed:?}"
+    );
+    assert_eq!(redeemed.status(), StatusCode::FORBIDDEN, "no access");
+    harness.grant(admin.user_id).await;
+    assert!(in_use(admin.user_id).await.is_empty(), "nothing revived");
 }
 
 /// A dashboard session times out once unused for half an hour: each request

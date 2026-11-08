@@ -33,8 +33,8 @@ pub struct RedeemedHandoff {
     pub user_id: UserId,
     /// The dashboard path to go on to.
     pub return_to: String,
-    /// When a passkey confirmed the handoff, if one did.
-    pub confirmed_at: Option<DateTime<Utc>>,
+    /// When a passkey proved the handoff.
+    pub confirmed_at: DateTime<Utc>,
 }
 
 /// A dashboard session in use: its auth session is still active, and it has
@@ -121,8 +121,32 @@ impl DashboardRepository<'_> {
         Ok(())
     }
 
+    /// The account whose session handed off the unexpired code with this digest,
+    /// if there is one: what redeeming it locks first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn handoff_user(
+        &mut self,
+        code_digest: &[u8],
+    ) -> Result<Option<UserId>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"SELECT s.user_id AS "user_id: UserId"
+                FROM dashboard_handoffs h
+                JOIN sessions s ON s.id = h.session_id
+                WHERE h.code_digest = $1 AND h.expires_at > now()"#,
+                code_digest,
+            )
+        )
+    }
+
     /// Consumes the unexpired code with this digest, if the browser's state has
-    /// this digest. A code presented with another state stays, so a forged
+    /// this digest, and a passkey proved it: the previous release handed off
+    /// without one. A code presented with another state stays, so a forged
     /// redemption cannot burn the browser's own.
     ///
     /// # Errors
@@ -141,9 +165,10 @@ impl DashboardRepository<'_> {
                 r#"DELETE FROM dashboard_handoffs h
                 USING sessions s
                 WHERE h.code_digest = $1 AND h.state_digest = $2 AND h.expires_at > now()
-                AND s.id = h.session_id
+                AND h.confirmed_at IS NOT NULL AND s.id = h.session_id
                 RETURNING h.session_id AS "session_id: SessionId",
-                    s.user_id AS "user_id: UserId", h.return_to, h.confirmed_at"#,
+                    s.user_id AS "user_id: UserId", h.return_to,
+                    h.confirmed_at AS "confirmed_at!""#,
                 code_digest,
                 state_digest,
             )
@@ -151,8 +176,7 @@ impl DashboardRepository<'_> {
     }
 
     /// Stores a dashboard session of the auth session `session_id`, confirmed at
-    /// `confirmed_at` if a passkey confirmed it, which ends at `expires_at`
-    /// however busy.
+    /// `confirmed_at`, which ends at `expires_at` however busy.
     ///
     /// # Errors
     ///
@@ -161,7 +185,7 @@ impl DashboardRepository<'_> {
         &mut self,
         secret_digest: &[u8],
         session_id: SessionId,
-        confirmed_at: Option<DateTime<Utc>>,
+        confirmed_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
     ) -> Result<(), DatabaseError> {
         run!(

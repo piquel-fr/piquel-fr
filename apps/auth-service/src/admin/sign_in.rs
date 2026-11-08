@@ -45,7 +45,7 @@ use piquel_common::{
     events::{Actor, DomainEvent},
 };
 use piquel_crypto::Secret;
-use piquel_repository::{Database, InsertHandoff};
+use piquel_repository::{Database, DatabaseTransaction, InsertHandoff};
 use piquel_ui::{HandoffQuery, Query};
 use url::Url;
 
@@ -135,7 +135,10 @@ impl DashboardSignIn {
             state: state.encoded(),
             return_to: return_to.to_owned(),
         };
-        let page = query.url(self.auth.as_url(), routes::page::ADMIN)?;
+        let mut page = query.url(self.auth.as_url(), routes::page::ADMIN)?;
+        // The previous release's handoff page asks for a passkey only then, and a
+        // handoff without one never redeems: drop it once no release reads it.
+        page.query_pairs_mut().append_pair("confirm", "on");
         Ok((page, DashboardCookie(Step::Started(state))))
     }
 
@@ -172,8 +175,9 @@ impl DashboardSignIn {
         let state = Secret::parse(&handoff.state).map_err(|_| AdminError::InvalidHandoff)?;
         let return_to = Self::path(&handoff.return_to)?;
         let code = Secret::generate()?;
-        self.database
-            .dashboard()
+        let mut tx = self.database.begin().await?;
+        Self::hold_rights(&mut tx, session.user_id).await?;
+        tx.dashboard()
             .insert_handoff(&InsertHandoff {
                 code_digest: code.digest().as_bytes(),
                 session_id: session.id,
@@ -183,6 +187,7 @@ impl DashboardSignIn {
                 expires_at: Utc::now() + HANDOFF_LIFETIME,
             })
             .await?;
+        tx.commit().await?;
         let mut target = self.dashboard.url(routes::dashboard::SIGN_IN);
         target
             .query_pairs_mut()
@@ -206,6 +211,12 @@ impl DashboardSignIn {
             .ok_or(AdminError::InvalidHandoff)?;
         let code = Secret::parse(code).map_err(|_| AdminError::InvalidHandoff)?;
         let mut tx = self.database.begin().await?;
+        let user_id = (tx
+            .dashboard()
+            .handoff_user(code.digest().as_bytes())
+            .await?)
+            .ok_or(AdminError::InvalidHandoff)?;
+        Self::hold_rights(&mut tx, user_id).await?;
         let handoff = tx
             .dashboard()
             .redeem_handoff(code.digest().as_bytes(), state.digest().as_bytes())
@@ -327,6 +338,22 @@ impl DashboardSignIn {
             tx.commit().await?;
         }
         Ok(DashboardCookie(Step::SignedOut))
+    }
+
+    /// Requires `user_id` to hold administrator rights, share-locked until `tx`
+    /// ends: a handoff or a dashboard session written in `tx` then commits before
+    /// a revocation of the rights, which ends it, or not at all. The rights come
+    /// first, as a revocation takes them before the handoffs and sessions it
+    /// deletes, so neither waits for the other in a cycle.
+    async fn hold_rights(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<(), AdminError> {
+        if tx.administrators().contains_for_share(user_id).await? {
+            Ok(())
+        } else {
+            Err(AdminError::NotAdministrator)
+        }
     }
 
     /// The earliest last request of a dashboard session still in use: one unused

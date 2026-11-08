@@ -96,7 +96,9 @@ that session or replacing it ends it, and every request checks the
 administrator's rights again. It also ends after 30 minutes without a request,
 12 hours after its sign-in however busy, and when the account's administrator
 rights are revoked, in the same transaction, with the handoffs that would start
-one: rights granted again revive none. Signing out of the dashboard ends only its
+one: rights granted again revive none. Writing a handoff or redeeming one holds
+the rights, as a change does, so a revocation waits for it and then ends what it
+wrote, or comes first and refuses it. Signing out of the dashboard ends only its
 session. Signing in and out are recorded as `dashboard_signed_in` and
 `dashboard_signed_out`, which the administrator's security history shows; a
 session that times out records nothing. The account's devices list each
