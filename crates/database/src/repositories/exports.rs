@@ -6,9 +6,11 @@ use super::{ExportRepository, JsonArray, RepositoryExecutor};
 use crate::{DatabaseError, StoredPasskey};
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    AuthenticationMethod, ClientId, PasskeyId, Provider, SessionId, UserId, events::UserAgentFamily,
+    AnnouncementId, AuthenticationMethod, ClientId, EventId, NotificationId, PasskeyId, Provider,
+    SessionId, UserId, events::UserAgentFamily,
 };
 use serde::Serialize;
+use serde_json::Value;
 use std::net::IpAddr;
 
 /// A GitHub or Google identity the account linked, unlinked ones included until
@@ -57,6 +59,38 @@ pub struct SessionRecord {
     pub revoked_at: Option<DateTime<Utc>>,
     /// The apps it signed in to, first one first.
     pub clients: Vec<ClientId>,
+}
+
+/// A notification of the account's inbox as stored, whatever its kind: one a
+/// newer release wrote is exported too.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct NotificationRecord {
+    /// Notification ID.
+    pub id: NotificationId,
+    /// When it was written.
+    pub created_at: DateTime<Utc>,
+    /// When its owner last read it, unless they marked it unread since.
+    pub read_at: Option<DateTime<Utc>>,
+    /// The event it comes from, if any.
+    pub event_id: Option<EventId>,
+    /// What it says, as stored: `{"kind": …, …}`.
+    #[serde(flatten)]
+    pub payload: Value,
+}
+
+/// An announcement the account received.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AnnouncementRecord {
+    /// Announcement ID.
+    pub id: AnnouncementId,
+    /// Its subject.
+    pub subject: String,
+    /// Its text.
+    pub body: String,
+    /// Whether it went to every account, rather than to chosen ones.
+    pub everyone: bool,
+    /// When it was sent.
+    pub sent_at: DateTime<Utc>,
 }
 
 impl ExportRepository<'_> {
@@ -135,6 +169,58 @@ impl ExportRepository<'_> {
                 FROM sessions s
                 WHERE s.user_id = $1
                 ORDER BY s.last_seen_at DESC, s.id DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
+    /// Every notification of the account's inbox, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn notifications(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<NotificationRecord>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                NotificationRecord,
+                r#"SELECT
+                    id AS "id: NotificationId", created_at, read_at,
+                    event_id AS "event_id: EventId", payload
+                FROM notifications
+                WHERE user_id = $1
+                ORDER BY created_at DESC, id DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
+    /// The announcements the account received, until cleanup deletes its
+    /// recipient row, newest first. Drafts are the administrators' until sent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn announcements(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<AnnouncementRecord>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                AnnouncementRecord,
+                r#"SELECT
+                    a.id AS "id: AnnouncementId", a.subject, a.body, a.everyone,
+                    a.sent_at AS "sent_at!"
+                FROM announcements a
+                JOIN announcement_recipients r ON r.announcement_id = a.id
+                WHERE r.user_id = $1 AND a.sent_at IS NOT NULL
+                ORDER BY a.sent_at DESC, a.id DESC"#,
                 user_id.as_uuid(),
             )
         )

@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    a.id AS \"id: AnnouncementId\", a.subject, a.body, a.everyone,\n                    a.sent_at AS \"sent_at!\"\n                FROM announcements a\n                JOIN announcement_recipients r ON r.announcement_id = a.id\n                WHERE r.user_id = $1 AND a.sent_at IS NOT NULL\n                ORDER BY a.sent_at DESC, a.id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: AnnouncementId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "everyone",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "sent_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f30e6a970c7090c947a5cbf0ff7631bea0148d3ef92b27e48d191cd4948adeca"
+}

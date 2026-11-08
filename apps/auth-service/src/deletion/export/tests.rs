@@ -1,12 +1,10 @@
 //! The export's JSON shape, which downloads keep across releases.
 use super::*;
-use crate::notifications::NotificationItem;
 use chrono::TimeZone;
 use piquel_common::{
-    AuthenticationMethod, EmailId, EventId, NotificationId, Provider, TokenId,
+    AnnouncementId, AuthenticationMethod, EmailId, EventId, NotificationId, Provider, TokenId,
     clients::ClientKind,
     events::{Browser, Platform, UserAgentFamily},
-    notifications::Notification,
 };
 use piquel_repository::RecoveryPasskey;
 use serde_json::json;
@@ -30,7 +28,8 @@ fn serializes_every_section_in_its_documented_shape() {
     let grant = TokenId::new();
     let event = EventId::new();
     let picture = PictureId::new();
-    let notification = NotificationId::new();
+    let (notification, newer) = (NotificationId::new(), NotificationId::new());
+    let announcement = AnnouncementId::new();
     let client: ClientId = "notes".parse().expect("client");
     let device = UserAgentFamily {
         browser: Browser::Firefox,
@@ -123,7 +122,7 @@ fn serializes_every_section_in_its_documented_shape() {
             revoked_at: None,
         }],
         clients: vec![Client {
-            client: OwnedClientView {
+            view: OwnedClientView {
                 id: client.clone(),
                 display_name: "Notes".into(),
                 kind: ClientKind::Public,
@@ -137,6 +136,8 @@ fn serializes_every_section_in_its_documented_shape() {
                 suspended_at: None,
                 last_used_at: Some(at),
             },
+            created_at: at,
+            deleted_at: None,
             related_origins: vec![ApprovedOrigin {
                 origin: "https://notes.example".parse().expect("origin"),
                 client_id: client.clone(),
@@ -157,14 +158,28 @@ fn serializes_every_section_in_its_documented_shape() {
                 active: true,
             }),
         })],
-        notifications: vec![NotificationItem {
-            id: notification,
-            created_at: at,
-            read_at: None,
-            event_id: Some(event),
-            notification: Notification::AccountEnabled,
-            subject: Notification::AccountEnabled.subject().to_owned(),
-            body: Notification::AccountEnabled.body(),
+        notifications: vec![
+            Notification::from(NotificationRecord {
+                id: notification,
+                created_at: at,
+                read_at: None,
+                event_id: Some(event),
+                payload: json!({"kind": "account_enabled"}),
+            }),
+            Notification::from(NotificationRecord {
+                id: newer,
+                created_at: at,
+                read_at: Some(at),
+                event_id: None,
+                payload: json!({"kind": "from_a_newer_release", "detail": 1}),
+            }),
+        ],
+        announcements: vec![AnnouncementRecord {
+            id: announcement,
+            subject: "Maintenance".into(),
+            body: "Tonight.".into(),
+            everyone: true,
+            sent_at: at,
         }],
     };
     assert_eq!(records.file_name(), "piquel-account-ada-2026-10-22.json");
@@ -250,6 +265,8 @@ fn serializes_every_section_in_its_documented_shape() {
                 "enabled": true,
                 "suspended_at": null,
                 "last_used_at": time,
+                "created_at": time,
+                "deleted_at": null,
                 "related_origins": [{
                     "origin": "https://notes.example",
                     "client_id": "notes",
@@ -275,6 +292,22 @@ fn serializes_every_section_in_its_documented_shape() {
                 "kind": "account_enabled",
                 "subject": "Your account was enabled again",
                 "body": "You can sign in to it again.",
+            }, {
+                "id": newer,
+                "created_at": time,
+                "read_at": time,
+                "event_id": null,
+                "kind": "from_a_newer_release",
+                "detail": 1,
+                "subject": null,
+                "body": null,
+            }],
+            "announcements": [{
+                "id": announcement,
+                "subject": "Maintenance",
+                "body": "Tonight.",
+                "everyone": true,
+                "sent_at": time,
             }],
         })
     );

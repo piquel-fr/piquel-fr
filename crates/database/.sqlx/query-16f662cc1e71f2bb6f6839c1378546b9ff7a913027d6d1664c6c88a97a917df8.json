@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM announcements a\n            WHERE a.ctid IN (\n                SELECT announcement.ctid\n                FROM announcements announcement\n                WHERE NOT announcement.everyone\n                AND announcement.sent_at < now() - interval '1 year'\n                AND NOT EXISTS (\n                    SELECT FROM announcement_recipients r\n                    WHERE r.announcement_id = announcement.id\n                )\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "16f662cc1e71f2bb6f6839c1378546b9ff7a913027d6d1664c6c88a97a917df8"
+}

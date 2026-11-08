@@ -9,10 +9,7 @@
 //! connection, until the download ends or [`DEADLINE`] passes, so a replica
 //! streams at most [`STREAMS`] exports at once.
 
-use crate::{
-    clients::OwnedClientView, emails::EmailView, history::HistoryItem,
-    notifications::NotificationItem,
-};
+use crate::{clients::OwnedClientView, emails::EmailView, history::HistoryItem};
 use axum::body::Bytes;
 use base64::Engine;
 use chrono::{DateTime, Utc};
@@ -22,9 +19,10 @@ use piquel_common::{
     UserId,
 };
 use piquel_repository::{
-    DashboardSignIn, DatabaseError, DatabaseTransaction, EventFilter, IdentityRecord,
-    RecentRecovery, RecordedEvent, RecoveryState, SessionRecord, StoredGrant, StoredHandle,
-    StoredPasskey, StoredPicture, StoredUser,
+    AnnouncementRecord, DashboardSignIn, DatabaseError, DatabaseTransaction, EventFilter,
+    IdentityRecord, NotificationRecord, RecentRecovery, RecordedEvent, RecoveryState,
+    SessionRecord, StoredGrant, StoredHandle, StoredOidcClient, StoredPasskey, StoredPicture,
+    StoredUser,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -66,7 +64,8 @@ const VIEWS: &str = "account_viewed";
 /// "events": […]}`. Version 2 added the profile picture. Version 3 added what
 /// ended and is still stored (revoked passkeys, unlinked identities, ended
 /// sessions), each session's apps, the owned apps' related origins, and every
-/// event about the account as stored, which replaced its history.
+/// event about the account as stored, which replaced its history, deleted apps,
+/// notifications of kinds a newer release wrote, and received announcements.
 pub(crate) struct AccountExport {
     /// Every section but the events, read when the export starts.
     records: Records,
@@ -112,13 +111,16 @@ struct Records {
     consents: Vec<Consent>,
     /// Applications' refresh grants, revoked ones included until cleanup deletes them.
     grants: Vec<StoredGrant>,
-    /// The OIDC clients the account manages, as its developer console shows
-    /// them, with their related origins.
+    /// The OIDC clients the account manages or managed, as its developer
+    /// console shows them, with their related origins: a deleted one keeps only
+    /// its ID, settings and dates.
     clients: Vec<Client>,
     /// The recoveries support started for the account, newest first.
     recoveries: Vec<Recovery>,
     /// The inbox, newest first, with when each notification was read.
-    notifications: Vec<NotificationItem>,
+    notifications: Vec<Notification>,
+    /// The announcements the account received, newest first.
+    announcements: Vec<AnnouncementRecord>,
 }
 
 /// The account's profile.
@@ -201,14 +203,61 @@ struct Session {
     current: bool,
 }
 
-/// A client the account manages.
+/// A client the account manages, or managed until it was deleted.
 #[derive(Debug, Serialize)]
 struct Client {
     /// The client, as the developer console shows it.
     #[serde(flatten)]
-    client: OwnedClientView,
+    view: OwnedClientView,
+    /// When it was registered.
+    created_at: DateTime<Utc>,
+    /// When it was deleted; `None` while it exists.
+    deleted_at: Option<DateTime<Utc>>,
     /// The origins approved for its pages to sign in with passkeys.
     related_origins: Vec<ApprovedOrigin>,
+}
+
+impl Client {
+    /// `client`, with those of `origins` approved for it.
+    fn new(client: StoredOidcClient, origins: &[ApprovedOrigin]) -> Self {
+        Self {
+            related_origins: (origins.iter())
+                .filter(|origin| origin.client_id == client.id)
+                .cloned()
+                .collect(),
+            created_at: client.created_at,
+            deleted_at: client.deleted_at,
+            view: OwnedClientView::from(client),
+        }
+    }
+}
+
+/// A notification of the inbox: as stored, with what it says when this release
+/// knows its kind.
+#[derive(Debug, Serialize)]
+struct Notification {
+    /// The notification as stored.
+    #[serde(flatten)]
+    record: NotificationRecord,
+    /// Its subject; `None` for a kind a newer release wrote.
+    subject: Option<String>,
+    /// What it says; `None` for a kind a newer release wrote.
+    body: Option<String>,
+}
+
+impl From<NotificationRecord> for Notification {
+    /// Reads what it says from its payload, when this release knows its kind.
+    fn from(record: NotificationRecord) -> Self {
+        let known = serde_json::from_value::<piquel_common::notifications::Notification>(
+            record.payload.clone(),
+        )
+        .ok();
+        Self {
+            subject: (known.as_ref()).map(|known| known.subject().to_owned()),
+            body: known.map(|known| known.body()),
+            record,
+        }
+    }
 }
 
 /// A handle the account holds or held.
@@ -393,16 +442,14 @@ impl AccountExport {
             }
             None => None,
         };
+        // Events name every app, so every client is read once for both. A
+        // deleted client keeps its owner, so the account's tombstones are in it.
+        let every = tx.oidc().list_clients().await?;
+        let names = HistoryItem::names(&every);
         let origins = tx.oidc().related_origins().await?;
-        let clients = (tx.oidc().list_owned_clients(user_id).await?)
-            .into_iter()
-            .map(|client| Client {
-                related_origins: (origins.iter())
-                    .filter(|origin| origin.client_id == client.id)
-                    .cloned()
-                    .collect(),
-                client: OwnedClientView::from(client),
-            })
+        let clients = (every.into_iter())
+            .filter(|client| client.owner_id == Some(user_id))
+            .map(|client| Client::new(client, &origins))
             .collect();
         let records = Records {
             format: FORMAT,
@@ -445,14 +492,17 @@ impl AccountExport {
                 .map(Recovery::from)
                 .collect(),
             clients,
-            notifications: NotificationItem::all(tx, user_id).await?,
+            notifications: (tx.exports().notifications(user_id).await?)
+                .into_iter()
+                .map(Notification::from)
+                .collect(),
+            announcements: tx.exports().announcements(user_id).await?,
             profile: user.into(),
         };
-        let clients = HistoryItem::client_names(tx.oidc()).await?;
         Ok(Self {
             records,
             snapshot,
-            clients,
+            clients: names,
             permit,
         })
     }

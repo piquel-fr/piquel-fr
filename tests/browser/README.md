@@ -21,7 +21,8 @@ form sends.
 `sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
 no passkey for is refused in the form. Every spec signs up through `/register`.
 
-`deletion.spec.ts` downloads the account's data from `/settings/data`, deletes the
+`deletion.spec.ts` downloads the account's data from `/settings/data`, a whole
+streamed document ending with the account's events, deletes the
 account by typing its handle, and restores it: signing in with its passkey offers to
 restore it instead of a session, and restoring signs in.
 

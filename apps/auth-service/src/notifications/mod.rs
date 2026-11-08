@@ -16,8 +16,8 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{EventId, NotificationId, UserId, notifications::Notification};
-use piquel_repository::{Database, DatabaseError, DatabaseTransaction, StoredNotification};
+use piquel_common::{EventId, NotificationId, notifications::Notification};
+use piquel_repository::{Database, StoredNotification};
 use serde::{Deserialize, Serialize};
 
 /// Notification failures and their response mapping.
@@ -107,28 +107,6 @@ impl NotificationItem {
     /// Whether the owner has read it.
     pub(crate) const fn read(&self) -> bool {
         self.read_at.is_some()
-    }
-
-    /// Every notification of `user`'s, newest first, read in `tx`, for their
-    /// data export.
-    pub(crate) async fn all(
-        tx: &mut DatabaseTransaction<'_>,
-        user: UserId,
-    ) -> Result<Vec<Self>, DatabaseError> {
-        let mut items = Vec::new();
-        let mut before = None;
-        loop {
-            let batch = tx
-                .notifications()
-                .list(user, before, u32::from(PAGE_SIZE))
-                .await?;
-            let exhausted = batch.len() < usize::from(PAGE_SIZE);
-            before = batch.last().map(|stored| stored.id);
-            items.extend(batch.into_iter().filter_map(Self::new));
-            if exhausted {
-                return Ok(items);
-            }
-        }
     }
 }
 

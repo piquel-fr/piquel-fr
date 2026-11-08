@@ -19,7 +19,7 @@ use piquel_common::{
 };
 use piquel_repository::{
     Database, DatabaseError, EventFilter, EventRepository, OidcRepository, SessionScope,
-    StoredEvent,
+    StoredEvent, StoredOidcClient,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
@@ -148,18 +148,20 @@ impl HistoryItem {
         Some(Self::with(stored, clients, entry))
     }
 
-    /// The names of the registered clients, by ID, for [`Self::with`]. A deleted
-    /// client's name was erased with it, so its entries name no client.
-    pub(crate) async fn client_names(
+    /// The names of the registered clients, by ID, for [`Self::with`].
+    async fn client_names(
         mut oidc: OidcRepository<'_>,
     ) -> Result<BTreeMap<ClientId, String>, DatabaseError> {
-        Ok(oidc
-            .list_clients()
-            .await?
-            .into_iter()
+        Ok(Self::names(&oidc.list_clients().await?))
+    }
+
+    /// The names of `clients`, by ID, for [`Self::with`]. A deleted client's name
+    /// was erased with it, so its entries name no client.
+    pub(crate) fn names(clients: &[StoredOidcClient]) -> BTreeMap<ClientId, String> {
+        (clients.iter())
             .filter(|client| client.deleted_at.is_none())
-            .map(|client| (client.id, client.display_name))
-            .collect())
+            .map(|client| (client.id.clone(), client.display_name.clone()))
+            .collect()
     }
 
     /// The entry the event `event_id` of `user`'s shows, if their history shows

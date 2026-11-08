@@ -13,14 +13,15 @@ use crate::{
 };
 use axum::http::header;
 use piquel_common::{
-    AuthenticationMethod, PictureId, Provider, RecoveryId, TokenId,
+    AnnouncementId, AuthenticationMethod, PictureId, Provider, RecoveryId, TokenId,
     clients::{ClientKind, ClientOwner},
     events::{JobName, RequestOrigin, SignInFailure},
     notifications::Notification,
 };
 use piquel_repository::{
-    Database, Holds, InsertExternalIdentity, InsertPasskey, InsertRecovery, RefreshRedemption,
-    RefreshRedemptionError, Table,
+    Database, DraftedAnnouncement, Holds, InsertAuthorizationCode, InsertExternalIdentity,
+    InsertPasskey, InsertRecovery, Recipients, RefreshRedemption, RefreshRedemptionError,
+    SessionAuthentication, Table,
 };
 use serde_json::json;
 use tokio_stream::StreamExt;
@@ -134,6 +135,40 @@ impl Fixture {
         client.id
     }
 
+    /// Signs `browser`'s session in to `client`: a code it redeemed, which records
+    /// the app the session signed in to.
+    async fn sign_in_to(&self, browser: &Browser, client: &ClientId) {
+        let mut tx = self.database.begin().await.expect("transaction");
+        let session = (tx.sessions().find_by_id(browser.session_id).await)
+            .expect("lookup")
+            .expect("session");
+        let code = TokenId::new();
+        let digest = code.as_uuid().as_bytes().repeat(2);
+        tx.oidc()
+            .insert_code(&InsertAuthorizationCode {
+                id: code,
+                secret_digest: digest.clone(),
+                digest_key: "test".into(),
+                client_id: client.clone(),
+                user_id: browser.user_id,
+                session_id: browser.session_id,
+                redirect_uri: "https://owned.example/callback".into(),
+                pkce_challenge: "challenge".into(),
+                nonce: None,
+                scopes: vec!["openid".into()],
+                audience: client.to_string(),
+                authentication: SessionAuthentication::from(&session),
+                expires_at: Utc::now() + Duration::minutes(1),
+            })
+            .await
+            .expect("code");
+        tx.oidc()
+            .consume_code(code, &[digest], client)
+            .await
+            .expect("redeemed");
+        tx.commit().await.expect("commit");
+    }
+
     /// Gives `browser`'s account a record in every table an export reads besides
     /// its sessions, a revoked passkey and an unlinked identity among them, and
     /// an event its history hides beside a view of it, which the export leaves
@@ -212,6 +247,21 @@ impl Fixture {
             .insert(user_id, None, &Notification::AccountEnabled)
             .await
             .expect("notification");
+        let announcement = AnnouncementId::new();
+        tx.announcements()
+            .insert_draft(&DraftedAnnouncement {
+                id: announcement,
+                subject: "Maintenance",
+                body: "Tonight.",
+                recipients: Recipients::Accounts(&[user_id]),
+            })
+            .await
+            .expect("draft");
+        tx.announcements()
+            .send(announcement, 1)
+            .await
+            .expect("send")
+            .expect("sent");
         let hidden = DomainEvent::SignInFailed {
             method: AuthenticationMethod::Passkey,
             reason: SignInFailure::AccountUnavailable,
@@ -226,7 +276,10 @@ impl Fixture {
         ] {
             let context = EventContext {
                 actor,
-                origin: RequestOrigin::default(),
+                origin: RequestOrigin {
+                    client_ip: Some([192, 0, 2, 7].into()),
+                    user_agent_family: None,
+                },
                 reason: None,
             };
             tx.record(&context, Some(user_id), event)
@@ -240,7 +293,19 @@ impl Fixture {
             .save_consent(user_id, &client, "test", &["openid".into()])
             .await
             .expect("consent");
-        self.own_client(browser).await;
+        let owned = self.own_client(browser).await;
+        self.sign_in_to(browser, &owned).await;
+        self.database
+            .oidc()
+            .approve_related_origin(&owned, &"https://related.example".parse().expect("origin"))
+            .await
+            .expect("related origin");
+        let deleted = self.own_client(browser).await;
+        change(&self.database, async |registry| {
+            registry.delete(&deleted).await
+        })
+        .await
+        .expect("deleted client");
         digest
     }
 
@@ -256,6 +321,22 @@ impl Fixture {
             .await
             .expect("due deletion");
         tx.commit().await.expect("commit");
+    }
+}
+
+/// Whether `value` holds something at `path`, an inventory's export path: not
+/// null, `false` or an empty array, in some item wherever the path says `*`.
+fn holds(value: &serde_json::Value, path: &[&str]) -> bool {
+    match path.split_first() {
+        None => {
+            !(value.is_null()
+                || *value == serde_json::Value::Bool(false)
+                || value.as_array().is_some_and(Vec::is_empty))
+        }
+        Some((&"*", rest)) => {
+            (value.as_array()).is_some_and(|items| items.iter().any(|item| holds(item, rest)))
+        }
+        Some((field, rest)) => holds(&value[*field], rest),
     }
 }
 
@@ -318,10 +399,9 @@ async fn exports_hold_every_category_and_no_secret() {
         fixture.handle(&browser).await.as_str()
     );
     for table in Table::ALL {
-        if let Holds::Exported(section) = table.holds() {
-            let value = &export[section];
-            let empty = value.is_null() || value.as_array().is_some_and(Vec::is_empty);
-            assert!(!empty, "{table} in {section}: {value}");
+        if let Holds::Exported(path) = table.holds() {
+            let path: Vec<&str> = path.split('/').collect();
+            assert!(holds(&export, &path), "{table} at {path:?}");
         }
     }
     let count = |category: &str| export[category].as_array().map_or(0, Vec::len);
@@ -333,8 +413,9 @@ async fn exports_hold_every_category_and_no_secret() {
         ("sessions", 2),
         ("consents", 1),
         ("grants", 1),
-        ("clients", 1),
+        ("clients", 2),
         ("recoveries", 1),
+        ("announcements", 1),
     ] {
         assert_eq!(count(category), expected, "{category}");
     }

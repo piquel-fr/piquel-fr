@@ -45,7 +45,7 @@ pub use repositories::{
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},
-    exports::{IdentityRecord, SessionRecord},
+    exports::{AnnouncementRecord, IdentityRecord, NotificationRecord, SessionRecord},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,

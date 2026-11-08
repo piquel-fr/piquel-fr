@@ -11,9 +11,10 @@ probation sign-in.
   rights and dashboard sign-ins, email addresses, passkeys (label, dates and
   backup state, no key material), linked identities, sessions with their devices,
   IP addresses and the apps each signed in to, consents, refresh grants, the apps
-  the account registered with their related origins, its recoveries (dates, state
-  and the passkey each enrolled, never a link), its notifications with when each
-  was read, and last, every event about the account as stored (`kind` and
+  the account registered with their related origins, deleted ones included as
+  their tombstones, its recoveries (dates, state and the passkey each enrolled,
+  never a link), its notifications as stored with when each was read, the
+  announcements it received, and last, every event about the account as stored (`kind` and
   `data`), with who acted, the app, and the request's IP address and device while
   they are kept. Passkeys, identities, sessions and grants that ended are in it
   until cleanup deletes them. Administrators' views of the account are left out,
@@ -73,13 +74,13 @@ records: that comes with
 
 `Table` (`crates/database/src/inventory/mod.rs`) names every table and what it
 holds about the person behind an account: nothing, records the export includes
-under a named section, or personal data it leaves out and why, such as digests
+at a path, such as `clients/*/related_origins`, or personal data it leaves out and why, such as digests
 of secrets or sign-ins in progress. Tests hold the export and the purge to it:
 
 - a database test fails while the schema has a table `Table` doesn't name, or
   a table with a foreign key to `users` that it says holds nothing;
-- the export test seeds every table the export reads, and fails while the
-  download lacks a section `Table` names;
+- the export test gives an account a row in every table the export reads, and
+  fails while the download holds nothing at a path `Table` names;
 - the purge test fails while a table with a foreign key to `users` holds no row
   of its account before the purge, or any row after it.
 
@@ -92,9 +93,10 @@ five minutes (`MaintenanceRepository::purge_expired_auth_state`):
 | --- | --- |
 | Personal data of events: IP, device, reasons, `Personal` values | 90 days after the event |
 | Revoked passkeys, unlinked identities | 90 days after they end |
-| Recoveries | 90 days after they are undone, cancelled or settle, or their unused link expires |
+| Recoveries | 90 days after they are undone or settle, or their unused link is cancelled or expires, whichever comes first |
 | Ended sessions, with their IP addresses | a day after they end, or once no refresh grant or code needs them: about 31 days at most |
 | Notifications | a year after they arrive |
+| Who received an announcement | a year after it is sent; one to chosen accounts goes with its last recipient |
 | A purged account's handles | a year after the purge |
 | Deliveries | 7 days after they succeed, 30 after they fail or are cancelled |
 

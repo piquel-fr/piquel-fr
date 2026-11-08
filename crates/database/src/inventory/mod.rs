@@ -1,9 +1,9 @@
 //! What every table holds about the people behind accounts: the one inventory
 //! the data export and the purge are checked against. Its tests fail while a
 //! migration adds a table it does not name, or a table referencing an account
-//! that it says holds nothing; auth's export test fails while the export lacks a
-//! section it names, and the purge test while a purge leaves a row referencing
-//! the account. How long each kind of record is kept is documented beside the
+//! that it says holds nothing; auth's export test fails while the export of an
+//! account with a row in every table holds nothing at a path it names, and the
+//! purge test while a purge leaves a row referencing the account. How long each kind of record is kept is documented beside the
 //! cleanup statements (`MaintenanceRepository::purge_expired_auth_state`) and in
 //! `docs/dev/architecture/account-deletion.md`.
 
@@ -106,7 +106,9 @@ pub enum Holds {
     /// Nothing that identifies a person: keys, cursors, the audit chain's own
     /// records, or invitations, which name nobody.
     Nothing,
-    /// The account's records, which its export includes under this key.
+    /// The account's records, which its export includes at this path: a
+    /// top-level section, then, through `/`, `*` for any item of an array and
+    /// the field holding them, e.g. `clients/*/related_origins`.
     Exported(&'static str),
     /// Personal data the export leaves out, for this reason: a secret, state
     /// that lasts minutes, or a copy of what another section holds.
@@ -124,27 +126,27 @@ impl Table {
             Self::Handles => Holds::Exported("handles"),
             Self::Administrators => Holds::Exported("administrator"),
             Self::DashboardSessions => Holds::Exported("dashboard_sessions"),
-            // The ownership index is a copy of the verified addresses.
-            Self::UserEmails | Self::ActiveVerifiedEmailOwnership => Holds::Exported("emails"),
+            Self::UserEmails => Holds::Exported("emails"),
+            // A copy of the verified addresses.
+            Self::ActiveVerifiedEmailOwnership => Holds::Exported("emails/*/verified"),
             Self::PasskeyCredentials => Holds::Exported("passkeys"),
             Self::ExternalLoginIdentities => Holds::Exported("identities"),
-            // Each session lists the apps it signed in to.
-            Self::Sessions | Self::OidcSessionClients => Holds::Exported("sessions"),
+            Self::Sessions => Holds::Exported("sessions"),
+            Self::OidcSessionClients => Holds::Exported("sessions/*/clients"),
             Self::OidcConsents => Holds::Exported("consents"),
             Self::RefreshTokenFamilies => Holds::Exported("grants"),
-            Self::OidcClients | Self::OidcRedirectUris | Self::ClientWebauthnOrigins => {
-                Holds::Exported("clients")
-            }
+            Self::OidcClients => Holds::Exported("clients"),
+            Self::OidcRedirectUris => Holds::Exported("clients/*/redirect_uris"),
+            Self::ClientWebauthnOrigins => Holds::Exported("clients/*/related_origins"),
             Self::AccountRecoveries => Holds::Exported("recoveries"),
-            Self::DomainEvents | Self::EventPersonalData => Holds::Exported("events"),
+            Self::DomainEvents => Holds::Exported("events"),
+            Self::EventPersonalData => Holds::Exported("events/*/ip"),
             Self::Notifications => Holds::Exported("notifications"),
+            // Sent ones; a draft is the administrators' until it is sent.
+            Self::Announcements | Self::AnnouncementRecipients => Holds::Exported("announcements"),
             Self::AccountDeletions => Holds::Withheld(
                 "it exists only while the account is scheduled for deletion, \
                 when nobody can sign in to export it",
-            ),
-            Self::Announcements | Self::AnnouncementRecipients => Holds::Withheld(
-                "administrators' drafts and recipient lists: a sent announcement \
-                reaches the account as a notification",
             ),
             Self::Deliveries => Holds::Withheld(
                 "outbound messages, copies of notifications and logout tokens, \

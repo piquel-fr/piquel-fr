@@ -13,8 +13,10 @@ async fn insert_user(pool: &PgPool, prefix: &str) -> UserId {
 }
 
 /// Revoked passkeys, unlinked identities and ended recoveries go 90 days after
-/// they end, notifications a year after they arrive, and a purged account's
-/// handles a year after its purge, which released them. Newer ones stay.
+/// they end, even a link cancelled after it expired, notifications and an
+/// announcement's recipients a year after it arrives, with an announcement to
+/// chosen accounts left without one, and a purged account's handles a year after
+/// its purge, which released them. Newer ones stay.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn ended_records_go_after_their_retention() {
@@ -32,13 +34,19 @@ async fn ended_records_go_after_their_retention() {
         FROM (VALUES ('old', interval '91 days'), ('new', interval '89 days')) v (label, age);
         INSERT INTO account_recoveries (id, user_id, secret_digest, started_at, expires_at, cancelled_at)
         VALUES (uuidv7(), '{user}', uuid_send(uuidv7()), now() - interval '92 days',
-            now() - interval '91 days', now() - interval '91 days');
+            now() - interval '91 days', now() - interval '1 day');
         INSERT INTO account_recoveries (id, user_id, secret_digest, started_at, expires_at)
         VALUES (uuidv7(), '{user}', uuid_send(uuidv7()), now() - interval '90 days',
             now() - interval '89 days');
         INSERT INTO notifications (id, user_id, payload, created_at)
         SELECT uuidv7(), '{user}', jsonb_build_object('kind', label), now() - age
         FROM (VALUES ('old', interval '366 days'), ('new', interval '364 days')) v (label, age);
+        INSERT INTO announcements (id, subject, body, everyone, sent_at)
+        SELECT uuidv7(), label, '{user}', everyone, now() - age
+        FROM (VALUES ('old', FALSE, interval '366 days'), ('old to everyone', TRUE, interval '366 days'),
+            ('new', FALSE, interval '364 days')) v (label, everyone, age);
+        INSERT INTO announcement_recipients (announcement_id, user_id)
+        SELECT id, '{user}' FROM announcements WHERE body = '{user}';
         DELETE FROM users WHERE id = '{purged}';"
     ))
     .execute(&pool)
@@ -62,6 +70,9 @@ async fn ended_records_go_after_their_retention() {
             UNION ALL SELECT 'recovery ' || CASE WHEN cancelled_at IS NULL THEN 'new' ELSE 'old' END
             FROM account_recoveries WHERE user_id = $1
             UNION ALL SELECT 'notification ' || (payload ->> 'kind') FROM notifications WHERE user_id = $1
+            UNION ALL SELECT 'announcement ' || subject FROM announcements WHERE body = $1::text
+            UNION ALL SELECT 'recipient of ' || a.subject FROM announcement_recipients r
+            JOIN announcements a ON a.id = r.announcement_id WHERE r.user_id = $1
             UNION ALL SELECT 'handle ' || handle FROM handles WHERE handle = $2
             ORDER BY 1",
         )
@@ -83,10 +94,13 @@ async fn ended_records_go_after_their_retention() {
     assert_eq!(
         remaining().await,
         [
+            "announcement new",
+            "announcement old to everyone",
             purged_handle.as_str(),
             "identity new",
             "notification new",
             "passkey new",
+            "recipient of new",
             "recovery new"
         ]
     );
@@ -99,9 +113,12 @@ async fn ended_records_go_after_their_retention() {
     assert_eq!(
         remaining().await,
         [
+            "announcement new",
+            "announcement old to everyone",
             "identity new",
             "notification new",
             "passkey new",
+            "recipient of new",
             "recovery new"
         ]
     );

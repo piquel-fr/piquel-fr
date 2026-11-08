@@ -26,4 +26,5 @@ The owner marks one unread, or every one read, in settings or through
 `…/unread` read them without marking anything. Administrators read an account's
 inbox on its dashboard page and operators with `account <user> notifications
 list|show`; neither marks anything read. The data export includes the inbox, and
-cleanup deletes a notification a year after it arrives.
+cleanup deletes a notification a year after it arrives, and an announcement's
+recipients a year after it is sent.
