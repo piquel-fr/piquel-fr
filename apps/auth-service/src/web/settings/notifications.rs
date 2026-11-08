@@ -93,8 +93,10 @@ impl AccountPage for Inbox {
         cx: &Cx,
         reader: &Reader,
         shown: InboxState,
-        outcome: (StatusCode, Messages<'_>),
+        (status, messages): (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
+        // A refused preference is said in the dialog shown again, not behind it.
+        let (alert, messages) = messages.into_dialog(shown.email);
         let viewer = reader.viewer();
         let inbox = web.account.inbox(&viewer, shown.before).await?;
         let rows: Vec<_> = inbox
@@ -113,10 +115,18 @@ impl AccountPage for Inbox {
                 confirmed: reader.is_recent(),
             },
             preferences: &inbox.preferences,
+            alert,
         };
         let page = Child::new(view! { cx => piquel_ui::inbox(rows: &rows, page: page) });
-        web.settings_page(cx, Tab::Notifications, reader, outcome, &[], page)
-            .await
+        web.settings_page(
+            cx,
+            Tab::Notifications,
+            reader,
+            (status, messages),
+            &[],
+            page,
+        )
+        .await
     }
 }
 

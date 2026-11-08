@@ -104,6 +104,8 @@ pub struct InboxPage<'a> {
     /// Whether each category's notifications are emailed, which only the owner
     /// changes.
     pub preferences: &'a [NotificationPreference],
+    /// Why a change to them was refused, which their dialog, shown again, says.
+    pub alert: Option<&'a str>,
 }
 
 impl InboxPage<'_> {
@@ -219,7 +221,7 @@ async fn email_button() -> Result<impl View> {
 async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
     let owner = page.audience.owns();
     Ok(view! {
-        dialog(id: EMAIL_DIALOG, title: "Email preferences", shown: page.shown.email, back: page.page, focus_close: true,
+        dialog(id: EMAIL_DIALOG, title: "Email preferences", shown: page.shown.email, back: page.page, alert: page.alert, focus_close: true,
             <p class="help">
                 (if owner {
                     "Piquel always emails you about your account itself, at your primary address: its addresses, sign-in methods and recovery, and what support changes. Choose what else it emails you."
