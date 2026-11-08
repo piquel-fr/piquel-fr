@@ -65,7 +65,9 @@ detail.
 - One Google and one GitHub identity may be linked. Unlinking releases the provider
   identity so another account can link it; account data and credentials never move.
   Settings keep listing identities of disabled providers so they can be unlinked.
-- The last passkey cannot be removed. Removing a passkey/provider revokes other
+- An account keeps at most 100 active passkeys (`PasskeyRepository::LIMIT`): a
+  database trigger enforces it, and enrollment refuses the 101st before the
+  authenticator creates it. The last passkey cannot be removed. Removing a passkey/provider revokes other
   central sessions. An owner who lost every passkey is recovered with a link to
   auth's `/recover` that enrolls one new passkey; for 15 days after, it confirms
   no change, and another passkey of the account can undo the recovery on

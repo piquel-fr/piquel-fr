@@ -107,7 +107,7 @@ Two roles hold different rights
 | Role | Who connects as it | What it may do |
 | --- | --- | --- |
 | `piquel`, the schema owner | the `migrate` job, and `audit prune` | Everything: it is PostgreSQL's superuser. It changes the schema and provisions the runtime role. |
-| `piquel_auth`, the runtime role | `serve` and every other command | Read and write rows. It may not rewrite sealed audit events or checkpoints, move the audit anchor, change the schema, disable triggers or run programs on the server. |
+| `piquel_auth`, the runtime role | `serve` and every other command | Read and write rows. It inserts only the columns auth writes, so an event's time, transaction, position and chain columns keep their defaults and it can't backdate or forge them. It may not rewrite sealed audit events or checkpoints, move the audit anchor, change the schema, disable triggers or run programs on the server. |
 
 `Database::provision` grants the runtime role its rights on every `migrate`, from
 `crates/database/src/connection/runtime_role.sql`. Triggers in the migrations
