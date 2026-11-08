@@ -1,0 +1,4 @@
+# The build context is the repository root; infra/docs.Dockerfile reads only these.
+*
+!book.toml
+!docs

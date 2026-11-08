@@ -54,7 +54,8 @@ just preview
 
 This snapshots the checkout, uncommitted changes included, builds auth and the
 admin dashboard, applies migrations, and prints the preview's URLs. The settings
-are at `/settings` on its auth URL, and the developer console at `/developers`.
+are at `/settings` on its auth URL, the developer console at `/developers`, and
+the documentation on its docs URL.
 The preview has its own database and keys, and its URLs work from any device on
 the tailnet. Run the same command again after changing code, and
 `just preview-delete` to remove it. See [deploying](operations/deploying.md#previews)
