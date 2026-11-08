@@ -1,10 +1,10 @@
 //! Signing keys: listing, rotating and revoking them. Importing the
 //! deployment's PEM key stays at the terminal.
 
-use super::AdminApplication as App;
+use super::{AdminApplication as App, NoInput};
 use piquel_common::protocol::jwt::KeyId;
-use piquel_ui::{Action, Change, Checkbox, SigningKeyRow};
-use serde::{Deserialize, de::IgnoredAny};
+use piquel_ui::{Action, Change, Checkbox, SigningKeyRow, Target};
+use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
@@ -15,10 +15,10 @@ use topcoat::{
 path_param!(pub key: KeyId, error = not_found);
 
 /// The form rotating the signing key.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Rotation {
     /// Whether the new key signs at once, skipping its day of waiting.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
     now: Checkbox,
 }
 
@@ -71,7 +71,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Resp
 /// `/keys/{key}/revoke`: deletes the key at once, and when it signs, the keys
 /// stored beside it, a new key signing instead.
 #[route([GET, POST] "/keys/{key}/revoke")]
-pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn revoke(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let app = App::of(cx);
@@ -84,12 +84,16 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
             .map(drop)
     })
     .await?;
+    let target = Target {
+        name: "Signing key",
+        id: Some(id.as_str()),
+    };
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::RevokeSigningKey,
+            target: target,
             back: back.as_str(),
             refusal: refused.as_deref(),
-            <p><code>(id.as_str())</code></p>
         )
     };
     App::render(cx, StatusCode::OK, Change::RevokeSigningKey.title(), page).await

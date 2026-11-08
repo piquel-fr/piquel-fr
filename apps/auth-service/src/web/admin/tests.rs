@@ -649,9 +649,10 @@ async fn administrators_remove_a_disabled_accounts_picture() {
     assert!(stored.expect("read").is_none(), "removed");
 }
 
-/// A change the service refuses shows the form again with what was typed: a
-/// settings section reopens the refused row with its input and reason, which no
-/// other form takes, and a change page keeps its fields.
+/// A change the service refuses shows the form again with what was typed, at
+/// the refusal's status: a settings section reopens the refused row with its
+/// input and reason, which no other form takes, and a change page keeps its
+/// fields.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_refused_change_keeps_what_was_typed() {
@@ -731,7 +732,13 @@ async fn a_refused_change_keeps_what_was_typed() {
         .handle
         .to_string();
     let same = [("handle", current.as_str()), ("reason", "Impersonation")];
-    let page = html(post(&handle, &same).await).await;
+    let refused = post(&handle, &same).await;
+    assert!(
+        refused.status().is_client_error(),
+        "a change page keeps the refusal's status: {}",
+        refused.status()
+    );
+    let page = html(refused).await;
     assert!(page.contains(&format!(r#"value="{current}""#)), "{page}");
     assert!(page.contains(r#"value="Impersonation""#), "{page}");
 }
@@ -1438,6 +1445,7 @@ async fn pages_that_could_only_fail_refuse_at_once() {
     let client = format!("/clients/{id}");
     let page = format!("{client}/overview");
     assert_eq!(redirect(&post("/clients/new", &registration).await), page);
+    harness.forget_submissions().await;
     let taken = html(post("/clients/new", &registration).await).await;
     assert!(taken.contains("is taken"), "{taken}");
 
@@ -1553,6 +1561,15 @@ impl Channel for Unsent {
 }
 
 impl Harness {
+    /// Lets the same forms be posted again at once, as if the seconds in which a
+    /// repeat is taken for a double click had passed.
+    async fn forget_submissions(&self) {
+        (self.database.dashboard())
+            .forget_submissions()
+            .await
+            .expect("forget");
+    }
+
     /// The actor of the newest event of `kind` that `found` picks, if any.
     async fn actor_of(&self, kind: &str, found: impl Fn(&DomainEvent) -> bool) -> Option<Actor> {
         let filter = EventFilter {
@@ -1621,7 +1638,9 @@ async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
     let page = html(harness.visit(&dashboard, &listed).await).await;
     assert!(page.contains(&format!(r#"action="{retry}""#)), "{page}");
     assert!(page.contains("Cancelled"), "{page}");
-    // Cancelled already, it is refused, saying why.
+    // Cancelled already, it is refused, saying why, once past the seconds in
+    // which posting it again is taken for a double click.
+    harness.forget_submissions().await;
     let refused = html(post(&cancel).await).await;
     assert!(
         refused.contains("No pending or failed delivery"),
@@ -1678,6 +1697,7 @@ async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
     assert_eq!(redirect(&post(&revoke).await), "/keys");
     let keys = harness.database.signing_keys().list().await.expect("keys");
     assert!(keys.iter().all(|key| key.id != next), "revoked");
+    harness.forget_submissions().await;
     let unknown = html(post(&revoke).await).await;
     assert!(unknown.contains("No signing key has ID"), "{unknown}");
 }
@@ -1714,6 +1734,7 @@ async fn handles_are_reserved_given_released_and_unreserved() {
         redirect(&post("/handles/reserve", &reserve).await),
         "/handles"
     );
+    harness.forget_submissions().await;
     let refused = html(post("/handles/reserve", &reserve).await).await;
     assert!(
         refused.contains("This handle, or one that looks like it, is reserved already"),
@@ -1754,6 +1775,7 @@ async fn handles_are_reserved_given_released_and_unreserved() {
         "released: {page}"
     );
     assert_eq!(redirect(&post(&release, &[]).await), "/handles");
+    harness.forget_submissions().await;
     let refused = html(post(&release, &[]).await).await;
     assert!(refused.contains("This handle is not released"), "{refused}");
     assert_eq!(redirect(&post(&unreserve, &[]).await), "/handles");
@@ -1896,6 +1918,8 @@ async fn the_draft_form_finds_accounts_and_sends_from_the_editor() {
     let confirmed = harness
         .confirmed(&admin, "/announcements/new", Utc::now())
         .await;
+    // The same form, posted again at once, would be taken for a double click.
+    harness.forget_submissions().await;
     let sent = post(&confirmed, &to).await;
     let shown = html(harness.visit(&confirmed, redirect(&sent)).await).await;
     assert!(shown.contains("Sent"), "{shown}");
@@ -2008,4 +2032,157 @@ async fn announcements_are_drafted_then_sent_from_the_dashboard() {
     let item = routes::page::settings::NOTIFICATION.replace("{id}", &received.id.to_string());
     let shown = html(owner.visit(&harness.auth.a, &item).await).await;
     assert!(shown.contains("<p>Nothing else changes.</p>"), "{shown}");
+}
+
+/// A change's page names the account it changes, by handle and ID, beside its
+/// button, and its form names it to the passkey dialog: two such pages left open
+/// cannot be told apart only by their address.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_change_page_names_its_target() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let user = Browser::new_account(&harness.database).await;
+    let disable = format!("/users/{}/disable", user.user_id);
+    let dashboard = harness.confirmed(&admin, &disable, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, &disable).await).await;
+    let handle = format!("browser-{}", &user.user_id.to_string()[24..]);
+    assert!(
+        page.contains(&format!(
+            r#"<p class="target"><strong>{handle}</strong> <code>{}</code></p>"#,
+            user.user_id
+        )),
+        "{page}"
+    );
+    assert!(
+        page.contains(&format!(
+            r#"data-confirming="Disable this account: {handle} ({})""#,
+            user.user_id
+        )),
+        "{page}"
+    );
+}
+
+/// A change posted once the dashboard's confirmation ended, such as without its
+/// script, goes through auth's handoff page, and its page then shows the form as
+/// it was posted, once, saying nothing changed yet.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_form_posted_without_a_confirmation_comes_back_after_it() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let user = Browser::new_account(&harness.database).await;
+    let disable = format!("/users/{}/disable", user.user_id);
+    let dashboard = harness.sign_in(&admin, "/users").await;
+    let posted = dashboard
+        .submit(
+            &harness.dashboard,
+            &format!("{DASHBOARD}{disable}"),
+            &[("reason", "Typed before it ended")],
+            OWN_PAGE,
+        )
+        .await;
+    let handoff = location(&posted);
+    assert_eq!(handoff.path(), routes::page::ADMIN);
+    let back = parameter(&handoff, "return_to");
+    assert_eq!(back, disable);
+    let (state, _) = cookie(&posted, BrowserCookie::DashboardState);
+    let query = HandoffQuery {
+        state: state.to_owned(),
+        return_to: back.clone(),
+        confirm: LegacyConfirm,
+    };
+    let proof = AdminProof::unverified(admin.session_id, Utc::now());
+    let code_url = harness
+        .sign_in_service()
+        .hand_off(&admin.owner(&harness.database).await, &query, proof)
+        .await
+        .expect("handed off");
+    let browser = dashboard.with_cookie(BrowserCookie::DashboardState, state);
+    let confirmed = harness.redeem(&browser, &code_url, &back).await;
+
+    let shown = harness.visit(&confirmed, &back).await;
+    assert_eq!(shown.status(), StatusCode::OK);
+    let page = html(shown).await;
+    assert!(page.contains(r#"value="Typed before it ended""#), "{page}");
+    assert!(page.contains("Nothing has changed yet"), "{page}");
+    let again = html(harness.visit(&confirmed, &back).await).await;
+    assert!(
+        !again.contains("Typed before it ended"),
+        "shown once: {again}"
+    );
+    let stored = harness.database.users().find_by_id(user.user_id).await;
+    let stored = stored.expect("lookup").expect("user");
+    assert_eq!(stored.status, AccountStatus::Active, "nothing changed");
+}
+
+/// An account's page revokes only its own sessions: another account's session
+/// in the path is not found, and stays signed in.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_session_is_revoked_only_from_its_own_account() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let (named, other) = (
+        Browser::new_account(&harness.database).await,
+        Browser::new_account(&harness.database).await,
+    );
+    let revoke = format!(
+        "/users/{}/sessions/{}/revoke",
+        named.user_id, other.session_id
+    );
+    let dashboard = harness.confirmed(&admin, &revoke, Utc::now()).await;
+    let refused = dashboard
+        .submit(
+            &harness.dashboard,
+            &format!("{DASHBOARD}{revoke}"),
+            &[],
+            OWN_PAGE,
+        )
+        .await;
+    assert_eq!(refused.status(), StatusCode::NOT_FOUND);
+    let session = harness
+        .database
+        .sessions()
+        .find_active_by_id(other.session_id)
+        .await
+        .expect("lookup");
+    assert!(session.is_some(), "still signed in");
+}
+
+/// The same form posted twice within seconds, such as by a double click, makes
+/// its change once: the second goes where the change is listed.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_change_posted_twice_is_made_once() {
+    let origin = AUTH_ORIGIN.parse().expect("auth origin");
+    let mut config = AuthConfig::test(&origin);
+    config.passkey.invite_required = true;
+    let harness = Harness::of(config).await;
+    let admin = harness.admin().await;
+    let new = "/invitations/new";
+    let dashboard = harness.confirmed(&admin, new, Utc::now()).await;
+    let before = harness.database.security().list_invitations().await;
+    let before = before.expect("invitations").len();
+    let url = format!("{DASHBOARD}{new}");
+    let post = || dashboard.submit(&harness.dashboard, &url, &[("expires_in", "2d")], OWN_PAGE);
+    let (first, second) = tokio::join!(post(), post());
+    // One shows the new link, the other the invitations, where it is listed.
+    let mut answers = [redirect(&first), redirect(&second)];
+    answers.sort_unstable();
+    assert_eq!(answers, ["/invitations", new]);
+    let after = harness.database.security().list_invitations().await;
+    assert_eq!(after.expect("invitations").len(), before + 1, "made once");
+}
+
+/// The invitations pages find who is signed in before whether signup needs
+/// invitations, so a browser that is not signed in learns nothing of it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn invitation_pages_sign_in_first() {
+    let harness = Harness::new().await;
+    let page = harness
+        .visit(&Browser::signed_out(), "/invitations/new")
+        .await;
+    assert_eq!(location(&page).path(), routes::page::ADMIN);
 }

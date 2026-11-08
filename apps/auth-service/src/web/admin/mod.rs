@@ -34,6 +34,8 @@ mod audit;
 mod clients;
 /// The outbound delivery queue.
 mod deliveries;
+/// What the dashboard keeps of the changes its forms post.
+mod forms;
 /// The reserved and released handles, and the accounts holding a reserved one.
 mod handles;
 /// Signup invitations.
@@ -74,9 +76,10 @@ use piquel_crypto::{KeyEncryptionKey, NoteVerifier};
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
 use piquel_ui::{
-    Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search, Who,
+    Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search,
+    Target, Who,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     future::Future,
     sync::{Arc, Mutex, PoisonError},
@@ -113,6 +116,8 @@ pub(crate) struct AdminApplication {
     service: AdminService,
     /// The settings administrators share with owners.
     account: AccountService,
+    /// The claims on changes, and the drafts kept across auth's handoff page.
+    forms: forms::DashboardForms,
     /// Who is signed in, and signing in through auth.
     sign_in: DashboardSignIn,
     /// The passkey ceremonies that confirm the dashboard on its own pages.
@@ -233,6 +238,7 @@ impl AdminApplication {
         Ok(Self {
             service: AdminService::new(database.clone(), config.email.smtp.is_some()),
             account: AccountService::new(database.clone()),
+            forms: forms::DashboardForms::new(database.clone()),
             keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             passkeys,
@@ -413,17 +419,13 @@ impl AdminApplication {
         }
     }
 
-    /// Requires the dashboard's passkey confirmation recent enough for a change:
-    /// still for [`FORM_TIME`] when a page shows its form, and now when it takes
-    /// the form posted. Without one, the browser confirms on auth's handoff page,
-    /// and comes back to the page, where the administrator submits again.
+    /// Requires the dashboard's passkey confirmation to last [`FORM_TIME`] more
+    /// when a page shows its form, so it can still be submitted. Without one, the
+    /// browser confirms on auth's handoff page, and comes back to the page. A
+    /// posted form goes on: the service refuses its change without a confirmation
+    /// recent enough, and [`Self::change`] keeps the form across the same trip.
     fn confirm(cx: &Cx, admin: &SignedInAdmin) -> Result<()> {
-        let ahead = if method(cx) == Method::POST {
-            Duration::zero()
-        } else {
-            FORM_TIME
-        };
-        if admin.operator.is_confirmed(ahead) {
+        if method(cx) == Method::POST || admin.operator.is_confirmed(FORM_TIME) {
             Ok(())
         } else {
             Err(Self::of(cx).hand_off(cx))
@@ -449,43 +451,94 @@ impl AdminApplication {
         }
     }
 
-    /// Makes the change a posted `form` asks for, with `call`. Returns nothing for
-    /// a `GET`, which only shows the form: a link, even with a query, never changes
-    /// anything. A refusal comes back with the message the form shows and the form
-    /// as posted, so the page keeps what was typed. When the change needs a newer
-    /// confirmation, or the session ended meanwhile, the browser goes through
-    /// auth's handoff page and back to the form's page.
+    /// Makes the change a posted `form` asks for, with `call`, once: the same form
+    /// posted again to the same page within seconds, such as by a double click or
+    /// a reload, changes nothing, and goes to `again`. Every change the dashboard
+    /// makes comes through here.
+    ///
+    /// A `GET` only shows the form, so it returns nothing: a link, even with a
+    /// query, never changes anything. It shows the page's draft, if the
+    /// administrator left one, once, as [`DRAFT_KEPT`] says. A refusal comes back with the message the
+    /// form shows and the form as posted, so the page keeps what was typed, and
+    /// the page answers with the refusal's status. When the change needs a newer
+    /// confirmation, or the session ended meanwhile, the form is kept as a draft,
+    /// and the browser goes through auth's handoff page and back to the form's
+    /// page, which shows it.
     async fn change<I, T, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
+        again: String,
         call: F,
     ) -> Result<Option<Result<T, Refused<I>>>>
     where
-        I: Clone,
+        I: Clone + Serialize + DeserializeOwned,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
+        let app = Self::of(cx);
+        let admin = Self::admin(cx).await?;
+        let path = uri(cx).path();
         let Some(Form(input)) = form.filter(|_| method(cx) == Method::POST) else {
-            return Ok(None);
+            let kept = app.forms.take(admin.user_id, path).await?;
+            return Ok(kept.map(|form| {
+                Err(Refused {
+                    message: DRAFT_KEPT.to_owned(),
+                    form,
+                })
+            }));
+        };
+        let Some(claim) = app.forms.claim(admin.user_id, path, &input).await? else {
+            return Err(see_other(again).into());
         };
         let refused = match call(input.clone()).await {
             Ok(value) => return Ok(Some(Ok(value))),
             Err(refused) => refused.into(),
         };
+        app.forms.release(claim).await?;
         match refused {
-            Refusal::HandOff => Err(Self::of(cx).hand_off(cx)),
+            Refusal::HandOff => {
+                app.forms.keep(admin.user_id, path, &input).await?;
+                Err(app.hand_off(cx))
+            }
             Refusal::Page(error) => Err(error.into()),
             Refusal::Form(refusal) => match refusal.public() {
                 (status, _) if status.is_server_error() => {
                     Err(Error::msg("an admin change failed"))
                 }
-                (_, message) => Ok(Some(Err(Refused {
-                    message: Self::sentence(message),
-                    form: input,
-                }))),
+                (status, message) => {
+                    *Self::refused(cx)
+                        .await
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner) = Some(status);
+                    Ok(Some(Err(Refused {
+                        message: Self::sentence(message),
+                        form: input,
+                    })))
+                }
             },
         }
+    }
+
+    /// The status a page at `status` answers with: the refusal's, for a page at
+    /// `200` showing the change the request posted refused.
+    async fn status(cx: &Cx, status: StatusCode) -> StatusCode {
+        let refused = *Self::refused(cx)
+            .await
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        refused
+            .filter(|_| status == StatusCode::OK)
+            .unwrap_or(status)
+    }
+
+    /// The status of the refusal of the change the request posted, if one was
+    /// refused, which the page answers with: one cell per request, which
+    /// [`Self::change`] fills and [`Self::render`] reads.
+    #[memoize]
+    async fn refused(cx: &Cx) -> Arc<Mutex<Option<StatusCode>>> {
+        let _ = cx;
+        Arc::default()
     }
 
     /// The answer of a JSON route the dashboard's script calls: `answered`, or its
@@ -496,7 +549,8 @@ impl AdminApplication {
             .map(Body::new)
     }
 
-    /// Like [`Self::change`], then goes to `done` once the change is made.
+    /// Like [`Self::change`], then goes to `done` once the change is made, where
+    /// the same form posted again meanwhile goes too.
     async fn submit<I, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
@@ -504,12 +558,12 @@ impl AdminApplication {
         call: F,
     ) -> Result<Option<Refused<I>>>
     where
-        I: Clone,
+        I: Clone + Serialize + DeserializeOwned,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<(), E>>,
     {
-        match Self::change(cx, form, call).await? {
+        match Self::change(cx, form, done.clone(), call).await? {
             Some(Ok(())) => Err(see_other(done).into()),
             Some(Err(refused)) => Ok(Some(refused)),
             None => Ok(None),
@@ -517,8 +571,39 @@ impl AdminApplication {
     }
 }
 
+/// What a change's page says over the form a confirmation's trip through auth
+/// kept: nothing was changed yet.
+const DRAFT_KEPT: &str = "Nothing has changed yet: check the form, then submit it again.";
+
+/// The page a change's page is under: the account or client it changes.
+#[derive(Clone)]
+struct Parent {
+    /// Its name, as the crumb shows it: the account's handle, or the client's
+    /// name.
+    name: String,
+    /// Its page.
+    href: String,
+    /// Its ID.
+    id: String,
+}
+
+impl Parent {
+    /// It, as a change's page names it beside its button.
+    fn target(&self) -> Target<'_> {
+        Target {
+            name: &self.name,
+            id: Some(&self.id),
+        }
+    }
+}
+
+/// The form of a change that takes no input, which its button alone posts.
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct NoInput {}
+
 /// A change the service refused: why, and the form as it was posted, which the
-/// page shows again so nothing typed is lost. It reads as its message.
+/// page shows again so nothing typed is lost. It reads as its message. A form
+/// kept across auth's handoff page comes back as one too, saying so.
 struct Refused<I> {
     /// Why, as the form says it.
     message: String,
@@ -646,20 +731,18 @@ impl AdminApplication {
             .or_else(|| (path == tabs[0].1).then_some(DashboardTab::Overview))
     }
 
-    /// The page the request's page is under, inside `current`, among `tabs`, if
-    /// any, named and linked in the crumb: the account under Users or
-    /// Administrators, or the client under Clients, which a page such as
-    /// `/users/{account}/disable` changes. The account's or client's own page,
-    /// and a tab's other pages, have none. A parent that cannot be read, such as
-    /// on the error page of an account that does not exist, is left out: the
-    /// page itself says what went wrong.
-    async fn parent(
-        cx: &Cx,
-        admin: Option<&SignedInAdmin>,
-        tabs: &[(DashboardTab, String)],
-        current: Option<DashboardTab>,
-    ) -> Option<(String, String)> {
-        let (admin, current) = (admin?, current?);
+    /// The page the request's page is under, inside its tab, if any, named and
+    /// linked in the crumb: the account under Users or Administrators, or the
+    /// client under Clients, which a page such as `/users/{account}/disable`
+    /// changes, and which that page names beside its button. The account's or
+    /// client's own page, and a tab's other pages, have none. A parent that cannot
+    /// be read, such as on the error page of an account that does not exist, is
+    /// left out: the page itself says what went wrong. Read once per request.
+    #[memoize]
+    async fn parent(cx: &Cx) -> Option<Parent> {
+        let admin = Self::admin(cx).await.ok()?;
+        let tabs = Self::tabs(cx);
+        let current = Self::current_tab(cx, &tabs)?;
         let path = uri(cx).path();
         let (_, tab) = tabs.iter().find(|(tab, _)| *tab == current)?;
         // Only a page below the account's or client's has one: `/clients/new`
@@ -672,7 +755,11 @@ impl AdminApplication {
             DashboardTab::Users | DashboardTab::Administrators => {
                 let id: UserId = id.parse().ok()?;
                 let handle = service.user_handle(&admin.operator, id).await.ok()?;
-                Some((handle.to_string(), Self::account(cx, id)))
+                Some(Parent {
+                    name: handle.to_string(),
+                    href: Self::account(cx, id),
+                    id: id.to_string(),
+                })
             }
             DashboardTab::Clients => {
                 let id: ClientId = id.parse().ok()?;
@@ -681,13 +768,25 @@ impl AdminApplication {
                     return None;
                 }
                 let details = service.client_details(&admin.operator, &id).await.ok()?;
-                Some((Self::title(&details.client).to_owned(), href))
+                Some(Parent {
+                    name: Self::title(&details.client).to_owned(),
+                    href,
+                    id: id.to_string(),
+                })
             }
             _ => None,
         }
     }
 
-    /// Answers with the page named `title` and `page`, at `status`, in the shell
+    /// What the request's change page acts on, as [`Self::parent`] finds it: the
+    /// account or client, which its page names beside its button.
+    async fn target(cx: &Cx) -> Option<Target<'_>> {
+        Self::parent(cx).await.as_ref().map(Parent::target)
+    }
+
+    /// Answers with the page named `title` and `page`, at `status`, or, for a page
+    /// at `200`, the status of the refusal of the change the request posted, in
+    /// the shell
     /// every page shares: the sidebar of tabs, the signed-in administrator and
     /// signing out, the account search, the service's health, and the trace ID
     /// of a server error.
@@ -698,12 +797,13 @@ impl AdminApplication {
         page: impl View,
     ) -> Result<Response> {
         let title = title.into();
+        let status = Self::status(cx, status).await;
         // A browser that is not signed in is sent on by the page itself.
         let admin = Self::admin(cx).await.ok();
         let app = Self::of(cx);
         let tabs = Self::tabs(cx);
         let current = Self::current_tab(cx, &tabs);
-        let parent = Self::parent(cx, admin, &tabs, current).await;
+        let parent = Self::parent(cx).await;
         let links: &Vec<_> = &tabs
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
@@ -751,7 +851,7 @@ impl AdminApplication {
             current,
             parent: parent
                 .as_ref()
-                .map(|(name, href)| (name.as_str(), href.as_str())),
+                .map(|parent| (parent.name.as_str(), parent.href.as_str())),
             sign_out: leave,
             preferences: BrowserCookie::read_preferences(headers(cx)),
             preferences_action: prefer,

@@ -3,13 +3,13 @@
 //! client's page lists its own.
 
 use super::{
-    AdminApplication as App, Refusal,
+    AdminApplication as App, NoInput, Refusal,
     clients::{self, Client},
 };
 use crate::{clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
 use piquel_common::{admin::ApproveOrigin, clients::RelatedOrigin};
-use piquel_ui::{Change, Query};
-use serde::{Serialize, de::IgnoredAny};
+use piquel_ui::{Change, Query, Target};
+use serde::Serialize;
 use topcoat::{
     Result,
     context::Cx,
@@ -72,7 +72,7 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
 /// origin from signing users in. Auth refuses their sign-ins at once; browsers
 /// drop the origin from their copy of the list within five minutes.
 #[route([GET, POST] "/clients/{client}/origins/remove")]
-pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn remove(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -83,13 +83,18 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.remove_related_origin(&admin.operator, &id, &origin)
     })
     .await?;
-    let which = format!("Client {id}, origin {origin}.");
+    let shown = origin.to_string();
+    let client = id.to_string();
+    let target = Target {
+        name: &shown,
+        id: Some(&client),
+    };
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::RemoveOrigin,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            <p class="help">(which.as_str())</p>
         )
     };
     App::render(cx, StatusCode::OK, Change::RemoveOrigin.title(), page).await

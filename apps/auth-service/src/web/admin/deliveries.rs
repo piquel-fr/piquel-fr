@@ -1,9 +1,8 @@
 //! The outbound delivery queue: listing deliveries, retrying and cancelling one.
 
-use super::AdminApplication as App;
+use super::{AdminApplication as App, NoInput};
 use piquel_common::{DeliveryId, admin::DeliveryStatus};
-use piquel_ui::{Action, Change, DeliveryRow};
-use serde::de::IgnoredAny;
+use piquel_ui::{Action, Change, DeliveryRow, Target};
 use topcoat::{
     Result,
     context::Cx,
@@ -83,14 +82,14 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 /// `/deliveries/{delivery}/retry`: attempts a failed delivery, or a cancelled
 /// unordered one, again now.
 #[route([GET, POST] "/deliveries/{delivery}/retry")]
-pub(super) async fn retry(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn retry(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::RetryDelivery).await
 }
 
 /// `/deliveries/{delivery}/cancel`: cancels a pending or failed delivery, which
 /// unblocks the deliveries ordered after it.
 #[route([GET, POST] "/deliveries/{delivery}/cancel")]
-pub(super) async fn cancel(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn cancel(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::CancelDelivery).await
 }
 
@@ -99,7 +98,7 @@ impl App {
     /// which goes back to the list once made.
     async fn delivery_change(
         cx: &Cx,
-        form: Option<Form<IgnoredAny>>,
+        form: Option<Form<NoInput>>,
         change: Change,
     ) -> Result<Response> {
         let admin = Self::admin(cx).await?;
@@ -115,9 +114,15 @@ impl App {
             }
         })
         .await?;
+        let id = id.to_string();
+        let target = Target {
+            name: "Delivery",
+            id: Some(&id),
+        };
         let page = view! { cx =>
             piquel_ui::dashboard_change(
                 change: change,
+                target: target,
                 back: back.as_str(),
                 refusal: refusal.as_deref(),
             )

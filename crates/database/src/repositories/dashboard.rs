@@ -336,6 +336,122 @@ impl DashboardRepository<'_> {
         )
     }
 
+    /// Keeps `form`, as JSON, which `user_id` posted to the dashboard page `path`,
+    /// until `expires_at`, as the draft of that page, replacing one already
+    /// kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the insert fails, e.g. for an unknown account.
+    pub async fn keep_draft(
+        &mut self,
+        user_id: UserId,
+        path: &str,
+        form: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO dashboard_drafts (user_id, path, form, expires_at)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id, path)
+                DO UPDATE SET form = EXCLUDED.form, expires_at = EXCLUDED.expires_at",
+                user_id.as_uuid(),
+                path,
+                form,
+                expires_at,
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Takes the unexpired draft `user_id` posted to the page `path`, if any: its
+    /// form, as JSON, shown once.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn take_draft(
+        &mut self,
+        user_id: UserId,
+        path: &str,
+    ) -> Result<Option<String>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "DELETE FROM dashboard_drafts
+                WHERE user_id = $1 AND path = $2 AND expires_at > now()
+                RETURNING form",
+                user_id.as_uuid(),
+                path,
+            )
+        )
+    }
+
+    /// Claims the change whose administrator, page and form have the digest
+    /// `digest` until `expires_at`. Returns `false` if it is claimed already and
+    /// the claim has not expired: the same change, posted again meanwhile.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn claim_submission(
+        &mut self,
+        digest: &[u8],
+        expires_at: DateTime<Utc>,
+    ) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO dashboard_submissions (digest, expires_at) VALUES ($1, $2)
+                ON CONFLICT (digest) DO UPDATE SET expires_at = EXCLUDED.expires_at
+                WHERE dashboard_submissions.expires_at <= now()",
+                digest,
+                expires_at,
+            )
+        )?
+        .rows_affected()
+            == 1)
+    }
+
+    /// Releases the claim of the change with the digest `digest`, which made no
+    /// change, so posting it again tries again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn release_submission(&mut self, digest: &[u8]) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "DELETE FROM dashboard_submissions WHERE digest = $1",
+                digest,
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Ends every claim on a change, as if its window had passed: a fixture for
+    /// posting the same form again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the delete fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn forget_submissions(&mut self) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!("DELETE FROM dashboard_submissions")
+        )?;
+        Ok(())
+    }
+
     /// Moves the last use of the dashboard sessions of the auth session
     /// `session_id` `by` into the past, as if they had been left that long: a
     /// fixture for their idle timeout.

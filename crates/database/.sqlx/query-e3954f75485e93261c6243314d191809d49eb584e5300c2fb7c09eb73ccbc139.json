@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dashboard_submissions (digest, expires_at) VALUES ($1, $2)\n                ON CONFLICT (digest) DO UPDATE SET expires_at = EXCLUDED.expires_at\n                WHERE dashboard_submissions.expires_at <= now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e3954f75485e93261c6243314d191809d49eb584e5300c2fb7c09eb73ccbc139"
+}

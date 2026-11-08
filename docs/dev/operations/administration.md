@@ -34,8 +34,8 @@ just auth user recover alice --reason "Phone stolen" --revoke --keep <passkey-id
 just auth user undo-recovery alice --reason "Owner confirmed by phone"
 just auth user delete alice --reason "Asked by email"   # see Data export and account deletion
 just auth user restore alice --reason "Changed their mind"
-just auth session revoke <session-id>     # one session, as `user show` lists it
-just auth session revoke-all alice        # every session of the account
+just auth session revoke alice <session-id>  # one of its sessions, as `user show` lists them
+just auth session revoke-all alice           # every session of the account
 just auth audit list --user alice --kind session_revoked
 just auth audit list --user alice --views # with administrators' views of the account
 just auth audit verify                    # recompute the tamper-evident chain, and record what it found

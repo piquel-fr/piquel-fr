@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM dashboard_drafts\n                WHERE user_id = $1 AND path = $2 AND expires_at > now()\n                RETURNING form",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "form",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e63dd070cb85c5cd9d0fd1444f582e59a61820b2212b2164d442e27e131d6496"
+}

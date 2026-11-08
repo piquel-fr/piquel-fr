@@ -1,6 +1,6 @@
 //! Account search, one account's page, and the changes made to an account.
 
-use super::{AdminApplication as App, invitations, lists, settings};
+use super::{AdminApplication as App, NoInput, invitations, lists, settings};
 use crate::{Reason, routes};
 use piquel_common::{
     AccountStatus, PictureId, SessionId, UserId,
@@ -9,9 +9,8 @@ use piquel_common::{
 use piquel_repository::{RecentRecovery, RecoveryState};
 use piquel_ui::{
     AccountPages, Action, Change, Crumb, Pager, Query, RecoveryKey, RecoveryRow, RecoveryStanding,
-    SessionRow, UserRow,
+    SessionRow, Target, UserRow,
 };
-use serde::de::IgnoredAny;
 use topcoat::{
     Result,
     context::Cx,
@@ -197,9 +196,11 @@ pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<
     .await?;
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::Disable,
+            target: target,
             back: back.as_str(),
             refusal: refusal,
             reason: reason,
@@ -210,7 +211,7 @@ pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<
 
 /// `/users/{account}/enable`: reactivates a disabled account.
 #[route([GET, POST] "/users/{account}/enable")]
-pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn enable(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -220,9 +221,11 @@ pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.enable_user(&admin.operator, id)
     })
     .await?;
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::Enable,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )
@@ -248,9 +251,11 @@ pub(super) async fn delete(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Re
     .await?;
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::Delete,
+            target: target,
             back: back.as_str(),
             refusal: refusal,
             reason: reason,
@@ -276,9 +281,11 @@ pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     .await?;
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::Restore,
+            target: target,
             back: back.as_str(),
             refusal: refusal,
             reason: reason,
@@ -289,7 +296,7 @@ pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
 
 /// `/users/{account}/sessions/revoke`: ends every session of the account.
 #[route([GET, POST] "/users/{account}/sessions/revoke")]
-pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -299,9 +306,11 @@ pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> 
         service.revoke_user_sessions(&admin.operator, id)
     })
     .await?;
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::RevokeSessions,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )
@@ -309,9 +318,10 @@ pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> 
     App::render(cx, StatusCode::OK, "Revoke sessions", page).await
 }
 
-/// `/users/{account}/sessions/{session}/revoke`: ends one session.
+/// `/users/{account}/sessions/{session}/revoke`: ends one session of the account;
+/// another account's is not found.
 #[route([GET, POST] "/users/{account}/sessions/{session}/revoke")]
-pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -319,12 +329,19 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
     let session = *path_param::<Session>(cx)?;
     let back = App::account(cx, id);
     let refusal = App::submit(cx, form, back.clone(), |_| {
-        service.revoke_session(&admin.operator, session)
+        service.revoke_session(&admin.operator, id, session)
     })
     .await?;
+    // The session, of the account the crumb names.
+    let session = session.to_string();
+    let target = App::target(cx).await.map(|account| Target {
+        name: account.name,
+        id: Some(&session),
+    });
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::RevokeSession,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )
@@ -334,7 +351,7 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
 
 /// The form of a change whose reason the owner sees in their history: starting
 /// or undoing a recovery, scheduling a deletion or restoring the account.
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct ReasonForm {
     /// Why, recorded with the change and shown to the owner in their history.
     reason: String,
@@ -364,9 +381,11 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::Recover,
+            target: target,
             back: back.as_str(),
             refusal: refusal,
             reason: reason,
@@ -396,9 +415,11 @@ pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<ReasonForm>>) -> Re
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::UndoRecovery,
+            target: target,
             back: back.as_str(),
             refusal: refusal,
             reason: reason,

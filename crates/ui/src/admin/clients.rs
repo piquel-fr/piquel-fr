@@ -15,7 +15,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{UserId, admin::Client, clients::ClientKind, protocol::oauth::Scope};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{View, class, component, view},
@@ -32,16 +32,16 @@ pub struct AdminClientRow<'a> {
 
 /// A client's settings as an operator's form sends them: an owner's, then the
 /// scopes beyond the standard ones and its trust, which only operators choose.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperatorDraft {
     /// What an owner chooses too.
     #[serde(flatten)]
     pub draft: ClientDraft,
     /// The scopes it may request beyond the standard ones, which have checkboxes.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Lines::is_empty")]
     pub other_scopes: Lines,
     /// Whether it skips the consent screen.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
     pub trusted: Checkbox,
 }
 
@@ -72,13 +72,13 @@ impl OperatorDraft {
 }
 
 /// A client an operator registers: the ID they choose, its kind and settings.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewClientForm {
     /// Its ID, as typed.
     pub id: String,
     /// Its kind, which the form's radio group chooses: confidential when the form
     /// sends none, as the group starts there.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<ClientKind>,
     /// Its settings.
     #[serde(flatten)]

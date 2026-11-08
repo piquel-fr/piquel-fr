@@ -1,10 +1,10 @@
 //! Who administers Piquel: the list, granting rights and revoking them.
 
-use super::AdminApplication as App;
+use super::{AdminApplication as App, NoInput};
 use crate::AdminError;
 use piquel_common::{UserId, admin::UserSearch};
 use piquel_ui::{Action, AdministratorRow, Change, Pager, Query};
-use serde::{Deserialize, de::IgnoredAny};
+use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
@@ -51,7 +51,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 /// What [`grant`] takes: by `GET`, the search for the account, from its query;
 /// by `POST`, the account to grant, from its form. One type, since the extractor
 /// reads a `GET`'s query as its form.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(super) struct GrantForm {
     /// The account to grant rights, which the button posts.
     user_id: Option<UserId>,
@@ -111,7 +111,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
 /// `/administrators/{administrator}/revoke`: removes another administrator's
 /// rights.
 #[route([GET, POST] "/administrators/{administrator}/revoke")]
-pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn revoke(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -121,9 +121,11 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.revoke_administrator(&admin.operator, id)
     })
     .await?;
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::RevokeAdministrator,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )

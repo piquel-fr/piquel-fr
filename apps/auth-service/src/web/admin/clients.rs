@@ -15,7 +15,7 @@
 //! page at `/clients/new`, whatever the client's ID.
 
 use super::{
-    AdminApplication as App, Refusal,
+    AdminApplication as App, NoInput, Refusal,
     origins::{self, OriginQuery},
 };
 use crate::{
@@ -35,7 +35,6 @@ use piquel_ui::{
     NewClientForm, OperatorDraft, Query, Registration, Revealed, SecretRow, SecretsChange,
     SecretsState,
 };
-use serde::de::IgnoredAny;
 use topcoat::{
     Result,
     context::Cx,
@@ -166,13 +165,18 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<NewClientForm>>) -> Result
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
-    let created = App::change(cx, form, async |new: NewClientForm| {
-        let registration = App::registration(new)?;
-        let secret = service
-            .create_client(&admin.operator, &registration)
-            .await?;
-        Ok::<_, Refusal>((registration.id, secret))
-    })
+    let created = App::change(
+        cx,
+        form,
+        href!(list).resolve(cx),
+        async |new: NewClientForm| {
+            let registration = App::registration(new)?;
+            let secret = service
+                .create_client(&admin.operator, &registration)
+                .await?;
+            Ok::<_, Refusal>((registration.id, secret))
+        },
+    )
     .await?;
     let (shown, refusal) = match created {
         Some(Ok((id, secret))) => {
@@ -241,12 +245,17 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
         return Err(AdminError::from(ClientRegistryError::Public(id)).into());
     }
     let here = href!(rotate, Client(id.clone())).resolve(cx);
-    let changed = App::change(cx, form, async |SecretsChange::Rotate { grace }| {
-        let grace = grace.unwrap_or_default().into();
-        service
-            .rotate_client_secret(&admin.operator, &id, grace)
-            .await
-    })
+    let changed = App::change(
+        cx,
+        form,
+        here.clone(),
+        async |SecretsChange::Rotate { grace }| {
+            let grace = grace.unwrap_or_default().into();
+            service
+                .rotate_client_secret(&admin.operator, &id, grace)
+                .await
+        },
+    )
     .await?;
     let (state, refusal) = match changed {
         Some(Ok(secret)) => return App::reveal(cx, admin, here, secret.expose()),
@@ -343,7 +352,7 @@ impl Toggle {
     /// Its page, for the client the path names: a `GET` asks to confirm it, and a
     /// `POST` makes it, then goes back to the client's page, or to the clients
     /// once the client is deleted.
-    async fn page(self, cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+    async fn page(self, cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
         let admin = App::admin(cx).await?;
         App::confirm(cx, admin)?;
         let service = &App::of(cx).service;
@@ -356,13 +365,13 @@ impl Toggle {
         let refusal =
             App::submit(cx, form, done, |_| self.make(service, &admin.operator, &id)).await?;
         let change = self.change();
-        let which = format!("Client {id}.");
+        let target = App::target(cx).await;
         let page = view! { cx =>
             piquel_ui::dashboard_change(
                 change: change,
+                target: target,
                 back: back.as_str(),
                 refusal: refusal.as_deref(),
-                <p class="help">(which.as_str())</p>
             )
         };
         App::render(cx, StatusCode::OK, change.title(), page).await
@@ -371,32 +380,32 @@ impl Toggle {
 
 /// `/clients/{client}/enable`: lets a disabled client sign users in again.
 #[route([GET, POST] "/clients/{client}/enable")]
-pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn enable(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     Toggle::Enable.page(cx, form).await
 }
 
 /// `/clients/{client}/disable`: stops a client signing users in.
 #[route([GET, POST] "/clients/{client}/disable")]
-pub(super) async fn disable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn disable(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     Toggle::Disable.page(cx, form).await
 }
 
 /// `/clients/{client}/suspend`: blocks a client, so that its owner cannot enable
 /// it again.
 #[route([GET, POST] "/clients/{client}/suspend")]
-pub(super) async fn suspend(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn suspend(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     Toggle::Suspend.page(cx, form).await
 }
 
 /// `/clients/{client}/unsuspend`: lifts a client's suspension; it stays disabled.
 #[route([GET, POST] "/clients/{client}/unsuspend")]
-pub(super) async fn unsuspend(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn unsuspend(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     Toggle::Unsuspend.page(cx, form).await
 }
 
 /// `/clients/{client}/delete`: deletes a client for good.
 #[route([GET, POST] "/clients/{client}/delete")]
-pub(super) async fn delete(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn delete(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
     Toggle::Delete.page(cx, form).await
 }
 

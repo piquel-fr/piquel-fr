@@ -14,6 +14,8 @@
  *   unless it is marked `data-unconfirmed`, as a change that needs no
  *   confirmation, such as writing a draft announcement, is; a button of it marked
  *   `data-confirms`, such as the draft's "Send", still asks.
+ * The dialog names what it confirms, from the link's or form's `data-confirming`:
+ * the change, and what it acts on, so two pages left open are told apart.
  * The dialog's `data-passkey-confirm` button runs the passkey ceremony for the
  * dashboard's origin, which auth lists as a related origin of its RP ID: the
  * dialog's `data-confirmation-start` starts it, and its `data-confirmation-finish`
@@ -90,7 +92,14 @@ function wire(document) {
   const dialog = document.getElementById('passkey-confirmation');
   const button = dialog?.querySelector('button[data-passkey-confirm]');
   const alert = dialog?.querySelector('[data-passkey-error]');
-  if (!dialog || !(button instanceof HTMLButtonElement) || !(alert instanceof HTMLElement)) return;
+  const confirming = dialog?.querySelector('[data-confirming]');
+  if (
+    !dialog ||
+    !(button instanceof HTMLButtonElement) ||
+    !(alert instanceof HTMLElement) ||
+    !(confirming instanceof HTMLElement)
+  )
+    return;
   const { confirmationStart: start = '', confirmationFinish: finish = '' } = dialog.dataset;
   /** When the confirmation ends, on `performance.now()`'s clock. */
   const ends = performance.now() + Number(dialog.dataset.confirmedFor ?? 0) * 1000;
@@ -144,15 +153,20 @@ function wire(document) {
     });
   };
   /**
-   * Opens the dialog for the change `then` makes once confirmed. Answers whether
-   * it opened: where it cannot confirm, the change goes on as it is.
+   * Opens the dialog for the change `then` makes once confirmed, which `what`
+   * names, if anything does. Answers whether it opened: where it cannot confirm,
+   * the change goes on as it is.
    * @param {() => void} then
+   * @param {string | undefined} what
    * @returns {boolean}
    */
-  const confirm = (then) => {
+  const confirm = (then, what) => {
     if (!usable) return false;
     change = { then, started: post(start) };
     unlessStarted(change);
+    const named = confirming.firstElementChild;
+    if (named) named.textContent = what ?? '';
+    confirming.hidden = !what;
     alert.hidden = true;
     busy(false);
     dialog.showPopover();
@@ -212,7 +226,7 @@ function wire(document) {
     if (!link || !plain || confirmed(formTime)) return;
     const opened = confirm(() => {
       window.location.assign(link.href);
-    });
+    }, link.dataset.confirming);
     if (opened) event.preventDefault();
   });
   document.addEventListener('submit', (event) => {
@@ -231,7 +245,7 @@ function wire(document) {
       confirmedForm = form;
       form.requestSubmit(submitter);
       confirmedForm = undefined;
-    });
+    }, form.dataset.confirming);
     if (opened) event.preventDefault();
   });
 }

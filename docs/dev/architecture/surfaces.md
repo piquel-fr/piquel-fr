@@ -123,9 +123,33 @@ RP ID on the dashboard's own origin, which auth's `/.well-known/webauthn` lists 
 a related origin (`WebAuthn` Level 3 §5.11), against the dashboard's `/confirm`
 routes. The proof is the handoff's kind: started by the dashboard session's auth
 session, bound to the browser, signed for the dashboard's origin, which the
-handoff refuses, and kept as the dashboard's confirmation only. Without the
-script, or in a browser without related origins, the browser goes to the handoff
-page and back as before.
+handoff refuses, and kept as the dashboard's confirmation only. The dialog names
+what it confirms, from the link's or form's `data-confirming`: the change, and
+what it acts on. Without the script, or in a browser without related origins, the
+browser goes to the handoff page and back as before.
+
+Every change goes through `AdminApplication::change`, which keeps a change from
+being misread, lost or made twice:
+
+- **Its target.** A change's page names what it acts on beside its button, such
+  as the account's handle and ID, so two pages left open cannot be told apart
+  only by their address. The account or client comes from the crumb's parent.
+- **A form kept across the handoff.** A change posted once the confirmation
+  ended, or the session, is refused by the service. The dashboard keeps the
+  form as a draft, for its administrator and page, for ten minutes. It goes to
+  the handoff page and back, and the page shows the draft once, saying nothing
+  has changed yet.
+- **Made once.** The dashboard claims each change by the digest of its
+  administrator, page and form, for ten seconds. The same form posted again
+  meanwhile, such as by a double click or a reload, changes nothing, and goes
+  where the first one went. A change that is refused gives up its claim, so
+  posting it again tries again.
+- **Its status.** A refused change shows its form again with the refusal's
+  status, such as `400`, not `200`.
+
+An account's page acts only on that account: revoking a session another
+account holds is not found, from the dashboard and from `session revoke`, which
+names the account too.
 
 Lists page by number, with their totals, as the CLI's `--page` does.
 

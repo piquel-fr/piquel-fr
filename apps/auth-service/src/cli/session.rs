@@ -8,9 +8,12 @@ use piquel_common::SessionId;
 /// Ending sessions, with the refresh tokens their applications hold.
 #[derive(Subcommand)]
 pub(super) enum SessionCommand {
-    /// End one session and its applications' refresh tokens.
+    /// End one session of an account and its applications' refresh tokens.
     Revoke {
-        /// The session's ID, as `user show` lists it.
+        /// The account: its handle, ID or verified email.
+        user: UserRef,
+        /// The session's ID, as `user show` lists it. Another account's session is
+        /// not found.
         session: SessionId,
     },
     /// End every session of an account and its applications' refresh tokens.
@@ -30,7 +33,10 @@ impl SessionCommand {
             service, operator, ..
         } = console;
         match self {
-            Self::Revoke { session } => service.revoke_session(operator, session).await?,
+            Self::Revoke { user, session } => {
+                let id = console.user(&user).await?;
+                service.revoke_session(operator, id, session).await?;
+            }
             Self::RevokeAll { user, confirm } => {
                 let id = console.user(&user).await?;
                 confirm.ask(&format!("Sign {user} ({id}) out everywhere"))?;

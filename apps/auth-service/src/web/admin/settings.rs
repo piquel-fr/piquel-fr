@@ -27,7 +27,7 @@ use piquel_ui::{
     HistoryPage, HistoryState, Holdings, InboxPage, InboxRow, InboxState, ProfileChange,
     ProfileDialog, ProfilePages, ProfileState, ProviderRow, Recovery, SignInChange, Tab, Who,
 };
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use topcoat::{
     Result,
     context::Cx,
@@ -43,7 +43,7 @@ use topcoat::{
 };
 
 /// A settings change an administrator posts: the owner's change, and why.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Administered<C> {
     /// The change, as the owner's form names it.
     #[serde(flatten)]
@@ -53,19 +53,19 @@ struct Administered<C> {
 }
 
 /// The form giving an account a new handle.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct NewHandle {
     /// The handle.
     handle: String,
     /// Why, recorded with the change and shown to the owner in their history.
     reason: String,
     /// Whether a reserved handle, or one that looks like another, is allowed.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
     allow_reserved: Checkbox,
 }
 
 /// The form giving an account a new display name.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct NewDisplayName {
     /// The name.
     display_name: String,
@@ -201,15 +201,7 @@ pub(super) async fn profile(cx: &Cx, body: Body) -> Result<Response> {
     // The refusal is said in the dialog shown again, not behind it, or above the
     // profile when the page no longer has that dialog. The page's
     // dialogs make its future large: it is boxed, off the handler's stack.
-    Box::pin(App::settings_tab(
-        cx,
-        user,
-        Tab::Profile,
-        alert.is_some(),
-        None,
-        section,
-    ))
-    .await
+    Box::pin(App::settings_page(cx, user, Tab::Profile, None, section)).await
 }
 
 /// `/users/{account}/emails`: the account's addresses, to make a verified one
@@ -392,9 +384,11 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
         )
     });
     let refused = refused.as_deref();
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::ChangeHandle,
+            target: target,
             back: back.as_str(),
             refusal: refused,
             reason: reason,
@@ -431,9 +425,11 @@ pub(super) async fn display_name(cx: &Cx, form: Option<Form<NewDisplayName>>) ->
         )
     });
     let refused = refused.as_deref();
+    let target = App::target(cx).await;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             change: Change::ChangeDisplayName,
+            target: target,
             back: back.as_str(),
             refusal: refused,
             reason: reason,
@@ -505,27 +501,14 @@ impl App {
         ))
     }
 
-    /// Answers with `user`'s settings tab `tab`, its `section`, under the tabs and
-    /// why the change just posted was `refused`, if it was.
+    /// Answers with `user`'s settings tab `tab`, its `section` under the tabs, and
+    /// why the change just posted was refused above the tabs, its `refusal`,
+    /// unless the section says it itself, as the profile's dialogs do. A refused
+    /// change answers with its own status (see `App::change`).
     async fn settings_page(
         cx: &Cx,
         user: UserId,
         tab: Tab,
-        refused: Option<&str>,
-        section: impl View,
-    ) -> Result<Response> {
-        Self::settings_tab(cx, user, tab, refused.is_some(), refused, section).await
-    }
-
-    /// Answers with `user`'s settings tab `tab`, its `section` under the tabs, as
-    /// refused when the change just posted was `refused`, and saying why above the
-    /// tabs, its `refusal`, unless the section says it itself, as the profile's
-    /// dialogs do.
-    async fn settings_tab(
-        cx: &Cx,
-        user: UserId,
-        tab: Tab,
-        refused: bool,
         refusal: Option<&str>,
         section: impl View,
     ) -> Result<Response> {
@@ -553,11 +536,6 @@ impl App {
                 (section)
             )
         };
-        let status = if refused {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::OK
-        };
-        Self::render(cx, status, tab.label(), page).await
+        Self::render(cx, StatusCode::OK, tab.label(), page).await
     }
 }
