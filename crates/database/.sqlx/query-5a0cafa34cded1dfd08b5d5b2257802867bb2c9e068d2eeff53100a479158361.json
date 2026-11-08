@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE dashboard_submissions SET made = TRUE, expires_at = $2 WHERE token = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a0cafa34cded1dfd08b5d5b2257802867bb2c9e068d2eeff53100a479158361"
+}

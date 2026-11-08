@@ -24,6 +24,11 @@ CREATE INDEX dashboard_drafts_expires_idx ON dashboard_drafts (expires_at);
 -- is; one refused is deleted, so posting it again tries again.
 CREATE TABLE dashboard_submissions (
     digest BYTEA PRIMARY KEY,
+    -- The administrator who posted it.
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- This claim's own, so a request whose claim expired and was taken by a
+    -- repeat cannot mark or release the repeat's.
+    token UUID NOT NULL,
     made BOOLEAN NOT NULL DEFAULT FALSE,
     expires_at TIMESTAMPTZ NOT NULL
 );

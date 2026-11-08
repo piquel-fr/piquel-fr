@@ -16,7 +16,7 @@
 use chrono::{Duration, Utc};
 use piquel_common::UserId;
 use piquel_crypto::Digest;
-use piquel_repository::{Database, DatabaseError};
+use piquel_repository::{Database, DatabaseError, Submission, SubmissionToken};
 use serde::{Serialize, de::DeserializeOwned};
 
 /// How long a change blocks the same form posted again: a double click, or a
@@ -60,8 +60,8 @@ pub(super) enum Claimed<'a> {
 pub(super) struct Claim<'a> {
     /// Where its claim is kept.
     forms: &'a DashboardForms,
-    /// The digest of its administrator, page, query and form.
-    digest: Digest,
+    /// Its claim's own token, which only this request holds.
+    token: SubmissionToken,
 }
 
 impl Claim<'_> {
@@ -69,7 +69,7 @@ impl Claim<'_> {
     pub(super) async fn keep(self) -> Result<(), FormsError> {
         let expires_at = Utc::now() + SUBMISSION_WINDOW;
         (self.forms.database.dashboard())
-            .made_submission(self.digest.as_bytes(), expires_at)
+            .made_submission(self.token, expires_at)
             .await?;
         Ok(())
     }
@@ -78,7 +78,7 @@ impl Claim<'_> {
     /// again.
     pub(super) async fn release(self) -> Result<(), FormsError> {
         (self.forms.database.dashboard())
-            .release_submission(self.digest.as_bytes())
+            .release_submission(self.token)
             .await?;
         Ok(())
     }
@@ -108,15 +108,12 @@ impl DashboardForms {
         // without releasing its claim, no longer holds back its repeat.
         let expires_at = Utc::now() + SUBMISSION_WINDOW;
         let found = (self.database.dashboard())
-            .claim_submission(digest.as_bytes(), expires_at)
+            .claim_submission(digest.as_bytes(), user_id, expires_at)
             .await?;
         Ok(match found {
-            None => Claimed::New(Claim {
-                forms: self,
-                digest,
-            }),
-            Some(true) => Claimed::Made,
-            Some(false) => Claimed::Pending,
+            Submission::Claimed(token) => Claimed::New(Claim { forms: self, token }),
+            Submission::Made => Claimed::Made,
+            Submission::Pending => Claimed::Pending,
         })
     }
 

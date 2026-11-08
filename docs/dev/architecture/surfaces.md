@@ -148,7 +148,8 @@ being misread, lost or made twice:
   still being made, the repeat shows its form again, at `409`, saying so. A
   refused change gives up its claim, so posting it again tries again. No
   transaction stays open while a change is made: the claim is written, then
-  marked made or deleted.
+  marked made or deleted, by its own token, so a request whose claim expired
+  cannot touch the claim a repeat took since.
 - **Its status.** A refused change shows its form again with the refusal's
   status, such as `400`, not `200`.
 

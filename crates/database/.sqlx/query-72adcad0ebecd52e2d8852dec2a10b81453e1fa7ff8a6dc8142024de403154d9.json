@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dashboard_submissions (digest, user_id, token, expires_at)\n                VALUES ($1, $2, gen_random_uuid(), $3)\n                ON CONFLICT (digest) DO UPDATE\n                SET token = EXCLUDED.token, made = FALSE, expires_at = EXCLUDED.expires_at\n                WHERE dashboard_submissions.expires_at <= now()\n                RETURNING token",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "72adcad0ebecd52e2d8852dec2a10b81453e1fa7ff8a6dc8142024de403154d9"
+}
