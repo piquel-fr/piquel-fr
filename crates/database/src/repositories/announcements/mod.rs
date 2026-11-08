@@ -250,6 +250,9 @@ impl AnnouncementRepository<'_> {
                         ELSE (SELECT count(*) FROM announcement_recipients r
                             WHERE r.announcement_id = a.id)
                     END AS "recipients!: Unsigned",
+                    -- Cleanup's cutoff for recipients (`purge_expired_auth_state`).
+                    (a.sent_at IS NULL OR a.sent_at >= now() - interval '1 year')
+                        AS "recipients_kept!",
                     a.created_at, a.updated_at, a.sent_at
                 FROM announcements a
                 ORDER BY a.created_at DESC, a.id DESC
@@ -280,6 +283,9 @@ impl AnnouncementRepository<'_> {
                         ELSE (SELECT count(*) FROM announcement_recipients r
                             WHERE r.announcement_id = a.id)
                     END AS "recipients!: Unsigned",
+                    -- Cleanup's cutoff for recipients (`purge_expired_auth_state`).
+                    (a.sent_at IS NULL OR a.sent_at >= now() - interval '1 year')
+                        AS "recipients_kept!",
                     a.created_at, a.updated_at, a.sent_at
                 FROM announcements a
                 WHERE a.id = $1"#,

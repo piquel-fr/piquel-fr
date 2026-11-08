@@ -113,9 +113,14 @@ impl AnnouncementCommand {
                             || "draft".to_owned(),
                             |at| format!("sent {}", at.to_rfc3339()),
                         );
+                        let recipients = if announcement.recipients_kept {
+                            announcement.recipients.to_string()
+                        } else {
+                            "deleted".to_owned()
+                        };
                         println!(
-                            "{}\t{status}\t{}\t{}",
-                            announcement.id, announcement.recipients, announcement.subject
+                            "{}\t{status}\t{recipients}\t{}",
+                            announcement.id, announcement.subject
                         );
                     }
                 })?;
@@ -132,13 +137,19 @@ impl AnnouncementCommand {
                     println!("ID\t{}", announcement.id);
                     println!("SUBJECT\t{}", announcement.subject);
                     println!("REVISION\t{}", announcement.revision);
-                    println!("TO\t{to}: {} accounts", announcement.recipients);
-                    println!("EMAILED\t{} with a primary verified address", detail.mailed);
+                    if announcement.recipients_kept {
+                        println!("TO\t{to}: {} accounts", announcement.recipients);
+                        println!("EMAILED\t{} with a primary verified address", detail.mailed);
+                    } else {
+                        println!("TO\t{to}: recipients deleted a year after sending");
+                    }
                     match announcement.sent_at {
                         Some(at) => {
                             let emails = detail.emails;
                             println!("SENT\t{}", at.to_rfc3339());
-                            println!("READ\t{} of {}", detail.read, announcement.recipients);
+                            if announcement.recipients_kept {
+                                println!("READ\t{} of {}", detail.read, announcement.recipients);
+                            }
                             println!(
                                 "EMAILS\t{} pending, {} succeeded, {} failed, {} cancelled",
                                 emails.pending, emails.succeeded, emails.failed, emails.cancelled

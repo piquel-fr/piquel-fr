@@ -19,6 +19,10 @@ async fn insert_user(pool: &PgPool, prefix: &str) -> UserId {
 /// its purge, which released them. Newer ones stay.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "One record past and one within each limit."
+)]
 async fn ended_records_go_after_their_retention() {
     let pool = Database::test_pool().await;
     let user = insert_user(&pool, "retained").await;
@@ -62,6 +66,8 @@ async fn ended_records_go_after_their_retention() {
     .expect("purged handle");
     assert!(handle.1, "the purge released {}", handle.0);
 
+    // Other tests' announcements to everyone reach this account too, so only its
+    // own rows count.
     let remaining = || async {
         sqlx::query_scalar::<_, String>(
             "SELECT 'passkey ' || friendly_name FROM passkey_credentials WHERE user_id = $1
@@ -69,10 +75,12 @@ async fn ended_records_go_after_their_retention() {
             FROM external_login_identities WHERE user_id = $1
             UNION ALL SELECT 'recovery ' || CASE WHEN cancelled_at IS NULL THEN 'new' ELSE 'old' END
             FROM account_recoveries WHERE user_id = $1
-            UNION ALL SELECT 'notification ' || (payload ->> 'kind') FROM notifications WHERE user_id = $1
+            UNION ALL SELECT 'notification ' || (payload ->> 'kind') FROM notifications
+            WHERE user_id = $1 AND payload ->> 'kind' IN ('old', 'new')
             UNION ALL SELECT 'announcement ' || subject FROM announcements WHERE body = $1::text
             UNION ALL SELECT 'recipient of ' || a.subject FROM announcement_recipients r
-            JOIN announcements a ON a.id = r.announcement_id WHERE r.user_id = $1
+            JOIN announcements a ON a.id = r.announcement_id
+            WHERE r.user_id = $1 AND a.body = $1::text
             UNION ALL SELECT 'handle ' || handle FROM handles WHERE handle = $2
             ORDER BY 1",
         )
@@ -90,6 +98,21 @@ async fn ended_records_go_after_their_retention() {
             .expect("cleanup")
     };
     maintenance().await;
+    // The announcement to everyone stays, saying it no longer knows whom it
+    // reached rather than counting no one.
+    let kept: uuid::Uuid = sqlx::query_scalar(
+        "SELECT id FROM announcements WHERE body = $1 AND subject = 'old to everyone'",
+    )
+    .bind(user.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("announcement to everyone");
+    let kept = crate::AnnouncementRepository::from_pool(&pool)
+        .find(piquel_common::AnnouncementId::from_uuid(kept).expect("ID"))
+        .await
+        .expect("find")
+        .expect("kept");
+    assert!(!kept.recipients_kept);
     let purged_handle = format!("handle {}", handle.0);
     assert_eq!(
         remaining().await,

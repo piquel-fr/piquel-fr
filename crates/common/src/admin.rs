@@ -426,6 +426,10 @@ pub struct Announcement {
     /// now for a draft and as of its sending once sent. Purged accounts no longer
     /// count.
     pub recipients: u64,
+    /// Whether auth still knows whom it went to: cleanup deletes its recipients
+    /// a year after it is sent, and `recipients`, with how many were mailed or
+    /// read it, then count none.
+    pub recipients_kept: bool,
     /// When it was drafted.
     pub created_at: DateTime<Utc>,
     /// When its draft last changed.

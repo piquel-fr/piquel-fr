@@ -415,7 +415,6 @@ async fn exports_hold_every_category_and_no_secret() {
         ("grants", 1),
         ("clients", 2),
         ("recoveries", 1),
-        ("announcements", 1),
     ] {
         assert_eq!(count(category), expected, "{category}");
     }
@@ -426,6 +425,12 @@ async fn exports_hold_every_category_and_no_secret() {
         1
     );
     assert!(export["identities"][0]["revoked_at"].is_string());
+    // Other tests' announcements to everyone may reach the account too.
+    let announcements = export["announcements"].as_array().expect("announcements");
+    assert!(
+        (announcements.iter()).any(|announcement| announcement["subject"] == "Maintenance"),
+        "{announcements:?}"
+    );
     let kinds: Vec<&str> = (export["events"].as_array().expect("events"))
         .iter()
         .filter_map(|event| event["kind"].as_str())
