@@ -5,7 +5,7 @@ use chrono::Duration;
 use serde::Deserialize;
 use sourceorigin_common::{
     Handle, HandleError, UserId,
-    admin::{AnnouncementAudience, DraftAnnouncement},
+    admin::{AnnouncementAudience, DraftAnnouncement, MessageUser},
 };
 use sourceorigin_ui::Grace;
 use std::{fmt, str::FromStr};
@@ -191,52 +191,32 @@ impl FromStr for Reason {
     }
 }
 
-/// Maximum Unicode characters in an announcement's subject.
+/// Maximum Unicode characters in a letter's subject.
 const MAX_SUBJECT_CHARS: usize = 150;
-/// Maximum Unicode characters in an announcement's text.
+/// Maximum Unicode characters in a letter's text.
 const MAX_BODY_CHARS: usize = 20_000;
 /// Maximum accounts an announcement is chosen for; more go to everyone.
 pub(super) const MAX_CHOSEN_ACCOUNTS: usize = 1_000;
 
-/// An announcement's draft, as an operator writes it: its subject and text, and
-/// whom it goes to.
+/// What administrators write to accounts, in an announcement or a message: its
+/// subject and text, checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AnnouncementDraft {
+pub struct Letter {
     /// The email's subject: one line of 1 to 150 characters, trimmed.
-    pub(super) subject: String,
+    pub(crate) subject: String,
     /// Its text: 1 to 20,000 characters, trimmed, with `\n` line breaks and no
     /// other control characters but tabs.
-    pub(super) body: String,
-    /// Whom it goes to.
-    pub(super) recipients: AnnouncementRecipients,
-    /// Whether it is emailed to every recipient, whatever their preference.
-    pub(super) essential: bool,
+    pub(crate) body: String,
 }
 
-/// Whom an announcement goes to, as an operator names them.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AnnouncementRecipients {
-    /// Every account, as of its sending.
-    Everyone,
-    /// The accounts named, at least one and at most 1,000.
-    Accounts(Vec<UserRef>),
-}
-
-impl AnnouncementDraft {
+impl Letter {
     /// Checks `subject` and `body`, trimmed, and normalizes the text's line
-    /// breaks, which forms post as `\r\n`, to `\n`. An `essential` one is emailed
-    /// to every recipient, whatever their preference.
+    /// breaks, which forms post as `\r\n`, to `\n`.
     ///
     /// # Errors
     /// [`AdminError::InvalidSubject`] or [`AdminError::InvalidBody`] when either
-    /// breaks its rule, and [`AdminError::NoRecipients`] or
-    /// [`AdminError::TooManyRecipients`] for too few or many chosen accounts.
-    pub fn new(
-        subject: &str,
-        body: &str,
-        recipients: AnnouncementRecipients,
-        essential: bool,
-    ) -> Result<Self, AdminError> {
+    /// breaks its rule.
+    pub fn new(subject: &str, body: &str) -> Result<Self, AdminError> {
         let subject = subject.trim();
         if subject.is_empty()
             || subject.chars().count() > MAX_SUBJECT_CHARS
@@ -254,6 +234,54 @@ impl AnnouncementDraft {
         {
             return Err(AdminError::InvalidBody);
         }
+        Ok(Self {
+            subject: subject.to_owned(),
+            body: body.to_owned(),
+        })
+    }
+}
+
+impl TryFrom<&MessageUser> for Letter {
+    type Error = AdminError;
+    /// Reads the dashboard's message form.
+    fn try_from(form: &MessageUser) -> Result<Self, Self::Error> {
+        Self::new(&form.subject, &form.body)
+    }
+}
+
+/// An announcement's draft, as an operator writes it: its subject and text, and
+/// whom it goes to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnnouncementDraft {
+    /// Its subject and text.
+    pub(super) letter: Letter,
+    /// Whom it goes to.
+    pub(super) recipients: AnnouncementRecipients,
+    /// Whether it is emailed to every recipient, whatever their preference.
+    pub(super) essential: bool,
+}
+
+/// Whom an announcement goes to, as an operator names them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AnnouncementRecipients {
+    /// Every account, as of its sending.
+    Everyone,
+    /// The accounts named, at least one and at most 1,000.
+    Accounts(Vec<UserRef>),
+}
+
+impl AnnouncementDraft {
+    /// Checks the accounts chosen to receive `letter`. An `essential` one is
+    /// emailed to every recipient, whatever their preference.
+    ///
+    /// # Errors
+    /// [`AdminError::NoRecipients`] or [`AdminError::TooManyRecipients`] for too
+    /// few or many chosen accounts.
+    pub fn new(
+        letter: Letter,
+        recipients: AnnouncementRecipients,
+        essential: bool,
+    ) -> Result<Self, AdminError> {
         if let AnnouncementRecipients::Accounts(accounts) = &recipients {
             if accounts.is_empty() {
                 return Err(AdminError::NoRecipients);
@@ -263,8 +291,7 @@ impl AnnouncementDraft {
             }
         }
         Ok(Self {
-            subject: subject.to_owned(),
-            body: body.to_owned(),
+            letter,
             recipients,
             essential,
         })
@@ -290,7 +317,11 @@ impl TryFrom<&DraftAnnouncement> for AnnouncementDraft {
                     .collect(),
             ),
         };
-        Self::new(&form.subject, &form.body, recipients, form.essential.0)
+        Self::new(
+            Letter::new(&form.subject, &form.body)?,
+            recipients,
+            form.essential.0,
+        )
     }
 }
 

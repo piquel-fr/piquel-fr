@@ -32,6 +32,9 @@ operations! {
         RevokeUserSessions,
         /// End one session.
         RevokeSession,
+        /// Send one account a message: it lands in the account's inbox, and is
+        /// emailed to its primary verified address.
+        MessageUser,
         /// List invitations.
         ListInvitations,
         /// Create a signup link.

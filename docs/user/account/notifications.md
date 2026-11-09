@@ -19,6 +19,9 @@ emails, you need a [confirmed email address](email-addresses.md).
   a passkey, or a recovery was undone.
 - Your account was disabled, enabled again, scheduled for deletion or
   restored.
+- SourceOrigin support sent you a message about your account, such as why it was
+  disabled or what they need from you. You can't reply to it: the message says
+  how to reach support.
 - SourceOrigin sent an announcement, such as news of a security incident or a change
   to its privacy policy, to every account or to yours.
 - If you administer Origin Auth, an alert about the service was raised, such as a
@@ -37,7 +40,8 @@ The sidebar's **Notifications** tab shows how many are unread, and the
 A notification's page says what happened and shows its entry in your
 [security history](security-history.md), with **This wasn’t me** if you can
 report it. An alert concerns the service rather than your account, so it has
-no entry, and **See the alerts** opens the admin dashboard's **Alerts** tab.
+no entry, and **See the alerts** opens the admin dashboard's **Alerts** tab. A
+message from support has no entry either: your inbox is where you read it.
 Select **Mark as unread** to keep it in mind for later.
 
 To mark every notification read, select **Mark all as read** in the inbox.
@@ -47,8 +51,8 @@ To mark every notification read, select **Mark all as read** in the inbox.
 
 Each notification is also emailed, in one of two categories:
 
-- **Security:** everything about your account itself. You always receive these,
-  so nobody can hide one from you.
+- **Security:** everything about your account itself, messages from support
+  included. You always receive these, so nobody can hide one from you.
 - **Announcements:** news from SourceOrigin, such as a new feature. You receive these
   by default, and can [turn them off](#turn-announcement-emails-off).
 
@@ -60,7 +64,7 @@ privacy policy or terms. You receive those by email even with announcements
 turned off. Either way, every announcement stays in your inbox.
 
 The email says what the inbox says and links to the notification's page; an
-announcement's email links your inbox.
+announcement's or a message's email links your inbox.
 
 - A change of primary address is emailed to the address that stopped being
   primary, and a removed address is told at that address.

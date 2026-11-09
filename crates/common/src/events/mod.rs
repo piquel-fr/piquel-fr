@@ -435,6 +435,11 @@ pub enum DomainEvent {
         #[serde(default)]
         essential: bool,
     },
+    /// An administrator or operator sent the account a message, which its owner
+    /// finds in their inbox and at their primary verified address. Its text,
+    /// which may be personal, is not recorded: the account's notification is its
+    /// only copy, deleted with the account.
+    MessageSent {},
     /// A condition that needs an administrator's attention began to hold, so the
     /// alert `alert_id` was raised. It concerns no account.
     AlertRaised {
@@ -572,6 +577,7 @@ impl DomainEvent {
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
             | Self::AnnouncementSent { .. }
+            | Self::MessageSent {}
             | Self::AlertRaised { .. }
             | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
@@ -644,6 +650,7 @@ impl DomainEvent {
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
             | Self::AnnouncementSent { .. }
+            | Self::MessageSent {}
             | Self::AlertRaised { .. }
             | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
@@ -716,6 +723,7 @@ impl DomainEvent {
             Self::AuditHistoryPruned { .. } => "audit_history_pruned",
             Self::AuditChainVerified(_) => "audit_chain_verified",
             Self::AnnouncementSent { .. } => "announcement_sent",
+            Self::MessageSent {} => "message_sent",
             Self::AlertRaised { .. } => "alert_raised",
             Self::AlertUpdated { .. } => "alert_updated",
             Self::AlertCleared { .. } => "alert_cleared",

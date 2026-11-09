@@ -31,6 +31,11 @@
 <p><a href="{{ alerts }}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">See the alerts</a></p>
 {%- endif %}
 <p><a href="{{ page }}">Read it in your Origin Account notifications</a></p>
+{%- when Content::Message { address: _, subject: _, body: _, paragraphs, inbox } %}
+{%- for paragraph in paragraphs %}
+<p>{% for line in paragraph %}{% if !loop.first %}<br>{% endif %}{{ line }}{% endfor %}</p>
+{%- endfor %}
+<p style="font-size:14px;color:#555555">SourceOrigin support wrote this message about your Origin Account. You can read it again in <a href="{{ inbox }}">your Origin Account notifications</a>.</p>
 {%- when Content::Announcement { address: _, subject: _, body: _, paragraphs, everyone, inbox, unsubscribe } %}
 {%- for paragraph in paragraphs %}
 <p>{% for line in paragraph %}{% if !loop.first %}<br>{% endif %}{{ line }}{% endfor %}</p>

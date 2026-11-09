@@ -6,7 +6,7 @@ use super::{
 use crate::layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod,
-    admin::{Session, User, UserDetail},
+    admin::{MessageUser, Session, User, UserDetail},
 };
 use topcoat::{
     Result,
@@ -147,6 +147,8 @@ pub struct AccountPages<'a> {
     pub handle: &'a str,
     /// Giving it a new display name.
     pub display_name: &'a str,
+    /// Sending it a message.
+    pub message: &'a str,
 }
 
 /// One account's page: `detail`, with its profile picture at `picture`, the
@@ -327,6 +329,7 @@ async fn account_actions<'a>(
                     <a data-confirm-first="" data-confirming=(opening("Connected apps")) class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>
                     <a class="button secondary small" href=(pages.notifications)>"Notifications"</a>
+                    <a class="button secondary small" href=(pages.message)>"Send a message"</a>
                     <a data-confirm-first="" data-confirming=(Change::ChangeHandle.confirming(target)) class="button secondary small" href=(pages.handle)>"Change handle"</a>
                     <a data-confirm-first="" data-confirming=(Change::ChangeDisplayName.confirming(target)) class="button secondary small" href=(pages.display_name)>"Change display name"</a>
                 },
@@ -335,6 +338,85 @@ async fn account_actions<'a>(
                 },
             }
         </div>
+    })
+}
+
+/// A message's email, as it will be sent.
+#[derive(Clone, Copy, Debug)]
+pub struct MessagePreview<'a> {
+    /// Its plain-text body.
+    pub email: &'a str,
+    /// The account's primary verified address, which it is emailed to, if the
+    /// account has one.
+    pub address: Option<&'a str>,
+}
+
+/// A message to the account `handle`, `form` as typed, with a link `back` to
+/// the account's page and why the last attempt was refused, if it was. Without
+/// a `preview`, the form writing it, whose button shows its email; with one,
+/// that email, with buttons sending it, which needs the dashboard's passkey
+/// confirmation, and changing its text again.
+#[component]
+pub async fn message_page<'a>(
+    handle: &'a str,
+    back: &'a str,
+    form: &'a MessageUser,
+    #[into]
+    #[default]
+    preview: Option<MessagePreview<'a>>,
+    #[into]
+    #[default]
+    refusal: Option<&'a str>,
+) -> Result<impl View> {
+    let change = Change::Message;
+    Ok(view! {
+        page_head(title: change.title(), lead: format!("To @{handle}. {}", change.description()))
+        if let Some(refusal) = refusal {
+            <p class="notice error" role="alert">(refusal)</p>
+        }
+        <section class="card">
+            <form class="stack" method="post" data-submit-once="" data-unconfirmed="">
+                match preview {
+                    None => {
+                        <label>
+                            "Subject"
+                            <input name="subject" required="" maxlength="150" value=(form.subject.as_str()) autofocus="">
+                        </label>
+                        <label>
+                            "Text"
+                            <textarea name="body" required="" rows="14" maxlength="20000">(form.body.as_str())</textarea>
+                            <small>"The email starts with “Hello,” and ends with “SourceOrigin”. Separate paragraphs with a blank line. Links are written out in full: mail apps make them clickable."</small>
+                        </label>
+                        <div class="row actions">
+                            <button name="intent" value="preview">"Preview the email"</button>
+                            <a class="button secondary" href=(back)>"Cancel"</a>
+                        </div>
+                    },
+                    Some(preview) => {
+                        <input type="hidden" name="subject" value=(form.subject.as_str())>
+                        <input type="hidden" name="body" value=(form.body.as_str())>
+                        <dl class="facts">
+                            <dt>"To"</dt><dd>(format!("@{handle}"))</dd>
+                            <dt>"Subject"</dt><dd>(form.subject.as_str())</dd>
+                            <dt>"Emailed to"</dt>
+                            <dd>
+                                match preview.address {
+                                    Some(address) => private_address(address: address),
+                                    None => "Nobody: the account has no primary verified address. Its owner finds it in their inbox.",
+                                }
+                            </dd>
+                        </dl>
+                        <p class="help">"Its plain-text version. The HTML version says the same, with the same line breaks."</p>
+                        <pre class="email">(preview.email)</pre>
+                        <div class="row actions">
+                            <button name="intent" value="send" data-confirms="">(change.button())</button>
+                            <button class="secondary" name="intent" value="edit">"Edit"</button>
+                            <a class="button secondary" href=(back)>"Cancel"</a>
+                        </div>
+                    },
+                }
+            </form>
+        </section>
     })
 }
 

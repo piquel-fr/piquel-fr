@@ -1,22 +1,23 @@
 //! Account search, one account's page, and the changes made to an account.
 
-use super::{AdminApplication as App, invitations, lists, settings};
-use crate::{Reason, routes};
+use super::{AdminApplication as App, Refused, invitations, lists, settings};
+use crate::{AdminError, Letter, Reason, deliveries::EmailSender, routes};
 use serde::de::IgnoredAny;
 use sourceorigin_common::{
     AccountStatus, PictureId, SessionId, UserId,
-    admin::{DisableUser, EventSearch, User, UserSearch},
+    admin::{DisableUser, EventSearch, MessageIntent, MessageUser, User, UserSearch},
 };
 use sourceorigin_repository::{RecentRecovery, RecoveryState};
 use sourceorigin_ui::{
-    AccountPages, Action, Change, Crumb, Pager, Query, RecoveryKey, RecoveryRow, RecoveryStanding,
-    SessionRow, Target, UserRow,
+    AccountPages, Action, Change, Crumb, MessagePreview, Pager, Query, RecoveryKey, RecoveryRow,
+    RecoveryStanding, SessionRow, Target, UserRow,
 };
 use topcoat::{
-    Result,
+    Error, Result,
     context::Cx,
     router::{
-        StatusCode, content::Form, href, path_param, query_params, response::Response, route,
+        StatusCode, content::Form, error::see_other, href, path_param, query_params,
+        response::Response, route,
     },
     view::view,
 };
@@ -106,6 +107,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         href!(settings::notifications, Account(id)).resolve(cx),
         href!(settings::handle, Account(id)).resolve(cx),
         href!(settings::display_name, Account(id)).resolve(cx),
+        href!(message, Account(id)).resolve(cx),
     ];
     let [
         recovering,
@@ -118,6 +120,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         told,
         renaming,
         naming,
+        writing,
     ] = links.each_ref().map(String::as_str);
     let status = action(match detail.user.status {
         AccountStatus::Active => href!(disable, Account(id)).resolve(cx),
@@ -141,6 +144,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             notifications: told,
             handle: renaming,
             display_name: naming,
+            message: writing,
         })
     } else {
         Err(ADMINISTRATOR_TARGET)
@@ -349,6 +353,79 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
         )
     };
     App::render(cx, StatusCode::OK, "Revoke a session", page).await
+}
+
+/// What a message's form asked for, once it was posted.
+enum Composed {
+    /// Its text again, to change it.
+    Editing(MessageUser),
+    /// Its email, as it will be sent.
+    Previewing(MessageUser, Letter),
+    /// Nothing more: it was sent.
+    Sent,
+}
+
+/// `/users/{account}/message`: writes a message to the account, shows its email
+/// as it will be sent, then sends it and goes on to the account's page. Writing
+/// and previewing it need no confirmation, so a long text never outlasts one;
+/// sending needs the dashboard's recent one, which its script asks for first.
+/// Without the script, a confirmation that ran out goes through auth's handoff
+/// page and back to an empty form. Refused for an administrator's account,
+/// which the account's page links no message for.
+#[route([GET, POST] "/users/{account}/message")]
+pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<Response> {
+    let admin = App::admin(cx).await?;
+    let app = App::of(cx);
+    let id = *path_param::<Account>(cx)?;
+    let back = App::account(cx, id);
+    let composed = App::change(cx, form, |input: MessageUser| async move {
+        if input.intent == MessageIntent::Edit {
+            return Ok(Composed::Editing(input));
+        }
+        let letter = Letter::try_from(&input)?;
+        if input.intent == MessageIntent::Preview {
+            return Ok(Composed::Previewing(input, letter));
+        }
+        app.service
+            .message_user(&admin.operator, id, letter)
+            .await?;
+        Ok::<_, AdminError>(Composed::Sent)
+    })
+    .await?;
+    let (typed, letter, refusal) = match composed {
+        None => (MessageUser::default(), None, None),
+        Some(Ok(Composed::Sent)) => return Err(see_other(back).into()),
+        Some(Ok(Composed::Editing(typed))) => (typed, None, None),
+        Some(Ok(Composed::Previewing(typed, letter))) => (typed, Some(letter), None),
+        // A send refused shows its email again; a text refused, its form.
+        Some(Err(Refused { message, form })) => {
+            (form.clone(), Letter::try_from(&form).ok(), Some(message))
+        }
+    };
+    let account = app.service.view_user(&admin.operator, id).await?;
+    let email = letter
+        .map(|letter| EmailSender::preview(&letter, &app.auth))
+        .transpose()
+        .map_err(|error| Error::msg(format!("could not render a message: {error}")))?;
+    let preview = email.as_deref().map(|email| MessagePreview {
+        email,
+        address: account
+            .emails
+            .iter()
+            .find(|address| address.primary && address.verified_at.is_some())
+            .map(|address| address.address.as_str()),
+    });
+    let (handle, typed) = (account.user.handle.as_str(), &typed);
+    let page = view! { cx =>
+        sourceorigin_ui::message_page(
+            handle: handle,
+            back: back.as_str(),
+            form: typed,
+            preview: preview,
+            refusal: refusal.as_deref(),
+        )
+    };
+    App::render(cx, StatusCode::OK, "Send a message", page).await
 }
 
 /// The form of a change whose reason the owner sees in their history: starting

@@ -555,6 +555,34 @@ pub struct SendAnnouncement {
     pub revision: u64,
 }
 
+/// The form sending an account a message, as typed: the dashboard checks it,
+/// so a mistake is explained beside the form.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageUser {
+    /// The email's subject: one line, up to 150 characters.
+    #[serde(default)]
+    pub subject: String,
+    /// Its text: up to 20,000 characters, paragraphs separated by blank lines.
+    #[serde(default)]
+    pub body: String,
+    /// What the button pressed asks for.
+    #[serde(default)]
+    pub intent: MessageIntent,
+}
+
+/// What a message form's button asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageIntent {
+    /// Show the email as it will be sent, which needs no confirmation.
+    #[default]
+    Preview,
+    /// Change the text again, keeping what was typed.
+    Edit,
+    /// Send it, which needs the dashboard's recent passkey confirmation.
+    Send,
+}
+
 /// Whom an announcement goes to, as its form chooses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

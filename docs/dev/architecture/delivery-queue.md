@@ -116,7 +116,8 @@ it; a replaced or removed address's to that address, so whoever reads it hears
 of it; any other to the primary verified address, and an account without one
 gets no email. The message copies the address and the notification, read in the
 event's transaction, so removing the address right after cannot cancel it, and
-says what the inbox says. It links the notification's page. A recovery's also
+says what the inbox says. It links the notification's page, except a message's,
+which reads like an announcement's and links the inbox. A recovery's also
 links its undo page while a passkey can still undo it, and an alert's links the
 dashboard's Alerts tab while auth serves one. The copied addresses are the
 channel's only personal data, deleted with the delivery. The `destination`

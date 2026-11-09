@@ -36,6 +36,12 @@ See the alerts on the admin dashboard:
 Read it in your Origin Account notifications:
 
 {{ page }}
+{%- when Content::Message { address: _, subject: _, body, paragraphs: _, inbox } %}
+{{ body }}
+
+SourceOrigin support wrote this message about your Origin Account. You can read it again in your Origin Account notifications:
+
+{{ inbox }}
 {%- when Content::Announcement { address: _, subject: _, body, paragraphs: _, everyone, inbox, unsubscribe } %}
 {{ body }}
 

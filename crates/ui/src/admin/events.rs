@@ -426,6 +426,7 @@ impl EventRow<'_> {
                 format!("Announcement sent to {recipients} accounts")
             })
             .with("announcement", announcement_id),
+            DomainEvent::MessageSent {} => Description::new("Message sent to the account"),
             DomainEvent::NotificationPreferenceChanged(preference) => {
                 Description::new(preference.change())
             }

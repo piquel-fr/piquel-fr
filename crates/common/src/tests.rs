@@ -323,6 +323,7 @@ fn event_kinds_match_their_serde_tags() {
             recipients: 2,
             essential: true,
         },
+        DomainEvent::MessageSent {},
         DomainEvent::AlertRaised {
             alert_id: AlertId::new(),
             alert: alert.clone(),

@@ -136,7 +136,8 @@ enum Administration {
     /// on them.
     #[command(subcommand)]
     Alerts(AlertsCommand),
-    /// Read or change one account's settings on its owner's behalf.
+    /// Read or change one account's settings on its owner's behalf, or send it a
+    /// message.
     Account(AccountCommand),
 }
 
@@ -201,7 +202,7 @@ impl Administration {
     const fn operation(&self) -> Operation {
         type Op = AdminOperation;
         Operation::Admin(match self {
-            Self::Account(command) => return Operation::Account(command.operation()),
+            Self::Account(command) => return command.operation(),
             Self::User(command) => match command {
                 UserCommand::Search { .. } => Op::SearchUsers,
                 UserCommand::Show { .. } => Op::ViewUser,

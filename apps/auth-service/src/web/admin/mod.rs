@@ -410,6 +410,7 @@ impl AdminApplication {
             Op::RestoreUser => &users::restore,
             Op::RevokeUserSessions => &users::revoke_sessions,
             Op::RevokeSession => &users::revoke_session,
+            Op::MessageUser => &users::message,
             Op::RenameHandle => &settings::handle,
             Op::RecoverAccount => &users::recover,
             Op::UndoRecovery => &users::undo_recovery,

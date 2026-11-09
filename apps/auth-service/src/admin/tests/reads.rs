@@ -118,6 +118,7 @@ impl AdminOperation {
             | Self::PurgeUser
             | Self::RevokeUserSessions
             | Self::RevokeSession
+            | Self::MessageUser
             | Self::CreateInvitation
             | Self::RevokeInvitation
             | Self::CreateClient

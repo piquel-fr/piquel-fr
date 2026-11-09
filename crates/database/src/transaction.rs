@@ -73,6 +73,34 @@ impl<'a> DatabaseTransaction<'a> {
         self.record_to::<Registered>(context, subject, event).await
     }
 
+    /// Records that `context`'s administrator or operator sent the account
+    /// `user_id` a message, [`DomainEvent::MessageSent`], as [`Self::record`]
+    /// does, and gives the account the message, `title` and `text`, as a
+    /// notification, emailed as every other. The event, which the audit chain
+    /// keeps, holds no text: the notification is the message's only copy, which
+    /// purging the account deletes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the event, the notification or a delivery
+    /// cannot be written.
+    pub async fn record_message(
+        &mut self,
+        context: &EventContext,
+        user_id: UserId,
+        title: String,
+        text: String,
+    ) -> Result<EventId, DatabaseError> {
+        let message = Notification::Message { title, text };
+        self.write::<Registered>(
+            context,
+            Some(user_id),
+            DomainEvent::MessageSent {},
+            Some(message),
+        )
+        .await
+    }
+
     /// [`Self::record`], fanning out to the channels `C`, which tests replace.
     pub(crate) async fn record_to<C: Channels>(
         &mut self,
@@ -80,8 +108,21 @@ impl<'a> DatabaseTransaction<'a> {
         subject: Option<UserId>,
         event: DomainEvent,
     ) -> Result<EventId, DatabaseError> {
+        let notification = event.notification(&context.actor);
+        self.write::<C>(context, subject, event, notification).await
+    }
+
+    /// Records `event`, giving its audience `notification`, and fans both out to
+    /// the channels `C`.
+    async fn write<C: Channels>(
+        &mut self,
+        context: &EventContext,
+        subject: Option<UserId>,
+        event: DomainEvent,
+        notification: Option<Notification>,
+    ) -> Result<EventId, DatabaseError> {
         let id = self.events().insert(context, subject, &event).await?;
-        let notified = match event.notification(&context.actor) {
+        let notified = match notification {
             Some(notification) => self.notify(id, subject, notification).await?,
             None => Vec::new(),
         };

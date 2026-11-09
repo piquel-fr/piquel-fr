@@ -22,6 +22,7 @@ mod deliveries;
 mod handles;
 mod invitations;
 mod keys;
+mod messages;
 mod mutations;
 mod reads;
 

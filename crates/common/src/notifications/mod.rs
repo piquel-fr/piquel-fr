@@ -18,11 +18,12 @@ use serde::{Deserialize, Serialize};
 /// kind: a newer release's kinds are skipped by older ones, not misread.
 ///
 /// A variant holds only IDs, enums, flags and timestamps, never a secret, an
-/// address or a [`Personal`](crate::Personal) value, except an announcement,
-/// which holds the text administrators wrote, and a raised alert, which holds
-/// the alert's text; it names no account. A targeted announcement's text,
-/// which may name its recipients, goes with them: purging an account deletes its
-/// notifications, and the announcement once its last recipient is purged.
+/// address or a [`Personal`](crate::Personal) value, except an announcement or
+/// a message, which hold the text administrators wrote, and a raised alert,
+/// which holds the alert's text; it names no account. A targeted announcement's
+/// text, which may name its recipients, goes with them: purging an account
+/// deletes its notifications, its messages among them, and the announcement once
+/// its last recipient is purged.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Notification {
@@ -65,6 +66,16 @@ pub enum Notification {
         announcement_id: AnnouncementId,
         /// Its subject, as they wrote it. Named apart from the `subject` every
         /// notification is shown with, which it becomes.
+        title: String,
+        /// Its text, as they wrote it, which becomes the notification's `body`.
+        text: String,
+    },
+    /// Administrators sent this account a message, such as why it was disabled
+    /// or what support needs from its owner. It is the message's only copy:
+    /// [`DomainEvent::MessageSent`] records who sent it, not what it says.
+    Message {
+        /// Its subject, as they wrote it, which becomes the notification's
+        /// `subject`.
         title: String,
         /// Its text, as they wrote it, which becomes the notification's `body`.
         text: String,
@@ -194,6 +205,9 @@ impl DomainEvent {
             | Self::AuditChainVerified(_)
             // It concerns no one account: sending writes each recipient's.
             | Self::AnnouncementSent { .. }
+            // It leaves the message's text out, which
+            // `DatabaseTransaction::record_message` gives the account instead.
+            | Self::MessageSent {}
             // Administrators follow an alert on the dashboard's Alerts tab, or
             // with `auth-service alerts list`, once it is raised.
             | Self::AlertUpdated { .. }
@@ -297,7 +311,8 @@ impl Notification {
             | Self::AccountEnabled
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
-            | Self::Announcement { .. } => Audience::Subject,
+            | Self::Announcement { .. }
+            | Self::Message { .. } => Audience::Subject,
         }
     }
 
@@ -325,6 +340,8 @@ impl Notification {
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
             | Self::AlertRaised { .. }
+            // About the account itself, so whatever the owner's preferences.
+            | Self::Message { .. }
             // Through the `announcement` channel, which has workers of its own.
             | Self::Announcement { .. } => Addressees::Primary,
         }
@@ -334,7 +351,9 @@ impl Notification {
     #[must_use]
     pub fn subject(&self) -> &str {
         match self {
-            Self::Announcement { title, .. } | Self::AlertRaised { title, .. } => title,
+            Self::Announcement { title, .. }
+            | Self::Message { title, .. }
+            | Self::AlertRaised { title, .. } => title,
             Self::PrimaryEmailChanged => "Your primary email address changed",
             Self::EmailRemoved => "An email address was removed from your account",
             Self::AccountSecured { .. } => "SourceOrigin support secured your account",
@@ -354,7 +373,9 @@ impl Notification {
     #[must_use]
     pub fn body(&self) -> String {
         match self {
-            Self::Announcement { text, .. } | Self::AlertRaised { text, .. } => text.clone(),
+            Self::Announcement { text, .. }
+            | Self::Message { text, .. }
+            | Self::AlertRaised { text, .. } => text.clone(),
             Self::PrimaryEmailChanged => "Another of your verified addresses is now the primary one. Origin Auth sends notices about your account there, and apps that read your email address see it the next time they refresh your profile. If you didn’t make this change, sign in and review your security history.".to_owned(),
             Self::EmailRemoved => "Origin Auth no longer sends anything to that address. If you didn’t remove it, sign in and review your security history.".to_owned(),
             Self::AccountSecured { kept } => {

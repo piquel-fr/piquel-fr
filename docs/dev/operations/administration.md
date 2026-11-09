@@ -2,7 +2,8 @@
 
 This page helps you run SourceOrigin's accounts: grant administrators, invite
 people, help an owner who lost their passkeys, act on an account that breaks the
-rules, send announcements, respond to alerts, and repair auth's own state.
+rules, message an account, send announcements, respond to alerts, and repair
+auth's own state.
 
 Two surfaces run the same code (`AdminService` in
 `apps/auth-service/src/admin`, and `AccountService` in
@@ -236,6 +237,44 @@ dashboard, open the account and select **Delete**, or **Restore**.
 
 See [data export and account deletion](../architecture/account-deletion.md).
 
+## Message an account
+
+A message tells one account's owner something about their account, such as why
+it was disabled or what support needs from them. It lands in their inbox (see
+[notifications](../architecture/notifications.md)), and is emailed to their
+primary verified address whatever their email preferences, since it is about the
+account itself. The owner can't reply, so say in the text how to reach support.
+A message has no separate reason: its text says why.
+
+> **Warning:** sending a message can't be taken back, and its text never
+> changes afterwards.
+
+On the dashboard:
+
+1. Open the account and select **Send a message**.
+2. Write the **Subject** and **Text**, then select **Preview the email**.
+   Writing and previewing need no passkey.
+3. Check the email as it will be sent, and the address it goes to. Select
+   **Edit** to change the text.
+4. Select **Send**. It asks for your passkey, then goes back to the account's
+   page.
+
+From the command line:
+
+```sh
+auth-service account alice message --subject "About your account" --body-file message.txt
+```
+
+The command reads the text from the file, or from standard input with
+`--body-file -`, and asks for confirmation before it sends.
+
+A message goes to an account in any status, so the owner of a disabled account
+can learn why. The dashboard never messages an administrator's account, as it
+changes none; the command line may. Sending records a `message_sent` event with
+who sent it, but not the text, which may be personal: the inbox holds the
+message's only copy, so purging the account deletes it. The owner's security
+history doesn't list the message, since their inbox shows it.
+
 ## Send an announcement
 
 An announcement tells accounts what they must know, such as a security incident
@@ -246,8 +285,8 @@ their primary verified address if they have one and receive announcements by
 email, which they may turn off. An **essential** announcement is emailed to
 every recipient with such an address, whatever their preference, and carries no
 unsubscribe link: mark one essential only for a security incident, or a change
-to the privacy policy or terms. It is not for support conversations, which
-happen elsewhere.
+to the privacy policy or terms. To tell one account something about itself,
+[message it](#message-an-account) instead.
 
 On the dashboard:
 
@@ -426,7 +465,7 @@ Each alert says what to look at. Auth raises these:
   `session revoke-all`, `admin revoke`, `client disable`, `client suspend`,
   `client delete`, `client rotate-secret --grace 0`, `keys revoke`, `keys rotate
   --now`, `handle release`, `audit prune`, `announcement send`, and `account …
-  passkeys revoke`,
+  message`, `passkeys revoke`,
   `identities unlink` and `sessions revoke-all`. Without a terminal, they
   refuse unless given `--yes`.
 - `--output json` prints the views the dashboard shows, as defined in
