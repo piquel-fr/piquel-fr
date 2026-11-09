@@ -19,8 +19,10 @@ telemetry for free and adds the rest in one line.
   jobs get one root span per run, and delivery workers one per attempt. Incoming
   `traceparent` headers are ignored: a public caller must not choose the trace IDs
   that events keep.
-- **An access log line** with status and duration. Health probes log at debug
-  level only.
+- **An access log line** with status and duration, such as `GET
+  /account/passkeys/{id}`. A request that matches no route logs `GET
+  unmatched`: its path is whatever the client sent, so it is never recorded.
+  Health probes log at debug level only.
 - **A span per query.** `run!` wraps every query in a trace in a `db.query` span
   with its parameterized SQL (`db.query.text`), never its bind values. Queries
   outside a trace, such as an idle delivery worker's poll every second or a
@@ -90,10 +92,24 @@ so the Rust SDK sends its requests, such as Google's signing-key fetches through
 
 Everything a span, log line or label holds is exported. Never record a secret
 (cookie, code, token, ceremony state, invitation, client secret), a query string,
-a request header, a client IP or a user agent. Events keep IPs and user agents
-under their own retention rules. User IDs are pseudonymous, so they are allowed
-on spans and log lines. The collector also deletes `url.query`, `url.full`,
-`client.address` and `http.*.header.*` attributes, as a second line of defense.
+a request header, a request path, a client IP or a user agent. Events keep IPs
+and user agents under their own retention rules. User IDs are pseudonymous, so
+they are allowed on spans and log lines. The collector also deletes `url.path`,
+`url.query`, `url.full`, `client.address` and `http.*.header.*` attributes, as a
+second line of defense.
+
+Some errors quote personal data, so they are logged with care:
+
+- **Errors** are logged as `error = %ErrorChain(&error)`: each message of the
+  chain, never a type's `Debug`. `DatabaseError`'s `Debug` is that chain too, so
+  even `?error` on it, or on an error holding it, leaves out PostgreSQL's
+  `detail`, which quotes the rejected values (`Key (address)=(…) already
+  exists`). A stored value that does not decode keeps only its column and, for
+  JSON, the failure's category and position (`DecodeFailure`), never the
+  decoder's message, which can quote the value.
+- **SMTP failures** keep only the reply code or failure category, as the
+  delivery's error. The relay's reply text can quote the recipient, so it is
+  never logged, at any level.
 
 `passkey::tests::telemetry::telemetry_exports_no_secret_of_a_sign_in_and_code_exchange`
 runs a passkey sign-in and a code exchange through the production layers, with
@@ -112,10 +128,16 @@ Only the standard variables, read by `Telemetry::init`:
 | `OTEL_RESOURCE_ATTRIBUTES` | e.g. `deployment.environment.name=staging`, which dashboards filter on |
 | `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Sampling; every trace is kept by default |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | Bound on each export request, in milliseconds; 10000 by default. The per-signal variants are not supported |
-| `RUST_LOG` | What is logged; spans keep the service's default filter |
+| `RUST_LOG` | What is logged; spans keep the service's default filter. A value that does not parse stops every command |
+
+When export is configured but cannot start, such as on a malformed endpoint,
+`serve` and the web app refuse to start: a server must not run without the
+telemetry its alerts read. Every other `auth-service` command, such as
+`migrate` or an account repair, logs a warning and runs with logs on stderr
+only, so broken telemetry never blocks a break-glass fix.
 
 Export goes through the workspace's `reqwest`, on the service's tokio runtime,
-in protobuf. A gRPC `OTEL_EXPORTER_OTLP_PROTOCOL` fails at startup. Shutdown
+in protobuf, whatever `OTEL_EXPORTER_OTLP_PROTOCOL` says. Shutdown
 flushes pending telemetry after the listeners stop.
 
 ## Locally

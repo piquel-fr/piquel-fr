@@ -60,7 +60,7 @@ use keys::KeysCommand;
 use session::SessionCommand;
 use sourceorigin_common::ErrorChain;
 use sourceorigin_repository::Database;
-use sourceorigin_telemetry::Telemetry;
+use sourceorigin_telemetry::{Export, Telemetry};
 use std::process::ExitCode;
 use tracing::Instrument;
 use user::UserCommand;
@@ -309,13 +309,21 @@ impl Administration {
 
 impl Cli {
     /// Installs telemetry, runs the selected command, then flushes telemetry, and
-    /// prints any failure with its causes. A failed flush, such as an unreachable
-    /// collector, is only reported: it must not fail a command, such as a deploy's
-    /// migration job.
+    /// prints any failure with its causes. OTLP export never stops a command other
+    /// than `serve`: when it cannot start, the command logs to stderr only, and a
+    /// failed flush, such as an unreachable collector, is only reported, so a
+    /// deploy's migration job and break-glass repairs still run. An unparseable
+    /// `RUST_LOG` stops every command.
     pub async fn run(self) -> ExitCode {
         let result = async {
-            let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
             let command = self.command.unwrap_or(Command::Serve);
+            let export = match command {
+                Command::Serve => Export::Required,
+                Command::Migrate | Command::Keys(_) | Command::Administration(_) => {
+                    Export::Optional
+                }
+            };
+            let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER, export)?;
             let result = command.run(self.operator).await;
             if let Err(error) = telemetry.shutdown().await {
                 eprintln!("warning: {}", ErrorChain(&error));

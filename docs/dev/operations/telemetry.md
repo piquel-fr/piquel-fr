@@ -86,9 +86,11 @@ Once, after `infra/telemetry.toml` is on `main`:
 3. Add that webhook to this repository, as for
    [sourceorigin](deploying.md#set-up-the-environments).
 
-Telemetry never blocks a deployment of sourceorigin. Until the collector is
-deployed and linked, export fails, the services log a warning on stderr, and
-serve normally.
+An unreachable collector never blocks a deployment of sourceorigin. Until the
+collector is deployed and linked, export fails, the services log a warning on
+stderr, and serve normally. A malformed endpoint, timeout or
+`OTEL_SDK_DISABLED`, by contrast, stops `serve` and the web app, while `migrate` and the
+administrative commands warn and log to stderr only.
 
 ## Run the dashboards locally
 
@@ -104,7 +106,7 @@ This runs Grafana's all-in-one OpenTelemetry backend, with both dashboards, at
 
 | Service | Image | Role |
 | --- | --- | --- |
-| `collector` | `otel/opentelemetry-collector-contrib` | OTLP/HTTP on port 4318, with a memory limit and batching. It deletes query strings, request headers and client addresses that reach it anyway |
+| `collector` | `otel/opentelemetry-collector-contrib` | OTLP/HTTP on port 4318, with a memory limit and batching. It deletes paths, query strings, request headers and client addresses that reach it anyway |
 | `prometheus` | `prom/prometheus` | Metrics, received over OTLP, kept 30 days |
 | `tempo` | `grafana/tempo` | Traces, kept 14 days |
 | `loki` | `grafana/loki` | Logs, received over OTLP, kept 30 days |
