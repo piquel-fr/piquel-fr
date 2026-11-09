@@ -170,8 +170,8 @@ message has no draft: the account's page links a form whose text, once written,
 shows as its email will be sent, and sending it needs the dashboard's recent
 confirmation. Writing and previewing need none, so the text is never lost to a
 confirmation that ran out while it was written, as long as the dashboard's
-script asks for one before sending. The dashboard messages no administrator's
-account, as it changes none (see
+script asks for one before sending. Unlike the dashboard's changes, a message
+also goes to an administrator's account, since it changes nothing about it (see
 [message an account](../operations/administration.md#message-an-account)).
 
 Administrators also follow alerts: conditions auth's background jobs find that

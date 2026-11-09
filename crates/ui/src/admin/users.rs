@@ -147,18 +147,18 @@ pub struct AccountPages<'a> {
     pub handle: &'a str,
     /// Giving it a new display name.
     pub display_name: &'a str,
-    /// Sending it a message.
-    pub message: &'a str,
 }
 
 /// One account's page: `detail`, with its profile picture at `picture`, the
-/// `pages` changing it, or why there are none, its `sessions`, and its `recent`
-/// events, linking `all_events`.
+/// `pages` changing it, or why there are none, the page sending it a `message`,
+/// which every account has, its `sessions`, and its `recent` events, linking
+/// `all_events`.
 #[component]
 pub async fn user_page<'a>(
     detail: &'a UserDetail,
     picture: Option<&'a str>,
     pages: Result<AccountPages<'a>, &'a str>,
+    message: &'a str,
     sessions: &'a [SessionRow<'a>],
     recent: &'a [EventRow<'a>],
     all_events: &'a str,
@@ -198,7 +198,7 @@ pub async fn user_page<'a>(
                         }
                     }
                 </dl>
-                account_actions(user: user, pages: pages, named: named.as_str())
+                account_actions(user: user, pages: pages, message: message, named: named.as_str())
             </div>
         </section>
         <div class="two">
@@ -295,12 +295,14 @@ async fn session_list<'a>(
         })
 }
 
-/// What may be done to `user`, by its `pages`, or why nothing may. The passkey
-/// dialog names the account as `named`.
+/// What may be done to `user`, by its `pages`, or why nothing may, and sending
+/// it a `message`, which even an administrator's account takes: it changes
+/// nothing. The passkey dialog names the account as `named`.
 #[component]
 async fn account_actions<'a>(
     user: &'a User,
     pages: Result<AccountPages<'a>, &'a str>,
+    message: &'a str,
     named: &'a str,
 ) -> Result<impl View> {
     let target = Some(named);
@@ -329,7 +331,6 @@ async fn account_actions<'a>(
                     <a data-confirm-first="" data-confirming=(opening("Connected apps")) class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>
                     <a class="button secondary small" href=(pages.notifications)>"Notifications"</a>
-                    <a class="button secondary small" href=(pages.message)>"Send a message"</a>
                     <a data-confirm-first="" data-confirming=(Change::ChangeHandle.confirming(target)) class="button secondary small" href=(pages.handle)>"Change handle"</a>
                     <a data-confirm-first="" data-confirming=(Change::ChangeDisplayName.confirming(target)) class="button secondary small" href=(pages.display_name)>"Change display name"</a>
                 },
@@ -337,6 +338,7 @@ async fn account_actions<'a>(
                     refused_action(label: "Change", reason: reason)
                 },
             }
+            <a class="button secondary small" href=(message)>"Send a message"</a>
         </div>
     })
 }

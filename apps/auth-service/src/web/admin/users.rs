@@ -144,7 +144,6 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             notifications: told,
             handle: renaming,
             display_name: naming,
-            message: writing,
         })
     } else {
         Err(ADMINISTRATOR_TARGET)
@@ -169,6 +168,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             detail: detail,
             picture: picture.as_deref(),
             pages: pages,
+            message: writing,
             sessions: sessions,
             recent: events,
             all_events: all_events.as_str(),
@@ -370,17 +370,14 @@ enum Composed {
 /// and previewing it need no confirmation, so a long text never outlasts one;
 /// sending needs the dashboard's recent one, which its script asks for first.
 /// Without the script, a confirmation that ran out goes through auth's handoff
-/// page and back to an empty form. Refused for an administrator's account,
-/// which the account's page links no message for, before anything is written.
+/// page and back to an empty form. An administrator's account takes one too: a
+/// message changes nothing about it.
 #[route([GET, POST] "/users/{account}/message")]
 pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let app = App::of(cx);
     let id = *path_param::<Account>(cx)?;
     let account = app.service.view_user(&admin.operator, id).await?;
-    if account.administrator {
-        return Err(AdminError::AdministratorTarget.into());
-    }
     let back = App::account(cx, id);
     let composed = App::change(cx, form, |input: MessageUser| async move {
         if input.intent == MessageIntent::Edit {

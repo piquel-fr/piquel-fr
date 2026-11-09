@@ -102,38 +102,31 @@ async fn messages_reach_the_inbox_and_the_primary_address_until_purged() {
     assert_eq!(emailed(primary).await.len(), 0);
 }
 
-/// The dashboard never messages an administrator's account, nor without a
-/// recent passkey confirmation, and sends nothing when it refuses; the CLI
-/// messages any account.
+/// The dashboard needs a recent passkey confirmation to send a message, and
+/// sends nothing without one. A message changes nothing about an account, so
+/// the dashboard and the CLI both message an administrator's.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn only_the_cli_messages_administrators() {
+async fn administrators_are_messaged_after_a_recent_confirmation() {
     let harness = Harness::new().await;
     let service = harness.service();
     let admin = harness.admin().await;
     let administrator = harness.admin().await.user_id;
-    let user = harness.account().await.user_id;
     let step_up = StepUpRequirement::passkey_within(CONFIRMATION_MAX_AGE);
     let stale = Utc::now() - Duration::minutes(10);
-    for (operator, target, refusal) in [
-        (
-            operator(admin, Utc::now()),
-            administrator,
-            AdminError::AdministratorTarget,
-        ),
-        (
-            operator(admin, stale),
-            user,
-            AdminError::StepUpRequired(step_up),
-        ),
-    ] {
-        let refused = service.message_user(&operator, target, letter()).await;
-        assert_refused(&refused.expect_err("refused"), &refusal, "message");
-        assert_eq!(harness.inbox(target).await, []);
-    }
+    let refused = service
+        .message_user(&operator(admin, stale), administrator, letter())
+        .await;
+    let refusal = AdminError::StepUpRequired(step_up);
+    assert_refused(&refused.expect_err("refused"), &refusal, "message");
+    assert_eq!(harness.inbox(administrator).await, []);
+    service
+        .message_user(&operator(admin, Utc::now()), administrator, letter())
+        .await
+        .expect("the dashboard messages an administrator");
     service
         .message_user(&cli(), administrator, letter())
         .await
         .expect("the CLI messages an administrator");
-    assert_eq!(harness.inbox(administrator).await.len(), 1);
+    assert_eq!(harness.inbox(administrator).await.len(), 2);
 }
