@@ -713,6 +713,11 @@ struct Parent {
 }
 
 impl Parent {
+    /// Its name and page, as the crumb links it.
+    fn crumb(&self) -> (&str, &str) {
+        (&self.name, &self.href)
+    }
+
     /// It, as a change's page names it beside its button.
     fn target(&self) -> Target<'_> {
         Target {
@@ -985,9 +990,7 @@ impl AdminApplication {
             me: &me,
             tabs: links,
             current,
-            parent: parent
-                .as_ref()
-                .map(|parent| (parent.name.as_str(), parent.href.as_str())),
+            parent: parent.as_ref().map(Parent::crumb),
             sign_out: leave,
             preferences: BrowserCookie::read_preferences(headers(cx)),
             preferences_action: prefer,
