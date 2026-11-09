@@ -11,7 +11,9 @@ use sourceorigin_common::{
     events::{DomainEvent, EventContext, RevocationReason},
     protocol::api::Identity,
 };
-use sourceorigin_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
+use sourceorigin_repository::{
+    Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation,
+};
 use std::net::IpAddr;
 
 impl FederationApplication {

@@ -12,6 +12,7 @@ use crate::{
     routes::page,
     security::RequestContext,
 };
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     UserId,
     config::Origin,
@@ -20,7 +21,6 @@ use sourceorigin_common::{
 };
 use sourceorigin_crypto::{CryptoError, Secret};
 use sourceorigin_repository::DatabaseTransaction;
-use serde::{Deserialize, Serialize};
 
 /// The links that turn an account's announcements' email off, which every
 /// email that is not essential carries. A link names the account and a token

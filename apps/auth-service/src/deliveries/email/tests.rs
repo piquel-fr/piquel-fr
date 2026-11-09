@@ -174,7 +174,10 @@ async fn retries_resend_the_same_message_to_the_current_address() {
         Err(DeliveryError::Retryable { .. })
     ));
     assert_eq!(sender.deliver(id, user_id, &verify).await, Ok(()));
-    let expected = (format!("<{id}@sourceorigin.dev>"), "ada@example.com".to_owned());
+    let expected = (
+        format!("<{id}@sourceorigin.dev>"),
+        "ada@example.com".to_owned(),
+    );
     assert_eq!(outbox.headers(), [expected.clone(), expected]);
 
     sender.assert_renders(user_id, &verify).await;
@@ -632,7 +635,10 @@ async fn an_alerts_email_links_the_dashboard() {
     };
     let dashboard: Origin = "https://admin.sourceorigin.dev".parse().expect("origin");
     for (linked, expected) in [
-        (Some(&dashboard), Some("https://admin.sourceorigin.dev/alerts")),
+        (
+            Some(&dashboard),
+            Some("https://admin.sourceorigin.dev/alerts"),
+        ),
         (None, None),
     ] {
         let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config)

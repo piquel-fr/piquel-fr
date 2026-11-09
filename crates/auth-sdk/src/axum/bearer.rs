@@ -8,8 +8,8 @@ use axum::{
     http::{HeaderValue, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
-use sourceorigin_common::protocol::challenge::{BearerChallenge, BearerError};
 use serde::de::DeserializeOwned;
+use sourceorigin_common::protocol::challenge::{BearerChallenge, BearerError};
 use std::{
     future::Future,
     marker::PhantomData,

@@ -2,11 +2,11 @@
 //! URL, and a client span around each request.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use sourceorigin_common::SendTraced;
 use reqwest::{
     RequestBuilder, StatusCode,
     header::{self, HeaderMap},
 };
+use sourceorigin_common::SendTraced;
 use std::time::Duration;
 use thiserror::Error;
 use url::Url;

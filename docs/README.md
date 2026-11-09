@@ -2,7 +2,7 @@
 
 SourceOrigin gives you one account, your Origin Account, secured by passkeys, that signs you in to
 SourceOrigin's services and to any app built on it. Its sign-in service,
-auth.sourceorigin.dev, is an OpenID Connect provider: apps register in its developer
+Origin Auth (auth.sourceorigin.dev), is an OpenID Connect provider: apps register in its developer
 console and sign their users in with the Rust or TypeScript SDK, or any OpenID
 Connect library.
 

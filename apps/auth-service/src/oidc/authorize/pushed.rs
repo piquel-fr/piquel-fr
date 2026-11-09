@@ -15,8 +15,8 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use chrono::{Duration, Utc};
-use sourceorigin_repository::{OidcRepository, StoredAuthorizationRequest};
 use serde::Serialize;
+use sourceorigin_repository::{OidcRepository, StoredAuthorizationRequest};
 use url::Url;
 
 /// Rejection of a `request_uri` that cannot be claimed.

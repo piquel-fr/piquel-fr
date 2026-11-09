@@ -21,7 +21,9 @@ use sourceorigin_common::{
     events::{DomainEvent, EventContext, SigningKeyChange},
     protocol::jwt::KeyId,
 };
-use sourceorigin_crypto::{CryptoError, Digest, KeyEncryptionKey, KeySet, PublicKey, Rs256Key, Secret};
+use sourceorigin_crypto::{
+    CryptoError, Digest, KeyEncryptionKey, KeySet, PublicKey, Rs256Key, Secret,
+};
 use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSigningKey, SigningKeyState,
     SigningKeyType, StoredSigningKey,

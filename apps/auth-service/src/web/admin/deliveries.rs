@@ -1,9 +1,9 @@
 //! The outbound delivery queue: listing deliveries, retrying and cancelling one.
 
 use super::AdminApplication as App;
+use serde::de::IgnoredAny;
 use sourceorigin_common::{DeliveryId, admin::DeliveryStatus};
 use sourceorigin_ui::{Action, Change, DeliveryRow};
-use serde::de::IgnoredAny;
 use topcoat::{
     Result,
     context::Cx,

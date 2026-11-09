@@ -3,9 +3,9 @@
 //! routes and the `account … apps` command. Their scenarios run with the OIDC flow
 //! tests, which issue the grants they remove.
 use crate::account::{AccountError, AccountService, Subject, Viewer};
+use serde::Serialize;
 use sourceorigin_common::{ClientId, events::DomainEvent, protocol::oauth::Scope};
 use sourceorigin_repository::StoredApp;
-use serde::Serialize;
 
 /// Removal failures and their browser response mapping.
 mod error;

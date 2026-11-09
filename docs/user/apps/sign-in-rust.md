@@ -99,7 +99,7 @@ Post a form to the logout route from one of your pages:
 
 The route revokes the session's refresh token, clears the cookie and sends the
 browser to auth, which asks **Ready to sign out?**. **Sign out** also ends the
-user's sourceorigin.dev session in that browser, and **Keep my session** keeps it. Auth
+user's Origin Account session in that browser, and **Keep my session** keeps it. Auth
 then sends the browser to the URL you gave `LoginRoutes::after_logout`, which must
 be one of the app's post-logout URIs. Without one, auth shows its own page.
 

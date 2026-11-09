@@ -31,7 +31,7 @@
   --radius: 7px;
   --sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --sidebar: 232px;
+  --sidebar: 256px;
   --sidebar-collapsed: 56px;
   color-scheme: light;
 }

@@ -7,9 +7,9 @@ use crate::{
     AdminService, AuthConfig, Operator, UserRef, account::AccountService, admin::OperatorName,
 };
 use clap::{Args, ValueEnum};
+use serde::Serialize;
 use sourceorigin_common::{UserId, admin::Paging, config::ConfigurationError};
 use sourceorigin_repository::Database;
-use serde::Serialize;
 use std::io::{BufRead, IsTerminal};
 
 /// Administrative commands' view of auth: every operation, run by the operator at

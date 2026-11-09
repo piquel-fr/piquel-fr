@@ -39,6 +39,8 @@ const MAX_DISPLAY_NAME_CHARS: usize = 80;
 /// "meta", are left out, since they appear inside ordinary names.
 pub const RESERVED_BRANDS: &[&str] = &[
     "sourceorigin",
+    "originauth",
+    "originaccount",
     "google",
     "microsoft",
     "github",

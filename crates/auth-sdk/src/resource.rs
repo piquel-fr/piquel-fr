@@ -2,8 +2,8 @@
 
 use crate::{AccessToken, Issuer, ScopeSet, TokenError};
 use chrono::{DateTime, Utc};
-use sourceorigin_common::protocol::{claims::AccessTokenClaims, jwt::TokenType};
 use serde::de::DeserializeOwned;
+use sourceorigin_common::protocol::{claims::AccessTokenClaims, jwt::TokenType};
 use std::{fmt, marker::PhantomData, str::FromStr};
 use thiserror::Error;
 use url::Url;
