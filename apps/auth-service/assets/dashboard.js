@@ -18,7 +18,8 @@
  * the change, and what it acts on, so two pages left open are told apart. One
  * that names nothing gets the dialog's `data-default`, what the page acts on.
  * A form marked `data-submit-once` posts once: a double click sends nothing more,
- * so a change, or a link or secret shown only once, is not lost to it.
+ * so a change, or a link or secret shown only once, is not lost to it. A page
+ * the browser restores from its back/forward cache may post it again.
  * The dialog's `data-passkey-confirm` button runs the passkey ceremony for the
  * dashboard's origin, which auth lists as a related origin of its RP ID: the
  * dialog's `data-confirmation-start` starts it, and its `data-confirmation-finish`
@@ -244,6 +245,13 @@ function wire(document) {
     if (form.dataset.submitted) event.preventDefault();
     else form.dataset.submitted = 'true';
   };
+  // A page the browser restores from its back/forward cache posts again.
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    for (const form of document.querySelectorAll('form[data-submitted]')) {
+      if (form instanceof HTMLFormElement) delete form.dataset.submitted;
+    }
+  });
   document.addEventListener('submit', (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || form.method !== 'post') return;
