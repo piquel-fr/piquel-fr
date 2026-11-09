@@ -169,10 +169,11 @@ impl Fixture {
         tx.commit().await.expect("commit");
     }
 
-    /// Gives `browser`'s account a record in every table an export reads besides
-    /// its sessions, a revoked passkey and an unlinked identity among them, and
-    /// an event its history hides beside a view of it, which the export leaves
-    /// out too. Returns its grant's refresh token digest.
+    /// Gives `browser`'s account a record in every table an export reads: a
+    /// revoked passkey, an unlinked identity and a signed-out session with its
+    /// dashboard session among them, and an event its history hides beside a view
+    /// of it, which the export leaves out too. Returns its grant's refresh token
+    /// digest.
     #[expect(
         clippy::too_many_lines,
         reason = "One record in every table an export reads."
