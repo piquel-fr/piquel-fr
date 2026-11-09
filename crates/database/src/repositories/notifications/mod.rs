@@ -32,6 +32,8 @@ pub struct StoredNotification {
 /// see: the `email` channel sends it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notified {
+    /// The account whose inbox it is in.
+    pub user_id: UserId,
     /// The notification's ID, which its page's path names.
     pub id: NotificationId,
     /// What it says.

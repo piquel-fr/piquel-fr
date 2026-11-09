@@ -268,7 +268,7 @@ macro_rules! worker_channels {
             fn deliveries(
                 _: &DomainEvent,
                 _: Option<UserId>,
-                _: Option<&piquel_repository::Notified>,
+                _: &[piquel_repository::Notified],
                 _: &mut DatabaseTransaction<'_>,
             ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
                 std::future::ready(Ok(vec![]))

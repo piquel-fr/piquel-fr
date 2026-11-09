@@ -63,15 +63,21 @@ impl<'a> DatabaseTransaction<'a> {
         event: DomainEvent,
     ) -> Result<EventId, DatabaseError> {
         let id = self.events().insert(context, subject, &event).await?;
-        let notified = match subject.zip(event.notification(&context.actor)) {
-            Some((user, notification)) => self
+        let notified: Vec<_> = match subject.zip(event.notification(&context.actor)) {
+            Some((user_id, notification)) => self
                 .notifications()
-                .insert(user, Some(id), &notification)
+                .insert(user_id, Some(id), &notification)
                 .await?
-                .map(|id| Notified { id, notification }),
-            None => None,
+                .map(|id| Notified {
+                    user_id,
+                    id,
+                    notification,
+                })
+                .into_iter()
+                .collect(),
+            None => Vec::new(),
         };
-        C::fan_out(self, id, subject, &event, notified.as_ref()).await?;
+        C::fan_out(self, id, subject, &event, &notified).await?;
         self.recorded.push(Committed {
             id,
             actor: HistoryActor::from(&context.actor),
