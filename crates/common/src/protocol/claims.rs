@@ -415,7 +415,10 @@ mod tests {
     /// no target.
     #[test]
     fn selection_takes_the_first_known_value() {
-        assert_eq!(Acr::select("urn:sourceorigin:acr:social phr"), Some(Acr::Social));
+        assert_eq!(
+            Acr::select("urn:sourceorigin:acr:social phr"),
+            Some(Acr::Social)
+        );
         assert_eq!(
             Acr::select("phr urn:sourceorigin:acr:social"),
             Some(Acr::PhishingResistant)

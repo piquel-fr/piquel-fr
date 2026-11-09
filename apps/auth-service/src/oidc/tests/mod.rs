@@ -14,6 +14,7 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
+use serde_json::{Value, json};
 use sourceorigin_common::{
     AuthenticationMethod, Handle, PasskeyId, UserId,
     clients::{ClientKind, ClientRegistration},
@@ -21,7 +22,6 @@ use sourceorigin_common::{
     protocol::claims::{Acr, IdTokenClaims},
 };
 use sourceorigin_crypto::{KeySet, Rs256Key};
-use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
 use url::Url;

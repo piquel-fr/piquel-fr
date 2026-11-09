@@ -1,6 +1,6 @@
 # Auth, account and admin surfaces
 
-This page sets out what each of sourceorigin.dev's three hosts serves, and how
+This page sets out what each of SourceOrigin's three hosts serves, and how
 administrators act on accounts without signing in as their owners. Parts not
 built yet are marked *(planned)*.
 

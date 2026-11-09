@@ -11,12 +11,12 @@ use crate::{
 };
 use axum::http::HeaderMap;
 use chrono::{Duration, Utc};
+use serde::Deserialize;
 use sourceorigin_common::{Handle, UserId, events::DomainEvent};
 use sourceorigin_repository::{
     DatabaseTransaction, InsertAuthorizationCode, SessionAuthentication,
     StoredAuthorizationRequest, StoredSession,
 };
-use serde::Deserialize;
 use url::Url;
 
 /// The consent page's answer for a pending authorization, as its form posts it.

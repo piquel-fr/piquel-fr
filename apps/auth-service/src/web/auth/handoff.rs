@@ -143,7 +143,8 @@ impl WebApplication {
                 Ok(see_other(login).into_response(cx)?)
             }
             Refusal::NoAccess => {
-                let page = view! { cx => sourceorigin_ui::no_access(home: routes::page::settings::HOME) };
+                let page =
+                    view! { cx => sourceorigin_ui::no_access(home: routes::page::settings::HOME) };
                 Ok(self
                     .render_as(
                         cx,

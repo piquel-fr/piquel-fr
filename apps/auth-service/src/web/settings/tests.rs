@@ -795,7 +795,9 @@ async fn data_page_downloads_the_data_and_deletes_the_account() {
         .to_str()
         .expect("disposition");
     assert!(
-        disposition.starts_with(&format!("attachment; filename=\"sourceorigin-account-{handle}-")),
+        disposition.starts_with(&format!(
+            "attachment; filename=\"sourceorigin-account-{handle}-"
+        )),
         "{disposition}"
     );
     let body = axum::body::to_bytes(download.into_body(), MAX_RESPONSE_BYTES)

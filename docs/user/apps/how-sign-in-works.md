@@ -49,7 +49,7 @@ Scopes say what your app asks to receive about the user:
 | `offline_access` | A refresh token, if the app is allowed refresh tokens |
 
 Apps registered in the developer console can request only these four. An API's own
-scopes, such as `notes:read`, are registered by sourceorigin.dev's operators for the
+scopes, such as `notes:read`, are registered by SourceOrigin's operators for the
 clients they manage.
 
 ## Tokens

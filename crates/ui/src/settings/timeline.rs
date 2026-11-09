@@ -7,12 +7,12 @@ use crate::{
     layout::page_head,
 };
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     AuthenticationMethod, EmailId, EventId, PasskeyId, Provider,
     events::{FollowUp, HistoryActor, HistoryEntry, RevocationReason, UserAgentFamily},
     protocol::api::Passkey,
 };
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{View, class, component, view},

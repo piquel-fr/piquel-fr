@@ -7,6 +7,11 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
+use rand::{RngCore, rngs::OsRng};
+use reqwest::StatusCode;
+use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
+use sha2::{Digest, Sha256};
 use sourceorigin_common::{
     ClientId,
     protocol::{
@@ -19,11 +24,6 @@ use sourceorigin_common::{
         step_up::StepUpRequirement,
     },
 };
-use rand::{RngCore, rngs::OsRng};
-use reqwest::StatusCode;
-use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
 use std::{fmt, sync::Arc};
 use thiserror::Error;
 use url::Url;

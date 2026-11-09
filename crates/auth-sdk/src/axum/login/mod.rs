@@ -25,9 +25,9 @@ use axum::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use layer::RequestSession;
-use sourceorigin_common::protocol::same_origin::BrowserRequest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sourceorigin_common::protocol::same_origin::BrowserRequest;
 use std::{fmt, future::Future, str::FromStr, sync::Arc};
 use url::Url;
 

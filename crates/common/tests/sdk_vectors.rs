@@ -17,6 +17,8 @@ use openssl::{
     sign::Signer,
     symm::{Cipher, encrypt_aead},
 };
+use serde::Serialize;
+use serde_json::{Value, json};
 use sourceorigin_common::{
     AuthenticationMethod, ClientId, DeliveryId, SessionId, TokenId,
     protocol::{
@@ -36,8 +38,6 @@ use sourceorigin_common::{
     },
 };
 use sourceorigin_crypto::{Digest, Rs256Key};
-use serde::Serialize;
-use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
@@ -305,7 +305,11 @@ impl Vectors {
             service_documentation: "https://github.com/sourceorigin-dev/sourceorigin#oidc-clients"
                 .parse()
                 .expect("documentation URL"),
-            op_policy_uri: Some("https://sourceorigin.dev/privacy".parse().expect("policy URL")),
+            op_policy_uri: Some(
+                "https://sourceorigin.dev/privacy"
+                    .parse()
+                    .expect("policy URL"),
+            ),
             op_tos_uri: Some("https://sourceorigin.dev/terms".parse().expect("terms URL")),
             scopes_supported: Scope::ALL.into(),
             response_types_supported: ResponseType::ALL.into(),

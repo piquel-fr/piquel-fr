@@ -1,6 +1,7 @@
 //! The export's JSON shape, which downloads keep across releases.
 use super::*;
 use chrono::TimeZone;
+use serde_json::json;
 use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, EmailId, EventId, NotificationId, Provider, TokenId,
     clients::ClientKind,
@@ -8,7 +9,6 @@ use sourceorigin_common::{
     notifications::{EmailCategory, NotificationPreference},
 };
 use sourceorigin_repository::RecoveryPasskey;
-use serde_json::json;
 
 /// Every section but the events serializes under its documented name and shape.
 #[test]
@@ -187,7 +187,10 @@ fn serializes_every_section_in_its_documented_shape() {
             email: false,
         }],
     };
-    assert_eq!(records.file_name(), "sourceorigin-account-ada-2026-10-22.json");
+    assert_eq!(
+        records.file_name(),
+        "sourceorigin-account-ada-2026-10-22.json"
+    );
     let time = "2026-10-22T09:30:00Z";
     assert_eq!(
         serde_json::to_value(&records).expect("export"),

@@ -14,6 +14,7 @@ use crate::{
     security::ApiError,
 };
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sourceorigin_common::{
     ClientId,
     clients::{
@@ -24,7 +25,6 @@ use sourceorigin_common::{
 };
 use sourceorigin_crypto::{ClientSecret, Secret};
 use sourceorigin_repository::{DatabaseTransaction, StoredClientSecret, StoredOidcClient};
-use serde::Serialize;
 use std::error::Error;
 use thiserror::Error;
 

@@ -5,13 +5,13 @@ use super::{
     ProviderEndpoints, ProviderError, VerifiedIdentity,
 };
 use chrono::Utc;
+use serde::Deserialize;
 use sourceorigin_auth::{Jws, KeyCache, TokenError};
 use sourceorigin_common::protocol::{
     claims::Audience,
     jwt::Algorithm,
     oauth::{Prompt, Scope},
 };
-use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 

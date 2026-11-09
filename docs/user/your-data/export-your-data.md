@@ -73,7 +73,7 @@ is deleted on its own:
 
 ## Troubleshooting
 
-- **"Other downloads are being prepared. Try again in a minute."** SourceOrigin
+- **"Other downloads are being prepared. Try again in a minute."** Origin Auth
   prepares only a few downloads at once. Wait a minute, then select **Download
   your data** again.
 - **The download fails partway.** The file is never saved incomplete. Select

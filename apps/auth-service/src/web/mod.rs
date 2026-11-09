@@ -56,11 +56,11 @@ use crate::{
 };
 pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
+use serde::de::DeserializeOwned;
 use sourceorigin_common::config::Origin;
 use sourceorigin_repository::Database;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{Onward, PreferenceChange, QueryError, Title};
-use serde::de::DeserializeOwned;
 use std::{fmt, sync::Arc};
 use topcoat::{
     Error, Result,
@@ -553,8 +553,7 @@ impl WebApplication {
     ) -> Result<Response> {
         let (status, code, description) = error.public();
         let description = status.is_client_error().then_some(description);
-        let page =
-            view! { cx => sourceorigin_ui::failure(code: &code, description: description, link: link) };
+        let page = view! { cx => sourceorigin_ui::failure(code: &code, description: description, link: link) };
         self.render(cx, status, title, &[], page).await
     }
 }

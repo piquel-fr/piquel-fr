@@ -16,12 +16,12 @@ use axum::{
     routing::{get, post, put},
 };
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EventId, NotificationId,
     notifications::{Notification, NotificationPreference},
 };
 use sourceorigin_repository::{Database, StoredNotification};
-use serde::{Deserialize, Serialize};
 
 /// Notification failures and their response mapping.
 mod error;

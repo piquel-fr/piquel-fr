@@ -4,9 +4,9 @@
 use super::{PasskeyApplication, PasskeyError};
 use crate::recovery::ProbationPasskey;
 use crate::security::{Credential, RequestContext};
+use serde_json::Value;
 use sourceorigin_common::{AccountStatus, AuthenticationMethod, PasskeyId, UserId, events::Actor};
 use sourceorigin_repository::{DatabaseError, DatabaseTransaction};
-use serde_json::Value;
 use webauthn_rs::prelude::*;
 
 /// Signature counter location in webauthn-rs's serialized passkey representation.

@@ -59,6 +59,9 @@ doc comment. Commit history records how things changed.
 
 Write so that someone new to SourceOrigin can follow the page from top to bottom.
 
+- **Use the names.** SourceOrigin is the project and its site. Origin Auth is
+  its sign-in service: sign-in, the account settings, the developer console,
+  the admin dashboard and the SDKs. A person's account is an Origin Account.
 - **Start with the reader's goal.** Open each page with one or two sentences
   saying what it helps them do.
 - **Keep sentences short, one idea per paragraph.** A sentence that needs a

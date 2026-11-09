@@ -12,6 +12,7 @@ use crate::{
     },
 };
 use axum::http::header;
+use serde_json::json;
 use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, PictureId, Provider, RecoveryId, TokenId,
     clients::{ClientKind, ClientOwner},
@@ -23,7 +24,6 @@ use sourceorigin_repository::{
     InsertPasskey, InsertRecovery, Recipients, RefreshRedemption, RefreshRedemptionError,
     SessionAuthentication, Table,
 };
-use serde_json::json;
 use tokio_stream::StreamExt;
 
 /// The scenario database, and the operations under test.

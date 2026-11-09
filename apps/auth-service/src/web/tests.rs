@@ -23,13 +23,13 @@ use axum::{
     response::Response,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::Serialize;
 use sourceorigin_common::{
     ClientId, PasskeyId,
     clients::{ClientKind, ClientOwner, ClientRegistration},
 };
 use sourceorigin_repository::InsertPasskey;
 use sourceorigin_ui::{DeviceChange, Section};
-use serde::Serialize;
 use tower::ServiceExt;
 use url::{Position, Url, form_urlencoded};
 
@@ -225,7 +225,9 @@ async fn consent_page_decides_from_its_own_form() {
     assert_eq!(response.status(), StatusCode::OK);
     let policy = policy(&response).to_owned();
     assert!(
-        policy.starts_with("default-src 'none'; style-src https://auth.sourceorigin.dev/assets/style."),
+        policy.starts_with(
+            "default-src 'none'; style-src https://auth.sourceorigin.dev/assets/style."
+        ),
         "{policy}"
     );
     assert!(

@@ -13,7 +13,7 @@ your changes on a preview.
   tests and `just coverage`.
 - For previews, [piquelctl](https://docs.piqueld.dev), piqueld's CLI
   (`cargo install --locked piquelctl`), signed in to the daemon that runs
-  sourceorigin.dev's previews with a token that has `previews:deploy` and
+  SourceOrigin's previews with a token that has `previews:deploy` and
   `previews:delete` on `sourceorigin`. Ask [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev)
   for one.
 

@@ -1,9 +1,9 @@
 # SourceOrigin
 
-The monorepo behind SourceOrigin: one account, secured by passkeys, for SourceOrigin's
-services and any app built on them.
+The monorepo behind SourceOrigin and Origin Auth: one account, an Origin Account secured
+by passkeys, for SourceOrigin's services and any app built on them.
 
-- **auth.sourceorigin.dev** is a passkey-first OpenID Connect provider. It serves
+- **Origin Auth**, at auth.sourceorigin.dev, is a passkey-first OpenID Connect provider. It serves
   sign-in, the account settings and the developer console, where anyone can
   register an app. It is one Rust executable, with PostgreSQL as its only data
   service. GitHub and Google are optional ways to sign in.

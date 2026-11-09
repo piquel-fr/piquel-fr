@@ -218,9 +218,9 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
         <aside class="sidebar">
             <div class="top">
-                <a class="brand" href=(frame.home) aria-label="SourceOrigin home">
-                    <span class="mark">"p"</span>
-                    <span class="name">"sourceorigin"</span>
+                <a class="brand" href=(frame.home) aria-label="Origin Auth home">
+                    <span class="mark">"o"</span>
+                    <span class="name">"Origin Auth"</span>
                     <span class="area">(frame.area)</span>
                 </a>
                 sidebar_toggle(

@@ -7,11 +7,11 @@ use crate::{
     tests::{Browser, Replicas},
 };
 use axum::http::{Method, StatusCode};
+use serde_json::Value;
 use sourceorigin_common::{
     UserId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
 };
-use serde_json::Value;
 
 /// The inbox routes, shared and the owner's, over the test database.
 struct Harness {

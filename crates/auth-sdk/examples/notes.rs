@@ -80,7 +80,8 @@ async fn home(State(ended): State<Ended>, user: SignedIn) -> Result<String, Stat
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // ANCHOR: issuer
-    let issuer = env::var("SOURCEORIGIN_ISSUER").unwrap_or_else(|_| "https://auth.sourceorigin.dev".into());
+    let issuer =
+        env::var("SOURCEORIGIN_ISSUER").unwrap_or_else(|_| "https://auth.sourceorigin.dev".into());
     let issuer = Issuer::discover(&issuer).await?;
     // ANCHOR_END: issuer
 

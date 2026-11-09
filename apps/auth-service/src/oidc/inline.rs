@@ -4,9 +4,9 @@
 
 use super::{OAuthCode, OidcApplication, policy::ClientPolicy};
 use crate::security::ApiError;
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{ClientId, TokenId, UserId, clients::RelatedOrigin};
 use sourceorigin_repository::{DatabaseTransaction, StoredSession};
-use serde::{Deserialize, Serialize};
 
 /// A pushed request an inline sign-in claimed, kept in its ceremony. It holds the
 /// digests its renewed secret is accepted under, which complete it, but never the
