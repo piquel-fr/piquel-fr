@@ -434,3 +434,65 @@ async fn migration_imports_the_audit_log() {
         ]
     );
 }
+
+/// An alert update's note is its event's reason, so it is read while the event's
+/// personal data is kept, and reads as none once that is erased.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn an_alert_updates_note_erases_with_its_event() {
+    use crate::repositories::AlertRepository;
+    use piquel_common::{
+        AlertId,
+        admin::{ChainBreak, ChainProblem},
+        alerts::{Alert, AlertStatus},
+    };
+    let pool = Database::test_pool().await;
+    let alert = Alert::AuditChainBroken(ChainBreak {
+        position: 1,
+        problem: ChainProblem::EventChanged,
+    });
+    let alert_id = AlertId::new();
+    // Cleared, so it is not the current alert other tests raise.
+    sqlx::query("INSERT INTO alerts (id, payload, version, cleared_at) VALUES ($1, $2, 1, now())")
+        .bind(alert_id.as_uuid())
+        .bind(serde_json::to_value(&alert).expect("payload"))
+        .execute(&pool)
+        .await
+        .expect("alert");
+    let context = EventContext {
+        actor: Actor::Cli {
+            os_user: "ops".into(),
+            host: "bastion".into(),
+        },
+        origin: RequestOrigin::default(),
+        reason: Some("Restoring from backup".into()),
+    };
+    let updated = DomainEvent::AlertUpdated {
+        alert_id,
+        alert,
+        status: AlertStatus::Fixing,
+    };
+    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    let event = tx.record(&context, None, updated).await.expect("record");
+    tx.alerts()
+        .add_update(alert_id, event, AlertStatus::Fixing, &context.actor)
+        .await
+        .expect("update");
+    tx.commit().await.expect("commit");
+    let note = || async {
+        let posted = AlertRepository::from_pool(&pool)
+            .updates(&[alert_id])
+            .await
+            .expect("updates");
+        let [(_, update)] = <[_; 1]>::try_from(posted).expect("one update");
+        update.note
+    };
+    assert_eq!(note().await.as_deref(), Some("Restoring from backup"));
+
+    sqlx::query("DELETE FROM event_personal_data WHERE event_id = $1")
+        .bind(event.as_uuid())
+        .execute(&pool)
+        .await
+        .expect("erase");
+    assert_eq!(note().await, None);
+}

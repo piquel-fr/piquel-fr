@@ -1,3 +1,8 @@
+/**
+ * Auth's own settings pages: passkeys, which each page tells the password
+ * manager about, devices, an email link and signing out; and reporting a passkey
+ * in the security history as not the owner's, which signs every other device out.
+ */
 import { expect, test } from '@playwright/test';
 import {
   addPasskeys,

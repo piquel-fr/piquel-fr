@@ -13,7 +13,7 @@ async fn locks_exclude_other_sessions_until_their_connection_ends() {
     let database = Database {
         pool: Database::test_pool().await,
     };
-    let lock = || database.try_exclusive(LockKey::Cleanup);
+    let lock = || database.try_exclusive(LockKey::LockTest);
     let holder = lock().await.expect("lock").expect("a free lock");
     assert!(lock().await.expect("lock").is_none(), "the lock is held");
     holder.release().await.expect("release");
@@ -45,20 +45,11 @@ async fn locked_transactions_read_committed_data() {
     let database = Database {
         pool: Database::test_pool().await,
     };
-    let mut holder = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            if let Some(holder) = database
-                .try_exclusive(LockKey::Cleanup)
-                .await
-                .expect("lock")
-            {
-                break holder;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the lock");
+    let mut holder = database
+        .try_exclusive(LockKey::TransactionTest)
+        .await
+        .expect("lock")
+        .expect("a free lock");
     sqlx::raw_sql(
         "SET default_transaction_isolation = 'repeatable read';
         SET default_transaction_read_only = on",

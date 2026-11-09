@@ -6,29 +6,12 @@ use super::{AlertRepository, KindProbe, RepositoryExecutor};
 use crate::{DatabaseError, LockKey};
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    AlertId,
-    alerts::{Alert, AlertKind},
-    events::DomainEvent,
+    AlertId, EventId, Handle,
+    alerts::{Alert, AlertAuthor, AlertKind, AlertStatus, AlertUpdate, AlertsShown, StoredAlert},
+    events::{Actor, DomainEvent},
 };
 use serde_json::Value;
-
-/// An alert, as stored.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StoredAlert {
-    /// Alert identifier.
-    pub id: AlertId,
-    /// What it says; `None` for a kind a newer release raised, which this one
-    /// cannot show.
-    pub alert: Option<Alert>,
-    /// When it was raised.
-    pub raised_at: DateTime<Utc>,
-    /// When auth last found its condition holding.
-    pub seen_at: DateTime<Utc>,
-    /// When an administrator acknowledged it, if one did.
-    pub acknowledged_at: Option<DateTime<Utc>>,
-    /// When its condition stopped holding, or changed, if it did.
-    pub cleared_at: Option<DateTime<Utc>>,
-}
+use sqlx::types::{Json, Uuid};
 
 /// An alert as the queries return it, before its payload decodes.
 struct AlertRow {
@@ -77,6 +60,47 @@ impl TryFrom<AlertRow> for StoredAlert {
             acknowledged_at: row.acknowledged_at,
             cleared_at: row.cleared_at,
         })
+    }
+}
+
+/// An update as the queries return it, before its author decodes.
+struct UpdateRow {
+    /// The alert it was posted on.
+    alert_id: AlertId,
+    /// Where the alert's handling stands.
+    status: AlertStatus,
+    /// The note, until its event's personal data is erased.
+    note: Option<String>,
+    /// Who posted it, as an event's actor.
+    author: Json<Actor>,
+    /// The administrator's handle, unless their account was purged.
+    handle: Option<Handle>,
+    /// When.
+    posted_at: DateTime<Utc>,
+}
+
+impl UpdateRow {
+    /// The update, with its alert.
+    fn decode(self) -> Result<(AlertId, AlertUpdate), DatabaseError> {
+        let author = match self.author.0 {
+            Actor::Admin { .. } => AlertAuthor::Administrator {
+                handle: self.handle,
+            },
+            Actor::Cli { os_user, host } => AlertAuthor::Operator { os_user, host },
+            _ => {
+                return Err(DatabaseError::InvalidStoredData {
+                    column: "author".into(),
+                    source: "not an administrator or operator".into(),
+                });
+            }
+        };
+        let update = AlertUpdate {
+            status: self.status,
+            note: self.note,
+            author,
+            posted_at: self.posted_at,
+        };
+        Ok((self.alert_id, update))
     }
 }
 
@@ -165,6 +189,155 @@ impl AlertRepository<'_> {
             sqlx::query!(
                 "UPDATE alerts SET cleared_at = now() WHERE id = $1 AND cleared_at IS NULL",
                 id.as_uuid()
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Acknowledges alert `id`, if it is current and not yet acknowledged, and
+    /// returns it while it is current. It stays locked until the transaction
+    /// ends, so updates posted on it are written in turn.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or its payload does not decode.
+    pub async fn acknowledge(&mut self, id: AlertId) -> Result<Option<StoredAlert>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                AlertRow,
+                r#"UPDATE alerts SET acknowledged_at = coalesce(acknowledged_at, now())
+                WHERE id = $1 AND cleared_at IS NULL
+                RETURNING id AS "id: AlertId", payload, version, raised_at, seen_at,
+                    acknowledged_at, cleared_at"#,
+                id.as_uuid(),
+            )
+        )?
+        .map(StoredAlert::try_from)
+        .transpose()
+    }
+
+    /// Adds an update on alert `id`, which [`Self::acknowledge`] locked, saying
+    /// where its handling stands, recorded as `event`, whose reason is its note.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn add_update(
+        &mut self,
+        id: AlertId,
+        event: EventId,
+        status: AlertStatus,
+        author: &Actor,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO alert_updates (id, alert_id, event_id, status, author)
+                VALUES ($1, $2, $3, $4, $5)",
+                Uuid::now_v7(),
+                id.as_uuid(),
+                event.as_uuid(),
+                status.as_str(),
+                Json(author) as _,
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Up to `limit` alerts, as `shown` says: the current ones, newest first,
+    /// or those that cleared, the most recently cleared first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a payload does not decode.
+    pub async fn list(
+        &mut self,
+        shown: AlertsShown,
+        limit: u32,
+    ) -> Result<Vec<StoredAlert>, DatabaseError> {
+        let rows = run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                AlertRow,
+                r#"SELECT id AS "id: AlertId", payload, version, raised_at, seen_at,
+                    acknowledged_at, cleared_at
+                FROM alerts
+                WHERE (cleared_at IS NOT NULL) = $1
+                ORDER BY coalesce(cleared_at, raised_at) DESC, id DESC
+                LIMIT $2"#,
+                shown == AlertsShown::Previous,
+                i64::from(limit),
+            )
+        )?;
+        rows.into_iter().map(StoredAlert::try_from).collect()
+    }
+
+    /// The updates posted on `alerts`, each with its alert, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row does not decode.
+    pub async fn updates(
+        &mut self,
+        alerts: &[AlertId],
+    ) -> Result<Vec<(AlertId, AlertUpdate)>, DatabaseError> {
+        let ids: Vec<_> = alerts.iter().map(|id| id.as_uuid()).collect();
+        let rows = run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                UpdateRow,
+                r#"SELECT u.alert_id AS "alert_id: AlertId", u.status AS "status: AlertStatus",
+                    p.reason AS "note?", u.author AS "author: Json<Actor>",
+                    h.handle AS "handle?: Handle", u.posted_at
+                FROM alert_updates u
+                LEFT JOIN event_personal_data p ON p.event_id = u.event_id
+                LEFT JOIN handles h
+                    ON h.user_id = (u.author ->> 'user_id')::uuid AND h.released_at IS NULL
+                WHERE u.alert_id = ANY($1)
+                ORDER BY u.posted_at, u.id"#,
+                &ids,
+            )
+        )?;
+        rows.into_iter().map(UpdateRow::decode).collect()
+    }
+
+    /// How many alerts are open: current, and with no update posted on them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn open_count(&mut self) -> Result<u64, DatabaseError> {
+        let count = run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT count(*) AS "count!" FROM alerts
+                WHERE cleared_at IS NULL AND acknowledged_at IS NULL"#,
+            )
+        )?;
+        Ok(count.try_into().unwrap_or_default())
+    }
+
+    /// Stores alert `id` as written at payload `version`, as a newer release
+    /// writing a payload this one does not would: a fixture for reading one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the update fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn set_version(&mut self, id: AlertId, version: i16) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE alerts SET version = $2 WHERE id = $1",
+                id.as_uuid(),
+                version,
             )
         )?;
         Ok(())

@@ -1,3 +1,8 @@
+/**
+ * The TypeScript SDK's browser client, built, in a client's page: a redirect sign-in
+ * that a reload restores, a passkey sign-in that never leaves the page, and its
+ * fallbacks to auth's pages. `just web test-browser` builds the package first.
+ */
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type BrowserContext, type CDPSession, type Page } from '@playwright/test';

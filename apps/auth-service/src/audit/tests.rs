@@ -3,6 +3,7 @@
 use super::*;
 use crate::{
     AdminError, AdminService, AuthConfig,
+    alerts::Alerts,
     config::AuditConfig,
     tests::{Replicas, operator},
 };
@@ -16,6 +17,7 @@ use piquel_common::{
 use piquel_crypto::NoteKey;
 use piquel_repository::{
     Checkpoint, DatabaseTransaction, EventFilter, ExclusiveConnection, LockKey, Tamper,
+    Verifications,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -384,7 +386,8 @@ async fn recomputed_hashes_do_not_match_signed_checkpoints() {
 }
 
 /// The sealer recomputes the events sealed since the latest checkpoint before
-/// signing the next one, and refuses to sign a chain that no longer matches.
+/// signing the next one, and refuses to sign a chain that no longer matches,
+/// raising an alert that says where, which a checkpoint signed later clears.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn checkpoints_never_sign_a_chain_that_does_not_match() {
@@ -395,14 +398,43 @@ async fn checkpoints_never_sign_a_chain_that_does_not_match() {
     fixture
         .tamper(Tamper::EditPayload(7, serde_json::json!({})))
         .await;
+    let at = ChainBreak {
+        position: 7,
+        problem: ChainProblem::EventChanged,
+    };
     assert!(matches!(
         fixture.sealer.checkpoint(&mut lock).await,
-        Err(AuditError::Broken(ChainBreak {
-            position: 7,
-            problem: ChainProblem::EventChanged
-        }))
+        Err(AuditError::Broken(broken)) if broken == at
     ));
     lock.release().await.expect("release");
+    let mut tx = fixture.database.begin().await.expect("transaction");
+    let alert = tx
+        .alerts()
+        .current(AlertKind::CheckpointRefused)
+        .await
+        .expect("current")
+        .and_then(|current| current.alert);
+    tx.commit().await.expect("commit");
+    assert_eq!(alert, Some(Alert::CheckpointRefused(at.clone())));
+
+    // Once the events match again, the next checkpoint clears it.
+    let intact = Fixture::sealed_six().await;
+    let mut tx = intact.database.begin().await.expect("transaction");
+    let context = EventContext::system(JobName::AuditSealer);
+    Alerts::new(&mut tx, &context)
+        .raise(Alert::CheckpointRefused(at))
+        .await
+        .expect("raise");
+    tx.commit().await.expect("commit");
+    intact.seal().await;
+    let mut tx = intact.database.begin().await.expect("transaction");
+    let current = tx
+        .alerts()
+        .current(AlertKind::CheckpointRefused)
+        .await
+        .expect("current");
+    tx.commit().await.expect("commit");
+    assert_eq!(current, None);
     let latest = fixture
         .database
         .audit()
@@ -581,24 +613,34 @@ async fn the_audit_page_shows_the_newest_recorded_verification() {
 }
 
 /// The verifier job verifies the chain when no verification was recorded lately,
-/// and records what it found as itself, which then holds off its next pass.
+/// one with keys given with `--key` aside, and records what it found as itself,
+/// which then holds off its next pass.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_verifier_verifies_when_no_verification_is_recent() {
     let fixture = Fixture::sealed_six().await;
-    let verifier = Verifier::new((*fixture.keys).clone());
+    // The server's own keys: what it records with them holds off its next pass.
+    let keys = AuditKeys::for_server(&Fixture::origin(), fixture.audit.verifier()).expect("keys");
+    let verifier = Verifier::new(keys);
     let mut lock = fixture
         .database
         .try_exclusive(LockKey::AuditVerification)
         .await
         .expect("lock")
         .expect("no other test verifies");
-    let intact = fixture.verify().await;
+    AdminService::new(fixture.database.clone(), false)
+        .verify_audit_chain(&operator(), &fixture.keys)
+        .await
+        .expect("a verification with given keys");
+    let intact = AuditVerification {
+        keys: VerificationKeys::Uncommitted,
+        ..fixture.verify().await
+    };
     assert_eq!(verifier.pass(&mut lock).await.expect("pass"), Some(intact));
     let newest = fixture
         .database
         .events()
-        .newest_audit_verification()
+        .newest_audit_verification(Verifications::Any)
         .await
         .expect("newest")
         .expect("recorded");
@@ -609,6 +651,53 @@ async fn the_verifier_verifies_when_no_verification_is_recent() {
         }
     );
     assert_eq!(verifier.pass(&mut lock).await.expect("pass"), None);
+    lock.release().await.expect("release");
+}
+
+/// The verifier's third failed run in a row raises the alert of a verification
+/// that keeps failing; a run that works in between starts the count again, and a
+/// recorded verification clears the alert.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_verification_that_keeps_failing_raises_its_alert() {
+    let fixture = Fixture::sealed_six().await;
+    let verifier = Verifier::new(AuditKeys {
+        source: VerificationKeys::Uncommitted,
+        ..(*fixture.keys).clone()
+    });
+    let mut lock = fixture
+        .database
+        .try_exclusive(LockKey::AuditVerification)
+        .await
+        .expect("lock")
+        .expect("no other test verifies");
+    let current = async || {
+        let mut tx = fixture.database.begin().await.expect("transaction");
+        let current = tx
+            .alerts()
+            .current(AlertKind::VerificationFailing)
+            .await
+            .expect("current");
+        tx.commit().await.expect("commit");
+        current.and_then(|current| current.alert)
+    };
+    let failed = || Err::<(), _>(AuditError::NoKeys);
+    for _ in 0..2 {
+        assert!(verifier.ended(&mut lock, failed()).await.is_err());
+    }
+    verifier
+        .ended(&mut lock, Ok(()))
+        .await
+        .expect("a run that works");
+    for _ in 0..2 {
+        assert!(verifier.ended(&mut lock, failed()).await.is_err());
+    }
+    assert_eq!(current().await, None);
+    assert!(verifier.ended(&mut lock, failed()).await.is_err());
+    assert_eq!(current().await, Some(Alert::VerificationFailing {}));
+
+    verifier.pass(&mut lock).await.expect("verification");
+    assert_eq!(current().await, None);
     lock.release().await.expect("release");
 }
 
@@ -946,6 +1035,11 @@ async fn sealing_goes_on_when_a_checkpoint_fails() {
     fixture
         .tamper(Tamper::EditPayload(7, serde_json::json!({})))
         .await;
+    // The first refusal raises its alert, an event of its own; later ones only
+    // see it again. Raise and seal it before counting.
+    let refused = fixture.sealer.pass(&mut lock, None).await;
+    assert!(matches!(refused, Err(AuditError::Broken(_))), "{refused:?}");
+    fixture.seal_with(&mut lock).await;
     fixture.sealer = fixture.sealer.sealing(2, EventContent::UNTAGGED);
     let database = fixture.database.clone();
     let mut tx = database.begin().await.expect("transaction");

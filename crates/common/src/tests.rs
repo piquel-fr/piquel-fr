@@ -319,15 +319,25 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::AnnouncementSent {
             announcement_id: AnnouncementId::new(),
             recipients: 2,
+            essential: true,
         },
         DomainEvent::AlertRaised {
             alert_id: AlertId::new(),
             alert: alert.clone(),
         },
+        DomainEvent::AlertUpdated {
+            alert_id: AlertId::new(),
+            alert: alert.clone(),
+            status: alerts::AlertStatus::Fixing,
+        },
         DomainEvent::AlertCleared {
             alert_id: AlertId::new(),
             alert,
         },
+        DomainEvent::NotificationPreferenceChanged(crate::notifications::NotificationPreference {
+            category: crate::notifications::EmailCategory::Announcements,
+            email: false,
+        }),
         DomainEvent::Imported(imported),
     ];
     let mut kinds: Vec<&str> = events.iter().map(DomainEvent::kind).collect();

@@ -209,13 +209,22 @@ CLI is the authoritative check: a compromised server could answer anything.
 
 Every verification is recorded as an `audit_chain_verified` event, with who
 made it and what it found. Auth also verifies the chain on its own: every ten
-minutes one replica checks the newest recorded verification, and once it is six
-hours old, whoever made it, verifies the whole chain with the dashboard's keys
-(below) and records it as the `audit_verification` job. A verification that
-finds the chain broken raises the `audit_chain_broken` alert for administrators,
+minutes one replica checks the newest recorded verification, other than one
+made with `--key`, and once that is six hours old, whoever made it, verifies the
+whole chain with the dashboard's keys (below) and records it as the
+`audit_verification` job. After each check, that
+replica's `piquel.auth.audit.broken` gauge says whether the newest recorded
+verification found the chain broken (1) or intact (0), leaving out those made
+with `--key`, as the alert does. A replica that has not checked lately reports
+nothing, so an absent gauge does not mean intact. A verification that
+finds the chain broken raises the `audit_chain_broken` alert, which the
+dashboard's Alerts tab and `auth-service alerts list` show,
 and the next one that finds it intact clears it. One with keys given with
-`--key` changes neither. The admin dashboard's
-Audit tab shows the newest one and when it was made, beside the chain as stored,
+`--key` changes neither. When the verifier itself fails three runs in a row on
+one replica, finding the chain neither broken nor intact, it raises the
+`verification_failing` alert once, and the next recorded verification, other
+than one with `--key`, clears it. The admin dashboard's Audit tab shows the
+newest one and when it was made, beside the chain as stored,
 so loading it costs the same however long the history. It recomputes nothing
 until an administrator presses **Verify now**, which runs the same
 `AdminService` operation as the CLI, within
@@ -287,7 +296,9 @@ so keep every key that signed a checkpoint still in the database.
   the schema owner's rights can edit them and recompute their hashes, and the
   next checkpoint signs the edited history. Before signing, the sealer
   recomputes the events since the latest checkpoint, so edits that leave the
-  stored hashes as they were, and recent deletions, are refused instead.
+  stored hashes as they were, and recent deletions, are refused instead. A
+  refusal raises the `checkpoint_refused` alert, which clears once the sealer
+  finds the events matching again.
 - **Open sessions.** Rotating the runtime role's password does not end the
   sessions already open with it, and one of them could set the role's password
   and settings again. So after a compromise, as the schema owner, first stop

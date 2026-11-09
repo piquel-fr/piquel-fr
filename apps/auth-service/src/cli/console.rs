@@ -49,7 +49,7 @@ pub(super) enum OutputFormat {
     /// Tab-separated lines for people.
     Table,
     /// The view the admin dashboard shows, as JSON, for scripts: its shape is
-    /// `piquel_common::admin`'s.
+    /// `piquel_common`'s, as its `admin` and `alerts` modules define it.
     Json,
 }
 

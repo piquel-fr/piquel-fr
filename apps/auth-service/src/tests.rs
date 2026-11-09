@@ -143,6 +143,16 @@ impl Replicas {
         }
     }
 
+    /// Builds both replicas from `config` over `database`, such as a schema of
+    /// a fixture's own.
+    pub(crate) async fn over(config: &AuthConfig, database: &Database) -> Self {
+        let peer = Self::peer();
+        Self {
+            a: config.test_router(database.clone(), peer).await,
+            b: config.test_router(database.clone(), peer).await,
+        }
+    }
+
     /// Builds both replicas from `config`, with GitHub sign-in enabled.
     pub(crate) async fn with_github(mut config: AuthConfig) -> Self {
         let secret = std::env::temp_dir().join(format!("piquel-github-secret-{}", TokenId::new()));
@@ -160,8 +170,13 @@ impl Replicas {
     /// The admin listener of `config`'s dashboard, for requests from a client
     /// address of its own.
     pub(crate) async fn dashboard(config: &AuthConfig) -> Router {
+        Self::dashboard_over(config, Self::database().await).await
+    }
+
+    /// The admin listener of `config`'s dashboard over `database`, for requests
+    /// from a client address of its own.
+    pub(crate) async fn dashboard_over(config: &AuthConfig, database: Database) -> Router {
         let dashboard = config.dashboard.as_ref().expect("a dashboard");
-        let database = Self::database().await;
         let keys = config.test_keys(database.clone()).await;
         config
             .admin_router(database, &keys, dashboard)

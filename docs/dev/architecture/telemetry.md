@@ -1,15 +1,19 @@
 # Telemetry
 
-Auth and the admin dashboard log to stderr. When `OTEL_EXPORTER_OTLP_ENDPOINT`
-is set, they also export traces, metrics and logs over OTLP/HTTP, to the
-`telemetry` application in production (see [the telemetry stack](../operations/telemetry.md)). `piquel-telemetry`
-(`crates/telemetry`) does both. A feature gets most of its telemetry for free and
-adds the rest in one line.
+This page explains the telemetry auth-service and piquel-web produce, how to add
+more, and what never goes in it.
+
+Both services log to stderr. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, they
+also export traces, metrics and logs over OTLP/HTTP, to the `telemetry`
+application in production (see [the telemetry stack](../operations/telemetry.md)).
+`piquel-telemetry` (`crates/telemetry`) does both. A feature gets most of its
+telemetry for free and adds the rest in one line.
 
 ## What every feature gets
 
 - **A trace per request, job run and delivery attempt.** `HttpTelemetry` wraps
-  both of auth's routers and the dashboard's. Each request gets one root span,
+  auth's public and admin routers and piquel-web's, outside every layer that can
+  refuse a request ([request lifecycle](request-lifecycle.md)). Each request gets one root span,
   named after its method and route template (`POST /oauth/token`). Every log line
   inside the span carries the trace ID, on stderr and in exported logs. Exclusive
   jobs get one root span per run, and delivery workers one per attempt. Incoming
@@ -120,7 +124,7 @@ Only the standard variables, read by `Telemetry::init`:
 | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP base URL, e.g. `http://collector.telemetry:4318`; unset or empty exports nothing |
 | `OTEL_SDK_DISABLED` | `true` keeps telemetry on stderr only |
-| `OTEL_SERVICE_NAME` | Overrides `auth-service` |
+| `OTEL_SERVICE_NAME` | Overrides the default, `auth-service` or `piquel-web` |
 | `OTEL_RESOURCE_ATTRIBUTES` | e.g. `deployment.environment.name=staging`, which dashboards filter on |
 | `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Sampling; every trace is kept by default |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | Bound on each export request, in milliseconds; 10000 by default. The per-signal variants are not supported |

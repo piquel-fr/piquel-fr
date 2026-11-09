@@ -33,6 +33,9 @@ pub mod email;
 /// Typed domain events: what changed in an account, and who changed it.
 #[cfg(feature = "events")]
 pub mod events;
+/// What auth's HTML forms post that does not decode as itself, such as a
+/// checkbox.
+pub mod form;
 /// Handles: an account's public identifier and login name.
 pub mod handle;
 /// What an account's owner is told about their account, in their inbox.

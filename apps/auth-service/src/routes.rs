@@ -111,8 +111,9 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
-/// The account's inbox. Listing and reading are shared settings operations;
-/// marking read or unread is the owner's alone.
+/// The account's inbox. Listing and reading, its notifications and email
+/// preferences, are shared settings operations; marking read or unread, and
+/// changing a preference, the owner's alone.
 pub(crate) mod notifications {
     /// Lists the account's notifications, newest first.
     pub(crate) const LIST: &str = "/account/notifications";
@@ -126,6 +127,9 @@ pub(crate) mod notifications {
     pub(crate) const READ: &str = "/account/notifications/{id}/read";
     /// Marks one unread.
     pub(crate) const MARK_UNREAD: &str = "/account/notifications/{id}/unread";
+    /// Whether each category's notifications are emailed: read as a shared
+    /// operation, changed by the owner alone.
+    pub(crate) const PREFERENCES: &str = "/account/notifications/preferences";
 }
 
 /// The account's sessions, one per signed-in browser.
@@ -196,9 +200,12 @@ pub(crate) mod dashboard {
     pub(crate) const CONFIRM: &str = "/confirm";
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
     pub(crate) const PREFERENCES: &str = "/preferences";
+    /// The current alerts, which an alert's notification links: the path of
+    /// `web::admin::alerts::list`'s route.
+    pub(crate) const ALERTS: &str = "/alerts";
     /// Every path the dashboard serves is one of these, or under one: the admin
     /// listener mounts the pages on them, and nowhere else.
-    pub(crate) const PREFIXES: [&str; 16] = [
+    pub(crate) const PREFIXES: [&str; 17] = [
         "/",
         SIGN_IN,
         CONFIRM,
@@ -215,6 +222,7 @@ pub(crate) mod dashboard {
         "/keys",
         "/audit",
         "/announcements",
+        ALERTS,
     ];
 }
 
@@ -236,6 +244,10 @@ pub(crate) mod page {
     pub(crate) const RECOVER: &str = "/recover";
     /// Undoes a recovery, whose ID is in the fragment; the notices link to it.
     pub(crate) const RECOVER_UNDO: &str = "/recover/undo";
+    /// Turns announcements' email off, from the link their emails carry, whose
+    /// query names the account and its token. Mail clients post to it in one
+    /// click (RFC 8058).
+    pub(crate) const UNSUBSCRIBE: &str = "/unsubscribe";
     /// Hands an administrator's passkey session off to the admin dashboard.
     pub(crate) const ADMIN: &str = "/admin";
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
@@ -293,7 +305,7 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 24] = [
+    pub(crate) const ALL: [&str; 25] = [
         LOGIN,
         REGISTER,
         CONSENT,
@@ -318,6 +330,7 @@ pub(crate) mod page {
         developers::APP_SECRETS,
         RECOVER,
         RECOVER_UNDO,
+        UNSUBSCRIBE,
     ];
 }
 

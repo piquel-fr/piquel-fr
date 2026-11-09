@@ -15,6 +15,13 @@ use topcoat::{
 /// Something that needs an administrator's attention.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Problem<'a> {
+    /// Alerts are open: nobody posted an update on them yet.
+    OpenAlerts {
+        /// How many.
+        count: u64,
+        /// The alerts.
+        alerts: &'a str,
+    },
     /// Far more sign-ins failed in the last hour than usually do.
     FailedSignIns {
         /// How many failed in the last hour.
@@ -202,6 +209,16 @@ pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View
 async fn problem_notice<'a>(problem: &'a Problem<'a>) -> Result<impl View> {
     Ok(view! {
         match problem {
+            Problem::OpenAlerts { count, alerts } => {
+                <section class="notice warning" role="alert">
+                    icon(kind: Icon::Warning)
+                    <div class="text">
+                        <strong>(if *count == 1 { "1 alert needs attention".to_owned() } else { format!("{count} alerts need attention") })</strong>
+                        <small>(if *count == 1 { "Nobody has posted an update on it yet." } else { "Nobody has posted an update on them yet." })</small>
+                    </div>
+                    <a class="button secondary small" href=(*alerts)>"See the alerts"</a>
+                </section>
+            },
             Problem::FailedSignIns { count, usual, events } => {
                 <section class="notice warning" role="alert">
                     icon(kind: Icon::Warning)

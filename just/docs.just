@@ -15,7 +15,9 @@ check:
         exit 1
     fi
     repository='https://(github\.com/piquel-fr/piquel-fr/(blob|tree)|raw\.githubusercontent\.com/piquel-fr/piquel-fr)'
-    git ls-files -z --cached --others --exclude-standard '*.md' \
+    # mdBook checks SUMMARY.md's links itself; its section headings are empty
+    # links, which lychee rejects.
+    git ls-files -z --cached --others --exclude-standard '*.md' ':!docs/SUMMARY.md' \
         | xargs -0 lychee --root-dir "$PWD/target/book" \
             --remap "$repository/main/ file://$PWD/" \
             --remap "$repository/ file:///links-to-this-repository-must-point-at-main/" \

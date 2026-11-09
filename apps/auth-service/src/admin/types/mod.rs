@@ -209,6 +209,8 @@ pub struct AnnouncementDraft {
     pub(super) body: String,
     /// Whom it goes to.
     pub(super) recipients: AnnouncementRecipients,
+    /// Whether it is emailed to every recipient, whatever their preference.
+    pub(super) essential: bool,
 }
 
 /// Whom an announcement goes to, as an operator names them.
@@ -222,7 +224,8 @@ pub enum AnnouncementRecipients {
 
 impl AnnouncementDraft {
     /// Checks `subject` and `body`, trimmed, and normalizes the text's line
-    /// breaks, which forms post as `\r\n`, to `\n`.
+    /// breaks, which forms post as `\r\n`, to `\n`. An `essential` one is emailed
+    /// to every recipient, whatever their preference.
     ///
     /// # Errors
     /// [`AdminError::InvalidSubject`] or [`AdminError::InvalidBody`] when either
@@ -232,6 +235,7 @@ impl AnnouncementDraft {
         subject: &str,
         body: &str,
         recipients: AnnouncementRecipients,
+        essential: bool,
     ) -> Result<Self, AdminError> {
         let subject = subject.trim();
         if subject.is_empty()
@@ -262,6 +266,7 @@ impl AnnouncementDraft {
             subject: subject.to_owned(),
             body: body.to_owned(),
             recipients,
+            essential,
         })
     }
 }
@@ -285,7 +290,7 @@ impl TryFrom<&DraftAnnouncement> for AnnouncementDraft {
                     .collect(),
             ),
         };
-        Self::new(&form.subject, &form.body, recipients)
+        Self::new(&form.subject, &form.body, recipients, form.essential.0)
     }
 }
 

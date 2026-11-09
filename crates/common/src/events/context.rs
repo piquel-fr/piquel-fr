@@ -89,11 +89,11 @@ pub enum JobName {
     /// Signing key rotation. Nothing records it yet: a release may write a new
     /// value only once the previous release reads it (see `docs/dev/architecture/database.md`).
     KeyRotation,
-    /// The periodic verification of the audit chain. Nothing records it yet,
-    /// for the same reason.
+    /// The periodic verification of the audit chain, which records what it found
+    /// and the alert of a broken chain.
     AuditVerification,
-    /// The sealer of the audit chain, which refuses to sign a checkpoint over
-    /// events that no longer match. Nothing records it yet, for the same reason.
+    /// The sealer of the audit chain, which records the alert of a checkpoint it
+    /// refuses to sign over events that no longer match.
     AuditSealer,
 }
 
@@ -239,4 +239,16 @@ pub struct EventContext {
     /// it. Kept with the origin as personal data, since free text may name people,
     /// and shown to the account's owner in their security history.
     pub reason: Option<String>,
+}
+
+impl EventContext {
+    /// What background `job` does on its own, outside any request.
+    #[must_use]
+    pub fn system(job: JobName) -> Self {
+        Self {
+            actor: Actor::System { job },
+            origin: RequestOrigin::default(),
+            reason: None,
+        }
+    }
 }

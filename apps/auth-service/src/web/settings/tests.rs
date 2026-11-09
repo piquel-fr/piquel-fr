@@ -2,7 +2,7 @@
 
 use crate::{
     AuthConfig,
-    routes::page::settings,
+    routes::page::{self, settings},
     security::BrowserCookie,
     tests::{
         AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, cookie, detailed_png, html,
@@ -14,13 +14,14 @@ use axum::http::{StatusCode, header};
 use piquel_common::{
     AuthenticationMethod, EmailId, EventId, Provider, TokenId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
+    notifications::EmailCategory,
 };
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
-    ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange, HistoryChange,
-    HistoryState, InboxChange, NotificationState, PICTURE_FIELD, ProfileChange, ProfileDialog,
-    ProfileState, Query, SignInChange,
+    Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
+    HistoryChange, HistoryState, InboxChange, InboxState, NotificationState, PICTURE_FIELD,
+    ProfileChange, ProfileDialog, ProfileState, Query, SignInChange,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the
@@ -511,6 +512,69 @@ async fn notifications_are_read_by_opening_them() {
     let missing = settings::NOTIFICATION.replace("{id}", "not-an-id");
     let shown = browser.visit_from(&replicas.a, &missing, OWN_PAGE).await;
     assert_eq!(shown.status(), StatusCode::NOT_FOUND);
+}
+
+/// The inbox turns announcements' email off and on. An announcement email's
+/// unsubscribe link asks first when opened, so a scanner following it changes
+/// nothing, and turns the email off when posted from anywhere without a session,
+/// as a mail client's one click does. A link not made for the account does
+/// nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
+    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
+    let replicas = Replicas::of(&config).await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let emailed = async || {
+        let preferences = database.notifications().preferences(browser.user_id).await;
+        preferences.expect("preferences")[0].email
+    };
+    let page = html(browser.visit(&replicas.a, settings::NOTIFICATIONS).await).await;
+    assert!(page.contains("Turn off emails for Announcements"), "{page}");
+    for email in [false, true] {
+        let change = InboxChange::Email {
+            category: EmailCategory::Announcements,
+            email: Checkbox(email),
+        };
+        let changed = browser
+            .post(&replicas, settings::NOTIFICATIONS, &change)
+            .await;
+        let reopened = InboxState {
+            email: true,
+            ..InboxState::default()
+        };
+        assert_eq!(
+            redirect(&changed),
+            reopened.on(settings::NOTIFICATIONS).expect("link")
+        );
+        assert_eq!(emailed().await, email);
+    }
+
+    let link = config
+        .email
+        .unsubscribe_links
+        .link(browser.user_id)
+        .expect("link");
+    let link = url::Url::parse(&link).expect("URL");
+    let path = &link[url::Position::BeforePath..];
+    let stranger = Browser::signed_out();
+    let opened = stranger.visit(&replicas.a, path).await;
+    assert_eq!(opened.status(), StatusCode::OK);
+    assert!(html(opened).await.contains("Stop announcement emails?"));
+    assert!(emailed().await, "opening the link changes nothing");
+    let one_click = stranger
+        .submit(&replicas.b, path, &[("List-Unsubscribe", "One-Click")], &[])
+        .await;
+    assert_eq!(one_click.status(), StatusCode::OK);
+    assert!(!emailed().await);
+    let forged = format!(
+        "{}?account={}&token=forged",
+        page::UNSUBSCRIBE,
+        browser.user_id
+    );
+    let forged = stranger.visit(&replicas.a, &forged).await;
+    assert_eq!(forged.status(), StatusCode::NOT_FOUND);
 }
 
 /// A history page lists entries with a report button each, older ones a page at a
