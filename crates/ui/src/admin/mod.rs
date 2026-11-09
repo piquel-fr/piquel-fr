@@ -210,6 +210,8 @@ pub struct Dashboard<'a> {
     pub here: &'a str,
     /// Whether the service needs attention, as the overview finds, if known.
     pub health: Option<Health>,
+    /// The tabs whose pages need attention, which the sidebar marks.
+    pub attention: &'a [Tab],
     /// The deployment the status bar names.
     pub environment: &'a str,
     /// Piquel's policies, which the status bar links.
@@ -254,9 +256,6 @@ pub async fn dashboard_frame<'a>(
     dashboard: &'a Dashboard<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
-    let warning = dashboard
-        .health
-        .is_some_and(|health| health != Health::Normal);
     let items: Vec<_> = dashboard
         .tabs
         .iter()
@@ -265,7 +264,7 @@ pub async fn dashboard_frame<'a>(
             label: tab.label(),
             href,
             current: dashboard.current == Some(*tab),
-            warning: warning && *tab == Tab::Overview,
+            warning: dashboard.attention.contains(tab),
             count: None,
         })
         .collect();

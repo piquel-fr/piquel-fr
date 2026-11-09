@@ -1,7 +1,7 @@
 //! The dashboard's overview, at `/`: what needs attention, the last hour's
 //! numbers against the week's, the newest events and the newest accounts.
 
-use super::{AdminApplication as App, deliveries, lists, users};
+use super::{AdminApplication as App, alerts, deliveries, lists, users};
 use crate::admin::{Kinds, Problem};
 use piquel_common::admin::EventSearch;
 use piquel_ui::{AdminOverview, Measure, Query};
@@ -17,8 +17,9 @@ use topcoat::{
 pub(super) async fn overview(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let service = &App::of(cx).service;
+    let generation = App::attention_generation(cx);
     let overview = service.overview(&admin.operator).await?;
-    App::remember_health(cx, &overview);
+    App::remember_attention(cx, generation, &overview);
     let administrators: Vec<_> = service
         .list_administrators(&admin.operator)
         .await?
@@ -32,10 +33,15 @@ pub(super) async fn overview(cx: &Cx) -> Result<Response> {
     }
     .on(&events_page)?;
     let queue = href!(deliveries::list).resolve(cx);
+    let alerts = href!(alerts::list).resolve(cx);
     let problems: Vec<_> = overview
         .problems()
         .into_iter()
         .map(|problem| match problem {
+            Problem::OpenAlerts(count) => piquel_ui::Problem::OpenAlerts {
+                count,
+                alerts: &alerts,
+            },
             Problem::FailedSignIns(rate) => piquel_ui::Problem::FailedSignIns {
                 count: rate.last_hour,
                 usual: rate.usual,
