@@ -19,7 +19,7 @@ down.
 
 2. From a device on the tailnet, open `https://grafana.sourceorigin.dev`, and sign in
    as `admin` with that password.
-3. Open **Dashboards**, then the **sourceorigin.dev** folder, and choose the
+3. Open **Dashboards**, then the **SourceOrigin** folder, and choose the
    environment at the top of a dashboard.
 
 Grafana stores that password on its first start, so regenerating the secret
@@ -115,7 +115,7 @@ Their configuration is in `infra/telemetry/`, mounted as piqueld files.
 ## Dashboards
 
 Grafana provisions the three data sources, linked so a log line opens its trace
-and a trace its logs, and two dashboards in the **sourceorigin.dev** folder:
+and a trace its logs, and two dashboards in the **SourceOrigin** folder:
 
 - **Auth overview**: traffic, errors and latency by route, sign-ins,
   registrations, tokens, refresh revocations, throttling, events by kind, the

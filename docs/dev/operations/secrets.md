@@ -1,6 +1,6 @@
 # Secrets
 
-This page helps you find the secrets sourceorigin.dev's deployments use, store the
+This page helps you find the secrets SourceOrigin's deployments use, store the
 ones piqueld can't generate, and rotate any of them.
 
 Every secret reaches a service as a file under `/run/secrets/`, and auth reads

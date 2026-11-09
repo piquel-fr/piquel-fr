@@ -1,10 +1,10 @@
 # Deploying with piqueld
 
-This page helps you run sourceorigin.dev's deployments: set up its environments on a
+This page helps you run SourceOrigin's deployments: set up its environments on a
 piqueld daemon, ship a change to staging and then to production, roll
 production back, and try a branch on a preview.
 
-`infra/piqueld.toml` deploys sourceorigin.dev as one piqueld application, `sourceorigin`,
+`infra/piqueld.toml` deploys SourceOrigin as one piqueld application, `sourceorigin`,
 read from this repository. It runs four services in every environment:
 
 | Service | What it serves |

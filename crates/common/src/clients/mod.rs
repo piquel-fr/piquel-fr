@@ -263,7 +263,7 @@ impl DisplayName {
 
     /// Refuses a name containing a brand of [`RESERVED_BRANDS`], as clients accounts
     /// own must. The name is compared without case, spaces or punctuation, and by
-    /// its handle [skeleton](Handle::skeleton), so "P1quel-Settings" and "G00gle"
+    /// its handle [skeleton](Handle::skeleton), so "S0urce0r1gin-Settings" and "G00gle"
     /// are refused too. Letters outside ASCII are dropped, not folded.
     ///
     /// # Errors

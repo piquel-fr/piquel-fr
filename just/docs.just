@@ -14,7 +14,7 @@ check:
         echo "$log" >&2
         exit 1
     fi
-    repository='https://(github\.com/sourceorigin/sourceorigin/(blob|tree)|raw\.githubusercontent\.com/sourceorigin/sourceorigin)'
+    repository='https://(github\.com/sourceorigin-dev/sourceorigin/(blob|tree)|raw\.githubusercontent\.com/sourceorigin-dev/sourceorigin)'
     # mdBook checks SUMMARY.md's links itself; its section headings are empty
     # links, which lychee rejects.
     git ls-files -z --cached --others --exclude-standard '*.md' ':!docs/SUMMARY.md' \

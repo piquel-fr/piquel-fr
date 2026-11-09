@@ -1,7 +1,7 @@
 # Deploying on piqueld
 
 The `sourceorigin-deploy` skill teaches an agent to deploy an app that signs in with
-sourceorigin.dev on [piqueld](https://docs.piqueld.dev). Use it when the app runs
+Origin Auth on [piqueld](https://docs.piqueld.dev). Use it when the app runs
 locally and you want it on its own address, in one environment or several.
 
 The agent asks you for a registration per environment, each with that
