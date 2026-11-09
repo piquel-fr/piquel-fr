@@ -666,9 +666,10 @@ async fn administrators_remove_a_disabled_accounts_picture() {
     assert!(stored.expect("read").is_none(), "removed");
 }
 
-/// A change the service refuses shows the form again with what was typed: a
-/// settings section reopens the refused row with its input and reason, which no
-/// other form takes, and a change page keeps its fields.
+/// A change the service refuses shows the form again with what was typed, at
+/// the refusal's status: a settings section reopens the refused row with its
+/// input and reason, which no other form takes, and a change page keeps its
+/// fields.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_refused_change_keeps_what_was_typed() {
@@ -748,7 +749,13 @@ async fn a_refused_change_keeps_what_was_typed() {
         .handle
         .to_string();
     let same = [("handle", current.as_str()), ("reason", "Impersonation")];
-    let page = html(post(&handle, &same).await).await;
+    let refused = post(&handle, &same).await;
+    assert!(
+        refused.status().is_client_error(),
+        "a change page keeps the refusal's status: {}",
+        refused.status()
+    );
+    let page = html(refused).await;
     assert!(page.contains(&format!(r#"value="{current}""#)), "{page}");
     assert!(page.contains(r#"value="Impersonation""#), "{page}");
 }
@@ -2028,6 +2035,81 @@ async fn announcements_are_drafted_then_sent_from_the_dashboard() {
     let item = routes::page::settings::NOTIFICATION.replace("{id}", &received.id.to_string());
     let shown = html(owner.visit(&harness.auth.a, &item).await).await;
     assert!(shown.contains("<p>Nothing else changes.</p>"), "{shown}");
+}
+
+/// A change's page names the account it changes, by handle and ID, beside its
+/// button, and its form names it to the passkey dialog: two such pages left open
+/// cannot be told apart only by their address.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_change_page_names_its_target() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let user = Browser::new_account(&harness.database).await;
+    let disable = format!("/users/{}/disable", user.user_id);
+    let dashboard = harness.confirmed(&admin, &disable, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, &disable).await).await;
+    let handle = format!("browser-{}", &user.user_id.to_string()[24..]);
+    assert!(
+        page.contains(&format!(
+            r#"<p class="target"><strong>{handle}</strong> <code>{}</code></p>"#,
+            user.user_id
+        )),
+        "{page}"
+    );
+    assert!(
+        page.contains(&format!(
+            r#"data-confirming="Disable this account: {handle} ({})""#,
+            user.user_id
+        )),
+        "{page}"
+    );
+}
+
+/// An account's page revokes only its own sessions: another account's session
+/// in the path is not found, and stays signed in.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_session_is_revoked_only_from_its_own_account() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let (named, other) = (
+        Browser::new_account(&harness.database).await,
+        Browser::new_account(&harness.database).await,
+    );
+    let revoke = format!(
+        "/users/{}/sessions/{}/revoke",
+        named.user_id, other.session_id
+    );
+    let dashboard = harness.confirmed(&admin, &revoke, Utc::now()).await;
+    let refused = dashboard
+        .submit(
+            &harness.dashboard,
+            &format!("{DASHBOARD}{revoke}"),
+            &[],
+            OWN_PAGE,
+        )
+        .await;
+    assert_eq!(refused.status(), StatusCode::NOT_FOUND);
+    let session = harness
+        .database
+        .sessions()
+        .find_active_by_id(other.session_id)
+        .await
+        .expect("lookup");
+    assert!(session.is_some(), "still signed in");
+}
+
+/// The invitations pages find who is signed in before whether signup needs
+/// invitations, so a browser that is not signed in learns nothing of it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn invitation_pages_sign_in_first() {
+    let harness = Harness::new().await;
+    let page = harness
+        .visit(&Browser::signed_out(), "/invitations/new")
+        .await;
+    assert_eq!(location(&page).path(), routes::page::ADMIN);
 }
 
 /// The Alerts page shows an open alert as needing attention, with posting an

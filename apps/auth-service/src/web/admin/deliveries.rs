@@ -3,7 +3,7 @@
 use super::AdminApplication as App;
 use serde::de::IgnoredAny;
 use sourceorigin_common::{DeliveryId, admin::DeliveryStatus};
-use sourceorigin_ui::{Action, Change, DeliveryRow};
+use sourceorigin_ui::{Action, Change, DeliveryRow, Target};
 use topcoat::{
     Result,
     context::Cx,
@@ -115,9 +115,15 @@ impl App {
             }
         })
         .await?;
+        let id = id.to_string();
+        let target = Target {
+            name: "Delivery",
+            id: Some(&id),
+        };
         let page = view! { cx =>
             sourceorigin_ui::dashboard_change(
                 change: change,
+                target: target,
                 back: back.as_str(),
                 refusal: refusal.as_deref(),
             )
