@@ -71,6 +71,7 @@ use crate::{
 };
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
+use serde::Deserialize;
 use sourceorigin_common::{ClientId, ErrorChain, UserId, config::Origin};
 use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
 use sourceorigin_repository::Database;
@@ -78,7 +79,6 @@ use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{
     Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search, Who,
 };
-use serde::Deserialize;
 use std::{
     future::Future,
     sync::{Arc, Mutex, MutexGuard, PoisonError},

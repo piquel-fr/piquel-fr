@@ -1,6 +1,6 @@
 # Administration
 
-This page helps you run sourceorigin.dev's accounts: grant administrators, invite
+This page helps you run SourceOrigin's accounts: grant administrators, invite
 people, help an owner who lost their passkeys, act on an account that breaks the
 rules, send announcements, respond to alerts, and repair auth's own state.
 

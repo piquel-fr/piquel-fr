@@ -8,11 +8,11 @@ use crate::{
     layout::{announcement_text, dialog, page_head},
 };
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     NotificationId,
     notifications::{EmailCategory, NotificationPreference},
 };
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{View, component, view},

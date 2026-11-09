@@ -11,7 +11,9 @@ import { authUrl } from './helpers';
 const webUrl = process.env.E2E_WEB_URL ?? '';
 
 /** Runs against sourceorigin.dev's web server, which CI runs beside auth. */
-test("sourceorigin.dev's pages lead to auth, and auth's footer back to its policies", async ({ page }) => {
+test("sourceorigin.dev's pages lead to auth, and auth's footer back to its policies", async ({
+  page
+}) => {
   test.skip(!webUrl, "Set E2E_WEB_URL to sourceorigin.dev's origin to run the site test.");
   // The pages allow only their stylesheet, so a violation would show on the console.
   const violations: string[] = [];

@@ -17,6 +17,7 @@ use crate::{
 };
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use chrono::{Duration, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EmailId, ErrorChain, Personal, Provider, UserId,
     email::NormalizedEmail,
@@ -27,7 +28,6 @@ use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, InsertVerifiedEmail,
     PendingFederation, StoredEmail,
 };
-use serde::{Deserialize, Serialize};
 use std::{net::IpAddr, time::Duration as StdDuration};
 
 /// Email failures and their browser response mapping.

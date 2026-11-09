@@ -28,7 +28,7 @@ An account can have up to 10 addresses.
 ## Confirm an address
 
 1. Open the email from SourceOrigin, titled **Confirm your email address for
-   SourceOrigin**, and open its link.
+   your Origin Account**, and open its link.
 2. On **Confirm your email address**, select **Confirm this address**.
 
 The page says **Address confirmed**. The link works once, for 24 hours, on any

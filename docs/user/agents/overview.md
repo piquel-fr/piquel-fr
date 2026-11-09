@@ -1,7 +1,7 @@
 # Building with coding agents
 
 A coding agent, such as Claude Code or Codex, can do most of the work of
-adding sourceorigin.dev sign-in to your app. This page says what it can do, what
+adding Origin Auth sign-in to your app. This page says what it can do, what
 stays with you, and how to give it the four skills that teach it the steps.
 
 ## What an agent can do
@@ -48,7 +48,7 @@ Here `sourceorigin` is a clone of the
 also shows its whole file, to copy into `<skills directory>/<name>/SKILL.md`.
 
 The agent then uses a skill when your request matches its description, such
-as "add sign-in with sourceorigin.dev".
+as "add sign-in with Origin Auth".
 
 | Skill | Use it to |
 | --- | --- |

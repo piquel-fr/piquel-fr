@@ -116,7 +116,7 @@ for `--grace` at most, 1 hour by default, while the deployment rolls out;
 `--grace 0` revokes them. Only the terminal applies clients, since only it takes
 a secret.
 
-No deployment of sourceorigin.dev needs a client: the admin dashboard signs
+No deployment of SourceOrigin needs a client: the admin dashboard signs
 administrators in itself (see [the admin dashboard](administration.md#how-the-dashboard-signs-administrators-in)).
 
 ## Approve an origin for passkey sign-in

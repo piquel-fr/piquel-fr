@@ -3,13 +3,13 @@
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, TimeDelta, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     AuthenticationMethod, PasskeyId, SessionId, UserId,
     admin::Session,
     events::{DomainEvent, EventContext, RevocationReason, UserAgentFamily},
     protocol::claims::{Acr, Amr},
 };
-use serde::{Deserialize, Serialize};
 use sqlx::{
     Decode, Postgres, Type,
     error::BoxDynError,

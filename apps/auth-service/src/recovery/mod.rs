@@ -37,6 +37,7 @@ use crate::{
     security::RequestContext,
 };
 use chrono::{DateTime, Duration, Utc};
+use serde::Serialize;
 use sourceorigin_common::{
     AccountStatus, Handle, PasskeyId, RecoveryId, UserId,
     config::Origin,
@@ -47,7 +48,6 @@ use sourceorigin_crypto::{CryptoError, Secret};
 use sourceorigin_repository::{
     DatabaseError, DatabaseTransaction, RecoveryState, SessionScope, StoredPasskey, StoredRecovery,
 };
-use serde::Serialize;
 use url::Url;
 
 /// How long a recovery link works.

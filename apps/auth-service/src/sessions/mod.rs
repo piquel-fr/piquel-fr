@@ -6,13 +6,13 @@ use crate::admin::DashboardSignIn;
 use crate::security::{BrowserCookie, RequestContext, Session, SessionError};
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sourceorigin_common::{
     AuthenticationMethod, SessionId,
     admin::DashboardSession,
     events::{RevocationReason, UserAgentFamily},
 };
 use sourceorigin_repository::{SessionScope, StoredSession};
-use serde::Serialize;
 use std::net::IpAddr;
 
 /// Sign-out failures and their browser response mapping.

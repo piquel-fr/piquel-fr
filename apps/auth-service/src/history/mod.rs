@@ -10,6 +10,7 @@ use axum::{
     routing::post,
 };
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     ClientId, EventId, Personal, UserId,
     events::{
@@ -21,7 +22,6 @@ use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, EventFilter, EventRepository, OidcRepository,
     SessionScope, StoredEvent,
 };
-use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
 
 /// History failures and their browser response mapping.

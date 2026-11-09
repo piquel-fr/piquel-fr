@@ -6,10 +6,10 @@ use crate::{
     layout::page_head,
 };
 use chrono::{DateTime, TimeDelta, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     AuthenticationMethod, SessionId, admin::DashboardSession, events::UserAgentFamily,
 };
-use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use topcoat::{
     Result,
