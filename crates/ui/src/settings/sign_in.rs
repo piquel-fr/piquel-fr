@@ -6,7 +6,7 @@ use crate::{
     form::{Ceremony, Precision, Query, change_form, new_passkey, open, passkey_form, time},
     layout::page_head,
 };
-use piquel_common::{
+use sourceorigin_common::{
     PasskeyId, Provider,
     protocol::api::{Identity, Passkey},
 };
@@ -75,7 +75,7 @@ pub struct ProviderRow<'a> {
     pub provider: Provider,
     /// The account's identity there, if linked.
     pub identity: Option<&'a Identity>,
-    /// Whether Piquel offers it now. A linked provider since disabled is still
+    /// Whether SourceOrigin offers it now. A linked provider since disabled is still
     /// listed, so it can be unlinked.
     pub enabled: bool,
 }

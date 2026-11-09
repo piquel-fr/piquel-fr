@@ -1,15 +1,15 @@
 # Contributing
 
 This page covers how a change gets from your branch to `main`. Questions are
-welcome at [contact@piquel.fr](mailto:contact@piquel.fr). Report a security
+welcome at [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev). Report a security
 vulnerability privately, as the
-[security policy](https://github.com/piquel-fr/piquel-fr/blob/main/SECURITY.md)
+[security policy](https://github.com/sourceorigin-dev/sourceorigin/blob/main/SECURITY.md)
 describes, never in a public issue.
 
 ## Before you start
 
 Open an issue first for anything larger than a fix, so the design is agreed
-before the code. piquel.fr is still in early development: breaking changes are
+before the code. SourceOrigin is still in early development: breaking changes are
 expected, and there are no real users whose data a change must migrate.
 
 ## Every surface gets the feature
@@ -17,9 +17,9 @@ expected, and there are no real users whose data a change must migrate.
 A feature reaches every surface it applies to:
 
 - the operator CLI (`apps/auth-service/src/cli`), the most complete surface;
-- the user settings, at `auth.piquel.fr/settings`;
-- the developer console, at `auth.piquel.fr/developers`;
-- the admin dashboard, at `admin.piquel.fr`;
+- the user settings, at `auth.sourceorigin.dev/settings`;
+- the developer console, at `auth.sourceorigin.dev/developers`;
+- the admin dashboard, at `admin.sourceorigin.dev`;
 - the Rust and TypeScript SDKs, which share
   [test vectors](testing.md#sdk-test-vectors);
 - the documentation, in the [user guide](../user/introduction.md) and this one.

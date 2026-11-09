@@ -28,7 +28,7 @@ use ts_rs::{Config, TS};
 
 /// Opens the generated file.
 const HEADER: &str = "\
-// Generated from piquel_common::protocol by `just sdk-types`. Do not edit.
+// Generated from sourceorigin_common::protocol by `just sdk-types`. Do not edit.
 // The wire types auth and every SDK share; docs/dev/architecture/sdk.md describes them.
 ";
 

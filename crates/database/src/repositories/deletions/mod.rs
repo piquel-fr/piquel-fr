@@ -4,7 +4,7 @@
 use super::{AccountDeletionRepository, RepositoryExecutor, Unsigned};
 use crate::DatabaseError;
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{PasskeyId, UserId, admin::PurgeFailure};
+use sourceorigin_common::{PasskeyId, UserId, admin::PurgeFailure};
 
 /// A restore token's account, and the passkey whose sign-in it continues.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

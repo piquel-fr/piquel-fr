@@ -41,7 +41,7 @@ use crate::{
     icons::Icon,
     layout::{Label, navigation},
 };
-use piquel_common::events::{Browser, Platform, UserAgentFamily};
+use sourceorigin_common::events::{Browser, Platform, UserAgentFamily};
 use topcoat::{
     Result,
     view::{View, component, view},

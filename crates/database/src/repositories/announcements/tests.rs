@@ -7,7 +7,7 @@ use crate::{
     NotificationRepository, UserRepository,
 };
 use chrono::Utc;
-use piquel_common::{
+use sourceorigin_common::{
     EmailId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
     notifications::{EmailCategory, NotificationPreference},

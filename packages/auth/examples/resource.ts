@@ -1,15 +1,15 @@
 /**
- * A resource server validating access tokens with `@piquel/auth`: `handle` answers a
+ * A resource server validating access tokens with `@sourceorigin/auth`: `handle` answers a
  * standard `Request`, so Node, Bun, Workers, Hono or SvelteKit can serve it. It
  * accepts tokens whose `aud` is `notes-api`, and declares the scopes it
- * understands. An app outside this repository imports `@piquel/auth` instead of the
+ * understands. An app outside this repository imports `@sourceorigin/auth` instead of the
  * sources. The `ANCHOR` comments mark the parts `docs/user/apps/protect-an-api.md`
  * shows.
  */
 import { AuthError, Issuer, defineScopes } from '../src/index.ts';
 
 // ANCHOR: resource
-const issuer = await Issuer.discover('https://auth.piquel.fr');
+const issuer = await Issuer.discover('https://auth.sourceorigin.dev');
 const notes = defineScopes('notes:read', 'notes:write');
 const api = issuer.resource({ identifier: 'notes-api', scopes: notes });
 // ANCHOR_END: resource

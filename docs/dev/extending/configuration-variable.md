@@ -1,6 +1,6 @@
 # Adding a configuration variable
 
-This guide adds an environment variable that auth-service or piquel-web reads at
+This guide adds an environment variable that auth-service or sourceorigin-web reads at
 startup. A variable is declared once, with the doc comment operators read: the
 [configuration](../operations/configuration.md) reference is generated from it,
 so the two can't disagree.
@@ -25,17 +25,17 @@ code that reads them:
 | Keys | `apps/auth-service/src/config/keys.rs` |
 | Sign-in providers | `apps/auth-service/src/config/federation.rs` |
 | Email | `apps/auth-service/src/config/email.rs` |
-| piquel-web | `apps/web/src/main.rs` |
+| sourceorigin-web | `apps/web/src/main.rs` |
 
 OIDC clients and signing keys are not configuration: they live in the database.
 
 ## 1. Declare it
 
-Add the variable to the section's `piquel_common::variables!` block
+Add the variable to the section's `sourceorigin_common::variables!` block
 (`crates/common/src/config/reference.rs` defines the macro):
 
 ```rust
-piquel_common::variables! {
+sourceorigin_common::variables! {
     /// The service's own variables, in the configuration reference's order.
     #[cfg(test)]
     pub(crate) const VARIABLES;
@@ -57,13 +57,13 @@ what it does, its format, and whether it is required. A blank comment line start
 a new paragraph. `default` names the `&str` constant the code falls back to,
 which the reference shows; leave it out when there is none.
 
-Name it `AUTH_…` for auth-service and `WEB_…` for piquel-web.
+Name it `AUTH_…` for auth-service and `WEB_…` for sourceorigin-web.
 
 ## 2. Read it
 
 Read the variable in the section's `from_environment`, through `Variable`'s
 methods, and keep the validated value in the section's configuration type, such
-as `AuthConfig`, `EmailConfig` or piquel-web's `Web`:
+as `AuthConfig`, `EmailConfig` or sourceorigin-web's `Web`:
 
 | Method | Reads |
 | --- | --- |
@@ -96,7 +96,7 @@ configuration sections read the environment.
 A variable joins the list of its section's block. A new block, for a new
 section of auth-service, declares its own `VARIABLES` list and joins the sections
 of `configuration_reference_is_current`, in `apps/auth-service/src/config/tests.rs`,
-in the order the reference lists them. piquel-web has one section, in
+in the order the reference lists them. sourceorigin-web has one section, in
 `apps/web/src/main.rs`.
 
 ## 4. Regenerate the reference
@@ -105,13 +105,13 @@ in the order the reference lists them. piquel-web has one section, in
 just docs reference
 ```
 
-It rewrites `docs/dev/operations/variables/auth-service.md` or `piquel-web.md`,
+It rewrites `docs/dev/operations/variables/auth-service.md` or `sourceorigin-web.md`,
 which the configuration page includes. `just test` fails while they are stale.
 
 ## 5. Set it in each environment
 
 Set the variable in the service's `[spec.services.environment]` in
-[`infra/piqueld.toml`](https://github.com/piquel-fr/piquel-fr/blob/main/infra/piqueld.toml).
+[`infra/piqueld.toml`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/infra/piqueld.toml).
 A required variable must be set in the same pull request, or the next deploy
 fails to start.
 

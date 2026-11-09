@@ -1,7 +1,7 @@
 # Sign-in methods
 
 The **Sign-in methods** tab of your settings, at
-`auth.piquel.fr/settings/sign-in`, lists the passkeys and the GitHub or Google
+`auth.sourceorigin.dev/settings/sign-in`, lists the passkeys and the GitHub or Google
 accounts that can sign in to your account. Use it to add a passkey for a new
 device, tidy up old ones, and link or unlink GitHub and Google.
 
@@ -31,7 +31,7 @@ losing one never locks you out.
 
 The page says **The passkey was added.**
 
-An account keeps at most 100 passkeys. With 100 already, Piquel refuses another
+An account keeps at most 100 passkeys. With 100 already, SourceOrigin refuses another
 before your device creates it, and says so: remove one you no longer use first.
 
 ## Rename a passkey
@@ -69,14 +69,14 @@ It never replaces your passkeys. You can link one GitHub and one Google
 account.
 
 1. Under **Social sign-in**, select **Link GitHub** or **Link Google**.
-2. Sign in at the provider and allow Piquel.
-3. Back on Piquel, **Add this sign-in method?** asks you to confirm. Select
+2. Sign in at the provider and allow SourceOrigin.
+3. Back on SourceOrigin, **Add this sign-in method?** asks you to confirm. Select
    **Verify passkey and add provider**, and confirm with your passkey if your
    browser asks.
 
 You return to your sign-in methods, where the provider shows the email address
 of the account you linked, if it shares one. If your account had no confirmed email address,
-Piquel also adds the provider's, as when you
+SourceOrigin also adds the provider's, as when you
 [create an account with it](creating-an-account.md#create-an-account-with-github-or-google).
 
 The **Overview** tab also offers **Link GitHub** or **Link Google** while one
@@ -89,7 +89,7 @@ is not linked. Select **Not now** to hide that suggestion in this browser.
    asks.
 
 Your passkeys keep working. Unlinking signs out every device but this one, and
-frees the GitHub or Google account, so it can be linked to another Piquel
+frees the GitHub or Google account, so it can be linked to another SourceOrigin
 account.
 
 ## Troubleshooting
@@ -99,7 +99,7 @@ account.
 - **"The passkey request was cancelled or unavailable."** You cancelled the
   browser's prompt, or the device can't create the passkey, as when it
   already holds one for your account. Try again, or use another device.
-- **"This provider account is already linked to another Piquel account."**
+- **"This provider account is already linked to another Origin Account."**
   Unlink it from that account first, or link another GitHub or Google account.
-- **A provider says it is currently unavailable.** Piquel no longer offers
+- **A provider says it is currently unavailable.** SourceOrigin no longer offers
   sign-in with it. You can still unlink it, but not sign in with it.

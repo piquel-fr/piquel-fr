@@ -2,8 +2,8 @@
 
 use crate::security::ApiError;
 use chrono::{DateTime, Utc};
-use piquel_common::{Handle, HandleError, protocol::api::ErrorCode};
-use piquel_repository::DatabaseError;
+use sourceorigin_common::{Handle, HandleError, protocol::api::ErrorCode};
+use sourceorigin_repository::DatabaseError;
 use thiserror::Error;
 
 /// Why an account cannot take a handle, or why looking it up failed. Signup, the

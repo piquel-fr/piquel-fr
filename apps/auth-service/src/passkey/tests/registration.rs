@@ -148,7 +148,7 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn enrollment_refuses_a_101st_passkey() {
     const REFUSED: &str = "This account already has 100 passkeys, the most it can keep. \
-        Remove one in your account settings, or ask Piquel support.";
+        Remove one in your account settings, or ask SourceOrigin support.";
     let mut fixture = Fixture::new().await;
     let signed_in = fixture.login().await;
     let (started, browser) = fixture

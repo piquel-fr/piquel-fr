@@ -4,7 +4,7 @@
     "document": {
       "acr_values_supported": [
         "phr",
-        "urn:piquel:acr:social"
+        "urn:sourceorigin:acr:social"
       ],
       "authorization_endpoint": "https://auth.example.com/oauth/authorize",
       "authorization_response_iss_parameter_supported": true,
@@ -37,8 +37,8 @@
       ],
       "issuer": "https://auth.example.com",
       "jwks_uri": "https://auth.example.com/.well-known/jwks.json",
-      "op_policy_uri": "https://piquel.fr/privacy",
-      "op_tos_uri": "https://piquel.fr/terms",
+      "op_policy_uri": "https://sourceorigin.dev/privacy",
+      "op_tos_uri": "https://sourceorigin.dev/terms",
       "pushed_authorization_request_endpoint": "https://auth.example.com/oauth/par",
       "request_parameter_supported": false,
       "request_uri_parameter_supported": false,
@@ -60,7 +60,7 @@
         "email",
         "offline_access"
       ],
-      "service_documentation": "https://github.com/piquel-fr/piquel-fr#oidc-clients",
+      "service_documentation": "https://github.com/sourceorigin-dev/sourceorigin#oidc-clients",
       "subject_types_supported": [
         "public"
       ],
@@ -77,7 +77,7 @@
     "ok": {
       "acr_values_supported": [
         "phr",
-        "urn:piquel:acr:social"
+        "urn:sourceorigin:acr:social"
       ],
       "authorization_endpoint": "https://auth.example.com/oauth/authorize",
       "authorization_response_iss_parameter_supported": true,
@@ -110,8 +110,8 @@
       ],
       "issuer": "https://auth.example.com",
       "jwks_uri": "https://auth.example.com/.well-known/jwks.json",
-      "op_policy_uri": "https://piquel.fr/privacy",
-      "op_tos_uri": "https://piquel.fr/terms",
+      "op_policy_uri": "https://sourceorigin.dev/privacy",
+      "op_tos_uri": "https://sourceorigin.dev/terms",
       "pushed_authorization_request_endpoint": "https://auth.example.com/oauth/par",
       "request_parameter_supported": false,
       "request_uri_parameter_supported": false,
@@ -133,7 +133,7 @@
         "email",
         "offline_access"
       ],
-      "service_documentation": "https://github.com/piquel-fr/piquel-fr#oidc-clients",
+      "service_documentation": "https://github.com/sourceorigin-dev/sourceorigin#oidc-clients",
       "subject_types_supported": [
         "public"
       ],

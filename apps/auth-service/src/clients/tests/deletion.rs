@@ -2,8 +2,8 @@
 //! without deadlocking.
 use super::*;
 use crate::tests::{refresh_grant, sign_out};
-use piquel_common::{TokenId, events::Actor};
-use piquel_repository::{RefreshRedemption, RefreshRedemptionError};
+use sourceorigin_common::{TokenId, events::Actor};
+use sourceorigin_repository::{RefreshRedemption, RefreshRedemptionError};
 use tokio::task::JoinHandle;
 
 /// A public client and an account holding refresh grants to it, which the

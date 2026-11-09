@@ -21,8 +21,8 @@ use crate::{
         settings::{Addresses, ConnectedApps, SignInMethods},
     },
 };
-use piquel_common::{EventId, Handle, UserId};
-use piquel_ui::{
+use sourceorigin_common::{EventId, Handle, UserId};
+use sourceorigin_ui::{
     Audience, Change, Checkbox, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow,
     HistoryPage, HistoryState, Holdings, InboxPage, InboxRow, InboxState, ProfileChange,
     ProfileDialog, ProfilePages, ProfileState, ProviderRow, Recovery, SignInChange, Tab, Who,
@@ -120,7 +120,7 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
     let (page, passkeys, providers, state, recovery) =
         (&App::here(cx), &passkeys, &providers, &state, &recovery);
     let section = view! { cx =>
-        piquel_ui::sign_in_methods(
+        sourceorigin_ui::sign_in_methods(
             page: page.as_str(),
             passkeys: passkeys,
             providers: providers,
@@ -187,7 +187,7 @@ pub(super) async fn profile(cx: &Cx, body: Body) -> Result<Response> {
         href!(handle, Account(user)).resolve(cx),
     ];
     let section = view! { cx =>
-        piquel_ui::profile_settings(
+        sourceorigin_ui::profile_settings(
             page: page.as_str(),
             who: who,
             stored: stored,
@@ -236,7 +236,7 @@ pub(super) async fn emails(cx: &Cx, body: Body) -> Result<Response> {
     let (state, reason) = App::reopened::<Addresses>(cx, refused.as_ref());
     let (page, rows, state) = (&App::here(cx), &rows, &state);
     let section = view! { cx =>
-        piquel_ui::addresses(
+        sourceorigin_ui::addresses(
             page: page.as_str(),
             emails: rows,
             state: state,
@@ -268,7 +268,7 @@ pub(super) async fn apps(cx: &Cx, body: Body) -> Result<Response> {
     let (state, reason) = App::reopened::<ConnectedApps>(cx, refused.as_ref());
     let (page, rows, state) = (&App::here(cx), &rows, &state);
     let section = view! { cx =>
-        piquel_ui::connected_apps(
+        sourceorigin_ui::connected_apps(
             page: page.as_str(),
             rows: rows,
             state: state,
@@ -326,7 +326,7 @@ pub(super) async fn history(cx: &Cx) -> Result<Response> {
         audience: Audience::Administrator { reason: "" },
     };
     let rows = &rows;
-    let section = view! { cx => piquel_ui::history(rows: rows, holds: holds, page: page) };
+    let section = view! { cx => sourceorigin_ui::history(rows: rows, holds: holds, page: page) };
     App::settings_page(cx, user, Tab::History, None, section).await
 }
 
@@ -359,7 +359,7 @@ pub(super) async fn notifications(cx: &Cx) -> Result<Response> {
         alert: None,
     };
     let rows = &rows;
-    let section = view! { cx => piquel_ui::inbox(rows: rows, page: page) };
+    let section = view! { cx => sourceorigin_ui::inbox(rows: rows, page: page) };
     Box::pin(App::settings_page(
         cx,
         user,
@@ -402,7 +402,7 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
     });
     let refused = refused.as_deref();
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::ChangeHandle,
             back: back.as_str(),
             refusal: refused,
@@ -411,7 +411,7 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
                 "New handle"
                 <input name="handle" required="" maxlength="32" autocomplete="off" value=(typed)>
             </label>
-            piquel_ui::reserved_handle_choice(checked: allow_reserved)
+            sourceorigin_ui::reserved_handle_choice(checked: allow_reserved)
         )
     };
     App::render(cx, StatusCode::OK, "Change handle", page).await
@@ -441,7 +441,7 @@ pub(super) async fn display_name(cx: &Cx, form: Option<Form<NewDisplayName>>) ->
     });
     let refused = refused.as_deref();
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::ChangeDisplayName,
             back: back.as_str(),
             refusal: refused,
@@ -555,7 +555,7 @@ impl App {
             .collect();
         let section = Child::new(section);
         let page = view! { cx =>
-            piquel_ui::account_settings(
+            sourceorigin_ui::account_settings(
                 tabs: tabs,
                 current: tab,
                 refusal: refusal,

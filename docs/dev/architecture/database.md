@@ -9,11 +9,11 @@ stored. Read it before writing a query or a migration.
 connections, rows and raw SQL remain private. Application modules choose policy;
 repository methods enforce atomic persistence and return contextual errors.
 
-`piquel-common` supplies closed string enums, IDs, account status, authentication
+`sourceorigin-common` supplies closed string enums, IDs, account status, authentication
 methods, providers and domain events. Its `sqlx` feature,
 enabled only here, lets IDs decode from `UUID` columns (rejecting anything but
 `UUIDv7`) and vocabularies from `TEXT` columns. Cryptographic material
-is generated and hashed in `piquel-crypto`; the repository persists its digests.
+is generated and hashed in `sourceorigin-crypto`; the repository persists its digests.
 Ceremony kinds and OIDC redirect kinds are typed storage vocabulary. Account and security changes are recorded as typed domain events; see
 [Domain events](#domain-events).
 
@@ -57,7 +57,7 @@ checked query renders its script (`src/connection/runtime_role.sql`) with
 `format`, which quotes the values, and `raw_sql` runs it.
 
 Queries only administration reads decode straight into its views from
-`piquel_common::admin`. Records that auth also uses elsewhere convert into those views
+`sourceorigin_common::admin`. Records that auth also uses elsewhere convert into those views
 with `From`, leaving out what administrators never see, so no record repeats a view.
 
 The cache in `.sqlx/` is committed, and `.cargo/config.toml` sets
@@ -230,7 +230,7 @@ on the `account_deletions` row, with its attempts, error and next attempt, which
 waits 5 minutes, doubling after each failure up to a day. Due accounts are read in
 the order they became due, past their grace period and their next attempt, so
 accounts that keep failing never hold back the others. After each run the job sets
-`piquel.auth.account_purge.failing`, the accounts that failed 3 times in a row,
+`sourceorigin.auth.account_purge.failing`, the accounts that failed 3 times in a row,
 and raises the `purges_failing` alert while there are any, clearing it once there
 are none.
 The purge's queries use indexes, including the actor's user ID in
@@ -294,7 +294,7 @@ account's rows.
 
 Deployments use two roles, so a SQL-level compromise of auth reaches only rows.
 The schema owner, PostgreSQL's superuser, only runs `migrate`. Everything else,
-including `serve`, connects as a restricted runtime role, `piquel_auth`. When `migrate` has an owner connection
+including `serve`, connects as a restricted runtime role, `sourceorigin_auth`. When `migrate` has an owner connection
 (`AUTH_DATABASE_OWNER_URL`), it then calls `Database::provision`, which creates
 the runtime role or resets its attributes and password, and grants it:
 
@@ -346,7 +346,7 @@ fails for any such function others may execute.
 
 ## Domain events
 
-`piquel_common::events` defines `DomainEvent`, one variant per account or security
+`sourceorigin_common::events` defines `DomainEvent`, one variant per account or security
 change, and `Actor`, the one type every feature uses to say who caused it: a user,
 an administrator, an operator at the CLI (`$USER` and host name), a client, a
 background job, or an anonymous browser. Handlers record an event with
@@ -367,7 +367,7 @@ read back. `repositories/events/` stores events: the personal data split below,
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
-a person outside auth is wrapped in `Personal<T>`, which any `piquel-common` type
+a person outside auth is wrapped in `Personal<T>`, which any `sourceorigin-common` type
 can use; storage decides how to keep it apart. Adding a variant is a
 compile-time change that every `match` must handle.
 
@@ -529,7 +529,7 @@ event's hash, is dated at an infinite time or more than a minute ahead, or has a
 note over 1 KiB. A forged position or checkpoint time would otherwise stop
 sealing or signing until the owner repaired it. SQL cannot check a checkpoint's
 signature: that is auth's job. Only `DatabaseTransaction::prune_audit_chain`,
-run as the schema owner, deletes sealed events: it sets `piquel.audit_prune` for
+run as the schema owner, deletes sealed events: it sets `sourceorigin.audit_prune` for
 its own transaction, then moves the anchor (`audit_anchor`) to the checkpoint it
 pruned through. The anchor only moves forward, so of two concurrent prunes, the
 one that would move it back fails. Personal data is not covered, so retention

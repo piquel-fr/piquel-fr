@@ -7,7 +7,7 @@ use crate::{
     clients::copyable,
     icons::{Icon, icon},
 };
-use piquel_common::{TraceId, UserId};
+use sourceorigin_common::{TraceId, UserId};
 use topcoat::{
     Result,
     view::{Child, View, class, component, view},
@@ -49,7 +49,7 @@ pub struct Who<'a> {
     /// Where their profile picture is served, which their avatar shows instead of
     /// their initials.
     pub picture: Option<&'a str>,
-    /// Whether they administer Piquel, which rings their avatar in red.
+    /// Whether they administer Origin Auth, which rings their avatar in red.
     pub administrator: bool,
 }
 
@@ -142,7 +142,7 @@ impl<'a> From<&'a str> for Crumb<'a> {
 pub struct Shell<'a> {
     /// Where the brand links.
     pub home: &'a str,
-    /// The part of Piquel the page belongs to, after the brand.
+    /// The part of SourceOrigin the page belongs to, after the brand.
     pub area: &'a str,
     /// Where the crumb's area links: the part's own home.
     pub area_home: &'a str,
@@ -174,7 +174,7 @@ pub struct Shell<'a> {
     pub health: Option<Health>,
     /// The deployment the status bar names, if it names one.
     pub environment: Option<&'a str>,
-    /// Piquel's policies, which the status bar links.
+    /// SourceOrigin's policies, which the status bar links.
     pub policies: Policies<'a>,
     /// The `reference` of a server error's trace, for the user to quote.
     pub reference: Option<TraceId>,
@@ -218,9 +218,9 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
         <aside class="sidebar">
             <div class="top">
-                <a class="brand" href=(frame.home) aria-label="Piquel home">
+                <a class="brand" href=(frame.home) aria-label="SourceOrigin home">
                     <span class="mark">"p"</span>
-                    <span class="name">"piquel"</span>
+                    <span class="name">"sourceorigin"</span>
                     <span class="area">(frame.area)</span>
                 </a>
                 sidebar_toggle(

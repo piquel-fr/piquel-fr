@@ -104,7 +104,7 @@ pub async fn account_overview<'a>(
             </div>
         </div>
         for row in unlinked {
-            let key = format!("piquel-link:{}", row.provider.as_str());
+            let key = format!("sourceorigin-link:{}", row.provider.as_str());
             let name = row.provider.name();
             <section class="hint" data-dismiss=(key.as_str()) hidden="">
                 icon(kind: Icon::Link)

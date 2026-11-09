@@ -8,10 +8,10 @@ use super::{
     VerificationKeys,
 };
 use crate::alerts::Alerts;
-use piquel_common::alerts::{Alert, AlertKind};
-use piquel_common::events::{DomainEvent, EventContext};
-use piquel_crypto::CryptoError;
-use piquel_repository::{
+use sourceorigin_common::alerts::{Alert, AlertKind};
+use sourceorigin_common::events::{DomainEvent, EventContext};
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::{
     AuditRepository, ChainLink, ChainedEvent, Checkpoint, DatabaseTransaction, RecordedEvent,
     Verifications,
 };

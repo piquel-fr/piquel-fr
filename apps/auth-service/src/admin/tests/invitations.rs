@@ -1,7 +1,7 @@
 //! Creating and revoking invitations.
 
 use super::*;
-use piquel_crypto::Secret;
+use sourceorigin_crypto::Secret;
 
 /// An invitation link works until an administrator revokes it, which also ends
 /// its expiry, for the previous release; revoking it again finds nothing.
@@ -70,7 +70,7 @@ async fn invitation_revocation_waits_for_signup() {
         .query_pairs()
         .find(|(name, _)| name == "invitation")
         .expect("invitation secret");
-    let digest = piquel_crypto::Secret::parse(&encoded)
+    let digest = sourceorigin_crypto::Secret::parse(&encoded)
         .expect("secret")
         .digest();
     let mut signup = harness.database.begin().await.expect("transaction");

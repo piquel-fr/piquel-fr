@@ -6,7 +6,7 @@ use crate::{
     layout::{Pager, Who, avatar, page_head, pager},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus,
     admin::{Administrator, Invitation},
 };
@@ -54,7 +54,7 @@ impl InvitationRow<'_> {
     }
 }
 
-/// Who administers Piquel, with the page granting rights at `grant`.
+/// Who administers Origin Auth, with the page granting rights at `grant`.
 #[component]
 pub async fn administrator_list<'a>(
     rows: &'a [AdministratorRow<'a>],

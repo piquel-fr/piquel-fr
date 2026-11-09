@@ -16,11 +16,11 @@ use axum::{
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
-use piquel_common::{
+use sourceorigin_common::{
     PasskeyId, RecoveryId, UserId,
     events::{Actor, DomainEvent},
 };
-use piquel_repository::DatabaseTransaction;
+use sourceorigin_repository::DatabaseTransaction;
 use webauthn_rs::prelude::*;
 
 impl PasskeyApplication {

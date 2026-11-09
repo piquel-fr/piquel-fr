@@ -1,10 +1,10 @@
-piquel_auth::scopes! {
+sourceorigin_auth::scopes! {
     pub mod notes {
         Read = "notes:read",
     }
 }
 
-fn delete(token: &piquel_auth::AccessToken) {
+fn delete(token: &sourceorigin_auth::AccessToken) {
     let _ = token.require::<notes::Delete>();
 }
 

@@ -1,5 +1,5 @@
 /**
- * The example app of `@piquel/auth/server`, `packages/auth/examples/server.ts`,
+ * The example app of `@sourceorigin/auth/server`, `packages/auth/examples/server.ts`,
  * signing in, keeping its session across a reload, stepping up and signing out of
  * both itself and auth. Skipped without `E2E_SERVER_CLIENT_SECRET`. Back-channel
  * logout needs a public address auth can post to, so the SDK's unit tests cover it.
@@ -10,7 +10,7 @@ import { once } from 'node:events';
 import { addPasskeys, authUrl, signUp } from './helpers';
 
 /**
- * The example app of `@piquel/auth/server`, signing users in as `browser-e2e-server`:
+ * The example app of `@sourceorigin/auth/server`, signing users in as `browser-e2e-server`:
  * a trusted confidential client whose secret is in `E2E_SERVER_CLIENT_SECRET`. Auth
  * accepts plain HTTP redirect URIs on loopback IPs only, and browsers count them as
  * secure, so its `__Host-` cookies work there.
@@ -74,7 +74,7 @@ test('the server SDK signs in, keeps the session across a reload, and signs out'
   expect(new URL(page.url()).origin).toBe(app);
   const cookies = await appCookies(context);
   expect(cookies.map((cookie) => cookie.name)).toEqual([
-    '__Host-piquel-browser-e2e-server-session'
+    '__Host-sourceorigin-browser-e2e-server-session'
   ]);
   expect(cookies[0]).toMatchObject({ httpOnly: true, secure: true, sameSite: 'Lax', path: '/' });
 

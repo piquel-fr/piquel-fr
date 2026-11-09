@@ -9,8 +9,8 @@ use axum::{
     response::Response,
 };
 use base64::Engine;
-use piquel_common::clients::AllowedScopes;
-use piquel_crypto::Secret;
+use sourceorigin_common::clients::AllowedScopes;
+use sourceorigin_crypto::Secret;
 use tower::ServiceExt;
 
 /// Sends `method` to `path` on `replica` from a browser page on `origin`, with an

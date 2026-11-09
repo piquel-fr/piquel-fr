@@ -216,7 +216,7 @@ fn opaque_tokens_preserve_envelopes_and_reject_wrong_purpose() {
 async fn oauth_failures_preserve_sources_and_statuses() {
     use axum::response::IntoResponse;
     use std::error::Error;
-    let error = OAuthError::from(piquel_repository::DatabaseError::Operation(Box::new(
+    let error = OAuthError::from(sourceorigin_repository::DatabaseError::Operation(Box::new(
         std::io::Error::other("internal diagnostic"),
     )));
     assert_eq!(
@@ -229,7 +229,7 @@ async fn oauth_failures_preserve_sources_and_statuses() {
     );
     let error = OAuthCode::InvalidGrant.reject_with(
         "code is \"malformed\" \u{2014} retry",
-        piquel_crypto::CryptoError::SecretLength,
+        sourceorigin_crypto::CryptoError::SecretLength,
     );
     assert!(error.source().is_some());
     let response = error.into_response();

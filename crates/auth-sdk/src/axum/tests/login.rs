@@ -93,7 +93,7 @@ async fn step_ups_in_nested_routers_keep_their_prefix() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let marker = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .encode(<sha2::Sha256 as sha2::Digest>::digest("/app/settings"));
-    let cookies = format!("{session}; __Host-piquel-{CLIENT}-step-up={marker}");
+    let cookies = format!("{session}; __Host-sourceorigin-{CLIENT}-step-up={marker}");
     let response = get_with(&app, "/app/settings", &[(header::COOKIE, &cookies)]).await;
     assert_eq!(
         response.status(),

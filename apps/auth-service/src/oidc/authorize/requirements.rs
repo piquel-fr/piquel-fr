@@ -4,11 +4,11 @@
 use crate::account::AccountService;
 use crate::oidc::{OAuthCode, OAuthError, OidcApplication, Reject};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, RecoveryId, UserId,
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     DatabaseError, DatabaseTransaction, SessionAuthentication, StoredAuthorizationRequest,
     StoredSession,
 };

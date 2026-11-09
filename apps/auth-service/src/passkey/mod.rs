@@ -13,13 +13,13 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use piquel_common::{
+use sourceorigin_common::{
     PasskeyId, UserId,
     config::Origin,
     events::{DomainEvent, EventContext},
 };
-use piquel_crypto::Secret;
-use piquel_repository::{
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertPasskey, PasskeyRepository, StoredPasskey,
 };
 use std::sync::Arc;
@@ -76,7 +76,7 @@ pub struct PasskeyApplication {
 }
 
 /// Human-readable `WebAuthn` relying party name.
-const RELYING_PARTY_NAME: &str = "Piquel";
+const RELYING_PARTY_NAME: &str = "SourceOrigin";
 /// Android UA marker is a compatibility gate, never an authentication claim.
 const ANDROID_USER_AGENT: &str = "Android";
 

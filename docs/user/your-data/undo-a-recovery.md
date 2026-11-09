@@ -1,6 +1,6 @@
 # Undo a recovery
 
-If Piquel support recovered your account and it wasn't you, undo the recovery
+If SourceOrigin support recovered your account and it wasn't you, undo the recovery
 with a passkey you had before it. Undoing takes back the passkey the recovery
 added, and signs everyone out. You can undo a recovery for 15 days after its
 link was used, or cancel it before.
@@ -15,13 +15,13 @@ recovery added can't undo it. Without an older passkey, see
 
 A recovery tells you in several ways:
 
-- **"Recover your Piquel account"**, sent to your primary email address when
+- **"Recover your Origin Account"**, sent to your primary email address when
   support starts the recovery. It holds the recovery link, and a second link to
   cancel the recovery if you still have a passkey.
 - **"A recovery added a passkey to your account"**, sent to every confirmed
   email address of the account once the link is used. It links to the page that
   undoes the recovery.
-- **"Piquel support secured your account"**, sent to every confirmed address
+- **"SourceOrigin support secured your account"**, sent to every confirmed address
   when support removed your other ways to sign in first. It links to the undo
   page only if support kept one of your passkeys.
 - **"Was this you?"**, asked on every settings and developer console page, and
@@ -35,7 +35,7 @@ The second and third notices also appear in your settings, under
 1. Open the undo link from one of the emails, or select **No, undo it** where
    your account asks "Was this you?". Before the recovery link is used, the
    question offers **No, cancel it** instead. Signed in, you can also open
-   `auth.piquel.fr/recover/undo`.
+   `auth.sourceorigin.dev/recover/undo`.
 2. If the page asks, select **Continue**. It then says what the recovery did,
    until when it can be undone, and what undoing takes back.
 3. Select **Undo it with a passkey**, or **Cancel it with a passkey** before the
@@ -66,9 +66,9 @@ settings, and each app you use.
 ## No passkey from before
 
 If you have no passkey from before the recovery, the undo page says "You have no
-passkey from before this recovery, so only Piquel support can undo it."
+passkey from before this recovery, so only SourceOrigin support can undo it."
 
-Email [contact@piquel.fr](mailto:contact@piquel.fr). Support checks that you own
+Email [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev). Support checks that you own
 the account, with evidence from before the recovery, as they do for
 [a recovery](recover-your-account.md#ask-support). A request sent from the
 account itself while it is being recovered doesn't count: it may come from
@@ -83,7 +83,7 @@ before it, not even support. That keeps your ability to undo it.
 - **"There's nothing to undo."** The recovery was already undone or cancelled,
   or its 15 days ended, or the link is wrong. After the 15 days, contact
   support.
-- **"Use a passkey you had before this recovery to undo it, or ask Piquel
+- **"Use a passkey you had before this recovery to undo it, or ask SourceOrigin
   support."** You used the passkey the recovery added. Use an older one.
 - **"Your account is disabled, so you're not signed in."** The undo worked, but
   your account is disabled. Contact support to enable it.

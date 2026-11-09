@@ -3,10 +3,10 @@
 
 use super::*;
 use crate::config::PolicyLinks;
-use piquel_common::AccountStatus;
-use piquel_common::clients::{AllowedScopes, ScopeName};
-use piquel_common::events::GrantRevocation;
-use piquel_repository::SessionScope;
+use sourceorigin_common::AccountStatus;
+use sourceorigin_common::clients::{AllowedScopes, ScopeName};
+use sourceorigin_common::events::GrantRevocation;
+use sourceorigin_repository::SessionScope;
 
 /// Checks refresh narrowing, that a confidential client keeps its token, client
 /// binding and logout.
@@ -469,7 +469,7 @@ async fn profile_changes_reach_the_next_token() {
         .await;
     assert_eq!(claims.get("picture"), None, "no picture yet");
     let database = &flow.app.database;
-    let picture = piquel_common::PictureId::new();
+    let picture = sourceorigin_common::PictureId::new();
     database
         .pictures()
         .set(flow.user_id, picture, b"jpeg")
@@ -505,7 +505,7 @@ fn the_picture_needs_the_profile_scope() {
     let claims = ProfileClaims {
         picture: Some(format!(
             "{AUTH_ORIGIN}/pictures/{}",
-            piquel_common::PictureId::new()
+            sourceorigin_common::PictureId::new()
         )),
         ..ProfileClaims::default()
     };

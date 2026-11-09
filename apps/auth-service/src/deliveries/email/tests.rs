@@ -8,14 +8,14 @@ use crate::{
     security::RequestContext,
     tests::{AUTH_ORIGIN, Browser, Replicas, verified_address},
 };
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, EmailId, Handle, NotificationId, PasskeyId, RecoveryId,
     config::Origin,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
     notifications::Notification,
 };
-use piquel_crypto::Secret;
-use piquel_repository::{
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{
     DraftedAnnouncement, InsertRecovery, InsertUnverifiedEmail, InsertUser, Recipients,
 };
 use std::{
@@ -174,7 +174,7 @@ async fn retries_resend_the_same_message_to_the_current_address() {
         Err(DeliveryError::Retryable { .. })
     ));
     assert_eq!(sender.deliver(id, user_id, &verify).await, Ok(()));
-    let expected = (format!("<{id}@piquel.fr>"), "ada@example.com".to_owned());
+    let expected = (format!("<{id}@sourceorigin.dev>"), "ada@example.com".to_owned());
     assert_eq!(outbox.headers(), [expected.clone(), expected]);
 
     sender.assert_renders(user_id, &verify).await;
@@ -196,7 +196,7 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     assert_eq!(
         link,
         format!(
-            "https://auth.piquel.fr/settings/emails/verify#token={}",
+            "https://auth.sourceorigin.dev/settings/emails/verify#token={}",
             token.encoded()
         )
     );
@@ -312,7 +312,7 @@ async fn a_recovery_link_is_sent_while_it_works() {
     let email_id = verified_address(&database, user_id, &address, true).await;
     // Started under a key that a change of token digest key made the accepted
     // one before the link was sent.
-    let origin: Origin = "https://auth.piquel.fr".parse().expect("origin");
+    let origin: Origin = "https://auth.sourceorigin.dev".parse().expect("origin");
     let started = Secret::generate().expect("recovery key");
     let current = Secret::generate().expect("recovery key");
     let before = RecoveryLinks::new(origin.clone(), LinkKeys::new(started.clone(), None));
@@ -434,7 +434,7 @@ async fn recovery_notices_link_to_the_undo_page() {
         notification: Notification::AccountSecured { kept },
         recovery_id: kept.then_some(recovery_id),
     };
-    let undo_page = format!("https://auth.piquel.fr/recover/undo#recovery={recovery_id}");
+    let undo_page = format!("https://auth.sourceorigin.dev/recover/undo#recovery={recovery_id}");
 
     let content = sender.content(user_id, &link).await.expect("content");
     assert!(matches!(content, Some(Content::RecoveryLink { undo, .. }) if undo == undo_page));
@@ -446,7 +446,7 @@ async fn recovery_notices_link_to_the_undo_page() {
         let content = sender.content(user_id, message).await.expect("content");
         assert!(
             matches!(&content, Some(Content::Notification { undo, page, .. })
-                if *undo == expected && page.starts_with("https://auth.piquel.fr/settings/notifications/")),
+                if *undo == expected && page.starts_with("https://auth.sourceorigin.dev/settings/notifications/")),
             "{message:?}"
         );
     }
@@ -541,7 +541,7 @@ async fn notifications_are_emailed_to_the_addresses_their_kind_names() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_raised_alert_notifies_active_administrators() {
-    use piquel_common::{
+    use sourceorigin_common::{
         AlertId,
         admin::{ChainBreak, ChainProblem},
         alerts::Alert,
@@ -624,15 +624,15 @@ async fn an_alerts_email_links_the_dashboard() {
         address: format!("{user_id}@example.com"),
         notification_id: NotificationId::new(),
         notification: Notification::AlertRaised {
-            alert_id: piquel_common::AlertId::new(),
+            alert_id: sourceorigin_common::AlertId::new(),
             title: "The audit chain is broken".into(),
             text: "A verification found the chain broken.".into(),
         },
         recovery_id: None,
     };
-    let dashboard: Origin = "https://admin.piquel.fr".parse().expect("origin");
+    let dashboard: Origin = "https://admin.sourceorigin.dev".parse().expect("origin");
     for (linked, expected) in [
-        (Some(&dashboard), Some("https://admin.piquel.fr/alerts")),
+        (Some(&dashboard), Some("https://admin.sourceorigin.dev/alerts")),
         (None, None),
     ] {
         let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config)

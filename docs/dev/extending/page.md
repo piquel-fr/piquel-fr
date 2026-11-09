@@ -1,6 +1,6 @@
 # Adding a page or route to auth
 
-This guide adds a server-rendered page to auth.piquel.fr, such as a settings
+This guide adds a server-rendered page to auth.sourceorigin.dev, such as a settings
 tab, or a JSON route of the account API. [Rust conventions](../rust-conventions.md#applications-and-routes)
 describes how pages and routes work; this page is the order you change them in.
 
@@ -14,7 +14,7 @@ instead: they are routes of the admin listener, not auth's pages.
   change on `POST`, under auth's security layer: its request budget, its
   Content-Security-Policy and the rule that only auth's own pages post forms
   to it.
-- Its strings, forms and queries in `piquel-ui`, so a field's name is written
+- Its strings, forms and queries in `sourceorigin-ui`, so a field's name is written
   once.
 - A change that needs a recent passkey asks for one before the form posts.
 - Tests through the whole service, and in a real browser.
@@ -52,7 +52,7 @@ gets the API's browser rules instead of a page's.
 
 ## 2. Describe what its forms send
 
-In `piquel-ui` (`crates/ui/src/<area>/`), beside the page's component, declare:
+In `sourceorigin-ui` (`crates/ui/src/<area>/`), beside the page's component, declare:
 
 - **its change**, an internally tagged enum that names itself in the hidden
   `action` field, with fields that deserialize from text:
@@ -90,7 +90,7 @@ change_form(
 )
 ```
 
-Every string the page shows is in `piquel-ui`. A new settings tab also adds a
+Every string the page shows is in `sourceorigin-ui`. A new settings tab also adds a
 `Tab` variant, with its label, in `crates/ui/src/settings/mod.rs`.
 
 ## 4. Write its handler
@@ -197,7 +197,7 @@ Then check the page in Chromium, with the real binary and a virtual
 authenticator: add a test to the spec of its area in `tests/browser/`, such as
 `settings.spec.ts`, and update the spec's top comment if it now covers more.
 Run `just web test-browser` against running servers, as the
-[browser tests' README](https://github.com/piquel-fr/piquel-fr/blob/main/tests/browser/README.md)
+[browser tests' README](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/browser/README.md)
 sets them up. To see the page yourself, deploy the checkout with `just preview`.
 
 ## Document it

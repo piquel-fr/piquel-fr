@@ -19,7 +19,7 @@ crate::str_enum! {
         /// User presence and verification, such as a passkey's PIN or biometric.
         User = "user",
         /// An external identity provider. RFC 8176 registers no such value; this is
-        /// Piquel's documented spelling.
+        /// SourceOrigin's documented spelling.
         Fed = "fed",
     }
 }
@@ -28,7 +28,7 @@ crate::str_enum! {
     /// `acr` values: the authentication context class a session reached, strongest first.
     ///
     /// ```
-    /// use piquel_common::protocol::claims::Acr;
+    /// use sourceorigin_common::protocol::claims::Acr;
     ///
     /// // A passkey meets a social requirement, but not the other way around.
     /// assert!(Acr::PhishingResistant.satisfies(Acr::Social));
@@ -42,7 +42,7 @@ crate::str_enum! {
         /// verification (`OpenID` Connect EAP ACR Values).
         PhishingResistant = "phr",
         /// Sign-in through an external identity provider.
-        Social = "urn:piquel:acr:social",
+        Social = "urn:sourceorigin:acr:social",
     }
 }
 
@@ -63,7 +63,7 @@ impl Acr {
     ///
     /// Later values are not considered: a session below the target signs in again.
     /// Not every account can reach every class: a recovered passkey reports
-    /// `urn:piquel:acr:social` until its recovery settles, and auth then answers
+    /// `urn:sourceorigin:acr:social` until its recovery settles, and auth then answers
     /// `unmet_authentication_requirements` rather than fall back to a later value.
     #[must_use]
     pub fn select(acr_values: &str) -> Option<Self> {
@@ -76,7 +76,7 @@ impl Acr {
 /// `aud`: one string or an array (RFC 7519 §4.1.3). Auth always sends one string.
 ///
 /// ```
-/// use piquel_common::protocol::claims::Audience;
+/// use sourceorigin_common::protocol::claims::Audience;
 ///
 /// let one: Audience = serde_json::from_str(r#""notes-api""#)?;
 /// let many: Audience = serde_json::from_str(r#"["notes-api", "files-api"]"#)?;
@@ -333,10 +333,10 @@ impl<'de> Deserialize<'de> for Absent {
 /// Auth always sends `sub`, and sends `sid` for a session logout.
 ///
 /// ```
-/// use piquel_common::protocol::claims::LogoutTokenClaims;
+/// use sourceorigin_common::protocol::claims::LogoutTokenClaims;
 ///
 /// let claims: LogoutTokenClaims = serde_json::from_str(r#"{
-///     "iss": "https://auth.piquel.fr",
+///     "iss": "https://auth.sourceorigin.dev",
 ///     "aud": "notes-web",
 ///     "iat": 1767225540,
 ///     "exp": 1767225660,
@@ -348,7 +348,7 @@ impl<'de> Deserialize<'de> for Absent {
 /// assert!(claims.sid.is_some());
 ///
 /// // A nonce, even null, means the token is not a logout token.
-/// let with_nonce = r#"{"iss": "https://auth.piquel.fr", "aud": "notes-web",
+/// let with_nonce = r#"{"iss": "https://auth.sourceorigin.dev", "aud": "notes-web",
 ///     "iat": 1767225540, "exp": 1767225660, "jti": "01936f3e-8c00-7000-8000-000000000004",
 ///     "sub": "01936f3e-8c00-7000-8000-000000000001", "nonce": null,
 ///     "events": {"http://schemas.openid.net/event/backchannel-logout": {}}}"#;
@@ -415,9 +415,9 @@ mod tests {
     /// no target.
     #[test]
     fn selection_takes_the_first_known_value() {
-        assert_eq!(Acr::select("urn:piquel:acr:social phr"), Some(Acr::Social));
+        assert_eq!(Acr::select("urn:sourceorigin:acr:social phr"), Some(Acr::Social));
         assert_eq!(
-            Acr::select("phr urn:piquel:acr:social"),
+            Acr::select("phr urn:sourceorigin:acr:social"),
             Some(Acr::PhishingResistant)
         );
         assert_eq!(

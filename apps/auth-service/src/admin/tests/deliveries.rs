@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::security::CONFIRMATION_MAX_AGE;
-use piquel_common::DeliveryId;
-use piquel_repository::{Channel, DatabaseError, DeliveryStatus, EventFilter, NewDelivery};
+use sourceorigin_common::DeliveryId;
+use sourceorigin_repository::{Channel, DatabaseError, DeliveryStatus, EventFilter, NewDelivery};
 
 /// A delivery no worker sends, which the tests only retry and cancel.
 struct Unsent;
@@ -16,7 +16,7 @@ impl Channel for Unsent {
     fn deliveries(
         _: &DomainEvent,
         _: Option<UserId>,
-        _: &[piquel_repository::Notified],
+        _: &[sourceorigin_repository::Notified],
         _: &mut DatabaseTransaction<'_>,
     ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
         std::future::ready(Ok(vec![]))

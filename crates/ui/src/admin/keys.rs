@@ -3,7 +3,7 @@
 use super::{Action, Change, confirm, dashboard_change, moment};
 use crate::{clients::choice, layout::page_head};
 use chrono::{DateTime, Utc};
-use piquel_common::admin::{SigningKey, SigningKeyState};
+use sourceorigin_common::admin::{SigningKey, SigningKeyState};
 use topcoat::{
     Result,
     view::{View, class, component, view},

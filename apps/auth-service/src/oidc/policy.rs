@@ -5,8 +5,8 @@
 //! checks the registration as it is now, never as it was when the request began.
 
 use super::{OAuthCode, OAuthError, Reject};
-use piquel_common::ClientId;
-use piquel_repository::{
+use sourceorigin_common::ClientId;
+use sourceorigin_repository::{
     ConsumedAuthorizationCode, Database, DatabaseTransaction, StoredAuthorizationRequest,
     StoredOidcClient,
 };

@@ -16,11 +16,11 @@ use crate::{
         account::{AccountPage, Applied, Framed, NoChange, Reader},
     },
 };
-use piquel_common::{
+use sourceorigin_common::{
     NotificationId, UserId,
     notifications::{Notification, NotificationPreference},
 };
-use piquel_ui::{
+use sourceorigin_ui::{
     Audience, Crumb, EmailRow, HistoryRow, Holdings, InboxChange, InboxPage, InboxRow, InboxState,
     Messages, NotificationState, Section, Tab, Title, UnsubscribeStep,
 };
@@ -120,7 +120,7 @@ impl AccountPage for Inbox {
             preferences: &inbox.preferences,
             alert,
         };
-        let page = Child::new(view! { cx => piquel_ui::inbox(rows: &rows, page: page) });
+        let page = Child::new(view! { cx => sourceorigin_ui::inbox(rows: &rows, page: page) });
         web.settings_page(
             cx,
             Tab::Notifications,
@@ -213,7 +213,7 @@ impl AccountPage for NotificationPage {
             .as_ref()
             .filter(|_| view.item.notification.links_alerts())
             .map(|dashboard| dashboard.dashboard().join(routes::dashboard::ALERTS));
-        let page = piquel_ui::NotificationPage {
+        let page = sourceorigin_ui::NotificationPage {
             here: &here,
             inbox: settings::NOTIFICATIONS,
             history: settings::HISTORY,
@@ -229,7 +229,7 @@ impl AccountPage for NotificationPage {
             shown,
         };
         let row = InboxRow::from(&view.item);
-        let page = Child::new(view! { cx => piquel_ui::notification(row: row, page: page) });
+        let page = Child::new(view! { cx => sourceorigin_ui::notification(row: row, page: page) });
         // Under the inbox in the crumb, named by its subject.
         let framed = Framed {
             section: Section::Account,
@@ -285,7 +285,7 @@ impl WebApplication {
         web.unsubscribe_page(cx, StatusCode::OK, step).await
     }
 
-    /// The account the page's link names, if its token is the one Piquel made
+    /// The account the page's link names, if its token is the one Origin Auth made
     /// for it.
     fn unsubscriber(&self, cx: &Cx) -> Result<Option<UserId>, Failure> {
         let Ok(link) = parse_query_params::<Unsubscribe>(cx) else {
@@ -305,7 +305,7 @@ impl WebApplication {
         status: StatusCode,
         step: UnsubscribeStep<'_>,
     ) -> Result<Response, Failure> {
-        let view = view! { cx => piquel_ui::unsubscribe(step: step) };
+        let view = view! { cx => sourceorigin_ui::unsubscribe(step: step) };
         let title = Title::Unsubscribe.as_str();
         Ok(self.render(cx, status, title, &[], view).await?)
     }

@@ -5,7 +5,7 @@
 use super::{AlertRepository, KindProbe, RepositoryExecutor};
 use crate::{DatabaseError, LockKey};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AlertId, EventId, Handle,
     alerts::{Alert, AlertAuthor, AlertKind, AlertStatus, AlertUpdate, AlertsShown, StoredAlert},
     events::{Actor, DomainEvent},

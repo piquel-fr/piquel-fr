@@ -6,7 +6,7 @@ use crate::{
     Alert, Messages,
     icons::{Icon, icon},
 };
-use piquel_common::admin::{Announcement, Paging};
+use sourceorigin_common::admin::{Announcement, Paging};
 use topcoat::{
     Result,
     view::{Child, View, component, view},

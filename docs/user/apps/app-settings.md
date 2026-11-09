@@ -9,7 +9,7 @@ signed in too.
 ## Before you start
 
 - You need an app you [registered](register-an-app.md). Open it from **Your
-  apps**, at `auth.piquel.fr/developers`, then select its **Settings** tab.
+  apps**, at `auth.sourceorigin.dev/developers`, then select its **Settings** tab.
 - Every change needs a passkey confirmation from the last five minutes. If
   yours is older, your browser asks for your passkey before the change is
   sent.
@@ -86,7 +86,7 @@ at auth, which answers instead of sending the browser back to your app:
 - **The app shows Suspended.** An administrator suspended it, for example
   because it was abused. It can't sign users in, and you can't enable it until
   they lift the suspension, after which it is disabled until you enable it. You
-  can still change its settings and delete it. Write to contact@piquel.fr to
+  can still change its settings and delete it. Write to contact@sourceorigin.dev to
   restore it.
 - **A redirect URI is refused with "must be written as …".** Write it as the
   message shows, which is how your app's library sends it: for example
@@ -98,13 +98,13 @@ at auth, which answers instead of sending the browser back to your app:
 
 | Setting | What it does |
 | --- | --- |
-| **App name** | The name the consent screen shows: at most 80 characters, without Piquel or another well-known brand, such as Google or GitHub, even disguised (`P1quel`). |
-| **Redirect URIs** | 1 to 16 places, one per line, where Piquel sends users back after they sign in. Each is matched exactly, and must use HTTPS, or HTTP on a loopback IP such as `127.0.0.1` ([local development](local-development.md)). It can't contain a user name, a password or a fragment. |
+| **App name** | The name the consent screen shows: at most 80 characters, without SourceOrigin or another well-known brand, such as Google or GitHub, even disguised (`P1quel`). |
+| **Redirect URIs** | 1 to 16 places, one per line, where Origin Auth sends users back after they sign in. Each is matched exactly, and must use HTTPS, or HTTP on a loopback IP such as `127.0.0.1` ([local development](local-development.md)). It can't contain a user name, a password or a fragment. |
 | **Post-logout URIs** | Up to 16 pages, one per line, where users may return after signing out, under the same rules. None by default. |
 | **Scopes** | What the app may ask for: `openid` (the user's stable ID), `profile` (their handle, display name and profile picture), `email` (their email address, when they have one) and `offline_access` (refresh tokens, if refresh is allowed). `openid`, `profile` and `email` by default. |
-| **Allow refresh tokens** | Lets the app stay signed in without sending users back to Piquel, when it requests `offline_access`. Off by default. |
+| **Allow refresh tokens** | Lets the app stay signed in without sending users back to Origin Auth, when it requests `offline_access`. Off by default. |
 | **Require pushed authorization requests** | The app must post its sign-in requests to `/oauth/par` (RFC 9126), so none of their parameters travel through the browser. The SDKs push their requests whenever auth offers it. Off by default. |
-| **Back-channel logout URI** | Where Piquel tells the app that a user's session ended ([back-channel logout](back-channel-logout.md)), under the same rules as redirect URIs. None by default. |
+| **Back-channel logout URI** | Where Origin Auth tells the app that a user's session ended ([back-channel logout](back-channel-logout.md)), under the same rules as redirect URIs. None by default. |
 
 The kind of app, with a backend or without, can't change: register a new app
 instead.

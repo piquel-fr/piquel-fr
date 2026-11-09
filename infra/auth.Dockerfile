@@ -5,7 +5,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 # With the shared stylesheet in crates/ui/assets and the passkey script in
 # apps/auth-service/assets, which the executable embeds. It serves the admin
-# dashboard too. The workspace's manifests need every member, piquel-web's
+# dashboard too. The workspace's manifests need every member, sourceorigin-web's
 # included, though only auth-service is built.
 COPY crates crates
 COPY apps apps

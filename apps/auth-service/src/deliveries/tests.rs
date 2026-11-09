@@ -8,8 +8,8 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use piquel_common::{DeliveryId, UserId, events::DomainEvent};
-use piquel_repository::{DatabaseTransaction, DeliveryStatus, DeliverySummary, NewDelivery};
+use sourceorigin_common::{DeliveryId, UserId, events::DomainEvent};
+use sourceorigin_repository::{DatabaseTransaction, DeliveryStatus, DeliverySummary, NewDelivery};
 use std::{marker::PhantomData, net::IpAddr, sync::Mutex};
 use tokio::sync::{Notify, mpsc};
 
@@ -268,7 +268,7 @@ macro_rules! worker_channels {
             fn deliveries(
                 _: &DomainEvent,
                 _: Option<UserId>,
-                _: &[piquel_repository::Notified],
+                _: &[sourceorigin_repository::Notified],
                 _: &mut DatabaseTransaction<'_>,
             ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
                 std::future::ready(Ok(vec![]))
@@ -458,7 +458,7 @@ async fn workers_retry_retryable_errors_and_fail_permanent_ones() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn each_attempt_is_a_trace_and_idle_polls_export_nothing() {
-    let capture = piquel_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
+    let capture = sourceorigin_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
     let (database, jobs, _) = workers::<Traced>().await;
     let id = queue::<Traced>(&database, Behavior::Refused).await;
     wait_for::<Traced, _>(&database, |listed| {

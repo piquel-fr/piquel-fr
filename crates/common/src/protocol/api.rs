@@ -2,7 +2,7 @@
 //! user, which the admin dashboard's views share.
 //!
 //! ```
-//! use piquel_common::protocol::api::{ErrorBody, ErrorCode};
+//! use sourceorigin_common::protocol::api::{ErrorBody, ErrorCode};
 //!
 //! let body: ErrorBody = serde_json::from_str(
 //!     r#"{"error": "Confirm with your passkey to continue.", "code": "step_up_required", "max_age": 300}"#,

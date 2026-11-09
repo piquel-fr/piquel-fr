@@ -8,7 +8,7 @@ use crate::{
     handles::Handles,
     security::Session,
 };
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, Handle, HandleError, Personal, SessionId, UserId,
     admin::{
         Email, Paging, ReleasedHandle, ReservedHandle, ScheduledDeletion, UserDetail, UserPage,
@@ -16,7 +16,7 @@ use piquel_common::{
     email::NormalizedEmail,
     events::{DomainEvent, EventContext, RevocationReason},
 };
-use piquel_repository::{DatabaseError, DatabaseTransaction, SessionScope, StoredUser};
+use sourceorigin_repository::{DatabaseError, DatabaseTransaction, SessionScope, StoredUser};
 
 /// Accounts per search page.
 const USER_PAGE_SIZE: u16 = 50;

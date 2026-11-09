@@ -12,8 +12,8 @@ use axum::{
     http::{Method, Request, header},
     response::Response,
 };
-use piquel_common::{AuthenticationMethod, Handle};
-use piquel_repository::{DeliverySummary, InsertUser};
+use sourceorigin_common::{AuthenticationMethod, Handle};
+use sourceorigin_repository::{DeliverySummary, InsertUser};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv6Addr};
 use tower::ServiceExt;
@@ -330,7 +330,7 @@ async fn verification_rejects_an_address_another_account_owns() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
         body["error"],
-        "This address is already used by another Piquel account."
+        "This address is already used by another Origin Account."
     );
     assert_eq!(harness.list(&other).await[0]["verified"], false);
 }
@@ -358,7 +358,7 @@ async fn verification_checks_the_signed_in_account() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
         body["error"],
-        "This link adds the address to a Piquel account other than the one you are signed in \
+        "This link adds the address to an Origin Account other than the one you are signed in \
          to. Sign out first if you meant to confirm it."
     );
     assert_eq!(harness.list(&owner).await[0]["verified"], false);
