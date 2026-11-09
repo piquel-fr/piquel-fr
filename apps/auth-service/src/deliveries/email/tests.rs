@@ -635,7 +635,10 @@ async fn an_alerts_email_links_the_dashboard() {
     };
     let dashboard: Origin = "https://admin.sourceorigin.dev".parse().expect("origin");
     for (linked, expected) in [
-        (Some(&dashboard), Some("https://admin.sourceorigin.dev/alerts")),
+        (
+            Some(&dashboard),
+            Some("https://admin.sourceorigin.dev/alerts"),
+        ),
         (None, None),
     ] {
         let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config)
