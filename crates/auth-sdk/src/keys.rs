@@ -7,11 +7,11 @@ use crate::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use jsonwebtoken::{DecodingKey, crypto::aws_lc::DEFAULT_PROVIDER};
+use serde::Deserialize;
 use sourceorigin_common::protocol::{
     jwt::{Algorithm, Jwk, JwkSet, TokenType},
     sdk::{ErrorCategory, ErrorReason, SdkError},
 };
-use serde::Deserialize;
 use std::{
     fmt,
     sync::{Arc, Mutex, MutexGuard, PoisonError},

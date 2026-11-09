@@ -69,11 +69,11 @@ use crate::{
     settings::{Tab as SettingsTab, settings_tabs},
 };
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     AccountStatus, TraceId,
     admin::{EventSearch, SendAnnouncement, UserSearch},
 };
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{Child, View, class, component, view},
@@ -977,7 +977,7 @@ pub async fn dashboard_failure<'a>(
 }
 
 /// What the dashboard says once signed out: signing in again, at `sign_in`, is
-/// quick while the SourceOrigin session lasts, which signs out at `auth_sign_out`.
+/// quick while the Origin Account session lasts, which signs out at `auth_sign_out`.
 #[component]
 pub async fn dashboard_signed_out<'a>(
     sign_in: &'a str,
@@ -988,7 +988,7 @@ pub async fn dashboard_signed_out<'a>(
         <p class="lead">"You are still signed in to your Origin Account, so signing in to the dashboard again is quick."</p>
         <div class="row actions">
             <a class="button" href=(sign_in)>"Sign in again"</a>
-            <a class="button secondary" href=(auth_sign_out)>"Sign out of SourceOrigin"</a>
+            <a class="button secondary" href=(auth_sign_out)>"Sign out of your Origin Account"</a>
         </div>
     })
 }

@@ -1,6 +1,6 @@
 # Protecting an API
 
-An API protected by sourceorigin.dev accepts the access tokens auth issues, and checks
+An API protected by Origin Auth accepts the access tokens auth issues, and checks
 on each request that the token is valid and grants what the request needs. Both
 SDKs do this for you, with the API's scopes declared as types, so a misspelled
 scope doesn't compile.
@@ -91,7 +91,7 @@ Then authenticate each request:
 ## Scopes
 
 Besides `openid`, `profile`, `email` and `offline_access`, an API's own scopes,
-such as `notes:read`, are granted only to clients sourceorigin.dev's operators register
+such as `notes:read`, are granted only to clients SourceOrigin's operators register
 with them. Apps registered in the developer console can't request them, so an API
 that serves those apps checks the user, not a scope: take `Authenticated` in
 Rust, and `authenticate(request)` without scopes in TypeScript.

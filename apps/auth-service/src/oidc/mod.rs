@@ -36,6 +36,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine;
+use serde::Serialize;
 use sourceorigin_common::{
     TokenId,
     clients::ClientKind,
@@ -52,7 +53,6 @@ use sourceorigin_common::{
 };
 use sourceorigin_repository::{Database, StoredOidcClient};
 use sourceorigin_ui::Query;
-use serde::Serialize;
 use std::sync::Arc;
 use url::Url;
 

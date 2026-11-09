@@ -4,7 +4,7 @@ This page explains the telemetry auth-service and sourceorigin-web produce, how 
 more, and what never goes in it.
 
 Both services log to stderr. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, they
-also export traces, metrics and logs over OTLP/HTTP, to the `telemetry`
+also export traces, metrics and logs over OTLP/HTTP, to the `sourceorigin-observability`
 application in production (see [the telemetry stack](../operations/telemetry.md)).
 `sourceorigin-telemetry` (`crates/telemetry`) does both. A feature gets most of its
 telemetry for free and adds the rest in one line.
@@ -106,7 +106,7 @@ Only the standard variables, read by `Telemetry::init`:
 
 | Variable | Meaning |
 | --- | --- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP base URL, e.g. `http://collector.telemetry:4318`; unset or empty exports nothing |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP base URL, e.g. `http://collector.sourceorigin-observability:4318`; unset or empty exports nothing |
 | `OTEL_SDK_DISABLED` | `true` keeps telemetry on stderr only |
 | `OTEL_SERVICE_NAME` | Overrides the default, `auth-service` or `sourceorigin-web` |
 | `OTEL_RESOURCE_ATTRIBUTES` | e.g. `deployment.environment.name=staging`, which dashboards filter on |

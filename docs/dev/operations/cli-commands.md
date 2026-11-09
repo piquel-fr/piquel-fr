@@ -12,7 +12,7 @@ Every command also accepts `-h` and `--help`.
 
 ## `auth-service`
 
-Origin Auth authentication service. Runs `serve` when no command is given.
+The Origin Auth service. Runs `serve` when no command is given.
 
 ```text
 auth-service [COMMAND]

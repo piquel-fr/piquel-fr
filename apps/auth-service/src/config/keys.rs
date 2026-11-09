@@ -6,7 +6,9 @@ use crate::{
     AuditKeys, emails::VerificationKeys, notifications::UnsubscribeLinks, recovery::RecoveryLinks,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use sourceorigin_common::config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable};
+use sourceorigin_common::config::{
+    ConfigurationError, Origin, SecretBytes, SecretReference, Variable,
+};
 use sourceorigin_crypto::{CryptoError, Digest, NoteKey, NoteVerifier, Secret};
 use std::sync::Arc;
 

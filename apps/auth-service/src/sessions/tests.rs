@@ -11,9 +11,9 @@ use axum::{
     Router,
     http::{Method, StatusCode},
 };
+use serde_json::{Value, json};
 use sourceorigin_common::events::{Actor, DomainEvent, RevocationReason};
 use sourceorigin_repository::Database;
-use serde_json::{Value, json};
 
 /// The session routes over the test database.
 struct Harness {

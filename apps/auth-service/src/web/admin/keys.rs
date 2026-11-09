@@ -2,9 +2,9 @@
 //! deployment's PEM key stays at the terminal.
 
 use super::{AdminApplication as App, NoInput};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::protocol::jwt::KeyId;
 use sourceorigin_ui::{Action, Change, Checkbox, SigningKeyRow, Target};
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
@@ -42,7 +42,8 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let (rows, rotating) = (&rows, &href!(rotate).resolve(cx));
-    let page = view! { cx => sourceorigin_ui::signing_key_list(rows: rows, rotate: rotating.as_str()) };
+    let page =
+        view! { cx => sourceorigin_ui::signing_key_list(rows: rows, rotate: rotating.as_str()) };
     App::render(cx, StatusCode::OK, "Signing keys", page).await
 }
 

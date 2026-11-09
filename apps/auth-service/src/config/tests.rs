@@ -8,7 +8,8 @@ use sourceorigin_common::config::{GeneratedFile, Section};
 #[test]
 fn audit_keys_must_be_32_hex_encoded_bytes() {
     let origin: Origin = "https://auth.sourceorigin.dev".parse().expect("origin");
-    let path = std::env::temp_dir().join(format!("audit-key-{}", sourceorigin_common::UserId::new()));
+    let path =
+        std::env::temp_dir().join(format!("audit-key-{}", sourceorigin_common::UserId::new()));
     let parse = |value: &str| {
         std::fs::write(&path, value).expect("secret file");
         let secret = SecretReference::parse(&format!("file://{}", path.display()))

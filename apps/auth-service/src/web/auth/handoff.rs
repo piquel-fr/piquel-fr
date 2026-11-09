@@ -5,8 +5,8 @@
 //! Its `GET` asks for a passkey, in a ceremony started for this handoff only,
 //! which its form posts; its `POST` goes on to the dashboard. A browser that is
 //! not signed in with a passkey signs in first, and comes back. An account that
-//! does not administer Origin Auth is told it has no access, and nothing is handed
-//! off.
+//! does not administer SourceOrigin is told it has no access, and nothing is
+//! handed off.
 
 use crate::web::{Failure, WebApplication};
 use crate::{
@@ -141,7 +141,8 @@ impl WebApplication {
                 Ok(see_other(login).into_response(cx)?)
             }
             Refusal::NoAccess => {
-                let page = view! { cx => sourceorigin_ui::no_access(home: routes::page::settings::HOME) };
+                let page =
+                    view! { cx => sourceorigin_ui::no_access(home: routes::page::settings::HOME) };
                 Ok(self
                     .render_as(
                         cx,

@@ -3,11 +3,11 @@ name: sourceorigin-sign-in
 description: >
   Add sign-in with an Origin Account to a web app with a backend, using the
   Rust SDK (sourceorigin-auth, with axum) or the TypeScript SDK (@sourceorigin/auth). Use
-  when the person wants their app's users to sign in with sourceorigin.dev, or asks
+  when the person wants their app's users to sign in with Origin Auth, or asks
   to integrate auth.sourceorigin.dev, its OpenID Connect provider or its SDKs.
 ---
 
-# Add sourceorigin.dev sign-in
+# Add Origin Auth sign-in
 
 auth.sourceorigin.dev is an OpenID Connect provider. Both SDKs have server-side login
 routes that run the whole sign-in: `GET /auth/login`, `GET /auth/callback` and
@@ -185,7 +185,7 @@ should land back on the app, signed in.
 ## Going further
 
 - An action that needs a fresh passkey: https://docs.sourceorigin.dev/user/apps/step-up.html
-- Ending the app's sessions when the user signs out of sourceorigin.dev:
+- Ending the app's sessions when the user signs out of their Origin Account:
   https://docs.sourceorigin.dev/user/apps/back-channel-logout.html
 
 If the sign-in fails, use the sourceorigin-debug-sign-in skill.

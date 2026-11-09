@@ -97,8 +97,9 @@ impl PasskeyConfig {
     /// Reads the passkey policy and validates that the origin has a domain RP ID.
     pub(crate) fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
         if !matches!(origin.as_url().host(), Some(url::Host::Domain(_))) {
-            return Err(PUBLIC_BASE_URL
-                .invalid("must use a domain name for WebAuthn, e.g. https://auth.sourceorigin.dev"));
+            return Err(PUBLIC_BASE_URL.invalid(
+                "must use a domain name for WebAuthn, e.g. https://auth.sourceorigin.dev",
+            ));
         }
         Ok(Self {
             origin: origin.clone(),

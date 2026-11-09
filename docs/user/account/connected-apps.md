@@ -31,7 +31,7 @@ Select **Continue** to allow it, or **Cancel** to refuse. Once you allow it,
 the app doesn't ask again unless it asks for more. To sign in to the app with
 another account, select **Not you? Switch account**.
 
-Apps that Origin Auth makes don't ask: they are marked **Made by SourceOrigin**.
+Apps that SourceOrigin makes don't ask: they are marked **Made by SourceOrigin**.
 
 ## Read the list
 

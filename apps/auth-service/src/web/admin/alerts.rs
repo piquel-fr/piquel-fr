@@ -3,12 +3,12 @@
 
 use super::AdminApplication as App;
 use crate::{AdminError, Reason, admin::ALERTS_SHOWN};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     AlertId,
     alerts::{AlertStatus, AlertsShown},
 };
 use sourceorigin_ui::{Action, AlertCard, Change, Target};
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
@@ -50,7 +50,8 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let cleared = href!(previous).resolve(cx);
-    let view = view! { cx => sourceorigin_ui::alert_list(cards: &cards, previous: cleared.as_str()) };
+    let view =
+        view! { cx => sourceorigin_ui::alert_list(cards: &cards, previous: cleared.as_str()) };
     App::render(cx, StatusCode::OK, "Alerts", view).await
 }
 

@@ -166,8 +166,8 @@ an auth session (`DashboardSignIn` in `src/admin/sign_in.rs`):
    (`__Host-sourceorigin_dashboard_state`).
 2. Redeeming the code creates a `dashboard_sessions` row naming the auth session,
    confirmed by the handoff's proof, which ends 12 hours later however busy, and
-   the `__Host-sourceorigin_dashboard` cookie on the dashboard's origin, whose digest
-   alone is stored, for those 12 hours.
+   the `__Host-sourceorigin_dashboard` cookie on the dashboard's origin, whose
+   digest alone is stored, for those 12 hours.
 3. Every request finds the dashboard session only while its auth session is
    active, it was used in the last 30 minutes and it has not reached its end, and
    counts as its latest use. It checks again that the account holds

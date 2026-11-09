@@ -21,6 +21,7 @@ use axum::{
     response::Response,
 };
 use chrono::{Duration, Utc};
+use serde_json::Value;
 use sourceorigin_common::{
     AuthenticationMethod, ClientId, EmailId, Handle, PasskeyId, Provider, SessionId, TokenId,
     UserId,
@@ -38,7 +39,6 @@ use sourceorigin_repository::{
     InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertUser, InsertVerifiedEmail,
     PendingFederation, SessionAuthentication, SessionScope,
 };
-use serde_json::Value;
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv6Addr, SocketAddr},
@@ -155,7 +155,8 @@ impl Replicas {
 
     /// Builds both replicas from `config`, with GitHub sign-in enabled.
     pub(crate) async fn with_github(mut config: AuthConfig) -> Self {
-        let secret = std::env::temp_dir().join(format!("sourceorigin-github-secret-{}", TokenId::new()));
+        let secret =
+            std::env::temp_dir().join(format!("sourceorigin-github-secret-{}", TokenId::new()));
         std::fs::write(&secret, "secret").expect("provider secret");
         config
             .federation

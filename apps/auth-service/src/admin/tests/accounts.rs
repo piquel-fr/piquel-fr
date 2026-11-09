@@ -1,8 +1,8 @@
 //! Disabling and enabling an account, and reading its event history.
 
 use super::*;
-use sourceorigin_common::events::RevocationReason;
 use serde_json::json;
+use sourceorigin_common::events::RevocationReason;
 
 /// The event list shows changes: an administrator's views of an account only
 /// when asked for.

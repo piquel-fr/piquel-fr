@@ -1253,7 +1253,8 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
     crate::tests::register(&harness.database, &client)
         .await
         .expect("client");
-    let untrusted = crate::tests::registration(sourceorigin_common::clients::ClientKind::Public, &origin);
+    let untrusted =
+        crate::tests::registration(sourceorigin_common::clients::ClientKind::Public, &origin);
     crate::tests::register(&harness.database, &untrusted)
         .await
         .expect("untrusted client");

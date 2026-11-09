@@ -18,7 +18,10 @@ fn related_origins_count_registrable_domain_labels() {
         domain("https://notes.alice.github.io").as_deref(),
         Some("alice")
     );
-    assert_eq!(domain("https://sourceorigin.dev").as_deref(), Some("sourceorigin"));
+    assert_eq!(
+        domain("https://sourceorigin.dev").as_deref(),
+        Some("sourceorigin")
+    );
     assert_eq!(
         domain("https://notes.auth.sourceorigin.dev").as_deref(),
         Some("sourceorigin")

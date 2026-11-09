@@ -20,11 +20,11 @@ use axum::{
     http::{HeaderMap, header},
     response::Response,
 };
+use serde::Deserialize;
 use sourceorigin_common::{
     clients::RelatedOrigin,
     events::{Actor, InlineSignIn},
 };
-use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
 use webauthn_rs::prelude::PublicKeyCredential;

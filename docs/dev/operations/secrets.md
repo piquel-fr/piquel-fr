@@ -1,6 +1,6 @@
 # Secrets
 
-This page helps you find the secrets sourceorigin.dev's deployments use, store the
+This page helps you find the secrets SourceOrigin's deployments use, store the
 ones piqueld can't generate, and rotate any of them.
 
 Every secret reaches a service as a file under `/run/secrets/`, and auth reads
@@ -107,7 +107,7 @@ Each is 32 random bytes, as hex or unpadded base64url text, except
 | `resend-dev` | staging and previews | the Resend key for `dev.sourceorigin.dev` |
 | `github-production`, `github-staging` | that environment | its GitHub OAuth app's client secret: see [sign-in providers](sign-in-providers.md) |
 | `google-production`, `google-staging` | that environment | its Google OAuth client's secret |
-| `audit-key-production`, `audit-key-staging` | that environment | the seed that signs its audit checkpoints, whose verifier key is committed: see [audit history](../security/audit-history.md#the-audit-key) |
+| `audit-key-production-2`, `audit-key-staging-2` | that environment | the seed that signs its audit checkpoints, whose verifier key is committed: see [audit history](../security/audit-history.md#the-audit-key) |
 
 The manifest's variables pick which stored secret each environment mounts:
 `smtp_secret`, `github_secret`, `google_secret` and `audit_key`.

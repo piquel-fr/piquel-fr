@@ -14,10 +14,10 @@
 //!   even where the dashboard's script could not confirm on the page.
 
 use chrono::{Duration, Utc};
+use serde::{Serialize, de::DeserializeOwned};
 use sourceorigin_common::UserId;
 use sourceorigin_crypto::Digest;
 use sourceorigin_repository::{Database, DatabaseError, Submission, SubmissionToken};
-use serde::{Serialize, de::DeserializeOwned};
 
 /// How long a change blocks the same form posted again: a double click, or a
 /// slow first answer, but rarely a real repeat.
