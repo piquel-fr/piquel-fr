@@ -154,6 +154,7 @@ impl DomainEvent {
             | Self::AuditChainVerified(_)
             // Alerts are the administrators', about the service.
             | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
             // A read may be a misclick or a confidential inquiry; the owner sees
             // changes, each with its reason, not what an administrator looked at.

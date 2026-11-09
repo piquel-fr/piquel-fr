@@ -174,6 +174,7 @@ impl DomainEvent {
             // It concerns no one account: sending writes each recipient's.
             | Self::AnnouncementSent { .. }
             | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
             | Self::Imported(_) => return None,
         })

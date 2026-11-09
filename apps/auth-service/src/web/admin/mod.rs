@@ -25,6 +25,8 @@
 
 /// The administrators.
 mod administrators;
+/// The alerts administrators are shown, and the updates they post on them.
+mod alerts;
 /// Announcements to accounts.
 mod announcements;
 /// The audit chain's state, and the checkpoints it may be pruned through.
@@ -274,7 +276,9 @@ impl AdminApplication {
             .route(settings::apps)
             .route(settings::history)
             .route(settings::notifications)
-            .route(settings::display_name);
+            .route(settings::display_name)
+            // `ListAlerts` lists the alerts that cleared on a page of their own.
+            .route(alerts::previous);
         let pages = AdminOperation::ALL
             .iter()
             .filter_map(|operation| Self::page(*operation))
@@ -360,6 +364,8 @@ impl AdminApplication {
             Op::EditAnnouncement => &announcements::edit,
             Op::DiscardAnnouncement => &announcements::discard,
             Op::SendAnnouncement => &announcements::send,
+            Op::ListAlerts => &alerts::list,
+            Op::UpdateAlert => &alerts::update,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
             // Importing takes the deployment's PEM private key, which must never
@@ -607,7 +613,7 @@ impl AdminApplication {
     }
 
     /// Each tab's page, in the sidebar's order.
-    fn tabs(cx: &Cx) -> [(DashboardTab, String); 11] {
+    fn tabs(cx: &Cx) -> [(DashboardTab, String); 12] {
         [
             (
                 DashboardTab::Overview,
@@ -635,6 +641,7 @@ impl AdminApplication {
                 DashboardTab::Announcements,
                 href!(announcements::list).resolve(cx),
             ),
+            (DashboardTab::Alerts, href!(alerts::list).resolve(cx)),
         ]
     }
 

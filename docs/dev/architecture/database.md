@@ -578,6 +578,14 @@ cleared yet, under a unique index on its kind. `alerts().current` takes
 `LockKey::Alerts` for the transaction, so whatever changes alerts next waits,
 even while none is current. Raising what the current alert already says
 only marks it seen again (`seen_at`). Raising anything else clears it first.
+Administrators post updates on a current alert (`alert_updates`): a status and
+the administrator or operator as its author, an event's actor. `acknowledge`
+locks the alert, if it is still current, and acknowledges it (`acknowledged_at`)
+on its first update. The update is recorded as `AlertUpdated`, and its row names
+that event (`event_id`), whose reason holds the update's optional note: the
+note is personal data, deleted with the event's after 90 days or when its
+author's account is purged. An acknowledged alert stays current, so finding the
+same condition again raises nothing until the condition changes or clears.
 The payload holds no personal data. Like an event's, it is stored with its
 version (`Alert::version`): a new kind, or a new variant inside one, gets the
 next version, and a kind or version a release does not write reads as an alert

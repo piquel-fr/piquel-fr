@@ -28,7 +28,7 @@ use crate::{
     AlertId, AnnouncementId, AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle,
     PasskeyId, Personal, PictureId, Provider, RecoveryId, SessionId, TokenId,
     admin::{AuditVerification, ChainBreak, ChainProblem, VerificationKeys},
-    alerts::Alert,
+    alerts::{Alert, AlertStatus},
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
     notifications::NotificationPreference,
@@ -429,6 +429,18 @@ pub enum DomainEvent {
         /// What it says.
         alert: Alert,
     },
+    /// An administrator posted an update on the current alert `alert_id`,
+    /// saying where its handling stands, with their note as the reason. The
+    /// first acknowledges it: it stops counting as a warning, though it stays
+    /// current while its condition holds. It concerns no account.
+    AlertUpdated {
+        /// The alert.
+        alert_id: AlertId,
+        /// What it says.
+        alert: Alert,
+        /// Where its handling stands.
+        status: AlertStatus,
+    },
     /// The condition of the alert `alert_id` no longer holds, or holds
     /// differently, as another alert, so it cleared. It concerns no account.
     AlertCleared {
@@ -467,7 +479,9 @@ impl DomainEvent {
                 ..
             } => origin.version(),
             Self::AuditChainVerified(verification) => verification.version(),
-            Self::AlertRaised { alert, .. } | Self::AlertCleared { alert, .. } => alert.version(),
+            Self::AlertRaised { alert, .. }
+            | Self::AlertUpdated { alert, .. }
+            | Self::AlertCleared { alert, .. } => alert.version(),
             _ => Self::FIRST_VERSION,
         }
     }
@@ -543,6 +557,7 @@ impl DomainEvent {
             | Self::AuditChainVerified(_)
             | Self::AnnouncementSent { .. }
             | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
             | Self::NotificationPreferenceChanged(_)
             | Self::Imported(_) => None,
@@ -612,6 +627,7 @@ impl DomainEvent {
             | Self::AuditChainVerified(_)
             | Self::AnnouncementSent { .. }
             | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
             | Self::NotificationPreferenceChanged(_)
             | Self::Imported(_) => None,
@@ -681,6 +697,7 @@ impl DomainEvent {
             Self::AuditChainVerified(_) => "audit_chain_verified",
             Self::AnnouncementSent { .. } => "announcement_sent",
             Self::AlertRaised { .. } => "alert_raised",
+            Self::AlertUpdated { .. } => "alert_updated",
             Self::AlertCleared { .. } => "alert_cleared",
             Self::NotificationPreferenceChanged(_) => "notification_preference_changed",
             Self::Imported(_) => "imported",
