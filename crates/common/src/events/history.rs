@@ -121,6 +121,7 @@ impl DomainEvent {
                 event_id: *event_id,
             },
             Self::AccountExported {} => HistoryEntry::AccountExported,
+            Self::SignedOutEverywhere { .. } => HistoryEntry::SignedOutEverywhere,
             Self::NotificationPreferenceChanged(preference) => {
                 HistoryEntry::NotificationPreferenceChanged(*preference)
             }
@@ -336,6 +337,9 @@ pub enum HistoryEntry {
     /// The user downloaded their data.
     #[serde(rename = "account.exported")]
     AccountExported,
+    /// A security email's sign-out link signed every device out.
+    #[serde(rename = "session.signed_out_everywhere")]
+    SignedOutEverywhere,
     /// The user turned a category of notifications' email on or off.
     #[serde(rename = "notifications.preference_changed")]
     NotificationPreferenceChanged(NotificationPreference),
@@ -400,6 +404,7 @@ impl HistoryEntry {
             | Self::PictureChanged
             | Self::PictureRemoved
             | Self::AccountExported
+            | Self::SignedOutEverywhere
             | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
@@ -452,6 +457,7 @@ impl HistoryEntry {
             | Self::RecoveryUndone
             | Self::CompromiseReported { .. }
             | Self::AccountExported
+            | Self::SignedOutEverywhere
             | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored

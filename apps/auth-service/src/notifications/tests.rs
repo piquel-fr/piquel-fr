@@ -300,7 +300,8 @@ async fn owners_choose_which_notifications_are_emailed() {
 
 /// The sign-out link of a security notification's email signs its account out
 /// everywhere without a session, revoking sessions and refresh grants, never a
-/// credential. It works once, and not after 7 days.
+/// credential. It works once, and not after 7 days. Each use is in the history,
+/// even with no session left to end.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_sign_out_link_works_once_within_seven_days() {
@@ -376,6 +377,37 @@ async fn the_sign_out_link_works_once_within_seven_days() {
             .expect("again"),
         "it works once"
     );
+    let uses = async || -> Vec<NotificationId> {
+        let mut events = harness.database.events();
+        let history = events.history_for_user(alice.user_id, 50).await;
+        history
+            .expect("history")
+            .into_iter()
+            .filter_map(|stored| match stored.event.known() {
+                Some(DomainEvent::SignedOutEverywhere { notification_id }) => {
+                    Some(*notification_id)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(uses().await, [id]);
+    // With every session already ended, its use still shows.
+    harness.enable(&alice).await;
+    let later = harness
+        .database
+        .notifications()
+        .list(alice.user_id, None, 1)
+        .await
+        .expect("inbox")[0]
+        .id;
+    assert!(
+        service
+            .sign_out_everywhere(later, context)
+            .await
+            .expect("no session left")
+    );
+    assert_eq!(uses().await, [later, id], "newest first");
     harness.enable(&alice).await;
     let stale = harness
         .database

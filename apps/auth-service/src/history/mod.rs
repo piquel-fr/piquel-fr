@@ -209,7 +209,7 @@ impl Activity {
     /// feed agree, as far as a count by kind can: a refresh grant's revocation
     /// is left out, since the history shows only a replay's, and a session's
     /// expiry is counted, since the history hides only that reason.
-    const SECURITY: [&'static str; 31] = [
+    const SECURITY: [&'static str; 32] = [
         "account_created",
         "signed_in",
         "session_revoked",
@@ -237,6 +237,7 @@ impl Activity {
         "recovery_completed",
         "recovery_undone",
         "account_exported",
+        "signed_out_everywhere",
         "account_deletion_scheduled",
         "account_restored",
         "compromise_reported",

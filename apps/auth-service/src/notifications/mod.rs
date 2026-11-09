@@ -19,7 +19,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EventId, NotificationId,
-    events::{Actor, RevocationReason},
+    events::{Actor, DomainEvent, RevocationReason},
     notifications::{Notification, NotificationPreference},
 };
 use sourceorigin_repository::{Database, StoredNotification};
@@ -249,8 +249,9 @@ impl AccountService {
     /// without a session, for an owner whose session was stolen while their
     /// passkey is out of reach. It ends every session and refresh grant, never a
     /// credential, so the worst a leaked link can do is sign the owner out. The
-    /// link works once, within [`SIGN_OUT_LINK_LIFETIME`]; returns whether it
-    /// still did.
+    /// link works once, within [`SIGN_OUT_LINK_LIFETIME`], and each use is
+    /// recorded as [`DomainEvent::SignedOutEverywhere`]; returns whether it still
+    /// did.
     pub(crate) async fn sign_out_everywhere(
         &self,
         id: NotificationId,
@@ -278,6 +279,16 @@ impl AccountService {
             user_id: user,
             session_id: None,
         });
+        // Recorded even when no session was left, so the owner's history shows
+        // every use of the link, from where it was used.
+        tx.record(
+            &context,
+            Some(user),
+            DomainEvent::SignedOutEverywhere {
+                notification_id: id,
+            },
+        )
+        .await?;
         Session::end_all(&mut tx, &context, user, RevocationReason::SignOutLink).await?;
         tx.commit().await?;
         Ok(true)

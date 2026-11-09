@@ -269,6 +269,9 @@ impl DomainEvent {
             | Self::CodeReplayed { .. }
             | Self::CodeRedemptionFailed { .. }
             | Self::AccountExported {}
+            // It signs the owner out, and the history shows its use, so a link
+            // someone else used never goes unseen.
+            | Self::SignedOutEverywhere { .. }
             // Administrator rights show in the dashboard, which its holder uses.
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}

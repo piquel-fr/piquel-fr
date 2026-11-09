@@ -425,6 +425,10 @@ impl EventRow<'_> {
                 Description::new(format!("Signing key {change}")).with("key", key_id)
             }
             DomainEvent::AccountExported {} => Description::new("Account data downloaded"),
+            DomainEvent::SignedOutEverywhere { notification_id } => {
+                Description::new("Signed out everywhere with a security email's link")
+                    .with("notification", notification_id)
+            }
             DomainEvent::AccountDeletionScheduled { purge_after } => {
                 Description::new("Account deletion scheduled")
                     .with("purged after", purge_after.to_rfc3339())
