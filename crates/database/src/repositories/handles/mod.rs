@@ -2,7 +2,8 @@
 //!
 //! A handle row is current while `released_at` is unset. Renaming releases it
 //! rather than deleting it, so a handle passes to another account only once an
-//! operator deletes it: until then, only its former owner may claim it again. The
+//! operator deletes it, or cleanup does a year after its account's purge: until
+//! then, only its former owner may claim it again. The
 //! table's keys keep handles and their skeletons unique across current, released
 //! and purged accounts' rows.
 

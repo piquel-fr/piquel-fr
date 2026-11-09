@@ -156,7 +156,7 @@ impl<R: Query> Applied<R> {
             Self::Done(notice) => WebApplication::notify(cx, here, notice),
             Self::Moved { to, notice } => WebApplication::notify(cx, &to, notice),
             Self::Opened(row) => Ok(see_other(row.on(here)?).into_response(cx)?),
-            Self::Download(export) => WebApplication::download(cx, &export),
+            Self::Download(export) => WebApplication::download(cx, *export),
             Self::Deleted(deleted) => web.deleted(cx, &deleted).await,
             Self::Elsewhere { to, cookie } => {
                 let mut response = see_other(to).into_response(cx)?;

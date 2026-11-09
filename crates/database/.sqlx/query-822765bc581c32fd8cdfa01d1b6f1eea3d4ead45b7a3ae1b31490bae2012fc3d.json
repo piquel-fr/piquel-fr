@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    s.id AS \"id: SessionId\",\n                    s.authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    s.authenticated_at, s.user_agent_family AS \"device: UserAgentFamily\",\n                    s.created_ip AS \"created_ip: IpAddr\", s.last_seen_at,\n                    s.last_seen_ip AS \"last_seen_ip: IpAddr\", s.passkey_confirmed_at,\n                    s.passkey_id AS \"passkey_id: PasskeyId\", s.expires_at, s.revoked_at,\n                    (\n                        SELECT COALESCE(jsonb_agg(c.client_id ORDER BY c.first_issued_at), '[]')\n                        FROM oidc_session_clients c\n                        WHERE c.session_id = s.id\n                    ) AS \"clients!: JsonArray<ClientId>\"\n                FROM sessions s\n                WHERE s.user_id = $1\n                ORDER BY s.last_seen_at DESC, s.id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "authentication_methods: JsonArray<AuthenticationMethod>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "authenticated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "device: UserAgentFamily",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_ip: IpAddr",
+        "type_info": "Inet"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_seen_ip: IpAddr",
+        "type_info": "Inet"
+      },
+      {
+        "ordinal": 7,
+        "name": "passkey_confirmed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "passkey_id: PasskeyId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "clients!: JsonArray<ClientId>",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "822765bc581c32fd8cdfa01d1b6f1eea3d4ead45b7a3ae1b31490bae2012fc3d"
+}

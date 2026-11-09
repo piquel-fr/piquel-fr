@@ -239,10 +239,13 @@ impl<'a, 't> Deletions<'a, 't> {
 /// export: an export leaves auth, so it goes only to the owner's own confirmed
 /// session, never through an administrator who would hand it on.
 impl AccountService {
-    /// Every record of the owner's account, read from one snapshot. It holds IP
-    /// and email addresses, so it needs a recent passkey confirmation, checked
-    /// under the account lock, where the export is recorded before it is read.
+    /// Every record of the owner's account, read from one snapshot, ready to
+    /// stream. It holds IP and email addresses, so it needs a recent passkey
+    /// confirmation, checked under the account lock, where the export is recorded
+    /// before it is read. Refused while the replica streams as many exports as it
+    /// may, before anything is recorded.
     pub(crate) async fn export(&self, owner: &Owner) -> Result<AccountExport, AccountError> {
+        let permit = AccountExport::permit().ok_or(DeletionError::ExportsBusy)?;
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
         tx.record(
@@ -252,8 +255,8 @@ impl AccountService {
         )
         .await?;
         tx.commit().await?;
-        let mut snapshot = self.database.begin_snapshot().await?;
-        Ok(AccountExport::read(&mut snapshot, owner.user(), owner.session().id).await?)
+        let snapshot = self.database.begin_snapshot().await?;
+        Ok(AccountExport::read(snapshot, owner.user(), owner.session().id, permit).await?)
     }
 
     /// Schedules the deletion of the owner's account, once they typed its

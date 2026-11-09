@@ -23,7 +23,8 @@ and the purge must then cover.
   leaves.
 - **Purged** means gone: the account row and every row that identifies its
   person. What stays is pseudonymous: events, without their personal data,
-  handles, without an owner, and the tombstones of the clients it registered.
+  handles, without an owner, for a year, and the tombstones of the clients it
+  registered.
 
 ## The code
 
@@ -94,7 +95,9 @@ been restored meanwhile.
    the announcements to chosen accounts it was the last recipient of, which may
    concern it, then erases the
    personal data of every event it is the subject or actor of
-   (`DeletionRepository::purge`);
+   (`DeletionRepository::purge`). Its handles lose their owner, which releases
+   them: cleanup deletes them a year later, when anyone may claim them, unless
+   an operator releases one sooner (`handle release`);
 4. records `AccountPurged`, once the account is gone, so the purge's own
    request data is not stored.
 
@@ -126,11 +129,71 @@ anything is read. The document is then read from one snapshot
 It holds every record auth keeps about the account, and no secret, digest or key
 material: passkeys show their label, dates and backup state only. Only the owner
 may download it, never an administrator, since it carries every IP address and
-the whole history out of auth. It includes the inbox, with when each
-notification was read, and which categories of notifications are emailed. Like every response, it is never cached.
+every event about the account out of auth. Like every response, it is never
+cached. Version 4 holds:
 
-A table that stores data about an account must be added to the export, and to
-`DeletionRepository::purge` unless its rows cascade with the account.
+- the profile, picture, handles, administrator rights, email addresses,
+  consents and refresh grants;
+- passkeys, linked identities and sessions, ended ones included until cleanup
+  deletes them, each session with its IP addresses, the apps it signed in to and
+  the admin dashboard sessions resting on it;
+- the apps the account registered, deleted ones as their tombstones, with their
+  related origins;
+- its recoveries (dates, state and the passkey each enrolled, never a link);
+- the inbox as stored, with when each notification was read, a kind a newer
+  release wrote included, which categories are emailed, and the announcements
+  it received;
+- last, every event about the account as stored (`kind` and `data`), with who
+  acted, the app, and the request's IP address and device while they are kept.
+  Administrators' views of the account are left out, as its history leaves them
+  out: a read may be a confidential inquiry.
+
+The document streams. The request reads every section but the events from the
+snapshot. A task then writes them, and the events 500 at a time, as the browser
+downloads, through a channel a few chunks deep, so a slow download holds the
+writer back rather than filling memory. The task keeps the snapshot, and its
+database connection, until the download ends, for at most 5 minutes. A replica
+therefore streams at most 2 exports at once, and refuses another with `429`
+until one ends. A failure partway, or the deadline, is logged and fails the
+download rather than saving a truncated file.
+
+## What auth stores, and for how long
+
+`Table` (`crates/database/src/inventory/mod.rs`) names every table and what it
+holds about the person behind an account: nothing, records the export includes
+at a path, such as `clients/*/related_origins`, or personal data it leaves out
+and why, such as digests of secrets or sign-ins in progress. Tests hold the
+export and the purge to it:
+
+- a database test fails while the schema has a table `Table` doesn't name, or
+  a table with a foreign key to `users` that it says holds nothing;
+- the export test gives an account a row in every table the export reads, and
+  fails while the download holds nothing at a path `Table` names;
+- the purge test fails while a table with a foreign key to `users` holds no row
+  of its account before the purge, or any row after it.
+
+A new table therefore needs a decision before its tests pass.
+
+Records an account no longer uses go on their own, in the cleanup pass every
+five minutes (`MaintenanceRepository::purge_expired_auth_state`):
+
+| Record | Deleted |
+| --- | --- |
+| Personal data of events: IP, device, reasons, `Personal` values | 90 days after the event |
+| Revoked passkeys, unlinked identities | 90 days after they end |
+| Recoveries | 90 days after they are undone or settle, or their unused link is cancelled or expires, whichever comes first |
+| Ended sessions, with their IP addresses | a day after they end, or once no refresh grant or code needs them: about 31 days at most |
+| Notifications | a year after they arrive |
+| Who received an announcement | a year after it is sent; one to chosen accounts goes with its last recipient |
+| A purged account's handles | a year after the purge |
+| Deliveries | 7 days after they succeed, 30 after they fail or are cancelled |
+
+The 90 days match the events' personal data, so a history entry that still
+shows its IP address still finds its passkey. The events themselves stay, with
+pseudonymous IDs only: the audit chain covers them, and only pruning the audited
+history removes them (see [Audit chain](database.md#audit-chain)). Everything
+else lives as long as the account. Database backups keep what cleanup and
+purges delete until they are replaced; piqueld manages them.
 
 ## Limits
 

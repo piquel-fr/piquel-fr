@@ -1,5 +1,6 @@
-//! Bounded deletion of expired ephemeral authentication state, event personal data
-//! and finished deliveries, and what is left of the digests of opaque tokens.
+//! Bounded deletion of expired ephemeral authentication state, event personal data,
+//! finished deliveries and the records an account no longer uses, and what is
+//! left of the digests of opaque tokens.
 
 use super::{MaintenanceRepository, RepositoryExecutor, Unsigned};
 use crate::DatabaseError;
@@ -67,9 +68,14 @@ impl MaintenanceRepository<'_> {
     }
 
     /// Purges a bounded batch of expired ephemeral authentication state, of event
-    /// personal data older than 90 days, and of deliveries that succeeded over 7
-    /// days ago or failed or were cancelled over 30 days ago, and returns how many
-    /// rows were deleted. Failed ordered deliveries are left to
+    /// personal data older than 90 days, of deliveries that succeeded over 7
+    /// days ago or failed or were cancelled over 30 days ago, and of what an
+    /// account no longer uses: passkeys revoked, identities unlinked and
+    /// recoveries ended over 90 days ago, notifications and the recipients of
+    /// announcements sent over a year ago, with the announcements to chosen
+    /// accounts they leave without one, and the handles of accounts purged over a
+    /// year ago, which anyone may then claim.
+    /// Returns how many rows were deleted. Failed ordered deliveries are left to
     /// [`DatabaseTransaction::abandon_stuck_deliveries`](crate::DatabaseTransaction::abandon_stuck_deliveries). `batch_size` is clamped to 1..=1000 rows per table.
     ///
     /// Each batch skips rows that live requests have locked, except event personal
@@ -256,6 +262,80 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
+            // An account's ended records go once its history no longer shows their
+            // events' details, 90 days on, as event personal data does.
+            "DELETE FROM passkey_credentials
+            WHERE ctid IN (
+                SELECT ctid
+                FROM passkey_credentials
+                WHERE revoked_at < now() - interval '90 days'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
+            "DELETE FROM external_login_identities
+            WHERE ctid IN (
+                SELECT ctid
+                FROM external_login_identities
+                WHERE revoked_at < now() - interval '90 days'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
+            // A recovery ends when it is undone or its probation settles, or,
+            // unused, when its link is cancelled or expires, whichever comes first:
+            // cancelling an expired link, as the next start does, ends nothing.
+            "DELETE FROM account_recoveries
+            WHERE ctid IN (
+                SELECT ctid
+                FROM account_recoveries
+                WHERE CASE WHEN completed_at IS NULL THEN least(expires_at, cancelled_at)
+                    ELSE least(undone_at, settles_at) END < now() - interval '90 days'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
+            "DELETE FROM notifications
+            WHERE ctid IN (
+                SELECT ctid
+                FROM notifications
+                WHERE created_at < now() - interval '1 year'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
+            // Who received an announcement goes with the inbox copies, a year on.
+            // One to every account stays, as the administrators' record of what
+            // they said; one to chosen accounts may concern them, so it goes
+            // with its last recipient, as a purge does.
+            "DELETE FROM announcement_recipients r
+            WHERE r.ctid IN (
+                SELECT recipient.ctid
+                FROM announcement_recipients recipient
+                JOIN announcements a ON a.id = recipient.announcement_id
+                WHERE a.sent_at < now() - interval '1 year'
+                LIMIT $1
+                FOR UPDATE OF recipient SKIP LOCKED
+            )",
+            "DELETE FROM announcements a
+            WHERE a.ctid IN (
+                SELECT announcement.ctid
+                FROM announcements announcement
+                WHERE NOT announcement.everyone
+                AND announcement.sent_at < now() - interval '1 year'
+                AND NOT EXISTS (
+                    SELECT FROM announcement_recipients r
+                    WHERE r.announcement_id = announcement.id
+                )
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
+            // A purged account's handles were released at its purge (migration
+            // 0042), and stay reserved a year, so nobody takes one to pass for it.
+            "DELETE FROM handles
+            WHERE ctid IN (
+                SELECT ctid
+                FROM handles
+                WHERE user_id IS NULL AND released_at < now() - interval '1 year'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
             // Ordered failures hold back their key, so only
             // `DatabaseTransaction::abandon_stuck_deliveries` removes them.
             "DELETE FROM deliveries d
@@ -296,3 +376,7 @@ impl MaintenanceRepository<'_> {
         )
     }
 }
+
+/// Retention of the records an account no longer uses.
+#[cfg(test)]
+mod tests;

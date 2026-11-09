@@ -1,7 +1,7 @@
 //! Explicit commit/rollback over repository operations; drop rolls back unfinished work.
 
 use crate::{
-    DatabaseError,
+    DatabaseError, Limit, Scope,
     repositories::{
         deliveries::{Channels, Registered},
         notifications::Notified,
@@ -14,6 +14,7 @@ use sourceorigin_common::{
     notifications::{Audience, Notification},
 };
 use sqlx::{Postgres, Transaction};
+use std::time::Duration;
 
 /// A private-`SQLx` transaction with the same typed repository families as
 /// [`Database`](crate::Database). Dropping it without committing rolls back.
@@ -32,6 +33,22 @@ impl<'a> DatabaseTransaction<'a> {
             inner,
             recorded: Vec::new(),
         }
+    }
+
+    /// Lets this transaction sit idle for up to `limit` between statements, until
+    /// it ends, rather than the default 30 seconds: for a reader that waits on
+    /// something else between reads, as a data export waits on its download.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if setting the limit fails.
+    pub async fn allow_idle(&mut self, limit: Duration) -> Result<(), DatabaseError> {
+        Limit::IDLE_IN_TRANSACTION
+            .at(limit)
+            .set(Scope::Transaction)
+            .fetch_one(&mut *self.inner)
+            .await?;
+        Ok(())
     }
 
     /// Records `event`, caused as `context` says and concerning the `subject`

@@ -220,7 +220,7 @@ link, likewise, and confirming with a passkey by the session it confirms.
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 
 Downloading the account's data stays the owner's although administrators may
-read most of it: the export copies every IP address and the whole history out
+read most of it: the export copies every IP address and every event about the account out
 of auth in one file, which only the owner's recently confirmed session receives.
 Support never hands one over; an owner who lost every passkey is recovered
 first, and downloads it themselves.

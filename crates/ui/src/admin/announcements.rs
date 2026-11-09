@@ -34,8 +34,15 @@ pub struct DraftActions<'a> {
     pub discard: Action,
 }
 
-/// Whom `announcement` goes to, in words.
+/// Whom `announcement` goes to, in words; how many, while auth knows.
 fn audience(announcement: &Announcement) -> String {
+    if !announcement.recipients_kept {
+        return if announcement.everyone {
+            "Everyone".to_owned()
+        } else {
+            "Chosen accounts".to_owned()
+        };
+    }
     let accounts = match announcement.recipients {
         1 => "1 account".to_owned(),
         count => format!("{count} accounts"),
@@ -124,19 +131,25 @@ pub async fn announcement_page<'a>(
                 <dl class="facts">
                     <dt>"To"</dt><dd>(audience(announcement))</dd>
                     <dt>"Essential"</dt><dd>(announcement.essentiality())</dd>
-                    <dt>"Emailed to"</dt>
-                    <dd>
-                        (format!("{} {}", detail.mailed, announcement.emailed()))
-                        if unmailed > 0 {
-                            <small>(format!(" · the other {unmailed} only find it in their inbox"))</small>
-                        }
-                    </dd>
+                    if announcement.recipients_kept {
+                        <dt>"Emailed to"</dt>
+                        <dd>
+                            (format!("{} {}", detail.mailed, announcement.emailed()))
+                            if unmailed > 0 {
+                                <small>(format!(" · the other {unmailed} only find it in their inbox"))</small>
+                            }
+                        </dd>
+                    }
                     <dt>"Drafted"</dt><dd>moment(at: announcement.created_at)</dd>
                     match announcement.sent_at {
                         Some(at) => {
                             <dt>"Sent"</dt><dd>moment(at: at)</dd>
                             <dt>"Read"</dt>
-                            <dd>(format!("by {} of {} recipients, in their inbox", detail.read, announcement.recipients))</dd>
+                            if announcement.recipients_kept {
+                                <dd>(format!("by {} of {} recipients, in their inbox", detail.read, announcement.recipients))</dd>
+                            } else {
+                                <dd>"Unknown: whom it went to, and who read it, are deleted a year after it is sent."</dd>
+                            }
                             <dt>"Emails"</dt>
                             <dd>
                                 (format!(

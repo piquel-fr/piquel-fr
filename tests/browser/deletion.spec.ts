@@ -23,14 +23,20 @@ test('downloading the data, deleting the account and restoring it with its passk
     page.waitForEvent('download'),
     page.getByRole('button', { name: 'Download your data', exact: true }).click()
   ]);
+  // The file streams as it is read; it parses only if it arrived whole, its
+  // events last.
   const data = JSON.parse(await readFile(await download.path(), 'utf8')) as {
+    version: number;
     exported_at: string;
     profile: { handle: string };
+    events: { kind: string }[];
   };
   expect(download.suggestedFilename()).toBe(
     `sourceorigin-account-${handle}-${data.exported_at.slice(0, 10)}.json`
   );
+  expect(data.version).toBe(4);
   expect(data.profile.handle).toBe(handle);
+  expect(data.events.map((event) => event.kind)).toContain('account_created');
 
   await page.getByRole('button', { name: 'Delete account', exact: true }).click();
   await page.getByLabel(`Type your handle, ${handle}, to confirm`).fill(handle);
