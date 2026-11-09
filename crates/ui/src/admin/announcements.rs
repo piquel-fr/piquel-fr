@@ -4,7 +4,7 @@
 use super::{Action, Change, confirm, moment};
 use crate::icons::{Icon, icon};
 use crate::{clients::choice, layout::page_head};
-use piquel_common::admin::{
+use sourceorigin_common::admin::{
     Announcement, AnnouncementAudience, AnnouncementDetail, DraftAnnouncement, User,
 };
 use topcoat::{
@@ -250,7 +250,7 @@ pub async fn announcement_form<'a>(
                 <label>
                     "Text"
                     <textarea name="body" required="" rows="14" maxlength="20000">(form.body.as_str())</textarea>
-                    <small>"The email starts with “Hello,” and ends with “Piquel”. Separate paragraphs with a blank line. Links are written out in full: mail apps make them clickable."</small>
+                    <small>"The email starts with “Hello,” and ends with “SourceOrigin”. Separate paragraphs with a blank line. Links are written out in full: mail apps make them clickable."</small>
                 </label>
                 <fieldset>
                     <legend>"Send it to"</legend>
@@ -260,7 +260,7 @@ pub async fn announcement_form<'a>(
                         checked: !chosen,
                         label: view! { "Everyone" },
                         detail: view! {
-                            "Every account when it is sent, disabled ones and ones being deleted included: Piquel still holds their data."
+                            "Every account when it is sent, disabled ones and ones being deleted included: SourceOrigin still holds their data."
                         },
                     )
                     choice(

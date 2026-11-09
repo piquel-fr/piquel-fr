@@ -17,13 +17,13 @@ use crate::{
 };
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     EmailId, ErrorChain, Personal, Provider, UserId,
     email::NormalizedEmail,
     events::{Actor, DomainEvent, EventContext},
 };
-use piquel_crypto::{CryptoError, Digest, Secret};
-use piquel_repository::{
+use sourceorigin_crypto::{CryptoError, Digest, Secret};
+use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, InsertVerifiedEmail,
     PendingFederation, StoredEmail,
 };

@@ -2,8 +2,8 @@
 //! conversion to responses.
 
 use crate::{ClientRegistryError, security::ApiError};
-use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::DatabaseError;
 use std::time::Duration;
 
 /// How long a refused export asks the browser to wait.

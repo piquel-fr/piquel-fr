@@ -49,10 +49,10 @@ impl Fixture {
     async fn exchange_with_secrets(
         &self,
         session: &str,
-        client: &piquel_common::clients::ClientRegistration,
+        client: &sourceorigin_common::clients::ClientRegistration,
     ) -> Vec<String> {
         let verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        let challenge = piquel_crypto::Pkce::challenge(verifier).expect("PKCE");
+        let challenge = sourceorigin_crypto::Pkce::challenge(verifier).expect("PKCE");
         let mut authorize = Url::parse(&format!("{AUTH_ORIGIN}/oauth/authorize")).expect("URL");
         authorize.query_pairs_mut().extend_pairs([
             ("response_type", "code"),
@@ -134,15 +134,15 @@ impl Fixture {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn telemetry_exports_no_secret_of_a_sign_in_and_code_exchange() {
-    use piquel_telemetry::Telemetry;
+    use sourceorigin_telemetry::Telemetry;
 
     let capture = Telemetry::capture(crate::TELEMETRY_FILTER);
     let mut fixture = Fixture::new().await;
     let replicas = Replicas::new().await;
-    let client = piquel_common::clients::ClientRegistration {
+    let client = sourceorigin_common::clients::ClientRegistration {
         trusted: true,
         ..crate::tests::registration(
-            piquel_common::clients::ClientKind::Public,
+            sourceorigin_common::clients::ClientKind::Public,
             "https://client.example",
         )
     };

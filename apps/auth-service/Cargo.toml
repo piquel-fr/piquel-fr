@@ -6,12 +6,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-piquel-common = { workspace = true, features = ["admin", "config", "email", "events"] }
-piquel-crypto.workspace = true
-piquel-repository.workspace = true
-piquel-telemetry.workspace = true
-piquel-auth.workspace = true
-piquel-ui.workspace = true
+sourceorigin-common = { workspace = true, features = ["admin", "config", "email", "events"] }
+sourceorigin-crypto.workspace = true
+sourceorigin-repository.workspace = true
+sourceorigin-telemetry.workspace = true
+sourceorigin-auth.workspace = true
+sourceorigin-ui.workspace = true
 
 askama.workspace = true
 axum.workspace = true
@@ -37,11 +37,11 @@ webauthn-rs.workspace = true
 webauthn-rs-proto.workspace = true
 
 [dev-dependencies]
-piquel-auth = { workspace = true, features = ["axum"] }
+sourceorigin-auth = { workspace = true, features = ["axum"] }
 rcgen.workspace = true
 tokio-rustls.workspace = true
-piquel-repository = { workspace = true, features = ["test-util"] }
-piquel-telemetry = { workspace = true, features = ["test-util"] }
+sourceorigin-repository = { workspace = true, features = ["test-util"] }
+sourceorigin-telemetry = { workspace = true, features = ["test-util"] }
 serde_urlencoded.workspace = true
 tower.workspace = true
 webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }

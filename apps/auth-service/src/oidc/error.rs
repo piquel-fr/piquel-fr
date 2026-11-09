@@ -10,26 +10,26 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
-use piquel_common::{
+use sourceorigin_common::{
     ErrorChain,
     protocol::{
         challenge::{BearerChallenge, BearerError},
         oauth::{ErrorDescription, ErrorResponse, InvalidScope},
     },
 };
-use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
-use piquel_ui::QueryError;
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::DatabaseError;
+use sourceorigin_ui::QueryError;
 use std::{borrow::Cow, error::Error as StdError};
 use thiserror::Error;
 use url::Url;
 
-/// OAuth and OIDC error codes, shared with the SDKs through `piquel-common` and shown by
+/// OAuth and OIDC error codes, shared with the SDKs through `sourceorigin-common` and shown by
 /// auth's consent and logout pages.
-pub(crate) use piquel_common::protocol::oauth::ErrorCode as OAuthCode;
+pub(crate) use sourceorigin_common::protocol::oauth::ErrorCode as OAuthCode;
 
 /// Builds rejections from an [`OAuthCode`]. A trait because the code type lives in
-/// `piquel-common`; import it wherever rejections are built.
+/// `sourceorigin-common`; import it wherever rejections are built.
 pub(crate) trait Reject {
     /// Client redirect carrying this error code and its description.
     fn redirect_url(&self, to: &ClientRedirect<'_>, description: &str) -> Url;
@@ -320,18 +320,18 @@ impl From<SessionError> for OAuthError {
     }
 }
 
-impl From<piquel_repository::CodeRedemptionError> for OAuthError {
+impl From<sourceorigin_repository::CodeRedemptionError> for OAuthError {
     /// Redemption failures reject the grant; persistence failures retain their internal status.
-    fn from(error: piquel_repository::CodeRedemptionError) -> Self {
+    fn from(error: sourceorigin_repository::CodeRedemptionError) -> Self {
         match error {
-            piquel_repository::CodeRedemptionError::Database(source) => source.into(),
-            error @ piquel_repository::CodeRedemptionError::Invalid => OAuthCode::InvalidGrant
+            sourceorigin_repository::CodeRedemptionError::Database(source) => source.into(),
+            error @ sourceorigin_repository::CodeRedemptionError::Invalid => OAuthCode::InvalidGrant
                 .reject_with(
                     "code is unknown or expired, or its client, account or sign-in session no \
                      longer allows it",
                     error,
                 ),
-            error @ piquel_repository::CodeRedemptionError::Replay { .. } => {
+            error @ sourceorigin_repository::CodeRedemptionError::Replay { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "code was already used, so any refresh tokens issued from it are revoked",
                     error,
@@ -341,20 +341,20 @@ impl From<piquel_repository::CodeRedemptionError> for OAuthError {
     }
 }
 
-impl From<piquel_repository::RefreshRedemptionError> for OAuthError {
+impl From<sourceorigin_repository::RefreshRedemptionError> for OAuthError {
     /// Redemption failures reject the grant; persistence failures retain their internal status.
-    fn from(error: piquel_repository::RefreshRedemptionError) -> Self {
+    fn from(error: sourceorigin_repository::RefreshRedemptionError) -> Self {
         match error {
-            piquel_repository::RefreshRedemptionError::Database(source) => source.into(),
-            error @ piquel_repository::RefreshRedemptionError::Invalid => OAuthCode::InvalidGrant
+            sourceorigin_repository::RefreshRedemptionError::Database(source) => source.into(),
+            error @ sourceorigin_repository::RefreshRedemptionError::Invalid => OAuthCode::InvalidGrant
                 .reject_with("refresh_token is unknown, expired or revoked", error),
-            error @ piquel_repository::RefreshRedemptionError::Replay { .. } => {
+            error @ sourceorigin_repository::RefreshRedemptionError::Replay { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "refresh_token was already used, so its whole token family is now revoked",
                     error,
                 )
             }
-            error @ piquel_repository::RefreshRedemptionError::Policy { .. } => {
+            error @ sourceorigin_repository::RefreshRedemptionError::Policy { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "the client or account no longer allows this grant, so its token family \
                      is now revoked",

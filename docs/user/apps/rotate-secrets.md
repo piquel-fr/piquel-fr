@@ -9,13 +9,13 @@ after a leak.
 ## Before you start
 
 - You need an app with a backend: only those have a secret, and a **Secrets**
-  tab. Open the app from **Your apps**, at `auth.piquel.fr/developers`.
+  tab. Open the app from **Your apps**, at `auth.sourceorigin.dev/developers`.
 - Have a way to update the secret where your app runs, such as its secret
   store or environment, and to redeploy it.
 - Rotating needs a passkey confirmation from the last five minutes. If yours is
   older, your browser asks for your passkey first.
 
-Piquel's own apps are rotated by its operators, on the admin dashboard or with
+SourceOrigin's own apps are rotated by its operators, on the admin dashboard or with
 `auth-service client rotate-secret`: see
 [OIDC clients](../../dev/operations/clients.md).
 
@@ -28,7 +28,7 @@ Piquel's own apps are rotated by its operators, on the admin dashboard or with
    Choose more time than your app takes to deploy. **For a day** is the
    default.
 3. Select **Rotate secret**.
-4. Piquel shows **Your client secret**, only this once. Copy it into your app's
+4. Origin Auth shows **Your client secret**, only this once. Copy it into your app's
    secret store or environment, then select **I saved it**.
 
 Every earlier secret now stops working at the end of the period you chose, or
@@ -73,7 +73,7 @@ To stop the app entirely while you investigate, [disable it](app-settings.md#dis
   incorrect or expired".** The app still sends an earlier secret whose period
   ended, or sends it wrong. Deploy the current secret. Your app sends it with
   HTTP Basic authentication, which the SDKs do for you.
-- **You lost the secret before saving it.** Piquel can't show it again. Rotate
+- **You lost the secret before saving it.** Origin Auth can't show it again. Rotate
   once more, and save the new one.
 - **The Secrets tab is missing.** The app runs in the browser or on a device, so
   it has no secret. An app's kind can't change: register an app with a backend

@@ -4,7 +4,7 @@
 use crate::repositories::{EventRepository, OidcRepository, UserRepository};
 use crate::{Database, DatabaseTransaction, InsertAuthorizationRequest, InsertUser, RecordedEvent};
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, ClientId, Personal, SessionId, TokenId, UserId,
     clients::{
         AllowedScopes, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris, RedirectUris,

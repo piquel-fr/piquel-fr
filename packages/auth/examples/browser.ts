@@ -1,16 +1,16 @@
 /**
- * A page with no server signing users in with `@piquel/auth/browser`, as a public
+ * A page with no server signing users in with `@sourceorigin/auth/browser`, as a public
  * client. Tokens live in the page's memory only. Bundle it into a page served at the
  * redirect URI's origin, with a `#sign-in` button, a `#sign-out` button and a
- * `#notes` list. An app outside this repository imports `@piquel/auth` and
- * `@piquel/auth/browser` instead of the sources. The `ANCHOR` comments mark the parts
+ * `#notes` list. An app outside this repository imports `@sourceorigin/auth` and
+ * `@sourceorigin/auth/browser` instead of the sources. The `ANCHOR` comments mark the parts
  * `docs/user/apps/browser-apps.md` shows.
  */
 import { browserClient, type Session } from '../src/browser.ts';
 import { Issuer } from '../src/index.ts';
 
 // ANCHOR: client
-const issuer = await Issuer.discover('https://auth.piquel.fr');
+const issuer = await Issuer.discover('https://auth.sourceorigin.dev');
 const auth = browserClient(issuer, {
   clientId: 'notes-web',
   redirectUri: `${location.origin}/callback`

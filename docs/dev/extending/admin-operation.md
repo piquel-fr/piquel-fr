@@ -53,7 +53,7 @@ Add the method to `AdminService`, in the module of its area under
 `Operator` first, and checks it itself:
 
 - **A read** calls `operator.authorize_read(&self.database)` before it reads
-  anything, and returns views from `piquel_common::admin`, which the dashboard
+  anything, and returns views from `sourceorigin_common::admin`, which the dashboard
   renders and the CLI prints as JSON: `Self::views` converts stored records into
   them. A read of an account's personal data records a view with
   `operator.record_view`, as `view_user` does.
@@ -157,7 +157,7 @@ pub(super) async fn reserve(cx: &Cx, form: Option<Form<Reservation>>) -> Result<
         // Parse the form, then call the service as `admin.operator`.
     })
     .await?;
-    // Render `piquel_ui::dashboard_change(change: Change::ReserveHandle, ...)`.
+    // Render `sourceorigin_ui::dashboard_change(change: Change::ReserveHandle, ...)`.
 }
 ```
 
@@ -225,5 +225,5 @@ just db test -E 'test(admin)'
    guide.
 
 The CLI is the most complete surface: the
-[surfaces rule](https://github.com/piquel-fr/piquel-fr/blob/main/AGENTS.md#guidelines)
+[surfaces rule](https://github.com/sourceorigin-dev/sourceorigin/blob/main/AGENTS.md#guidelines)
 lets an operation stay CLI-only only with its documented reason.

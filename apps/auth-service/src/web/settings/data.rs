@@ -9,7 +9,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{DataChange, DataState, Messages, Section, Tab, Title};
+use sourceorigin_ui::{DataChange, DataState, Messages, Section, Tab, Title};
 use topcoat::{
     Error,
     context::Cx,
@@ -65,7 +65,7 @@ impl AccountPage for AccountData {
     ) -> Result<Response, Failure> {
         let profile = web.account.profile(&reader.viewer()).await?;
         let page = Child::new(view! { cx =>
-            piquel_ui::account_data(
+            sourceorigin_ui::account_data(
                 page: settings::DATA,
                 handle: profile.handle.as_str(),
                 grace_days: GRACE_PERIOD_DAYS,
@@ -110,7 +110,7 @@ impl WebApplication {
         deleted: &AccountDeleted,
     ) -> Result<Response, Failure> {
         let page = view! { cx =>
-            piquel_ui::account_deleted(purge_after: deleted.purge_after, sign_in: page::LOGIN)
+            sourceorigin_ui::account_deleted(purge_after: deleted.purge_after, sign_in: page::LOGIN)
         };
         let title = Title::AccountDeleted.as_str();
         let mut response = self.render(cx, StatusCode::OK, title, &[], page).await?;

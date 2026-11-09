@@ -36,7 +36,7 @@ const answer =
   () =>
     Response.json(body, { status });
 const refusal = (code?: string) =>
-  answer({ error: 'Sign in on Piquel', ...(code === undefined ? {} : { code }) }, 400);
+  answer({ error: 'Sign in on SourceOrigin', ...(code === undefined ? {} : { code }) }, 400);
 
 /** The text body of a request, as the SDK sends every one. */
 const text = (init: RequestInit) => (typeof init.body === 'string' ? init.body : '');
@@ -412,7 +412,7 @@ describe('passkey sign-in on the page', () => {
     assert.equal(start.init.credentials, 'omit');
     assert.deepEqual(Object.fromEntries(new Headers(start.init.headers)), {
       'content-type': 'application/json',
-      'x-piquel-csrf': '1'
+      'x-sourceorigin-csrf': '1'
     });
     assert.deepEqual(jsonBody(start.init), { request_uri: auth.lastRequestUri });
     // The prompt gets bytes, and finish gets them back in base64url.

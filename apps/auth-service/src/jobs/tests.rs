@@ -250,7 +250,7 @@ async fn cleanup_that_keeps_falling_behind_raises_its_alert() {
         let expired = Utc::now() - chrono::Duration::days(1);
         database
             .security()
-            .create_invitation(piquel_common::TokenId::new(), &digest, expired)
+            .create_invitation(sourceorigin_common::TokenId::new(), &digest, expired)
             .await
             .expect("invitation");
         cleanup.run(&mut lock, &shutdown).await.expect("run");

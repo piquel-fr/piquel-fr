@@ -16,7 +16,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use piquel_common::{
+use sourceorigin_common::{
     SessionId, UserId,
     events::{Actor, DomainEvent},
 };

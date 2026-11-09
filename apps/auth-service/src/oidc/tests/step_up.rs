@@ -3,8 +3,8 @@
 use super::*;
 use crate::recovery::ProbationPasskey;
 use crate::security::Credential;
-use piquel_common::RecoveryId;
-use piquel_repository::{InsertPasskey, InsertRecovery};
+use sourceorigin_common::RecoveryId;
+use sourceorigin_repository::{InsertPasskey, InsertRecovery};
 
 /// Tokens report the class and time of the grant's authentication: a refresh keeps
 /// them after the session re-authenticates, and `acr_values` makes a weaker session
@@ -66,7 +66,7 @@ async fn acr_targets_and_grants_keep_their_authentication() {
     let login = location(&response);
     assert_eq!(login.path(), routes::page::LOGIN);
     assert_eq!(parameter(&login, "acr"), Acr::PhishingResistant.as_str());
-    for acr_values in ["urn:example:gold", "urn:piquel:acr:social phr"] {
+    for acr_values in ["urn:example:gold", "urn:sourceorigin:acr:social phr"] {
         let response = flow
             .authorize_with(
                 Method::GET,

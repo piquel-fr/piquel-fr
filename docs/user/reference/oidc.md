@@ -1,6 +1,6 @@
 # OpenID Connect
 
-auth.piquel.fr is an OpenID Connect provider. This page lists what it
+auth.sourceorigin.dev is an OpenID Connect provider. This page lists what it
 implements, for an app that talks to it directly or through an OIDC library.
 
 ## Discovery
@@ -65,11 +65,11 @@ authenticated:
 
 | Claim | Values |
 | --- | --- |
-| `acr` | `phr` once a passkey confirmed the session, which a passkey sign-in does: phishing-resistant multi-factor authentication ([OpenID Connect EAP ACR Values](https://openid.net/specs/openid-connect-eap-acr-values-1_0.html)). `urn:piquel:acr:social` for a session signed in with GitHub or Google only, the provider's authentication, whatever it was; and for one signed in with a recovered passkey until its recovery settles |
-| `amr` | Every method the session used (RFC 8176): `pop`, `mfa` and `user` for a passkey, which proves possession of a key and requires user verification; `fed` for a provider sign-in. RFC 8176 registers no value for federation, so `fed` is Piquel's own. It says how, not how strongly: gate on `acr` |
+| `acr` | `phr` once a passkey confirmed the session, which a passkey sign-in does: phishing-resistant multi-factor authentication ([OpenID Connect EAP ACR Values](https://openid.net/specs/openid-connect-eap-acr-values-1_0.html)). `urn:sourceorigin:acr:social` for a session signed in with GitHub or Google only, the provider's authentication, whatever it was; and for one signed in with a recovered passkey until its recovery settles |
+| `amr` | Every method the session used (RFC 8176): `pop`, `mfa` and `user` for a passkey, which proves possession of a key and requires user verification; `fed` for a provider sign-in. RFC 8176 registers no value for federation, so `fed` is SourceOrigin's own. It says how, not how strongly: gate on `acr` |
 | `auth_time` | The latest authentication at the session's `acr`: its last passkey confirmation, or else its sign-in |
 
-`phr` satisfies a `urn:piquel:acr:social` requirement, not the reverse. Both values
+`phr` satisfies a `urn:sourceorigin:acr:social` requirement, not the reverse. Both values
 are listed in discovery's `acr_values_supported`. An authorization request may send
 `acr_values` in order of preference: the first known value becomes its target, and
 unknown values are ignored. A session below the target signs in again, on a login

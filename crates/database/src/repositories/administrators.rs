@@ -2,7 +2,7 @@
 
 use super::{AdministratorRepository, RepositoryExecutor};
 use crate::DatabaseError;
-use piquel_common::{Handle, PictureId, UserId, admin::Administrator};
+use sourceorigin_common::{Handle, PictureId, UserId, admin::Administrator};
 
 /// Proof that the transaction took [`AdministratorRepository::lock`], which
 /// [`AdministratorRepository::is_last_active`] needs to give an answer that holds

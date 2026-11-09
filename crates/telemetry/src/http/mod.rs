@@ -9,7 +9,7 @@ use axum::{
     response::Response,
 };
 use opentelemetry::KeyValue;
-use piquel_common::TraceId;
+use sourceorigin_common::TraceId;
 use std::time::Instant;
 use tracing::{Instrument, field::Empty};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -55,7 +55,7 @@ static REQUEST_DURATION: Histogram = Histogram::new(
 pub struct HttpTelemetry {
     /// Routes whose access log lines are debug output only, such as health probes.
     quiet: &'static [&'static str],
-    /// Names the listener when a service has several, as `piquel.listener`.
+    /// Names the listener when a service has several, as `sourceorigin.listener`.
     listener: Option<&'static str>,
 }
 
@@ -85,7 +85,7 @@ impl HttpTelemetry {
     }
 
     /// Labels the requests' spans, log lines and measurements with
-    /// `piquel.listener = name`, telling apart the listeners of one service.
+    /// `sourceorigin.listener = name`, telling apart the listeners of one service.
     #[must_use]
     pub const fn listener(self, name: &'static str) -> Self {
         Self {
@@ -125,7 +125,7 @@ impl HttpTelemetry {
         let mut labels = vec![KeyValue::new("http.request.method", method)];
         labels.extend(
             this.listener
-                .map(|listener| KeyValue::new("piquel.listener", listener)),
+                .map(|listener| KeyValue::new("sourceorigin.listener", listener)),
         );
         // Unmatched paths go on the span and log line only: they are unbounded.
         let path = route.is_none().then(|| request.uri().path().to_owned());
@@ -162,7 +162,7 @@ impl HttpTelemetry {
                 ($level:ident) => {
                     tracing::$level!(
                         http.response.status_code = status,
-                        piquel.listener = this.listener,
+                        sourceorigin.listener = this.listener,
                         duration_ms,
                         "{method} {target}"
                     )

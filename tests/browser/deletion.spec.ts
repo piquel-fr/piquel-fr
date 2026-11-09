@@ -32,7 +32,7 @@ test('downloading the data, deleting the account and restoring it with its passk
     events: { kind: string }[];
   };
   expect(download.suggestedFilename()).toBe(
-    `piquel-account-${handle}-${data.exported_at.slice(0, 10)}.json`
+    `sourceorigin-account-${handle}-${data.exported_at.slice(0, 10)}.json`
   );
   expect(data.version).toBe(3);
   expect(data.profile.handle).toBe(handle);
@@ -45,7 +45,7 @@ test('downloading the data, deleting the account and restoring it with its passk
     page.getByRole('heading', { name: 'Your account is scheduled for deletion' })
   ).toBeVisible();
   expect((await context.cookies()).map((cookie) => cookie.name)).not.toContain(
-    '__Host-piquel_session'
+    '__Host-sourceorigin_session'
   );
 
   // Signing in with the account's passkey offers to restore it instead.
@@ -53,7 +53,7 @@ test('downloading the data, deleting the account and restoring it with its passk
   await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Restore your account?' })).toBeVisible();
   expect((await context.cookies()).map((cookie) => cookie.name)).not.toContain(
-    '__Host-piquel_session'
+    '__Host-sourceorigin_session'
   );
   await page.getByRole('button', { name: 'Restore my account', exact: true }).click();
   await expect(page).toHaveURL('/settings');

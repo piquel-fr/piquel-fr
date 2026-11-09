@@ -50,7 +50,7 @@ pub async fn account_data<'a>(
     confirmed: bool,
 ) -> Result<impl View> {
     Ok(view! {
-        page_head(title: "Your data", lead: "Everything Piquel keeps about you, and leaving.".to_owned())
+        page_head(title: "Your data", lead: "Everything SourceOrigin keeps about you, and leaving.".to_owned())
         <section class="card" aria-labelledby="export-heading">
             <header>
                 <h2 id="export-heading">"Download your data"</h2>
@@ -63,7 +63,7 @@ pub async fn account_data<'a>(
                 )
             </header>
             <p class="help">
-                "Everything Piquel keeps about your account, in one JSON file: your profile and its picture, handles, email addresses, passkeys and linked accounts, devices, connected apps, the apps you registered, account recoveries, your inbox and every event recorded about your account. What you removed is in it until Piquel deletes it. It holds no passkey keys or secrets."
+                "Everything SourceOrigin keeps about your account, in one JSON file: your profile and its picture, handles, email addresses, passkeys and linked accounts, devices, connected apps, the apps you registered, account recoveries, your inbox and every event recorded about your account. What you removed is in it until SourceOrigin deletes it. It holds no passkey keys or secrets."
             </p>
         </section>
         <section class="card" aria-labelledby="delete-heading">

@@ -19,8 +19,8 @@ use crate::{
     security::{ApiError, SessionError},
 };
 use axum::extract::Query as UriQuery;
-use piquel_common::{Provider, events::RevocationReason, protocol::claims::Acr};
-use piquel_ui::{
+use sourceorigin_common::{Provider, events::RevocationReason, protocol::claims::Acr};
+use sourceorigin_ui::{
     CallbackError, LinkKind, LoginChange, LoginQuery, Onward, Query, QueryError, SignedIn, Step,
     Title,
 };
@@ -281,7 +281,7 @@ impl WebApplication {
                 Err(Refusal::Failure(failure)) => return Err(failure),
                 Err(Refusal::Alert(error)) => error,
             },
-            None => ApiError::bad_request(piquel_ui::OUT_OF_DATE),
+            None => ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE),
         };
         web.sign_in_page(cx, page, Visit::new(web, cx).await, Some(refused))
             .await
@@ -480,7 +480,7 @@ impl WebApplication {
         };
         let here = continuation.on(query.clone()).on(page.path())?;
         let question = view! { cx =>
-            piquel_ui::recovery_prompt(
+            sourceorigin_ui::recovery_prompt(
                 recovery: &recovery,
                 action: &here,
                 undo: routes::page::RECOVER_UNDO,
@@ -616,7 +616,7 @@ impl WebApplication {
             ..query.clone()
         });
         let view = view! { cx =>
-            piquel_ui::sign_in(
+            sourceorigin_ui::sign_in(
                 step: step,
                 page: page.path(),
                 query: &kept,

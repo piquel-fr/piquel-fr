@@ -7,11 +7,11 @@ use axum::{
     extract::FromRequestParts,
     http::{Extensions, HeaderMap, header, request::Parts},
 };
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, ClientId, UserId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin, SignInFailure, UserAgentFamily},
 };
-use piquel_repository::{Database, DatabaseError, StoredSession};
+use sourceorigin_repository::{Database, DatabaseError, StoredSession};
 use std::net::IpAddr;
 
 /// Where a request came from, attached by

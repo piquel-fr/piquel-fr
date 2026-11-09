@@ -2,11 +2,11 @@
 
 use super::AdminError;
 use chrono::Duration;
-use piquel_common::{
+use sourceorigin_common::{
     Handle, HandleError, UserId,
     admin::{AnnouncementAudience, DraftAnnouncement},
 };
-use piquel_ui::Grace;
+use sourceorigin_ui::Grace;
 use serde::Deserialize;
 use std::{fmt, str::FromStr};
 use thiserror::Error;

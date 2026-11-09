@@ -50,13 +50,13 @@ use axum::{
     routing::{MethodRouter, delete, get, patch, post},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, EmailId, Handle, NotificationId, PasskeyId, Personal, PictureId, SessionId,
     events::DomainEvent,
     notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
 };
-use piquel_repository::{Database, StoredUser};
+use sourceorigin_repository::{Database, StoredUser};
 use serde::Deserialize;
 
 operations! {

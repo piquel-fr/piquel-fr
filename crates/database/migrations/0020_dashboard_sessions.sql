@@ -27,7 +27,7 @@ CREATE TABLE dashboard_sessions (
 );
 CREATE INDEX dashboard_sessions_session_idx ON dashboard_sessions (session_id);
 
--- The dashboard was the OIDC client `piquel-admin` until auth served it. It is
+-- The dashboard was the OIDC client `sourceorigin-admin` until auth served it. It is
 -- deleted as `auth-service client delete` would, so no deployment keeps it:
 -- disabled and marked deleted, its secrets and consents removed, and its refresh
 -- grants revoked. Unlike the command, this records no `client_deleted` event:
@@ -35,7 +35,7 @@ CREATE INDEX dashboard_sessions_session_idx ON dashboard_sessions (session_id);
 WITH client AS (
     UPDATE oidc_clients
     SET deleted_at = now(), enabled = FALSE, updated_at = now()
-    WHERE id = 'piquel-admin' AND deleted_at IS NULL
+    WHERE id = 'sourceorigin-admin' AND deleted_at IS NULL
     RETURNING id
 ),
 secrets AS (

@@ -1,6 +1,6 @@
 //! The account's data, as its owner downloads it (GDPR Art. 15 and 20): one
 //! versioned JSON document, read from one snapshot. It holds every record
-//! `piquel_repository::Table` names as exported, and no secret, digest or key
+//! `sourceorigin_repository::Table` names as exported, and no secret, digest or key
 //! material: passkeys show their label, dates and backup state only.
 //!
 //! Its events are unbounded, so the document streams: the request reads every
@@ -13,12 +13,12 @@ use crate::{clients::OwnedClientView, emails::EmailView, history::HistoryItem};
 use axum::body::Bytes;
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use piquel_common::admin::{ApprovedOrigin, Consent};
-use piquel_common::{
+use sourceorigin_common::admin::{ApprovedOrigin, Consent};
+use sourceorigin_common::{
     AccountStatus, ClientId, ErrorChain, Handle, PasskeyId, PictureId, RecoveryId, SessionId,
     UserId, notifications::NotificationPreference,
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     AnnouncementRecord, DashboardSignIn, DatabaseError, DatabaseTransaction, EventFilter,
     IdentityRecord, NotificationRecord, RecentRecovery, RecordedEvent, RecoveryState,
     SessionRecord, StoredGrant, StoredHandle, StoredOidcClient, StoredPasskey, StoredPicture,
@@ -35,7 +35,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::Instrument;
 
 /// The `format` of every export.
-const FORMAT: &str = "piquel.account-export";
+const FORMAT: &str = "sourceorigin.account-export";
 /// The export's version; a change to its shape gets a new one.
 const VERSION: u32 = 3;
 /// Where the serialized credential holds whether the passkey may be synced.
@@ -60,7 +60,7 @@ static STREAMING: Semaphore = Semaphore::const_new(STREAMS);
 const VIEWS: &str = "account_viewed";
 
 /// Everything auth stores about an account, read from one snapshot and streamed
-/// as one document: `{"format": "piquel.account-export", "version": 3, …,
+/// as one document: `{"format": "sourceorigin.account-export", "version": 3, …,
 /// "events": […]}`. Version 2 added the profile picture. Version 3 added what
 /// ended and is still stored (revoked passkeys, unlinked identities, ended
 /// sessions), each session's apps, the owned apps' related origins, and every
@@ -250,7 +250,7 @@ struct Notification {
 impl From<NotificationRecord> for Notification {
     /// Reads what it says from its payload, when this release knows its kind.
     fn from(record: NotificationRecord) -> Self {
-        let known = serde_json::from_value::<piquel_common::notifications::Notification>(
+        let known = serde_json::from_value::<sourceorigin_common::notifications::Notification>(
             record.payload.clone(),
         )
         .ok();
@@ -289,7 +289,7 @@ impl Records {
     /// and `-`, so it needs no quoting in a header.
     fn file_name(&self) -> String {
         format!(
-            "piquel-account-{}-{}.json",
+            "sourceorigin-account-{}-{}.json",
             self.profile.handle,
             self.exported_at.format("%Y-%m-%d")
         )
@@ -510,7 +510,7 @@ impl AccountExport {
         })
     }
 
-    /// The download's file name, `piquel-account-<handle>-<date>.json`.
+    /// The download's file name, `sourceorigin-account-<handle>-<date>.json`.
     pub(crate) fn file_name(&self) -> String {
         self.records.file_name()
     }

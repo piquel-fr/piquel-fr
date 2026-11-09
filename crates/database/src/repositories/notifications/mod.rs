@@ -5,7 +5,7 @@
 use super::{KindProbe, NotificationRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     EventId, NotificationId, UserId,
     notifications::{EmailCategory, Notification, NotificationPreference},
 };

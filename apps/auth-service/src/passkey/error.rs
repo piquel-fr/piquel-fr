@@ -2,9 +2,9 @@
 
 use crate::handles::HandlesError;
 use crate::security::{ApiError, SessionError};
-use piquel_common::{InvalidValue, events::SignInFailure};
-use piquel_crypto::CryptoError;
-use piquel_repository::{DatabaseError, PasskeyRepository};
+use sourceorigin_common::{InvalidValue, events::SignInFailure};
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::{DatabaseError, PasskeyRepository};
 use std::borrow::Cow;
 use webauthn_rs::prelude::WebauthnError;
 
@@ -135,7 +135,7 @@ impl From<PasskeyError> for ApiError {
             }
             PasskeyError::TooManyPasskeys(_) => Self::conflict(format!(
                 "This account already has {} passkeys, the most it can keep. Remove one in \
-                 your account settings, or ask Piquel support.",
+                 your account settings, or ask SourceOrigin support.",
                 PasskeyRepository::LIMIT
             )),
             PasskeyError::InvalidDisplayName => {
@@ -164,7 +164,7 @@ impl From<PasskeyError> for ApiError {
                 Self::unauthorized("This account is disabled, or this passkey was removed from it.")
             }
             PasskeyError::RestoreInProbation => Self::forbidden(
-                "This account is scheduled for deletion. A passkey added by a recovery can't restore it. Use a passkey you had before, or ask Piquel support.",
+                "This account is scheduled for deletion. A passkey added by a recovery can't restore it. Use a passkey you had before, or ask SourceOrigin support.",
             ),
             PasskeyError::UnknownHandle => Self::not_found("No active account has this handle."),
             PasskeyError::PasskeyNotFound => Self::bad_request("Passkey not found."),
@@ -185,7 +185,7 @@ impl From<PasskeyError> for ApiError {
                 error.rejected("This passkey could not be verified. Please try again.")
             }
             error @ PasskeyError::InvalidUserHandle(_) => {
-                error.rejected("This passkey does not belong to a Piquel account.")
+                error.rejected("This passkey does not belong to an Origin Account.")
             }
             error @ PasskeyError::UserVerificationRequired => error
                 .rejected("Your authenticator must verify you with a PIN, fingerprint or face."),
@@ -259,7 +259,7 @@ impl PasskeyError {
     /// [`CounterRegression`](Self::CounterRegression), so it is also logged
     /// as a warning. The Display holds no challenge or credential.
     fn rejected(&self, message: impl Into<Cow<'static, str>>) -> ApiError {
-        tracing::debug!(error = %piquel_common::ErrorChain(self), "WebAuthn request rejected");
+        tracing::debug!(error = %sourceorigin_common::ErrorChain(self), "WebAuthn request rejected");
         ApiError::bad_request(message)
     }
 }

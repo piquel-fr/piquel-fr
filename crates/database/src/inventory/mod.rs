@@ -7,7 +7,7 @@
 //! cleanup statements (`MaintenanceRepository::purge_expired_auth_state`) and in
 //! `docs/dev/architecture/account-deletion.md`.
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// Every table of the schema, by name.
     pub enum Table {
         /// Accounts scheduled for deletion, and their restore tokens.

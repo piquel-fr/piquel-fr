@@ -1,13 +1,13 @@
 //! The export's JSON shape, which downloads keep across releases.
 use super::*;
 use chrono::TimeZone;
-use piquel_common::{
+use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, EmailId, EventId, NotificationId, Provider, TokenId,
     clients::ClientKind,
     events::{Browser, Platform, UserAgentFamily},
     notifications::{EmailCategory, NotificationPreference},
 };
-use piquel_repository::RecoveryPasskey;
+use sourceorigin_repository::RecoveryPasskey;
 use serde_json::json;
 
 /// Every section but the events serializes under its documented name and shape.
@@ -187,12 +187,12 @@ fn serializes_every_section_in_its_documented_shape() {
             email: false,
         }],
     };
-    assert_eq!(records.file_name(), "piquel-account-ada-2026-10-22.json");
+    assert_eq!(records.file_name(), "sourceorigin-account-ada-2026-10-22.json");
     let time = "2026-10-22T09:30:00Z";
     assert_eq!(
         serde_json::to_value(&records).expect("export"),
         json!({
-            "format": "piquel.account-export",
+            "format": "sourceorigin.account-export",
             "version": 3,
             "exported_at": time,
             "profile": {

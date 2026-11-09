@@ -1,11 +1,11 @@
 # Back-channel logout
 
-Have Piquel tell your app's server when a user's session at Piquel ends, so your
+Have Origin Auth tell your app's server when a user's session at Origin Auth ends, so your
 app can end its own session for them at once. Without it, an app using the
 SDKs' login routes learns that a session ended at its next refresh, within five
 minutes.
 
-Piquel sends a logout token whenever a session ends before it expires: for
+Origin Auth sends a logout token whenever a session ends before it expires: for
 example when the user signs out, signs in to another account, signs out their
 other devices or removes a passkey, or an administrator ends their sessions or
 disables their account. It follows OpenID Connect Back-Channel Logout 1.0.
@@ -13,7 +13,7 @@ disables their account. It follows OpenID Connect Back-Channel Logout 1.0.
 ## Before you start
 
 - You need an [app you registered](register-an-app.md), with a server.
-- Your server must be reachable over HTTPS from the public internet. Piquel
+- Your server must be reachable over HTTPS from the public internet. SourceOrigin
   never posts to a loopback, private or tailnet address, and never follows a
   redirect.
 
@@ -25,7 +25,7 @@ disables their account. It follows OpenID Connect Back-Channel Logout 1.0.
    it at `/backchannel-logout` beside their callback.
 3. Select **Save changes**.
 
-Operators set it for Piquel's own apps with
+Operators set it for SourceOrigin's own apps with
 `auth-service client update <id> --backchannel-logout-uri <uri>`: see
 [OIDC clients](../../dev/operations/clients.md).
 
@@ -62,7 +62,7 @@ Empty **Back-channel logout URI** on the app's **Settings** tab, and select
 ## Check that it works
 
 1. Sign in to your app in one browser.
-2. In another browser, open your Piquel account's **Devices** settings, and
+2. In another browser, open your Origin Account's **Devices** settings, and
    select **Sign out** next to the first browser.
 3. Your handler receives a logout token naming that browser's session, within
    a few seconds, and your app treats the first browser as signed out.
@@ -72,7 +72,7 @@ Empty **Back-channel logout URI** on the app's **Settings** tab, and select
 - **No token arrives.** Check that the URI uses HTTPS, resolves to public
   addresses, and answers without a redirect. An app on a private route, or on
   your machine, never receives one.
-- **A token arrives twice.** Piquel delivers again until your server answers
+- **A token arrives twice.** Origin Auth delivers again until your server answers
   `200`, so make your handler idempotent: a repeat carries the same `jti`.
 - **Deliveries stop after an error.** A `400` or another `4xx` answer ends the
   delivery for good. Timeouts, `408`, `429` and `5xx` are retried with backoff,
@@ -81,12 +81,12 @@ Empty **Back-channel logout URI** on the app's **Settings** tab, and select
 
 ## Logout tokens
 
-Piquel posts `logout_token=<JWT>` as `application/x-www-form-urlencoded` to the
+Origin Auth posts `logout_token=<JWT>` as `application/x-www-form-urlencoded` to the
 URI. The token is signed with auth's token key, with the header
 `typ: logout+jwt`:
 
 ```json
-{ "iss": "https://auth.piquel.fr", "aud": "<client_id>", "iat": 1760000000,
+{ "iss": "https://auth.sourceorigin.dev", "aud": "<client_id>", "iat": 1760000000,
   "exp": 1760000120, "jti": "<delivery id>", "sub": "<user id>",
   "sid": "<session id>",
   "events": { "http://schemas.openid.net/event/backchannel-logout": {} } }

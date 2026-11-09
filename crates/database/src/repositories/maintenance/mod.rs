@@ -5,7 +5,7 @@
 use super::{MaintenanceRepository, RepositoryExecutor, Unsigned};
 use crate::DatabaseError;
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// The records that store an opaque token's secret as a keyed digest.
     pub enum DigestedSecret {
         /// A pending authorization request.

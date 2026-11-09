@@ -1,4 +1,4 @@
-//! auth.piquel.fr's sign-in flows: signing in and up, an application's consent
+//! auth.sourceorigin.dev's sign-in flows: signing in and up, an application's consent
 //! and logout, account recovery, and handing an administrator off to the admin
 //! dashboard. They serve browsers that may not be signed in yet, so they are
 //! pages of their own rather than [`AccountPage`](super::account::AccountPage)s.

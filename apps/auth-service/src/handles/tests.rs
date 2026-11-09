@@ -3,7 +3,7 @@
 use super::*;
 use crate::security::SessionError;
 use crate::tests::{Browser, Replicas};
-use piquel_common::AuthenticationMethod;
+use sourceorigin_common::AuthenticationMethod;
 
 /// A rename needs a passkey confirmation, and the cooldown to have passed since the
 /// last change, reclaims included. It bumps the profile version and records the

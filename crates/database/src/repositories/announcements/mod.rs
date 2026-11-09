@@ -6,7 +6,7 @@
 
 use super::{AnnouncementRepository, RepositoryExecutor, Unsigned};
 use crate::DatabaseError;
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, AnnouncementId, Handle, PictureId, UserId,
     admin::{Announcement, AnnouncementEmails, User},
     notifications::Notification,

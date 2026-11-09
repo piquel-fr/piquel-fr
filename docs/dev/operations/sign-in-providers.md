@@ -14,7 +14,7 @@ another provider, see
 
 1. Register an OAuth app for the environment, with its
    [callback URL](#environments).
-   - **GitHub**: an OAuth app, not a GitHub App, of the `piquel-fr`
+   - **GitHub**: an OAuth app, not a GitHub App, of the `sourceorigin-dev`
      organization, under **Settings** > **Developer settings** > **OAuth
      Apps**. Its homepage is the environment's web origin. Generate a client
      secret.
@@ -22,14 +22,14 @@ another provider, see
      branding, audience External, and data access `openid`, `email` and
      `profile`. Then add an OAuth client of type Web application, with the
      callback URL as its only authorized redirect URI. Branding links to
-     `https://piquel.fr`, `https://piquel.fr/privacy` and
-     `https://piquel.fr/terms`, on the authorized domain `piquel.fr`, verified
+     `https://sourceorigin.dev`, `https://sourceorigin.dev/privacy` and
+     `https://sourceorigin.dev/terms`, on the authorized domain `sourceorigin.dev`, verified
      in Search Console. Until the app is published, only its test users can
      sign in. These scopes need no verification to publish.
 2. Store the client secret, mountable by that environment only:
 
    ```sh
-   piquelctl app secret piquel-fr set github-production --stdin --environments production --no-previews
+   piquelctl app secret sourceorigin set github-production --stdin --environments production --no-previews
    ```
 
 3. In `infra/piqueld.toml`, set the environment's client ID variable,
@@ -46,10 +46,10 @@ another provider, see
 2. Store it under the same name, with the same access:
 
    ```sh
-   piquelctl app secret piquel-fr set github-production --stdin --environments production --no-previews
+   piquelctl app secret sourceorigin set github-production --stdin --environments production --no-previews
    ```
 
-3. Deploy the environment: `piquelctl --timeout 30m env deploy piquel-fr staging`
+3. Deploy the environment: `piquelctl --timeout 30m env deploy sourceorigin staging`
    for staging, or [production's own release again](deploying.md#pick-up-a-changed-secret-in-production)
    for production. Auth reads and checks the secret at startup only.
 4. Sign in with the provider on the environment, to check the new secret works.
@@ -68,8 +68,8 @@ the provider.
 
 | Environment | Callback URLs | Client ID variables | Stored secrets |
 | --- | --- | --- | --- |
-| production | `https://auth.piquel.fr/login/github/callback`, `https://auth.piquel.fr/login/google/callback` | `github_client_id`, `google_client_id` | `github-production`, `google-production` |
-| staging | `https://auth.staging.piquel.fr/login/github/callback`, `https://auth.staging.piquel.fr/login/google/callback` | `github_client_id`, `google_client_id` | `github-staging`, `google-staging` |
+| production | `https://auth.sourceorigin.dev/login/github/callback`, `https://auth.sourceorigin.dev/login/google/callback` | `github_client_id`, `google_client_id` | `github-production`, `google-production` |
+| staging | `https://auth.staging.sourceorigin.dev/login/github/callback`, `https://auth.staging.sourceorigin.dev/login/google/callback` | `github_client_id`, `google_client_id` | `github-staging`, `google-staging` |
 
 An empty client ID variable, the default, turns a provider off. The manifest
 then mounts the generated `no-provider-secret` in its place, which auth never

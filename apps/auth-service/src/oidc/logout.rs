@@ -9,8 +9,8 @@ use axum::{
     http::HeaderMap,
     response::Redirect,
 };
-use piquel_common::{ClientId, events::RevocationReason};
-use piquel_ui::LoginQuery;
+use sourceorigin_common::{ClientId, events::RevocationReason};
+use sourceorigin_ui::LoginQuery;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use url::Url;

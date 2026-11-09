@@ -148,7 +148,7 @@ test('a login completes with an ID token validated against the pending login', a
     state: 'af0ifjsldkj',
     nonce: String(ID.input.nonce),
     verifier: 'verifier',
-    stepUp: { acr_values: 'urn:piquel:acr:social' as const }
+    stepUp: { acr_values: 'urn:sourceorigin:acr:social' as const }
   };
   const tokens = await login.complete(pending, callback);
   assert.deepEqual(sent(fetch, TOKEN_URL).form, {

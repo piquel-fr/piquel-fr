@@ -1,6 +1,6 @@
 //! Retention of the records an account no longer uses.
 use crate::{Database, InsertUser, UserRepository};
-use piquel_common::UserId;
+use sourceorigin_common::UserId;
 use sqlx::PgPool;
 
 /// Inserts an active account whose handle starts with `prefix`.
@@ -108,7 +108,7 @@ async fn ended_records_go_after_their_retention() {
     .await
     .expect("announcement to everyone");
     let kept = crate::AnnouncementRepository::from_pool(&pool)
-        .find(piquel_common::AnnouncementId::from_uuid(kept).expect("ID"))
+        .find(sourceorigin_common::AnnouncementId::from_uuid(kept).expect("ID"))
         .await
         .expect("find")
         .expect("kept");

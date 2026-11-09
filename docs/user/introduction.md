@@ -1,12 +1,12 @@
 # Introduction
 
-A piquel.fr account signs you in with a passkey: a key your device or password
+An Origin Account signs you in with a passkey: a key your device or password
 manager keeps, which your fingerprint, face or PIN unlocks. There is no
 password to remember or leak. You can also link a GitHub or Google account to
 sign in with.
 
-Your account lives at [auth.piquel.fr](https://auth.piquel.fr). Its settings,
-at `auth.piquel.fr/settings`, manage your passkeys, email addresses, devices,
+Your account lives at [auth.sourceorigin.dev](https://auth.sourceorigin.dev). Its settings,
+at `auth.sourceorigin.dev/settings`, manage your passkeys, email addresses, devices,
 the apps you signed in to, your notifications and your data.
 
 ![The settings overview: active sessions, connected apps, recent security activity and devices](../images/account/settings.png)
@@ -19,13 +19,13 @@ the apps you signed in to, your notifications and your data.
   one per device or password manager.
 - **Session:** one device signed in to your account. Settings list your
   [devices](account/devices.md), and you can sign any of them out.
-- **App:** a website or service that signs you in with your piquel.fr account.
+- **App:** a website or service that signs you in with your Origin Account.
   The first time, it asks for your consent, naming what it will receive. Apps
-  Piquel runs itself don't ask.
+  SourceOrigin runs itself don't ask.
 
   ![The consent page for an app called Notes, listing what it will receive](../images/apps/consent.png)
 - **Passkey confirmation:** sensitive changes, such as removing a passkey, need
-  you to have used your passkey in the last five minutes. If you haven't, Piquel
+  you to have used your passkey in the last five minutes. If you haven't, Origin Auth
   asks for it again first, even though you are signed in. See
   [passkey confirmation](account/signing-in.md#passkey-confirmation).
 
@@ -42,7 +42,7 @@ the apps you signed in to, your notifications and your data.
 - [Devices](account/devices.md): the browsers signed in to your account.
 - [Connected apps](account/connected-apps.md): the apps that can use your
   account.
-- [Notifications](account/notifications.md): what Piquel tells you, in your
+- [Notifications](account/notifications.md): what SourceOrigin tells you, in your
   inbox and by email.
 - [Security history](account/security-history.md): every sign-in and change,
   and reporting what wasn't you.
@@ -52,7 +52,7 @@ the apps you signed in to, your notifications and your data.
 - [Recover your account](your-data/recover-your-account.md) if you lost every
   passkey.
 - [Undo a recovery](your-data/undo-a-recovery.md) that wasn't you.
-- [Download your data](your-data/export-your-data.md): everything Piquel keeps
+- [Download your data](your-data/export-your-data.md): everything SourceOrigin keeps
   about you, in one file.
 - [Delete your account](your-data/delete-your-account.md), and restore it
   within 30 days.
@@ -60,9 +60,9 @@ the apps you signed in to, your notifications and your data.
 ## Building an app
 
 Any account can register apps in the developer console, at
-`auth.piquel.fr/developers`. An app then signs its users in through OpenID
-Connect, with the Rust SDK (`piquel-auth`), the TypeScript SDK
-(`@piquel/auth`), or any OpenID Connect library:
+`auth.sourceorigin.dev/developers`. An app then signs its users in through OpenID
+Connect, with the Rust SDK (`sourceorigin-auth`), the TypeScript SDK
+(`@sourceorigin/auth`), or any OpenID Connect library:
 
 - [How sign-in works](apps/how-sign-in-works.md) explains the concepts, and
   which SDK to pick.

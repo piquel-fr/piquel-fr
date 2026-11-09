@@ -2,11 +2,11 @@
 use super::*;
 use crate::{Database, DatabaseTransaction, EventRepository, InsertUser, RestoreToken};
 use chrono::Duration;
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, PasskeyId, Personal, Provider, SessionId, TokenId,
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
-use piquel_common::{AuthenticationMethod, events::SignInFailure};
+use sourceorigin_common::{AuthenticationMethod, events::SignInFailure};
 use sqlx::{Acquire, PgPool};
 use std::net::IpAddr;
 
@@ -447,7 +447,7 @@ async fn personal_data_stored_during_a_purge_is_erased() {
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn an_alert_raised_during_a_purge_leaves_no_email() {
-    use piquel_common::{
+    use sourceorigin_common::{
         AlertId,
         admin::{ChainBreak, ChainProblem},
         alerts::Alert,

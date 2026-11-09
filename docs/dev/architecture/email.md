@@ -12,7 +12,7 @@ anything under `apps/auth-service/src/emails` or the `email` delivery channel.
 | `email_verification_secrets` | the SHA-256 digest of an unverified address's link token, and when it expires |
 | `active_verified_email_ownership` | one row per verified address of an active account, naming that account |
 
-Addresses are compared as `NormalizedEmail` (`piquel_common::email`), whose rules
+Addresses are compared as `NormalizedEmail` (`sourceorigin_common::email`), whose rules
 [email normalization](../security/email-normalization.md) sets out.
 
 The schema holds the invariants itself:
@@ -101,7 +101,7 @@ to the address they concern.
 Messages are transactional security notices: no tracking, no remote images, and
 links only to auth's pages. Without `AUTH_SMTP_URL`, adding an address is refused,
 an import skips its address, and the delivery workers drop what is queued. Any
-SMTP provider works, as long as it does not depend on Piquel's own sign-in;
+SMTP provider works, as long as it does not depend on SourceOrigin's own sign-in;
 [email](../operations/email.md) describes the deployments' relay and its DNS
 records. For development, `just auth mailpit` runs a local Mailpit: set
 `AUTH_SMTP_URL=smtp://localhost:1025` and read the mail at

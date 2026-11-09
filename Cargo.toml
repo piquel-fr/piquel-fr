@@ -16,7 +16,7 @@ edition = "2024"
 # Non-commercial by default. The SDK and the crate it depends on (auth-sdk,
 # common) override this with Apache-2.0, so any application can use them.
 license = "PolyForm-Noncommercial-1.0.0"
-repository = "https://github.com/piquel-fr/piquel-fr"
+repository = "https://github.com/sourceorigin-dev/sourceorigin"
 version = "0.1.0"
 
 [workspace.lints.rust]
@@ -36,12 +36,12 @@ self_named_module_files = "warn"
 
 [workspace.dependencies]
 # Local crates
-piquel-common        = { path = "crates/common" }
-piquel-crypto        = { path = "crates/crypto" }
-piquel-repository    = { path = "crates/database" }
-piquel-telemetry     = { path = "crates/telemetry" }
-piquel-auth          = { path = "crates/auth-sdk" }
-piquel-ui            = { path = "crates/ui" }
+sourceorigin-common        = { path = "crates/common" }
+sourceorigin-crypto        = { path = "crates/crypto" }
+sourceorigin-repository    = { path = "crates/database" }
+sourceorigin-telemetry     = { path = "crates/telemetry" }
+sourceorigin-auth          = { path = "crates/auth-sdk" }
+sourceorigin-ui            = { path = "crates/ui" }
 
 # External crates
 async-trait = "0.1"
@@ -105,7 +105,7 @@ jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc
 # in the tree through jsonwebtoken's aws_lc_rs.
 aws-lc-rs = "1.18"
 secrecy = "0.10"
-# Test-only: TypeScript declarations of the protocol types, which piquel-common's
+# Test-only: TypeScript declarations of the protocol types, which sourceorigin-common's
 # tests write to packages/auth/src/protocol.ts for the TypeScript SDK. The only serde
 # attribute it cannot read is `deserialize_with = "known"`, which drops unknown
 # vocabulary values without changing the type, so its warnings are off.

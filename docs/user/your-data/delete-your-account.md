@@ -1,6 +1,6 @@
 # Delete your account
 
-You can delete your piquel.fr account from your settings. It stops working at
+You can delete your Origin Account from your settings. It stops working at
 once, and is deleted for good 30 days later. Until then, you can restore it.
 
 ## Before you start
@@ -20,7 +20,7 @@ Deleting signs every device out at once, and after 30 days it can't be undone.
 2. Under **Delete your account**, select **Delete account**.
 3. Type your handle in **Type your handle, \<handle>, to confirm**.
 4. Select **Delete my account**.
-5. If Piquel asks, confirm with your passkey.
+5. If Origin Auth asks, confirm with your passkey.
 
 ![The Delete your account form, with the handle typed and the Delete my account button](../../images/account/delete.png)
 
@@ -34,7 +34,7 @@ be deleted for good.
 - Apps can no longer sign you in with it or refresh their access. An access
   token an app already holds keeps working until it expires, within five
   minutes, and an app that keeps its own session may keep you signed in to it
-  until it next checks with Piquel.
+  until it next checks with Origin Auth.
 - A recovery link support sent you stops working.
 - Your primary email address receives "Your account is scheduled for
   deletion", with the date.
@@ -44,7 +44,7 @@ be deleted for good.
 For 30 days, signing in with one of your account's passkeys offers to restore
 it instead.
 
-1. Open the sign-in page, at `auth.piquel.fr/login`, or select **Restore my
+1. Open the sign-in page, at `auth.sourceorigin.dev/login`, or select **Restore my
    account** on the page that confirmed the deletion.
 2. Sign in with your passkey. The page asks "Restore your account?" and says
    when the account will be deleted.
@@ -56,7 +56,7 @@ to be deleted.
 
 ## What is deleted at the end
 
-After 30 days, Piquel deletes:
+After 30 days, SourceOrigin deletes:
 
 - your account, with its profile, profile picture, email addresses, passkeys
   and linked GitHub or Google accounts,
@@ -70,14 +70,14 @@ Some things stay:
 - **Your security events,** without any personal details. What is left of them
   no longer names you: only IDs that point to no account.
 - **Your handles,** for a year. Nobody else can take a handle your account
-  held, unless Piquel support releases it. After a year, anyone may.
+  held, unless SourceOrigin support releases it. After a year, anyone may.
 - **What apps keep.** Apps you signed in to keep their own records of you. Ask
   each app to delete them.
 
-## Deletion by Piquel support
+## Deletion by SourceOrigin support
 
-Piquel support can also schedule your account's deletion, or restore it, for
-example when you ask them at [contact@piquel.fr](mailto:contact@piquel.fr). You
+SourceOrigin support can also schedule your account's deletion, or restore it, for
+example when you ask them at [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev). You
 receive the same emails, and your **Security history** shows the reason support
 gave.
 

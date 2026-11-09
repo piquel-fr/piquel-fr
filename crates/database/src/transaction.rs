@@ -8,7 +8,7 @@ use crate::{
     },
     telemetry::Committed,
 };
-use piquel_common::{
+use sourceorigin_common::{
     EventId, UserId,
     events::{Actor, DomainEvent, EventContext, HistoryActor},
     notifications::{Audience, Notification},

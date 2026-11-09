@@ -2,7 +2,7 @@
 use crate::{
     Database, DatabaseError, InsertUser, connection::MIGRATOR, repositories::UserRepository,
 };
-use piquel_common::{Handle, UserId};
+use sourceorigin_common::{Handle, UserId};
 
 /// The schema's `handle_skeleton` is the Rust type's skeleton, which the generated
 /// `skeleton` column, and so look-alike uniqueness, relies on.
@@ -201,7 +201,7 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
         .find(|migration| migration.description == "handles")
         .expect("the handles migration");
     let mut connection = Database::scratch_schema(..handles.version).await;
-    for username in ["a_b", "piquel", "pique1", "fine"] {
+    for username in ["a_b", "sourceorigin", "pique1", "fine"] {
         sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Migration test')")
             .bind(UserId::new().as_uuid())
             .bind(username)
@@ -215,7 +215,7 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
         .await
         .expect_err("invalid usernames");
     assert!(
-        refused.to_string().contains("a_b, pique1, piquel"),
+        refused.to_string().contains("a_b, pique1, sourceorigin"),
         "{refused}"
     );
     sqlx::raw_sql(
@@ -239,6 +239,6 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
     .expect("handles");
     assert_eq!(
         copied,
-        ["a-b", "fine", "piquel", "renamed"].map(|handle| (handle.to_owned(), true))
+        ["a-b", "fine", "sourceorigin", "renamed"].map(|handle| (handle.to_owned(), true))
     );
 }

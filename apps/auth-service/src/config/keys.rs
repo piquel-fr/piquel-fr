@@ -6,28 +6,28 @@ use crate::{
     AuditKeys, emails::VerificationKeys, notifications::UnsubscribeLinks, recovery::RecoveryLinks,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use piquel_common::config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable};
-use piquel_crypto::{CryptoError, Digest, NoteKey, NoteVerifier, Secret};
+use sourceorigin_common::config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable};
+use sourceorigin_crypto::{CryptoError, Digest, NoteKey, NoteVerifier, Secret};
 use std::sync::Arc;
 
 /// Separates opaque token digests from every other use of a token digest key. The
 /// PEM signing key was used the same way, so it still works as a token digest key.
-const TOKEN_DIGEST_CONTEXT: &[u8] = b"piquel-refresh-token-digest-v1";
+const TOKEN_DIGEST_CONTEXT: &[u8] = b"sourceorigin-refresh-token-digest-v1";
 /// Separates the email verification key from every other use of a token digest
 /// key.
-const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"piquel-email-verification-token-v1";
+const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"sourceorigin-email-verification-token-v1";
 /// Separates the recovery link key from every other use of a token digest key,
 /// as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
-const RECOVERY_LINK_CONTEXT: &[u8] = b"piquel-account-recovery-link-v1";
+const RECOVERY_LINK_CONTEXT: &[u8] = b"sourceorigin-account-recovery-link-v1";
 /// Separates the unsubscribe link key from every other use of a token digest
 /// key, as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
-const UNSUBSCRIBE_LINK_CONTEXT: &[u8] = b"piquel-email-unsubscribe-link-v1";
+const UNSUBSCRIBE_LINK_CONTEXT: &[u8] = b"sourceorigin-email-unsubscribe-link-v1";
 /// Fewest bytes a token digest key may have.
 const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
 /// Bytes of a token digest key's digest kept as its fingerprint.
 const DIGEST_KEY_FINGERPRINT_BYTES: usize = 8;
 
-piquel_common::variables! {
+sourceorigin_common::variables! {
     /// The keys' variables, in the configuration reference's order.
     #[cfg(test)]
     pub(crate) const VARIABLES;

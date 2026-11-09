@@ -1,7 +1,7 @@
 //! Signup from pending provider evidence, committed only with a first passkey.
 
 use super::*;
-use piquel_common::events::{Actor, DomainEvent};
+use sourceorigin_common::events::{Actor, DomainEvent};
 
 impl TestApp {
     /// Attaches the pending signup `pending` names, found by the browser's `headers`,
@@ -196,7 +196,7 @@ async fn signup_skips_an_address_an_account_being_deleted_holds() {
     test.app
         .database
         .users()
-        .set_status(deleting, piquel_common::AccountStatus::Deleting)
+        .set_status(deleting, sourceorigin_common::AccountStatus::Deleting)
         .await
         .expect("deleting");
     let (pending, headers) = test

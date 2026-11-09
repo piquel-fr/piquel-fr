@@ -5,7 +5,7 @@
 use super::{ExportRepository, JsonArray, RepositoryExecutor};
 use crate::{DatabaseError, StoredPasskey};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, ClientId, EventId, NotificationId, PasskeyId, Provider,
     SessionId, UserId, events::UserAgentFamily,
 };

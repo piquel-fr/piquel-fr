@@ -3,7 +3,7 @@
 
 use super::moment;
 use crate::layout::{Pager, page_head, pager};
-use piquel_common::{
+use sourceorigin_common::{
     AlertId, AuthenticationMethod, Personal, Provider,
     admin::Event,
     alerts::Alert,
