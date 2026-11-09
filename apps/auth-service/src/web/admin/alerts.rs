@@ -8,7 +8,7 @@ use sourceorigin_common::{
     AlertId,
     alerts::{AlertStatus, AlertsShown},
 };
-use sourceorigin_ui::{Action, AlertCard, Change};
+use sourceorigin_ui::{Action, AlertCard, Change, Target};
 use topcoat::{
     Result,
     context::Cx,
@@ -115,12 +115,17 @@ pub(super) async fn update(cx: &Cx, form: Option<Form<UpdateForm>>) -> Result<Re
         (Some(refused.form.status), refused.form.note.as_str())
     });
     let refusal = refused.as_deref();
+    let shown = id.to_string();
+    let target = Target {
+        name: subject,
+        id: Some(&shown),
+    };
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::UpdateAlert,
+            target: target,
             back: back.as_str(),
             refusal: refusal,
-            <p><strong>(subject)</strong></p>
             sourceorigin_ui::alert_update_fields(status: status, note: note)
         )
     };

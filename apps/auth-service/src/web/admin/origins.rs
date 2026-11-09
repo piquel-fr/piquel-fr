@@ -9,7 +9,7 @@ use super::{
 use crate::{clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
 use serde::{Serialize, de::IgnoredAny};
 use sourceorigin_common::{admin::ApproveOrigin, clients::RelatedOrigin};
-use sourceorigin_ui::{Change, Query};
+use sourceorigin_ui::{Change, Query, Target};
 use topcoat::{
     Result,
     context::Cx,
@@ -51,11 +51,12 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
     })
     .await?;
     let typed = refusal.as_ref().map(|refused| refused.form.origin.clone());
-    let client =
-        format!("Client {id}. Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
+    let client = format!("Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
+    let target = App::target(cx).await;
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::ApproveOrigin,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
             <p class="help">(client.as_str())</p>
@@ -83,13 +84,18 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.remove_related_origin(&admin.operator, &id, &origin)
     })
     .await?;
-    let which = format!("Client {id}, origin {origin}.");
+    let shown = origin.to_string();
+    let client = id.to_string();
+    let target = Target {
+        name: &shown,
+        id: Some(&client),
+    };
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::RemoveOrigin,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            <p class="help">(which.as_str())</p>
         )
     };
     App::render(cx, StatusCode::OK, Change::RemoveOrigin.title(), page).await
