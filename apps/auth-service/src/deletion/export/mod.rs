@@ -431,10 +431,7 @@ impl AccountExport {
             .filter(|client| client.owner_id == Some(user_id))
             .map(|client| Client::new(client, &origins))
             .collect();
-        // Every dashboard session still stored, idle ones included.
-        let dashboard = (tx.dashboard())
-            .of_user(user_id, DateTime::UNIX_EPOCH)
-            .await?;
+        let dashboard = tx.exports().dashboard_sessions(user_id).await?;
         let records = Records {
             format: FORMAT,
             version: VERSION,

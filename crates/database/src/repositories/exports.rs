@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, ClientId, EventId, NotificationId, PasskeyId, Provider,
-    SessionId, UserId, events::UserAgentFamily,
+    SessionId, UserId, admin::DashboardSession, events::UserAgentFamily,
 };
 use std::net::IpAddr;
 
@@ -221,6 +221,32 @@ impl ExportRepository<'_> {
                 JOIN announcement_recipients r ON r.announcement_id = a.id
                 WHERE r.user_id = $1 AND a.sent_at IS NOT NULL
                 ORDER BY a.sent_at DESC, a.id DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
+    /// Every admin dashboard session of the account still stored, newest first,
+    /// those on ended or expired sessions included until cleanup deletes them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn dashboard_sessions(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<DashboardSession>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                DashboardSession,
+                r#"SELECT d.session_id AS "session_id: SessionId", d.created_at AS signed_in_at,
+                    d.last_used_at, d.expires_at
+                FROM dashboard_sessions d
+                JOIN sessions s ON s.id = d.session_id
+                WHERE s.user_id = $1
+                ORDER BY d.created_at DESC"#,
                 user_id.as_uuid(),
             )
         )

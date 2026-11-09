@@ -60,7 +60,7 @@ pub(crate) struct HistoryPage {
 
 /// One entry of the account's history, which the account may report as not
 /// theirs when [`HistoryItem::reportable`] says so. Its data export shows every
-/// event as stored instead, as a `HistoryItem<RecordedEvent>`.
+/// event as stored instead, as a `HistoryItem<&RecordedEvent>`.
 #[derive(Serialize)]
 pub(crate) struct HistoryItem<E = HistoryEntry> {
     /// Event ID, to report the entry.

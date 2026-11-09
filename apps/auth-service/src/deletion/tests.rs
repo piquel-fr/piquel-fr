@@ -22,7 +22,7 @@ use sourceorigin_common::{
 use sourceorigin_repository::{
     Database, DraftedAnnouncement, Holds, InsertAuthorizationCode, InsertExternalIdentity,
     InsertPasskey, InsertRecovery, Recipients, RefreshRedemption, RefreshRedemptionError,
-    SessionAuthentication, Table,
+    SessionAuthentication, SessionScope, Table,
 };
 use tokio_stream::StreamExt;
 
@@ -179,6 +179,7 @@ impl Fixture {
     )]
     async fn seed(&self, browser: &Browser) -> Vec<u8> {
         let user_id = browser.user_id;
+        let ended = Browser::sign_in(&self.database, user_id).await;
         let address = format!("{user_id}@example.com");
         verified_address(&self.database, user_id, &address, true).await;
         let mut tx = self.database.begin().await.expect("transaction");
@@ -229,15 +230,29 @@ impl Fixture {
                 .await
                 .expect("administrator")
         );
+        // A dashboard session on a session that ended, both still stored.
         tx.dashboard()
             .insert_session(
                 user_id.as_uuid().as_bytes(),
-                browser.session_id,
+                ended.session_id,
                 Utc::now(),
                 Utc::now() + Duration::hours(1),
             )
             .await
             .expect("dashboard session");
+        let signed_out = EventContext {
+            actor: user(&ended),
+            origin: RequestOrigin::default(),
+            reason: None,
+        };
+        tx.revoke_sessions(
+            &signed_out,
+            user_id,
+            SessionScope::One(ended.session_id),
+            &RevocationReason::UserRevoked,
+        )
+        .await
+        .expect("signed out");
         tx.recoveries()
             .insert(&InsertRecovery {
                 id: RecoveryId::new(),
@@ -390,7 +405,8 @@ async fn exports_hold_every_category_and_no_secret() {
     let digest = fixture.seed(&browser).await;
     let owner = browser.owner(&fixture.database).await;
     let export = fixture.account.export(&owner).await.expect("export");
-    // The streams are taken while their exports wait to download.
+    // The streams are taken while their exports wait to download. Their count is
+    // the process's, which nextest gives each test alone.
     let second = fixture.account.export(&owner).await.expect("second export");
     assert!(matches!(
         fixture.account.export(&owner).await.map(drop),
@@ -421,7 +437,7 @@ async fn exports_hold_every_category_and_no_secret() {
         ("emails", 1),
         ("passkeys", 2),
         ("identities", 1),
-        ("sessions", 2),
+        ("sessions", 3),
         ("consents", 1),
         ("grants", 1),
         ("clients", 2),
@@ -436,6 +452,14 @@ async fn exports_hold_every_category_and_no_secret() {
         1
     );
     assert!(export["identities"][0]["revoked_at"].is_string());
+    let sessions = export["sessions"].as_array().expect("sessions");
+    assert!(
+        (sessions.iter()).any(|session| session["revoked_at"].is_string()
+            && session["dashboard"]
+                .as_array()
+                .is_some_and(|ds| !ds.is_empty())),
+        "an ended session keeps its dashboard session: {sessions:?}"
+    );
     // Other tests' announcements to everyone may reach the account too.
     let announcements = export["announcements"].as_array().expect("announcements");
     assert!(
