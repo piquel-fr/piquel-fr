@@ -83,23 +83,39 @@ The dashboard is no OIDC client. An administrator signs in by a handoff from aut
    cookie of its own origin.
 2. The handoff page needs a session signed in with a passkey, of an account that
    still holds administrator rights: anyone else is told they have no access, and
-   a social sign-in signs in with a passkey first. It sends the browser back with a
-   code that works once, for 60 seconds, bound to that session and to the state.
+   a social sign-in signs in with a passkey first. It then asks for a passkey, in
+   a ceremony started for the handoff, every time: a browser left signed in to
+   auth cannot open the dashboard without the administrator. It sends the browser
+   back with a code that works once, for 60 seconds, bound to that session and to
+   the state.
 3. The dashboard redeems the code in the browser holding the state, and starts a
    session of its own, storing only its cookie's digest, with the auth session and
-   its own passkey confirmation.
+   the passkey's proof as its confirmation.
 
 The dashboard's session rests on the auth session: signing out of auth, revoking
 that session or replacing it ends it, and every request checks the
-administrator's rights again. Signing out of the dashboard ends only its session.
+administrator's rights again. It also ends after 30 minutes without a request,
+12 hours after its sign-in however busy, and when the account's administrator
+rights are revoked, in the same transaction, with the handoffs that would start
+one: rights granted again revive none. Writing a handoff or redeeming one holds
+the rights, as a change does, so a revocation waits for it and then ends what it
+wrote, or comes first and refuses it. Signing out of the dashboard ends only its
+session. Signing in and out are recorded as `dashboard_signed_in` and
+`dashboard_signed_out`, which the administrator's security history shows; a
+session that times out records nothing. A confirmation on auth's handoff page,
+where the dashboard's script cannot confirm on the page, signs in again: it
+records another sign-in, and the new session's 12 hours start from it, since a
+passkey proved it. The account's devices list each dashboard session under the
+auth session it rests on, with its last use.
 [The admin dashboard's session](sessions.md#the-admin-dashboards-session) describes
 how it is stored.
 
 A change needs the dashboard's own passkey confirmation from the last five
-minutes, which a confirmation for auth's pages never gives. A page that changes
-something sends the browser to the handoff page to confirm before showing its form:
-there, a passkey proves the handoff in a ceremony started for it, and the
-dashboard keeps that time as its confirmation. The auth session's own
+minutes, which a confirmation for auth's pages never gives, and signing in gives.
+A page that changes something sends the browser to the handoff page to confirm
+before showing its form: there, a passkey proves the handoff in a ceremony
+started for it, recorded as `passkey_confirmed`, and the dashboard keeps that
+time as its confirmation. The auth session's own
 confirmation stays as it was. Once confirmed, a short change such as revoking a
 session confirms in a dialog on the list page itself, which the browser opens
 and closes with no script (`popovertarget`), posting to the change's own page;

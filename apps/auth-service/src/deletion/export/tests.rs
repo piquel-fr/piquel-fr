@@ -4,6 +4,7 @@ use chrono::TimeZone;
 use serde_json::json;
 use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, EmailId, EventId, NotificationId, Provider, TokenId,
+    admin::DashboardSession,
     clients::ClientKind,
     events::{Browser, Platform, UserAgentFamily},
     notifications::{EmailCategory, NotificationPreference},
@@ -64,11 +65,6 @@ fn serializes_every_section_in_its_documented_shape() {
             released_at: None,
         })],
         administrator: Some(Administrator { granted_at: at }),
-        dashboard_sessions: vec![DashboardSession::from(DashboardSignIn {
-            session_id: session,
-            created_at: at,
-            confirmed_at: Some(at),
-        })],
         emails: vec![EmailView {
             id: email,
             address: "ada@example.com".into(),
@@ -108,6 +104,12 @@ fn serializes_every_section_in_its_documented_shape() {
                 clients: vec![client.clone()],
             },
             current: true,
+            dashboard: vec![DashboardSession {
+                session_id: session,
+                signed_in_at: at,
+                last_used_at: at,
+                expires_at: at,
+            }],
         }],
         consents: vec![Consent {
             client_id: client.to_string(),
@@ -196,7 +198,7 @@ fn serializes_every_section_in_its_documented_shape() {
         serde_json::to_value(&records).expect("export"),
         json!({
             "format": "sourceorigin.account-export",
-            "version": 3,
+            "version": 4,
             "exported_at": time,
             "profile": {
                 "id": user,
@@ -215,9 +217,6 @@ fn serializes_every_section_in_its_documented_shape() {
             },
             "handles": [{"handle": "ada", "claimed_at": time, "released_at": null}],
             "administrator": {"granted_at": time},
-            "dashboard_sessions": [
-                {"session_id": session, "created_at": time, "confirmed_at": time}
-            ],
             "emails": [{"id": email, "address": "ada@example.com", "verified": true, "primary": true}],
             "passkeys": [{
                 "id": passkey,
@@ -250,6 +249,12 @@ fn serializes_every_section_in_its_documented_shape() {
                 "revoked_at": null,
                 "clients": ["notes"],
                 "current": true,
+                "dashboard": [{
+                    "session_id": session,
+                    "signed_in_at": time,
+                    "last_used_at": time,
+                    "expires_at": time,
+                }],
             }],
             "consents": [{"client_id": "notes", "audience": "notes", "scopes": ["openid"]}],
             "grants": [{

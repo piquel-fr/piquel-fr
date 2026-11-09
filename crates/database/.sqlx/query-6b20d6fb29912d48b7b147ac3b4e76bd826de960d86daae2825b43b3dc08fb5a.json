@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM dashboard_sessions d\n                USING sessions s\n                WHERE d.secret_digest = $1 AND s.id = d.session_id\n                RETURNING d.session_id AS \"session_id: SessionId\", s.user_id AS \"user_id: UserId\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6b20d6fb29912d48b7b147ac3b4e76bd826de960d86daae2825b43b3dc08fb5a"
+}

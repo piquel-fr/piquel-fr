@@ -230,7 +230,12 @@ impl Fixture {
                 .expect("administrator")
         );
         tx.dashboard()
-            .insert_session(user_id.as_uuid().as_bytes(), browser.session_id, None)
+            .insert_session(
+                user_id.as_uuid().as_bytes(),
+                browser.session_id,
+                Utc::now(),
+                Utc::now() + Duration::hours(1),
+            )
             .await
             .expect("dashboard session");
         tx.recoveries()

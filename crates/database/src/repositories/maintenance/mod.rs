@@ -171,6 +171,16 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
+            // A session that went unused too long has ended too, but stays until
+            // its `expires_at`, which comes soon after.
+            "DELETE FROM dashboard_sessions
+            WHERE ctid IN (
+                SELECT ctid
+                FROM dashboard_sessions
+                WHERE expires_at < now()
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
             "DELETE FROM authorization_requests
             WHERE ctid IN (
                 SELECT ctid
@@ -317,7 +327,7 @@ impl MaintenanceRepository<'_> {
                 FOR UPDATE SKIP LOCKED
             )",
             // A purged account's handles were released at its purge (migration
-            // 0041), and stay reserved a year, so nobody takes one to pass for it.
+            // 0042), and stay reserved a year, so nobody takes one to pass for it.
             "DELETE FROM handles
             WHERE ctid IN (
                 SELECT ctid

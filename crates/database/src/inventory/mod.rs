@@ -129,7 +129,7 @@ impl Table {
             Self::ProfilePictures => Holds::Exported("picture"),
             Self::Handles => Holds::Exported("handles"),
             Self::Administrators => Holds::Exported("administrator"),
-            Self::DashboardSessions => Holds::Exported("dashboard_sessions"),
+            Self::DashboardSessions => Holds::Exported("sessions/*/dashboard"),
             Self::UserEmails => Holds::Exported("emails"),
             // A copy of the verified addresses.
             Self::ActiveVerifiedEmailOwnership => Holds::Exported("emails/*/verified"),

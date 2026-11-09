@@ -33,8 +33,9 @@ downloaded".
   whether they sync between devices,
 - the GitHub or Google accounts linked to it, and when each was linked and
   unlinked,
-- the devices signed in to your account, with their IP addresses and the apps
-  each signed in to,
+- the devices signed in to your account, with their IP addresses, the apps each
+  signed in to, and, if you are an administrator, the admin dashboards signed in
+  through each,
 - the apps you gave access to, with what each may read, and their access
   grants,
 - the apps you registered in the developer console, deleted ones included,
@@ -44,7 +45,7 @@ downloaded".
 - every event recorded about your account, as stored: what your security
   history shows, and also failed sign-ins, passkey confirmations and sign-ins
   to apps, with the IP address and browser while they are kept,
-- whether you are an administrator, and your sign-ins to the admin dashboard.
+- whether you are an administrator, and since when.
 
 What you removed, such as a passkey or a signed-out device, is in the file
 until it is deleted: see [how long it is kept](#how-long-it-is-kept).

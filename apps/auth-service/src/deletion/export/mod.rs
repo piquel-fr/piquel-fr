@@ -15,16 +15,15 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
-use sourceorigin_common::admin::{ApprovedOrigin, Consent};
+use sourceorigin_common::admin::{ApprovedOrigin, Consent, DashboardSession};
 use sourceorigin_common::{
     AccountStatus, ClientId, ErrorChain, Handle, PasskeyId, PictureId, RecoveryId, SessionId,
     UserId, notifications::NotificationPreference,
 };
 use sourceorigin_repository::{
-    AnnouncementRecord, DashboardSignIn, DatabaseError, DatabaseTransaction, EventFilter,
-    IdentityRecord, NotificationRecord, RecentRecovery, RecordedEvent, RecoveryState,
-    SessionRecord, StoredGrant, StoredHandle, StoredOidcClient, StoredPasskey, StoredPicture,
-    StoredUser,
+    AnnouncementRecord, DatabaseError, DatabaseTransaction, EventFilter, IdentityRecord,
+    NotificationRecord, RecentRecovery, RecordedEvent, RecoveryState, SessionRecord, StoredGrant,
+    StoredHandle, StoredOidcClient, StoredPasskey, StoredPicture, StoredUser,
 };
 use std::{collections::BTreeMap, time::Duration};
 use tokio::sync::{
@@ -37,7 +36,7 @@ use tracing::Instrument;
 /// The `format` of every export.
 const FORMAT: &str = "sourceorigin.account-export";
 /// The export's version; a change to its shape gets a new one.
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 /// Where the serialized credential holds whether the passkey may be synced.
 const BACKUP_ELIGIBLE_POINTER: &str = "/cred/backup_eligible";
 /// Where the serialized credential holds whether the passkey is synced.
@@ -60,8 +59,9 @@ static STREAMING: Semaphore = Semaphore::const_new(STREAMS);
 const VIEWS: &str = "account_viewed";
 
 /// Everything auth stores about an account, read from one snapshot and streamed
-/// as one document: `{"format": "sourceorigin.account-export", "version": 3, …,
-/// "events": […]}`. Version 2 added the profile picture. Version 3 added what
+/// as one document: `{"format": "sourceorigin.account-export", "version": 4, …,
+/// "events": […]}`. Version 2 added the profile picture; version 3 moved
+/// dashboard sessions under the sessions they rest on. Version 4 added what
 /// ended and is still stored (revoked passkeys, unlinked identities, ended
 /// sessions), each session's apps, the owned apps' related origins, and every
 /// event about the account as stored, which replaced its history, deleted apps,
@@ -94,8 +94,6 @@ struct Records {
     handles: Vec<HandleHeld>,
     /// The account's administrator rights, if it has them.
     administrator: Option<Administrator>,
-    /// An administrator's sign-ins to the admin dashboard, newest first.
-    dashboard_sessions: Vec<DashboardSession>,
     /// Email addresses, verified or not, primary first.
     emails: Vec<EmailView>,
     /// Passkeys, revoked ones included until cleanup deletes them, oldest first.
@@ -203,6 +201,8 @@ struct Session {
     record: SessionRecord,
     /// Whether it downloaded the export.
     current: bool,
+    /// An administrator's admin dashboard sessions resting on it, newest first.
+    dashboard: Vec<DashboardSession>,
 }
 
 /// A client the account manages, or managed until it was deleted.
@@ -273,17 +273,6 @@ struct HandleHeld {
     released_at: Option<DateTime<Utc>>,
 }
 
-/// One of an administrator's sign-ins to the admin dashboard.
-#[derive(Debug, Serialize)]
-struct DashboardSession {
-    /// The browser session it rests on.
-    session_id: SessionId,
-    /// When it started.
-    created_at: DateTime<Utc>,
-    /// When a passkey last confirmed it, if one did.
-    confirmed_at: Option<DateTime<Utc>>,
-}
-
 impl Records {
     /// [`AccountExport::file_name`]. Handles are lowercase ASCII letters, digits
     /// and `-`, so it needs no quoting in a header.
@@ -303,17 +292,6 @@ impl From<StoredHandle> for HandleHeld {
             handle: handle.handle,
             claimed_at: handle.claimed_at,
             released_at: handle.released_at,
-        }
-    }
-}
-
-impl From<DashboardSignIn> for DashboardSession {
-    /// Keeps its session and dates.
-    fn from(signed_in: DashboardSignIn) -> Self {
-        Self {
-            session_id: signed_in.session_id,
-            created_at: signed_in.created_at,
-            confirmed_at: signed_in.confirmed_at,
         }
     }
 }
@@ -453,6 +431,10 @@ impl AccountExport {
             .filter(|client| client.owner_id == Some(user_id))
             .map(|client| Client::new(client, &origins))
             .collect();
+        // Every dashboard session still stored, idle ones included.
+        let dashboard = (tx.dashboard())
+            .of_user(user_id, DateTime::UNIX_EPOCH)
+            .await?;
         let records = Records {
             format: FORMAT,
             version: VERSION,
@@ -464,10 +446,6 @@ impl AccountExport {
                 .collect(),
             administrator: (tx.exports().administrator_since(user_id).await?)
                 .map(|granted_at| Administrator { granted_at }),
-            dashboard_sessions: (tx.dashboard().of_user(user_id).await?)
-                .into_iter()
-                .map(DashboardSession::from)
-                .collect(),
             emails: (tx.emails().list(user_id).await?)
                 .into_iter()
                 .map(EmailView::from)
@@ -481,6 +459,7 @@ impl AccountExport {
                 .into_iter()
                 .map(|record| Session {
                     current: record.id == current,
+                    dashboard: DashboardSession::on(&dashboard, record.id),
                     record,
                 })
                 .collect(),

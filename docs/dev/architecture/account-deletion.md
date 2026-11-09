@@ -130,12 +130,13 @@ It holds every record auth keeps about the account, and no secret, digest or key
 material: passkeys show their label, dates and backup state only. Only the owner
 may download it, never an administrator, since it carries every IP address and
 every event about the account out of auth. Like every response, it is never
-cached. Version 3 holds:
+cached. Version 4 holds:
 
-- the profile, picture, handles, administrator rights and dashboard sign-ins,
-  email addresses, consents and refresh grants;
+- the profile, picture, handles, administrator rights, email addresses,
+  consents and refresh grants;
 - passkeys, linked identities and sessions, ended ones included until cleanup
-  deletes them, each session with its IP addresses and the apps it signed in to;
+  deletes them, each session with its IP addresses, the apps it signed in to and
+  the admin dashboard sessions resting on it;
 - the apps the account registered, deleted ones as their tombstones, with their
   related origins;
 - its recoveries (dates, state and the passkey each enrolled, never a link);
