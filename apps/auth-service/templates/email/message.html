@@ -38,7 +38,7 @@
 {%- endif %}
 <p><a href="{{ page }}">Read it in your Origin Account notifications</a></p>
 {%- if let Some(sign_out) = sign_out %}
-<p style="font-size:14px;color:#555555">If this wasn’t you and you can’t sign in to secure your account, <a href="{{ sign_out }}">sign it out of every device and app</a>, without signing in. The link works once, for 7 days.</p>
+<p style="font-size:14px;color:#555555">If this wasn’t you and you can’t sign in to secure your account, <a href="{{ sign_out }}">sign it out of every device and app</a>, without signing in. The link works once, for {{ crate::notifications::SIGN_OUT_LINK_LIFETIME.num_days() }} days.</p>
 {%- endif %}
 {%- when Content::Message { address: _, subject: _, body: _, paragraphs, inbox } %}
 {%- call text(paragraphs) %}{%- endcall %}

@@ -304,20 +304,21 @@ impl WebApplication {
     }
 
     /// `GET /sign-out-everywhere`: asks to sign the account out everywhere, for
-    /// the notification the link names. Opening it changes nothing, so a mail
-    /// scanner that follows links signs no one out.
+    /// the notification the link names, while its link works. Opening it changes
+    /// nothing, so a mail scanner that follows links signs no one out.
     pub(in crate::web) async fn sign_out_confirmation(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let here = uri(cx).to_string();
-        match Self::linked(cx, &web.email.sign_out_links)? {
-            Some(_) => {
-                let step = SignOutStep::Confirm { action: &here };
-                web.sign_out_page(cx, StatusCode::OK, step).await
-            }
-            None => {
-                web.sign_out_page(cx, StatusCode::NOT_FOUND, SignOutStep::Invalid)
-                    .await
-            }
+        let works = match Self::linked(cx, &web.email.sign_out_links)? {
+            Some(id) => web.account.sign_out_link_works(id).await?,
+            None => false,
+        };
+        if works {
+            let step = SignOutStep::Confirm { action: &here };
+            web.sign_out_page(cx, StatusCode::OK, step).await
+        } else {
+            web.sign_out_page(cx, StatusCode::NOT_FOUND, SignOutStep::Invalid)
+                .await
         }
     }
 

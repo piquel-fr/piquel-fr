@@ -15,7 +15,7 @@ use axum::{
     http::StatusCode,
     routing::{get, post, put},
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EventId, NotificationId,
@@ -38,9 +38,7 @@ const PAGE_SIZE: u16 = 50;
 /// Unread security notifications the settings' banner shows at most, newest
 /// first; the inbox shows the rest.
 const BANNER_SIZE: u32 = 3;
-/// How long the "sign me out everywhere" link of a security notification's
-/// email works, once.
-pub(crate) const SIGN_OUT_LINK_LIFETIME: Duration = Duration::days(7);
+pub(crate) use sourceorigin_common::notifications::SIGN_OUT_LINK_LIFETIME;
 
 /// The owner's routes that change their inbox's read state and email
 /// preferences, and count what is unread.
@@ -244,6 +242,21 @@ impl AccountService {
 
 /// The "sign me out everywhere" link of security notifications' emails.
 impl AccountService {
+    /// Whether the sign-out link of notification `id`'s email still works,
+    /// which the page asking to use it reads first: unused, within
+    /// [`SIGN_OUT_LINK_LIFETIME`]. Reads only.
+    pub(crate) async fn sign_out_link_works(
+        &self,
+        id: NotificationId,
+    ) -> Result<bool, AccountError> {
+        let issued_after = Utc::now() - SIGN_OUT_LINK_LIFETIME;
+        Ok(self
+            .database
+            .notifications()
+            .sign_out_link_works(id, issued_after)
+            .await?)
+    }
+
     /// Signs the account whose notification `id` is out everywhere, from the link
     /// the notification's email carried, opened from `request`: as the owner,
     /// without a session, for an owner whose session was stolen while their

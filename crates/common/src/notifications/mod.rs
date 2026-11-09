@@ -13,6 +13,10 @@ use crate::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// How long the "sign me out everywhere" link of a security notification's
+/// email works, once: its emails and pages say so.
+pub const SIGN_OUT_LINK_LIFETIME: chrono::Duration = chrono::Duration::days(7);
+
 /// What an account's owner is told, stored as it serializes, e.g.
 /// `{"kind": "deletion_scheduled", "purge_after": …}`. Never rename a released
 /// kind: a newer release's kinds are skipped by older ones, not misread.
@@ -85,8 +89,8 @@ pub enum Notification {
     /// An app's refresh token was used twice, so its access was revoked: one of
     /// the two may have been stolen.
     TokenReused,
-    /// Support started a recovery of the account, whose link went to its
-    /// primary address.
+    /// Support started a recovery of the account, whose link adds a passkey: it
+    /// went to the primary address, or support handed it over.
     RecoveryStarted,
     /// Support signed the account out, of one device or every one.
     SignedOutBySupport,
@@ -96,7 +100,8 @@ pub enum Notification {
     /// backwards, as a copied passkey's does.
     PasskeyCopied,
     /// Someone proved they hold a way into the account, but the sign-in was
-    /// refused: the account is disabled, or cannot sign in that way any more.
+    /// refused: the account is disabled, cannot sign in that way any more, or is
+    /// scheduled for deletion and a recovery's passkey tried to restore it.
     SignInRefused,
     /// Administrators sent an announcement to every account, or to chosen ones
     /// among them this one. Sending writes it, as no event about the account
@@ -435,9 +440,39 @@ impl Notification {
     pub const OUTSIDE_SECURITY: [&'static str; 2] = ["announcement", "alert_raised"];
 
     /// Whether it is about the account's security: see [`Self::OUTSIDE_SECURITY`].
+    /// Every kind is named, so a new one decides; keep [`Self::OUTSIDE_SECURITY`]
+    /// in step with its `false` arm.
     #[must_use]
+    #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn security(&self) -> bool {
-        !matches!(self, Self::Announcement { .. } | Self::AlertRaised { .. })
+        match self {
+            Self::Announcement { .. } | Self::AlertRaised { .. } => false,
+            Self::PrimaryEmailChanged
+            | Self::EmailRemoved
+            | Self::AccountSecured { .. }
+            | Self::Recovered
+            | Self::RecoveryUndone
+            | Self::HandleChanged
+            | Self::DisplayNameChanged
+            | Self::PasskeyRenamed
+            | Self::PictureRemoved
+            | Self::AccountDisabled
+            | Self::AccountEnabled
+            | Self::DeletionScheduled { .. }
+            | Self::AccountRestored
+            | Self::NewDeviceSignIn
+            | Self::PasskeyAdded
+            | Self::PasskeyRemoved
+            | Self::IdentityLinked { .. }
+            | Self::IdentityUnlinked { .. }
+            | Self::EmailAdded { .. }
+            | Self::TokenReused
+            | Self::RecoveryStarted
+            | Self::SignedOutBySupport
+            | Self::CompromiseReported
+            | Self::PasskeyCopied
+            | Self::SignInRefused => true,
+        }
     }
 
     /// Whether it only follows from another change, such as support signing the
@@ -576,11 +611,11 @@ impl Notification {
                 format!("Origin Auth may send notices about your account there once it is verified.{from} If you didn’t add it, remove it from your email addresses and report the change in your security history.")
             }
             Self::TokenReused => "An app used the same sign-in token twice, which happens when a token is stolen, so Origin Auth signed that app out of your account. The app asks you to sign in again. Your security history says which app it was.".to_owned(),
-            Self::RecoveryStarted => "Someone asked SourceOrigin support for help signing in, and support sent a recovery link to your primary address: it adds a new passkey to your account. If you didn’t ask for it, cancel the recovery with a passkey you have, then contact SourceOrigin support.".to_owned(),
+            Self::RecoveryStarted => "Someone asked SourceOrigin support for help signing in, and support started a recovery of your account: its link adds a new passkey. If you didn’t ask for it, cancel the recovery with a passkey you have, then contact SourceOrigin support.".to_owned(),
             Self::SignedOutBySupport => "Support ended one or more of your sessions. Sign in again to keep using your account, and see your security history for why.".to_owned(),
             Self::CompromiseReported => "You said an entry of your security history wasn’t yours, so Origin Auth signed out every other device and every app. Your security history shows what you can still undo.".to_owned(),
             Self::PasskeyCopied => "A sign-in used one of your passkeys, but its signature showed it may be a copy, so Origin Auth refused it. If your passkey’s provider doesn’t sync it between devices, remove that passkey from your sign-in methods and add a new one.".to_owned(),
-            Self::SignInRefused => "Someone signed in with one of your passkeys or social sign-ins, but your account is disabled, or no longer signs in that way, so Origin Auth refused it. If it wasn’t you, contact SourceOrigin support.".to_owned(),
+            Self::SignInRefused => "Someone signed in with one of your passkeys or social sign-ins, but Origin Auth refused it: your account can’t be signed in to that way right now. If it wasn’t you, contact SourceOrigin support.".to_owned(),
         }
     }
 }

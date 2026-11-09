@@ -2,6 +2,7 @@
 
 use crate::{
     account::{AccountError, Owner},
+    notifications::NotificationError,
     routes::page::settings,
     web::{
         Failure, WebApplication,
@@ -58,10 +59,17 @@ impl AccountPage for History {
         }: HistoryChange,
     ) -> Result<Applied<HistoryState>, AccountError> {
         web.account.report(&owner, event_id).await?;
+        // The report went through; a notification gone since, or never the
+        // owner's, has nothing left to mark.
         if let Some(notification) = notification {
-            web.account
+            match web
+                .account
                 .mark_notification(&owner, notification, true)
-                .await?;
+                .await
+            {
+                Ok(()) | Err(AccountError::Notification(NotificationError::NotFound)) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(Applied::Opened(HistoryState {
             before,

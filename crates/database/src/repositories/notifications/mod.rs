@@ -367,6 +367,32 @@ impl NotificationRepository<'_> {
         )
     }
 
+    /// Whether the "sign me out everywhere" link of notification `id`'s email
+    /// still works: unused, and the notification written after `issued_after`.
+    /// Reads only, for the page that asks before using it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn sign_out_link_works(
+        &mut self,
+        id: NotificationId,
+        issued_after: DateTime<Utc>,
+    ) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                    SELECT FROM notifications
+                    WHERE id = $1 AND signed_out_at IS NULL AND created_at > $2
+                ) AS "works!""#,
+                id.as_uuid(),
+                issued_after,
+            )
+        )
+    }
+
     /// Moves notification `id` back to `created_at`, for tests of what expires.
     ///
     /// # Errors

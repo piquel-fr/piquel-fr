@@ -280,6 +280,11 @@ async fn owners_choose_which_notifications_are_emailed() {
     assert_eq!(checked(alice.user_id, &token), Some(alice.user_id));
     assert_eq!(checked(bob.user_id, &token), None, "another account's");
     assert_eq!(checked(alice.user_id, "garbage"), None);
+    // A link sent before the two kinds shared their form named the account.
+    let older: Link<UserId> =
+        serde_json::from_value(serde_json::json!({"account": alice.user_id, "token": token}))
+            .expect("an older link");
+    assert_eq!(links.check(&older).expect("check"), Some(alice.user_id));
 
     let service = AccountService::new(harness.database.clone());
     service
@@ -300,8 +305,7 @@ async fn owners_choose_which_notifications_are_emailed() {
 
 /// The sign-out link of a security notification's email signs its account out
 /// everywhere without a session, revoking sessions and refresh grants, never a
-/// credential. It works once, and not after 7 days. Each use is in the history,
-/// even with no session left to end.
+/// credential. It works once, and not after 7 days.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_sign_out_link_works_once_within_seven_days() {
@@ -377,37 +381,6 @@ async fn the_sign_out_link_works_once_within_seven_days() {
             .expect("again"),
         "it works once"
     );
-    let uses = async || -> Vec<NotificationId> {
-        let mut events = harness.database.events();
-        let history = events.history_for_user(alice.user_id, 50).await;
-        history
-            .expect("history")
-            .into_iter()
-            .filter_map(|stored| match stored.event.known() {
-                Some(DomainEvent::SignedOutEverywhere { notification_id }) => {
-                    Some(*notification_id)
-                }
-                _ => None,
-            })
-            .collect()
-    };
-    assert_eq!(uses().await, [id]);
-    // With every session already ended, its use still shows.
-    harness.enable(&alice).await;
-    let later = harness
-        .database
-        .notifications()
-        .list(alice.user_id, None, 1)
-        .await
-        .expect("inbox")[0]
-        .id;
-    assert!(
-        service
-            .sign_out_everywhere(later, context)
-            .await
-            .expect("no session left")
-    );
-    assert_eq!(uses().await, [later, id], "newest first");
     harness.enable(&alice).await;
     let stale = harness
         .database
@@ -439,7 +412,7 @@ async fn sqlx_age(database: &Database, id: NotificationId) {
     tx.notifications()
         .backdate(
             id,
-            Utc::now() - SIGN_OUT_LINK_LIFETIME - Duration::minutes(1),
+            Utc::now() - SIGN_OUT_LINK_LIFETIME - chrono::Duration::minutes(1),
         )
         .await
         .expect("backdate");
@@ -502,4 +475,54 @@ async fn support_signing_an_account_out_tells_its_owner_once() {
             Notification::SignedOutBySupport
         ]
     );
+}
+
+/// Each use of the sign-out link is in the owner's history, by the notification
+/// whose email carried it, even with no session left to end.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn every_use_of_the_sign_out_link_is_in_the_history() {
+    let harness = Harness::new().await;
+    let alice = Browser::new_account(&harness.database).await;
+    let service = AccountService::new(harness.database.clone());
+    let latest = async || {
+        harness.enable(&alice).await;
+        let mut notifications = harness.database.notifications();
+        notifications
+            .list(alice.user_id, None, 1)
+            .await
+            .expect("inbox")[0]
+            .id
+    };
+    let uses = async || -> Vec<NotificationId> {
+        let mut events = harness.database.events();
+        let history = events.history_for_user(alice.user_id, 50).await;
+        history
+            .expect("history")
+            .into_iter()
+            .filter_map(|stored| match stored.event.known() {
+                Some(DomainEvent::SignedOutEverywhere { notification_id }) => {
+                    Some(*notification_id)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let context = crate::security::RequestContext::TEST;
+    let first = latest().await;
+    assert!(
+        service
+            .sign_out_everywhere(first, context)
+            .await
+            .expect("first")
+    );
+    // Every session already ended: its use still shows.
+    let second = latest().await;
+    assert!(
+        service
+            .sign_out_everywhere(second, context)
+            .await
+            .expect("second")
+    );
+    assert_eq!(uses().await, [second, first], "newest first");
 }

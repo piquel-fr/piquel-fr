@@ -90,8 +90,10 @@ A notification about the account itself is a security notification
 (`Notification::security`): it is always emailed, no preference can turn it off,
 its email carries the "sign me out everywhere" link, and the settings' banner
 shows it while unread. Only a kind listed in `Notification::OUTSIDE_SECURITY`,
-by its stored `kind`, is not. Only a kind that isn't about the account, as an announcement
-isn't, may belong to an `EmailCategory` (`crates/common/src/notifications`),
+by its stored `kind`, is not; `Notification::security` names every kind, so a
+new one decides, and its `false` arm must match that list. Only a kind that
+isn't about the account, as an announcement isn't, may belong to an
+`EmailCategory` (`crates/common/src/notifications`),
 whose email the owner turns off in their inbox's **Email preferences**. Only
 announcements are wired today. A new category needs more than its variant, with
 its `label` and `description`, which settings and the dashboard show:

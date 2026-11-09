@@ -299,9 +299,9 @@ impl Session {
     /// Signs `user_id` in on this browser with a new session, as [`Self::sign_in`]
     /// does, but never re-authenticates the browser's session: whatever session it
     /// had, of this account or another, is revoked first. The browser becomes one of
-    /// the account's devices without an alert. Signing up and a recovery's link sign
-    /// in this way: a new account has nothing to alert about, and a recovery tells
-    /// its owner itself. An existing session can neither make a recovery's link fail
+    /// the account's devices without an alert. Signing up, a recovery's link and its
+    /// undo page sign in this way: a new account has nothing to alert about, and a
+    /// recovery and its undo tell their owner themselves. An existing session can neither make a recovery's link fail
     /// nor carry over.
     pub(crate) async fn sign_in_anew(
         tx: &mut DatabaseTransaction<'_>,

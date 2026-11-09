@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     NotificationId,
-    notifications::{EmailCategory, NotificationPreference},
+    notifications::{EmailCategory, NotificationPreference, SIGN_OUT_LINK_LIFETIME},
 };
 use topcoat::{
     Result,
@@ -452,7 +452,10 @@ pub async fn sign_out_everywhere(step: SignOutStep<'_>) -> Result<impl View> {
             SignOutStep::Invalid => {
                 <h1>"This link doesn’t work"</h1>
                 <p class="lead">
-                    "Each link signs you out once, within 7 days of its email. Sign in to sign your other devices out from your settings, or use the link of a newer email."
+                    (format!(
+                        "Each link signs you out once, within {} days of its email. Sign in to sign your other devices out from your settings, or use the link of a newer email.",
+                        SIGN_OUT_LINK_LIFETIME.num_days()
+                    ))
                 </p>
             }
         }
