@@ -108,7 +108,8 @@ A purge that fails is recorded on its `account_deletions` row and retried after
 that keeps failing never holds back the others. The account's dashboard page and
 `user show` give its failures and last error, and the
 `piquel.auth.account_purge.failing` gauge counts the accounts that failed 3
-times in a row.
+times in a row. While any do, the purge raises the `purges_failing` alert (see
+[respond to an alert](../operations/administration.md#respond-to-an-alert)).
 
 `AdminService::purge_user` purges at once, in any status, from the CLI only
 (`user delete --immediately`), since it cannot be undone.

@@ -18,6 +18,8 @@ crate::str_enum! {
         AuditChainBroken = "audit_chain_broken",
         /// See [`Alert::CheckpointRefused`].
         CheckpointRefused = "checkpoint_refused",
+        /// See [`Alert::PurgesFailing`].
+        PurgesFailing = "purges_failing",
     }
 }
 
@@ -35,6 +37,10 @@ pub enum Alert {
     /// The sealer refuses to sign a checkpoint: the events sealed since the
     /// latest one no longer match their hashes.
     CheckpointRefused(ChainBreak),
+    /// Accounts whose deletion grace period ended keep failing to be purged.
+    /// How many is left out, so a count that changes raises nothing new: the
+    /// `piquel.auth.account_purge.failing` gauge counts them.
+    PurgesFailing {},
 }
 
 impl Alert {
@@ -47,17 +53,19 @@ impl Alert {
         match self {
             Self::AuditChainBroken(_) => AlertKind::AuditChainBroken,
             Self::CheckpointRefused(_) => AlertKind::CheckpointRefused,
+            Self::PurgesFailing {} => AlertKind::PurgesFailing,
         }
     }
 
     /// Its payload version inside a recorded event. A new kind, or a new
     /// [`ChainProblem`], is one older releases cannot decode, so it fails to
     /// compile here until it is given the next version: [`Self::CheckpointRefused`]
-    /// came in the second.
+    /// came in the second, [`Self::PurgesFailing`] in the third.
     #[must_use]
     pub const fn version(&self) -> i16 {
         match self {
             Self::CheckpointRefused(_) => 2,
+            Self::PurgesFailing {} => 3,
             Self::AuditChainBroken(ChainBreak { problem, .. }) => match problem {
                 ChainProblem::MissingEvent
                 | ChainProblem::EventBeforeAnchor
@@ -77,6 +85,7 @@ impl Alert {
         match self {
             Self::AuditChainBroken(_) => "The audit chain is broken",
             Self::CheckpointRefused(_) => "The audit chain's checkpoints stopped",
+            Self::PurgesFailing {} => "Accounts keep failing to be purged",
         }
     }
 
@@ -101,6 +110,13 @@ impl Alert {
                  problem means. It clears once the sealer signs a checkpoint again.",
                 broken.position, broken.problem
             ),
+            Self::PurgesFailing {} => "Accounts whose deletion grace period ended failed to be \
+                purged at least 3 times in a row, so their data is kept past its deletion. \
+                Each is retried with a growing delay. The account-purge job's logs name \
+                each account that failed (could not purge account), and its dashboard page \
+                and auth-service user show give its failures and last error. It clears \
+                once no account has failed 3 times in a row."
+                .to_owned(),
         }
     }
 }
