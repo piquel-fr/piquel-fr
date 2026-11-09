@@ -198,6 +198,8 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::AccountViewed {},
         DomainEvent::AdministratorGranted {},
         DomainEvent::AdministratorRevoked {},
+        DomainEvent::DashboardSignedIn { session_id },
+        DomainEvent::DashboardSignedOut { session_id },
         DomainEvent::HandleChanged {
             old: Personal::Value("a_b".into()),
             new: Personal::Value(Handle::parse("a-b").expect("handle")),

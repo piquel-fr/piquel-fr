@@ -160,18 +160,25 @@ The admin dashboard, on its own origin, keeps a session of its own that hangs of
 an auth session (`DashboardSignIn` in `src/admin/sign_in.rs`):
 
 1. Auth's handoff page hands a session signed in with a passkey, of an account
-   that holds administrator rights, to the dashboard with a code that works once,
+   that holds administrator rights, to the dashboard, once a passkey proved the
+   handoff in a ceremony started for it. It answers with a code that works once,
    for 60 seconds, bound to the dashboard's state cookie
    (`__Host-sourceorigin_dashboard_state`).
 2. Redeeming the code creates a `dashboard_sessions` row naming the auth session,
-   and the `__Host-sourceorigin_dashboard` cookie on the dashboard's origin, whose
-   digest alone is stored.
+   confirmed by the handoff's proof, which ends 12 hours later however busy, and
+   the `__Host-sourceorigin_dashboard` cookie on the dashboard's origin, whose
+   digest alone is stored, for those 12 hours.
 3. Every request finds the dashboard session only while its auth session is
-   active, and checks again that the account holds administrator rights and that
-   the auth session's `acr` is `phr`.
+   active, it was used in the last 30 minutes and it has not reached its end, and
+   counts as its latest use. It checks again that the account holds
+   administrator rights and that the auth session's `acr` is `phr`.
 
 So signing out of auth, revoking the auth session or replacing it ends the
-dashboard's too, while signing out of the dashboard ends only its own. The
+dashboard's too, while signing out of the dashboard ends only its own. Revoking
+the account's administrator rights deletes its dashboard sessions and pending
+handoffs in the same transaction; writing or redeeming a handoff holds those
+rights, so neither outlives a revocation. Cleanup deletes the sessions that
+ended. The
 dashboard keeps its own confirmation time, set only by a passkey proof made for
 it, and a change needs that confirmation from the last five minutes; the auth
 session's confirmation never counts. [admin.sourceorigin.dev](surfaces.md#adminsourceorigindev)
