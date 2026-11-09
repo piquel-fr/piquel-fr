@@ -6,8 +6,8 @@ use crate::{
     KeyStore,
     admin::{AdminError, Operator},
 };
-use piquel_common::{admin::SigningKey, protocol::jwt::KeyId};
-use piquel_crypto::Rs256Key;
+use sourceorigin_common::{admin::SigningKey, protocol::jwt::KeyId};
+use sourceorigin_crypto::Rs256Key;
 
 impl AdminService {
     /// Lists every signing key, oldest first, without either half of the key.

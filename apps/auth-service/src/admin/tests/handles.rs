@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::handles::HandlesError;
-use piquel_common::HandleError;
+use sourceorigin_common::HandleError;
 
 /// Operators rename without the cooldown, but not to a taken, retired, look-alike,
 /// reserved or unchanged handle, and the rename records their reason, as personal
@@ -90,7 +90,7 @@ async fn operators_rename_and_release_handles() {
         .await
         .expect("a released handle is free");
     // A reserved handle is listed while an account holds it.
-    let reserved = Handle::parse("piquel").expect("handle");
+    let reserved = Handle::parse("sourceorigin").expect("handle");
     let listed = || async {
         service
             .check_handles(&cli())

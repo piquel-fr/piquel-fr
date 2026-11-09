@@ -8,7 +8,7 @@
 //! including ones carrying `token68` credentials.
 //!
 //! ```
-//! use piquel_common::protocol::{
+//! use sourceorigin_common::protocol::{
 //!     challenge::BearerChallenge,
 //!     claims::Acr,
 //!     step_up::StepUpRequirement,
@@ -29,7 +29,7 @@
 //!         .parse()?;
 //! assert_eq!(parsed, step_up);
 //! assert_eq!(parsed.step_up.acr, Some(Acr::PhishingResistant));
-//! # Ok::<(), piquel_common::protocol::challenge::ChallengeError>(())
+//! # Ok::<(), sourceorigin_common::protocol::challenge::ChallengeError>(())
 //! ```
 
 use super::{

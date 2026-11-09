@@ -1,15 +1,15 @@
 /**
- * `@piquel/auth/browser`: sign-in for applications with no server, as public
+ * `@sourceorigin/auth/browser`: sign-in for applications with no server, as public
  * clients. Tokens live in this page's memory only. A login that leaves the page
  * keeps its pending login (PKCE verifier, `state`, `nonce` and issuer) in
  * `sessionStorage` until its callback, which deletes it; no token is ever written
  * to `localStorage`, `sessionStorage` or a cookie.
  *
  * ```ts
- * import { Issuer } from '@piquel/auth';
- * import { browserClient } from '@piquel/auth/browser';
+ * import { Issuer } from '@sourceorigin/auth';
+ * import { browserClient } from '@sourceorigin/auth/browser';
  *
- * const issuer = await Issuer.discover('https://auth.piquel.fr');
+ * const issuer = await Issuer.discover('https://auth.sourceorigin.dev');
  * const auth = browserClient(issuer, { clientId: 'notes-web', redirectUri: `${location.origin}/callback` });
  * const session =
  *   (await auth.handleCallback()) ??
@@ -102,7 +102,7 @@ export class BrowserClient {
     const { platform: injected, ...registration } = config;
     this.client = issuer.client(registration);
     this.platform = injected ?? platform();
-    this.#key = `@piquel/auth:login:${registration.clientId}`;
+    this.#key = `@sourceorigin/auth:login:${registration.clientId}`;
   }
 
   /** @internal Use {@link browserClient}. */
@@ -388,7 +388,7 @@ export class Session {
 
 /**
  * Signs users in to this page as the public client `config` registers. Discover the
- * issuer with `Issuer.discover` from `@piquel/auth` first.
+ * issuer with `Issuer.discover` from `@sourceorigin/auth` first.
  */
 export function browserClient(issuer: Issuer, config: BrowserClientConfig): BrowserClient {
   return BrowserClient.from(issuer, config);

@@ -394,7 +394,7 @@ async fn refreshes_keep_the_original_sign_in() {
             claims["auth_time"] = json!(claims["auth_time"].as_i64().expect("auth_time") + 60);
         }),
         ("another acr", |claims| {
-            claims["acr"] = json!("urn:piquel:acr:social");
+            claims["acr"] = json!("urn:sourceorigin:acr:social");
         }),
         ("a nonce", |claims| claims["nonce"] = json!("replayed")),
     ];

@@ -3,8 +3,8 @@
 use super::{CliError, Command};
 use crate::{AuthConfig, Jobs, KeyStore};
 use axum::Router;
-use piquel_common::ErrorChain;
-use piquel_repository::Database;
+use sourceorigin_common::ErrorChain;
+use sourceorigin_repository::Database;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::watch};
 

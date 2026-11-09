@@ -1,6 +1,6 @@
 //! Typed persistence and startup failures, retaining driver causes.
 
-use piquel_common::ErrorChain;
+use sourceorigin_common::ErrorChain;
 use std::{error::Error as StdError, fmt};
 use thiserror::Error;
 

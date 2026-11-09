@@ -1,6 +1,6 @@
 //! The overview's arithmetic.
 use super::*;
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, SessionId,
     events::{DomainEvent, SignInFailure},
 };

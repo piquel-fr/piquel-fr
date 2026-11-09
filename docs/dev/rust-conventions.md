@@ -4,7 +4,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 
 ## Crates
 
-- `piquel-common` (`crates/common`): the one home for shared types, depending on
+- `sourceorigin-common` (`crates/common`): the one home for shared types, depending on
   no other workspace crate. IDs, handles, account status, authentication methods,
   providers, `Personal<T>`, error-chain formatting, `str_enum!`, the client
   registration types (`clients`), and under `protocol` the wire types shared with
@@ -17,25 +17,25 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   and the SDK), `config` (environment variables, validated origins, secret
   references), `email` (address normalization), `events` (domain events) and
   `sqlx` (column decoding, enabled only by the database crate).
-- `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
+- `sourceorigin-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
   comparison, PKCE, RS256 signing, key sets, AES-256-GCM sealing of keys at rest,
   Ed25519 signed notes, for audit checkpoints, and SCRAM-SHA-256 verifiers of
   database passwords.
-- `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
+- `sourceorigin-auth` (`crates/auth-sdk`): the public Rust SDK, following
   [sdk.md](architecture/sdk.md): token validation, typed scopes, login and the JWKS cache auth
   also uses for Google; its `axum` feature adds extractors, a bearer layer and
   login routes over an application's own session backend. It depends only on
-  `piquel-common`, with `client-spans` alone, among the workspace crates, since
+  `sourceorigin-common`, with `client-spans` alone, among the workspace crates, since
   it is published.
-- `piquel-repository` (`crates/database`): the only SQLx consumer; PostgreSQL
+- `sourceorigin-repository` (`crates/database`): the only SQLx consumer; PostgreSQL
   connections, migrations, typed repositories, transactions and storage
   vocabulary.
-- `piquel-telemetry` (`crates/telemetry`): logs, traces and metrics, following
+- `sourceorigin-telemetry` (`crates/telemetry`): logs, traces and metrics, following
   [telemetry.md](architecture/telemetry.md).
-- `piquel-ui` (`crates/ui`): the Topcoat components and layouts of auth's
+- `sourceorigin-ui` (`crates/ui`): the Topcoat components and layouts of auth's
   server-rendered pages, the strings they show, titles and notices included, and
   the changes and queries their forms and links send. They render plain data,
-  `piquel-common` IDs, vocabularies and events, or plain rows such as `EmailRow`
+  `sourceorigin-common` IDs, vocabularies and events, or plain rows such as `EmailRow`
   or `ClientRow` that the pages map the service's views into, and take URLs as
   props; they know nothing of the domain, the database or HTTP. `layout` holds
   the document and the two frames: the shell of a signed-in page, a sidebar of
@@ -52,8 +52,8 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   inline glyphs; `asset` the files pages link, embedded in the executable: the
   stylesheet, `STYLESHEET`, under a path naming its content, and the `FONTS` it
   links, under paths naming their version, which the admin dashboard serves
-  with its own, and the document piquel.fr's pages share. It depends only on
-  `piquel-common` (with `admin` and `events`), `chrono`, `serde`, `serde_json`,
+  with its own, and the document sourceorigin.dev's pages share. It depends only on
+  `sourceorigin-common` (with `admin` and `events`), `chrono`, `serde`, `serde_json`,
   `serde_urlencoded`, `url` and Topcoat's `view`, so it compiles beside the
   database crate.
 
@@ -121,7 +121,7 @@ those paths only, and their twins ending in a slash, which Topcoat redirects, ne
 as the fallback, so the security layer classifies them as pages, by the route
 template they match (`/developers/clients/{id}`), with a request context and the
 `page` budget. A page handler resolves who
-acts, calls the service in-process and renders `piquel-ui` components, or returns
+acts, calls the service in-process and renders `sourceorigin-ui` components, or returns
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
@@ -155,7 +155,7 @@ they confirmed with a passkey; a settings page reads through `Viewer::from(&owne
 and a change takes the owner, as a `Subject` when an administrator may make it too.
 A console page acts on the owner's client its path names: one that is not theirs,
 or does not exist, is a `Failure::Missing`, a `404`. Each page's change and query are types in
-`piquel-ui`, such as `SignInChange` and `SignInState`: forms and links serialize
+`sourceorigin-ui`, such as `SignInChange` and `SignInState`: forms and links serialize
 them, and the page deserializes the same types, so a field's name is written once.
 A change names itself in a hidden `action` field, as an internally tagged enum, so
 its fields must deserialize from text. A change that succeeds answers `303` to the
@@ -273,7 +273,7 @@ creates, updates, enables, disables, deletes and rotates the secrets of clients,
 recording each change's event. It works in the caller's transaction, so an
 operation can lock its actor's session and check its passkey confirmation in the
 transaction that makes the change. It takes a `ClientRegistration` from
-`piquel_common::clients`, whose field types validate themselves, so invalid input
+`sourceorigin_common::clients`, whose field types validate themselves, so invalid input
 never reaches the repository. `AdminService` (for the `client` command) and the
 owner's `AccountService` operations (`src/clients/owned.rs`), which the developer
 console calls, use it, and a registration API (RFC 7591) should too. The owner's input types there are the policy for
@@ -320,10 +320,10 @@ newer release may extend that older ones can read coarsely. Match domain enums e
 variants. Limits and lifetimes are named constants. Preserve existing wire spellings.
 
 Shared authentication vocabulary, JWT/JWK vocabulary and wire types live in
-`piquel-common`. Build tokens and protocol documents from its structs, never with
+`sourceorigin-common`. Build tokens and protocol documents from its structs, never with
 `json!`, so auth and the SDKs share one definition. Use `open_str_enum!` for wire
 values a newer peer may extend, such as `amr`. Domain events and `UserAgentFamily` live in
-`piquel_common::events`; storage vocabulary (`CeremonyKind`, `OidcRedirectKind`)
+`sourceorigin_common::events`; storage vocabulary (`CeremonyKind`, `OidcRedirectKind`)
 lives in the repository.
 Record each account or security change with `tx.record(&context, subject, event)`
 in the transaction that makes it. Handlers extract `RequestContext`, which

@@ -1,4 +1,4 @@
-# piquel-repository
+# sourceorigin-repository
 
 Typed PostgreSQL persistence for the authentication service. SQLx pools and SQL
 remain private; callers use repositories or a `DatabaseTransaction`.

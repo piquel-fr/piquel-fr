@@ -9,7 +9,7 @@
 use super::{HandleRepository, RepositoryExecutor};
 use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     Handle, UserId,
     admin::{ReleasedHandle, ReservedHandle},
 };

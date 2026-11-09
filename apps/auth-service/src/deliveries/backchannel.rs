@@ -10,12 +10,12 @@ use super::{DeliveryError, Failure, Sender, outbound::OutboundClient};
 use crate::{SigningKeys, oidc::OAuthError};
 use axum::http::Method;
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::ErrorChain;
-use piquel_common::protocol::{
+use sourceorigin_common::ErrorChain;
+use sourceorigin_common::protocol::{
     claims::{Absent, Audience, LogoutEvents, LogoutTokenClaims},
     jwt::TokenType,
 };
-use piquel_repository::{BackchannelLogout, Delivery};
+use sourceorigin_repository::{BackchannelLogout, Delivery};
 use std::time::Duration;
 
 /// How long a logout token is accepted after the attempt that signed it.

@@ -20,7 +20,7 @@ pub const CONFIRMATION_MAX_AGE: u32 = 300;
 ///
 /// ```
 /// use chrono::{TimeDelta, Utc};
-/// use piquel_common::protocol::{claims::Acr, step_up::StepUpRequirement};
+/// use sourceorigin_common::protocol::{claims::Acr, step_up::StepUpRequirement};
 ///
 /// let recent_passkey = StepUpRequirement::passkey_within(300);
 /// let now = Utc::now();

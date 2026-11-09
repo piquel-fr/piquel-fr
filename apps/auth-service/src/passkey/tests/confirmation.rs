@@ -4,7 +4,7 @@
 use super::*;
 use crate::{config::PasskeyConfig, security::Cached};
 use axum::{Json, extract::State};
-use piquel_common::{config::Origin, events::RevocationReason};
+use sourceorigin_common::{config::Origin, events::RevocationReason};
 
 /// Checks browser binding, and that a passkey confirmation belongs to one session,
 /// counts from its own time and is required only where an action needs it.
@@ -316,7 +316,7 @@ async fn the_dashboard_proves_with_passkeys_signed_for_its_origin() {
     let session = fixture.session(&cookie).await.expect("session");
     // The software authenticator knows no related origins, so the dashboard is on a
     // subdomain of auth's RP ID, which it signs for.
-    let dashboard: Origin = "https://admin.auth.piquel.fr"
+    let dashboard: Origin = "https://admin.auth.sourceorigin.dev"
         .parse()
         .expect("dashboard origin");
     let app = PasskeyApplication::new(
@@ -337,7 +337,7 @@ async fn the_dashboard_proves_with_passkeys_signed_for_its_origin() {
         listed
             .origins
             .iter()
-            .any(|origin| origin.as_str() == "https://admin.auth.piquel.fr")
+            .any(|origin| origin.as_str() == "https://admin.auth.sourceorigin.dev")
     );
     let owner = AccountService::new(fixture.database().clone())
         .owner(RequestContext::TEST, &cookies(&cookie))

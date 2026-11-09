@@ -7,8 +7,8 @@ use crate::oidc::{
     ResponseMode, ResponseType, Scopes, TokenPrefix,
 };
 use chrono::{Duration, Utc};
-use piquel_common::{UserId, protocol::claims::Acr};
-use piquel_repository::{InsertAuthorizationRequest, StoredOidcClient};
+use sourceorigin_common::{UserId, protocol::claims::Acr};
+use sourceorigin_repository::{InsertAuthorizationRequest, StoredOidcClient};
 use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
@@ -209,7 +209,7 @@ impl AuthorizationParameters {
             return Err(OAuthCode::InvalidRequest
                 .reject(format!("state must be at most {MAX_STATE_BYTES} bytes")));
         }
-        if !piquel_crypto::Pkce::valid_challenge(&self.code_challenge) {
+        if !sourceorigin_crypto::Pkce::valid_challenge(&self.code_challenge) {
             return Err(OAuthCode::InvalidRequest
                 .reject("code_challenge must be a base64url SHA-256 digest, 43 characters long"));
         }

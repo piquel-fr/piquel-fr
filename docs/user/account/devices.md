@@ -1,6 +1,6 @@
 # Devices
 
-The **Devices** tab of your settings, at `auth.piquel.fr/settings/sessions`,
+The **Devices** tab of your settings, at `auth.sourceorigin.dev/settings/sessions`,
 lists every browser signed in to your account. Use it to sign out a device you
 lost, sold or no longer use.
 
@@ -33,7 +33,7 @@ Signing a device out also ends the access of the apps you signed in to through
 it: they can't refresh it, and those that listen for it are told to sign you
 out. An app's access token keeps working until it expires, within five minutes,
 and an app that keeps its own session may keep you signed in until it next
-checks with Piquel.
+checks with Origin Auth.
 
 To sign out everywhere but here, select **Sign out of all other devices** at
 the top of the page. The page says **Your other devices were signed out.**

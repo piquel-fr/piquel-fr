@@ -1,4 +1,4 @@
-piquel_auth::scopes! {
+sourceorigin_auth::scopes! {
     pub mod notes {
         Read = "notes read",
     }

@@ -1,11 +1,11 @@
 # Browser apps
 
-`@piquel/auth/browser` signs users in to a page with no server of its own. It
+`@sourceorigin/auth/browser` signs users in to a page with no server of its own. It
 keeps the user's tokens in the page's memory, calls APIs with them, and can sign
 the user in with a passkey on your page itself.
 
 The code on this page comes from the SDK's example,
-[`examples/browser.ts`](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/examples/browser.ts).
+[`examples/browser.ts`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/packages/auth/examples/browser.ts).
 
 ## Before you start
 
@@ -16,12 +16,12 @@ The code on this page comes from the SDK's example,
 3. To keep users signed in for longer than an access token's five minutes, tick
    the `offline_access` scope and **Allow refresh tokens**, and request
    `offline_access` when signing in.
-4. Add `@piquel/auth` to your app. It is not on npm yet: build it from a checkout
+4. Add `@sourceorigin/auth` to your app. It is not on npm yet: build it from a checkout
    of the repository, then install it from there.
 
    ```console
    pnpm install --frozen-lockfile
-   pnpm --filter @piquel/auth build
+   pnpm --filter @sourceorigin/auth build
    npm install <checkout>/packages/auth
    ```
 
@@ -33,8 +33,8 @@ Discover the issuer, then make a browser client with your app's client ID and
 redirect URI:
 
 ```ts
-import { Issuer } from '@piquel/auth';
-import { browserClient, type Session } from '@piquel/auth/browser';
+import { Issuer } from '@sourceorigin/auth';
+import { browserClient, type Session } from '@sourceorigin/auth/browser';
 
 {{#include ../../../packages/auth/examples/browser.ts:client}}
 ```

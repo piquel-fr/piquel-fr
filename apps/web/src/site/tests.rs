@@ -4,7 +4,7 @@ use axum::body::{Body, to_bytes};
 use tower::ServiceExt;
 
 /// Auth's origin in tests.
-const AUTH: &str = "https://auth.piquel.fr";
+const AUTH: &str = "https://auth.sourceorigin.dev";
 
 /// `path`'s answer.
 async fn visit(path: &str) -> Response {
@@ -24,7 +24,7 @@ async fn visit(path: &str) -> Response {
 #[tokio::test]
 async fn serves_its_pages() {
     for (page, heading) in [
-        (Page::Home, "One passkey for every Piquel app."),
+        (Page::Home, "One passkey for every SourceOrigin app."),
         (Page::Privacy, "Privacy policy"),
         (Page::Terms, "Terms of service"),
     ] {
@@ -53,7 +53,7 @@ async fn sends_every_other_path_to_auth() {
     assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
     assert_eq!(
         response.headers()[header::LOCATION],
-        "https://auth.piquel.fr/settings/emails/verify?remove=1"
+        "https://auth.sourceorigin.dev/settings/emails/verify?remove=1"
     );
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
 }

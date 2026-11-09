@@ -19,7 +19,7 @@ const UPDATE: &str = "UPDATE_DOCS_REFERENCE";
 /// intra-doc links: they are rendered as Markdown outside rustdoc.
 ///
 /// ```
-/// piquel_common::variables! {
+/// sourceorigin_common::variables! {
 ///     /// Every variable below.
 ///     const VARIABLES;
 ///

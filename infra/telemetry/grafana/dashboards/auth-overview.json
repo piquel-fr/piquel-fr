@@ -1,7 +1,7 @@
 {
   "uid": "auth-overview",
   "title": "Auth overview",
-  "description": "Traffic, errors and latency, sign-ins, tokens and runtime of auth.piquel.fr.",
+  "description": "Traffic, errors and latency, sign-ins, tokens and runtime of auth.sourceorigin.dev.",
   "tags": [
     "auth"
   ],
@@ -284,7 +284,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(piquel_auth_throttled_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval])) * 60",
+          "expr": "sum(rate(sourceorigin_auth_throttled_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval])) * 60",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -491,7 +491,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (category) (rate(piquel_auth_throttled_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (category) (rate(sourceorigin_auth_throttled_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{category}}",
           "datasource": {
             "type": "prometheus",
@@ -556,7 +556,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (method, outcome) (rate(piquel_auth_sign_ins_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (method, outcome) (rate(sourceorigin_auth_sign_ins_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{method}} {{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -608,7 +608,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (method) (rate(piquel_auth_registrations_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (method) (rate(sourceorigin_auth_registrations_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{method}}",
           "datasource": {
             "type": "prometheus",
@@ -660,7 +660,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (grant_type, token_type) (rate(piquel_auth_tokens_issued_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (grant_type, token_type) (rate(sourceorigin_auth_tokens_issued_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{grant_type}} {{token_type}}",
           "datasource": {
             "type": "prometheus",
@@ -712,7 +712,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (reason) (rate(piquel_auth_grants_revoked_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (reason) (rate(sourceorigin_auth_grants_revoked_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{reason}}",
           "datasource": {
             "type": "prometheus",
@@ -764,7 +764,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (kind) (rate(piquel_auth_events_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (kind) (rate(sourceorigin_auth_events_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{kind}}",
           "datasource": {
             "type": "prometheus",
@@ -881,7 +881,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(piquel_auth_cleanup_changed_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum(rate(sourceorigin_auth_cleanup_changed_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "rows per second",
           "datasource": {
             "type": "prometheus",
@@ -890,7 +890,7 @@
         },
         {
           "refId": "B",
-          "expr": "sum(increase(piquel_auth_cleanup_overruns_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum(increase(sourceorigin_auth_cleanup_overruns_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "overruns",
           "datasource": {
             "type": "prometheus",
@@ -942,7 +942,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(piquel_auth_cleanup_duration_seconds_bucket{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(sourceorigin_auth_cleanup_duration_seconds_bucket{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[1h])))",
           "legendFormat": "p95",
           "datasource": {
             "type": "prometheus",
@@ -1007,7 +1007,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (channel) (piquel_auth_deliveries_pending{job=\"auth-service\", deployment_environment_name=~\"$environment\"})",
+          "expr": "max by (channel) (sourceorigin_auth_deliveries_pending{job=\"auth-service\", deployment_environment_name=~\"$environment\"})",
           "legendFormat": "{{channel}}",
           "datasource": {
             "type": "prometheus",
@@ -1059,7 +1059,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max by (channel) (piquel_auth_deliveries_oldest_pending_age_seconds{job=\"auth-service\", deployment_environment_name=~\"$environment\"})",
+          "expr": "max by (channel) (sourceorigin_auth_deliveries_oldest_pending_age_seconds{job=\"auth-service\", deployment_environment_name=~\"$environment\"})",
           "legendFormat": "{{channel}}",
           "datasource": {
             "type": "prometheus",
@@ -1111,7 +1111,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (channel, outcome) (rate(piquel_auth_deliveries_attempts_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "expr": "sum by (channel, outcome) (rate(sourceorigin_auth_deliveries_attempts_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{channel}} {{outcome}}",
           "datasource": {
             "type": "prometheus",

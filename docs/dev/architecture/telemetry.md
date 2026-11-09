@@ -1,18 +1,18 @@
 # Telemetry
 
-This page explains the telemetry auth-service and piquel-web produce, how to add
+This page explains the telemetry auth-service and sourceorigin-web produce, how to add
 more, and what never goes in it.
 
 Both services log to stderr. When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, they
 also export traces, metrics and logs over OTLP/HTTP, to the `telemetry`
 application in production (see [the telemetry stack](../operations/telemetry.md)).
-`piquel-telemetry` (`crates/telemetry`) does both. A feature gets most of its
+`sourceorigin-telemetry` (`crates/telemetry`) does both. A feature gets most of its
 telemetry for free and adds the rest in one line.
 
 ## What every feature gets
 
 - **A trace per request, job run and delivery attempt.** `HttpTelemetry` wraps
-  auth's public and admin routers and piquel-web's, outside every layer that can
+  auth's public and admin routers and sourceorigin-web's, outside every layer that can
   refuse a request ([request lifecycle](request-lifecycle.md)). Each request gets one root span,
   named after its method and route template (`POST /oauth/token`). Every log line
   inside the span carries the trace ID, on stderr and in exported logs. Exclusive
@@ -31,7 +31,7 @@ telemetry for free and adds the rest in one line.
   stores the current trace ID in `domain_events.trace_id`, and once its
   transaction commits it is logged as `event recorded` (with its ID, kind, kind
   of actor, subject and, when one acted from the admin dashboard, administrator) and
-  counted in `piquel.auth.events{kind}`. The audit
+  counted in `sourceorigin.auth.events{kind}`. The audit
   history and telemetry therefore point at each other: the admin dashboard shows
   each event's trace ID, and the trace shows each event its request recorded. A
   rolled-back transaction counts nothing. Telemetry is best effort, though: a
@@ -47,13 +47,13 @@ telemetry for free and adds the rest in one line.
   dashboard request refused`, with its `admin.failure` reason.
 - **One series per process.** Each process gets a new UUID as its
   `service.instance.id`, so replicas and command-line runs never write to the
-  same metric series. The admin dashboard's requests carry `piquel.listener =
+  same metric series. The admin dashboard's requests carry `sourceorigin.listener =
   "admin"`, which tells them apart from the public listener's.
 
 ## Adding telemetry
 
 **A log line or span:** the `tracing` macros. Auth's own targets
-(`auth_service`, `piquel_repository`) are traced and logged at `info`; use
+(`auth_service`, `sourceorigin_repository`) are traced and logged at `info`; use
 `debug!` for detail nobody needs in production.
 
 **A count derived from an event:** add an arm to `Committed::publish` in
@@ -67,7 +67,7 @@ counts their `event recorded` lines in Loki instead.
 ```rust
 /// Requests refused because their client's budget was exhausted, by category.
 static THROTTLED: Counter<[Label; 1]> = Counter::new(
-    "piquel.auth.throttled",
+    "sourceorigin.auth.throttled",
     "{request}",
     "Requests refused by rate limits, by rate category.",
 );
@@ -80,11 +80,11 @@ instrument, such as `[Label; N]` or a struct. A label value is a
 `&'static str`, so a user, client, session ID or IP address cannot become one.
 That keeps metrics free of personal data and their cardinality bounded. Name
 instruments after the [semantic conventions](https://opentelemetry.io/docs/specs/semconv/)
-where one exists, and `piquel.auth.*` otherwise. Units follow UCUM: `s`, or
+where one exists, and `sourceorigin.auth.*` otherwise. Units follow UCUM: `s`, or
 `{thing}` for counts.
 
 **An outbound HTTP call:** `request.send_traced()` instead of `send()`. It
-records the method, host and status only. `SendTraced` lives in `piquel-common`
+records the method, host and status only. `SendTraced` lives in `sourceorigin-common`
 so the Rust SDK sends its requests, such as Google's signing-key fetches through
 `KeyCache`, the same way.
 
@@ -124,7 +124,7 @@ Only the standard variables, read by `Telemetry::init`:
 | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP base URL, e.g. `http://collector.telemetry:4318`; unset or empty exports nothing |
 | `OTEL_SDK_DISABLED` | `true` keeps telemetry on stderr only |
-| `OTEL_SERVICE_NAME` | Overrides the default, `auth-service` or `piquel-web` |
+| `OTEL_SERVICE_NAME` | Overrides the default, `auth-service` or `sourceorigin-web` |
 | `OTEL_RESOURCE_ATTRIBUTES` | e.g. `deployment.environment.name=staging`, which dashboards filter on |
 | `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Sampling; every trace is kept by default |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | Bound on each export request, in milliseconds; 10000 by default. The per-signal variants are not supported |

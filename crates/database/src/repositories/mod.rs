@@ -137,9 +137,9 @@ repositories! {
 /// serde's derive knows the variant names, and it reports an unknown one through
 /// [`serde::de::Error::unknown_variant`].
 ///
-/// [`Alert`]: piquel_common::alerts::Alert
-/// [`DomainEvent`]: piquel_common::events::DomainEvent
-/// [`Notification`]: piquel_common::notifications::Notification
+/// [`Alert`]: sourceorigin_common::alerts::Alert
+/// [`DomainEvent`]: sourceorigin_common::events::DomainEvent
+/// [`Notification`]: sourceorigin_common::notifications::Notification
 #[derive(Debug, thiserror::Error)]
 enum KindProbe {
     /// The kind is no variant of this release's enum.

@@ -38,9 +38,9 @@ fn typed_ceremonies_preserve_persistence_and_check_the_expected_payload() {
     use ceremonies::CeremonyState;
 
     let user_id = UserId::new();
-    let session_id = piquel_common::SessionId::new();
-    let origin = Url::parse("https://auth.piquel.fr").expect("origin");
-    let webauthn = WebauthnBuilder::new("auth.piquel.fr", &origin)
+    let session_id = sourceorigin_common::SessionId::new();
+    let origin = Url::parse("https://auth.sourceorigin.dev").expect("origin");
+    let webauthn = WebauthnBuilder::new("auth.sourceorigin.dev", &origin)
         .expect("builder")
         .build()
         .expect("WebAuthn");
@@ -51,7 +51,7 @@ fn typed_ceremonies_preserve_persistence_and_check_the_expected_payload() {
     let ceremony = Ceremony::Discover(DiscoverCeremony { state });
     assert_eq!(
         ceremony.kind(),
-        piquel_repository::CeremonyKind::Authentication
+        sourceorigin_repository::CeremonyKind::Authentication
     );
     let encoded = serde_json::to_value(ceremony).expect("ceremony");
     assert_eq!(encoded, json!({"Discover":{"state":encoded_state}}));

@@ -32,11 +32,11 @@ use lettre::{
         header::{HeaderName, HeaderValue},
     },
 };
-use piquel_common::{
+use sourceorigin_common::{
     AnnouncementId, DeliveryId, ErrorChain, Handle, UserId, admin, config::Origin,
 };
-use piquel_crypto::CryptoError;
-use piquel_repository::{Announcement, Database, DatabaseError, Delivery, Email, EmailMessage};
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::{Announcement, Database, DatabaseError, Delivery, Email, EmailMessage};
 use std::{fmt::Display, time::Duration};
 
 /// Sends a built message, classifying failures for the retry policy. The SMTP
@@ -536,8 +536,8 @@ impl Content {
     /// The message's subject.
     fn subject(&self) -> &str {
         match self {
-            Self::VerifyAddress { .. } => "Confirm your email address for Piquel",
-            Self::RecoveryLink { .. } => "Recover your Piquel account",
+            Self::VerifyAddress { .. } => "Confirm your email address for SourceOrigin",
+            Self::RecoveryLink { .. } => "Recover your Origin Account",
             Self::Notification { subject, .. } | Self::Announcement { subject, .. } => subject,
         }
     }

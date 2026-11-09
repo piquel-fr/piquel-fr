@@ -3,8 +3,8 @@
 
 use super::{AdminError, AdminService, Operator};
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::admin::{Event, EventSearch, User};
-use piquel_repository::{DeliveryBacklog, Email};
+use sourceorigin_common::admin::{Event, EventSearch, User};
+use sourceorigin_repository::{DeliveryBacklog, Email};
 
 /// How many of the newest events the overview shows.
 const EVENTS_SHOWN: usize = 8;
@@ -16,7 +16,7 @@ const HOURS_PER_WEEK: u64 = 7 * 24;
 const DELIVERY_PATIENCE: Duration = Duration::minutes(15);
 
 /// The kinds of event the overview counts, by the serde tags
-/// [`DomainEvent`](piquel_common::events::DomainEvent) stores them under.
+/// [`DomainEvent`](sourceorigin_common::events::DomainEvent) stores them under.
 pub(crate) struct Kinds;
 
 impl Kinds {
@@ -85,7 +85,7 @@ pub struct Overview {
     pub active_sessions: u64,
     /// Every account.
     pub accounts: u64,
-    /// The accounts administering Piquel.
+    /// The accounts administering Origin Auth.
     pub administrators: u64,
     /// The newest events.
     pub events: Vec<Event>,

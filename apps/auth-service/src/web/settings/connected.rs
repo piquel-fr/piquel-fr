@@ -8,7 +8,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{
+use sourceorigin_ui::{
     Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, Messages, Notice, Section,
     Tab,
 };
@@ -67,7 +67,7 @@ impl AccountPage for ConnectedApps {
         let apps = web.account.apps(&reader.viewer()).await?;
         let rows: Vec<_> = apps.iter().map(ConnectedAppRow::from).collect();
         let page = Child::new(view! { cx =>
-            piquel_ui::connected_apps(
+            sourceorigin_ui::connected_apps(
                 page: settings::APPS,
                 rows: &rows,
                 state: &state,

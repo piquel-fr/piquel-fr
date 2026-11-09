@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use chrono::{Duration, Utc};
-use piquel_ui::{
+use sourceorigin_ui::{
     AccountOverview, ConnectedAppRow, DeviceRow, EmailRow, Holdings, Messages, OverviewLinks,
     Section, Tab,
 };
@@ -103,7 +103,7 @@ impl AccountPage for Overview {
             notifications: settings::NOTIFICATIONS,
         };
         let page = Child::new(view! { cx =>
-            piquel_ui::account_overview(overview: overview, links: links)
+            sourceorigin_ui::account_overview(overview: overview, links: links)
         });
         // Linking a provider goes on at the provider, so the page's forms may
         // redirect there.

@@ -5,8 +5,8 @@ use super::{
     ProviderEndpoints, ProviderError, VerifiedIdentity,
 };
 use chrono::Utc;
-use piquel_auth::{Jws, KeyCache, TokenError};
-use piquel_common::protocol::{
+use sourceorigin_auth::{Jws, KeyCache, TokenError};
+use sourceorigin_common::protocol::{
     claims::Audience,
     jwt::Algorithm,
     oauth::{Prompt, Scope},

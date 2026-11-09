@@ -4,7 +4,7 @@
 use super::{CliError, Confirm, Console, Output};
 use crate::{AnnouncementDraft, AnnouncementRecipients, UserRef};
 use clap::{Args, Subcommand};
-use piquel_common::AnnouncementId;
+use sourceorigin_common::AnnouncementId;
 use std::{io::Read, path::PathBuf};
 
 /// Drafting, sending and reading announcements. A draft goes to nobody until
@@ -64,7 +64,7 @@ pub(super) struct DraftArgs {
     subject: String,
     /// The file holding the text, or `-` for standard input: up to 20,000
     /// characters, paragraphs separated by blank lines. The email starts with
-    /// "Hello," and ends with "Piquel".
+    /// "Hello," and ends with "SourceOrigin".
     #[arg(long)]
     body_file: PathBuf,
     /// Send it to every account, as of its sending.

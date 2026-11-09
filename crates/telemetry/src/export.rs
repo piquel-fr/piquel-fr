@@ -6,7 +6,7 @@ use opentelemetry_http::{HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{
     ExporterBuildError, LogExporter, MetricExporter, SpanExporter, WithHttpConfig,
 };
-use piquel_common::config::{ConfigurationError, Variable};
+use sourceorigin_common::config::{ConfigurationError, Variable};
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::runtime::{Handle, TryCurrentError};

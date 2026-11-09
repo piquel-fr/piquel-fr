@@ -7,16 +7,16 @@ use crate::{
     jobs::{ExclusiveJob, Shutdown},
 };
 use chrono::{SubsecRound, TimeDelta, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ErrorChain,
     alerts::{Alert, AlertKind},
     events::{EventContext, JobName},
 };
-use piquel_crypto::NoteKey;
-use piquel_repository::{
+use sourceorigin_crypto::NoteKey;
+use sourceorigin_repository::{
     ChainLink, Checkpoint, EventContent, ExclusiveConnection, LockKey, SealedEvent,
 };
-use piquel_telemetry::Counter;
+use sourceorigin_telemetry::Counter;
 use std::{
     sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
@@ -25,7 +25,7 @@ use std::{
 /// Checkpoints the sealer passed over because none of the environment's audit
 /// keys verifies them, counted each time it looks for one to build on.
 static UNTRUSTED_CHECKPOINTS: Counter = Counter::new(
-    "piquel.auth.audit.untrusted_checkpoints",
+    "sourceorigin.auth.audit.untrusted_checkpoints",
     "{checkpoint}",
     "Checkpoints newer than the newest one that verifies, counted each time the sealer passes over them.",
 );
@@ -105,7 +105,7 @@ impl Sealer {
     /// returns how many it sealed. Positions follow [`unsealed`]'s order, so no
     /// event can later need a position before one already given.
     ///
-    /// [`unsealed`]: piquel_repository::AuditRepository::unsealed
+    /// [`unsealed`]: sourceorigin_repository::AuditRepository::unsealed
     pub(super) async fn seal(
         &self,
         connection: &mut ExclusiveConnection,

@@ -1,12 +1,12 @@
 //! Persistence guarantees behind invitations and session passkey confirmations.
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, Handle, PasskeyId, SessionId, TokenId, UserId,
     events::{
         Actor, Browser, EventContext, Platform, RequestOrigin, RevocationReason, UserAgentFamily,
     },
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser, SessionScope,
 };
 use std::net::IpAddr;

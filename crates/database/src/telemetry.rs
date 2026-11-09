@@ -2,40 +2,40 @@
 //! and in counters, and the pool's connections.
 
 use crate::Database;
-use piquel_common::{
+use sourceorigin_common::{
     EventId, UserId,
     events::{DomainEvent, HistoryActor, SignInFailure},
 };
-use piquel_telemetry::{Counter, Gauge, Label};
+use sourceorigin_telemetry::{Counter, Gauge, Label};
 
 /// Every committed event, by kind.
 static EVENTS: Counter<[Label; 1]> = Counter::new(
-    "piquel.auth.events",
+    "sourceorigin.auth.events",
     "{event}",
     "Domain events committed, by kind.",
 );
 /// Sign-ins and rejected authentications, by method and outcome.
 static SIGN_INS: Counter<[Label; 2]> = Counter::new(
-    "piquel.auth.sign_ins",
+    "sourceorigin.auth.sign_ins",
     "{sign_in}",
     "Sign-ins by method, and their outcome: success or why they were rejected.",
 );
 /// New accounts, by how the person proved who they are.
 static REGISTRATIONS: Counter<[Label; 1]> = Counter::new(
-    "piquel.auth.registrations",
+    "sourceorigin.auth.registrations",
     "{account}",
     "Accounts created, by authentication method.",
 );
 /// Revoked refresh families, by reason: replays and policy rejections included.
 static GRANTS_REVOKED: Counter<[Label; 1]> = Counter::new(
-    "piquel.auth.grants.revoked",
+    "sourceorigin.auth.grants.revoked",
     "{grant}",
     "Refresh token families revoked, by reason.",
 );
 /// Failed authorization code redemptions, each of which used its code up, by
 /// reason.
 static CODE_REDEMPTIONS_FAILED: Counter<[Label; 1]> = Counter::new(
-    "piquel.auth.codes.redemption_failed",
+    "sourceorigin.auth.codes.redemption_failed",
     "{code}",
     "Authorization code redemptions that failed and used the code up, by reason.",
 );

@@ -26,11 +26,11 @@ pub(crate) use outbound::OutboundClient;
 use crate::jobs::{Jobs, Shutdown};
 use axum::http::StatusCode;
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::ErrorChain;
-use piquel_repository::{
+use sourceorigin_common::ErrorChain;
+use sourceorigin_repository::{
     Channel, Database, DatabaseError, Delivery, DeliveryBacklog, DeliveryOutcome,
 };
-use piquel_telemetry::{Counter, Gauge, Label};
+use sourceorigin_telemetry::{Counter, Gauge, Label};
 use std::{
     collections::BTreeMap,
     hash::{BuildHasher, RandomState},
@@ -57,19 +57,19 @@ const BACKLOG_EVERY: Duration = Duration::from_secs(30);
 
 /// Attempts by channel and outcome, counted where the worker records the outcome.
 static ATTEMPTS: Counter<[Label; 2]> = Counter::new(
-    "piquel.auth.deliveries.attempts",
+    "sourceorigin.auth.deliveries.attempts",
     "{attempt}",
     "Delivery attempts, by channel and outcome: succeeded, retried, failed, or lease_lost when the outcome was discarded.",
 );
 /// Pending deliveries per channel, from [`BACKLOGS`].
 static PENDING: Gauge<[Label; 1]> = Gauge::new(
-    "piquel.auth.deliveries.pending",
+    "sourceorigin.auth.deliveries.pending",
     "{delivery}",
     "Deliveries waiting for an attempt or being attempted, by channel.",
 );
 /// How long each channel's oldest pending delivery has waited, from [`BACKLOGS`].
 static OLDEST_PENDING_AGE: Gauge<[Label; 1]> = Gauge::new(
-    "piquel.auth.deliveries.oldest_pending_age",
+    "sourceorigin.auth.deliveries.oldest_pending_age",
     "s",
     "Time since the oldest pending delivery was created or retried by an operator, by channel.",
 );

@@ -6,7 +6,7 @@ use crate::{
     Database, EventRepository, InsertUser, MaintenanceRepository, SessionScope, StoredEvent,
     UserRepository,
 };
-use piquel_common::{
+use sourceorigin_common::{
     SessionId,
     events::{Actor, EventContext, RequestOrigin, RevocationReason},
 };
@@ -164,7 +164,7 @@ async fn deliveries_commit_with_their_event() {
             reason: None,
         };
         let event = DomainEvent::IdentityUnlinked {
-            provider: piquel_common::Provider::GitHub,
+            provider: sourceorigin_common::Provider::GitHub,
         };
         tx.record_to::<(Recorder, ())>(&context, Some(user), event)
             .await

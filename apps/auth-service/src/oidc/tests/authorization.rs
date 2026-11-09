@@ -1,7 +1,7 @@
 //! Authorization requests: consent, PKCE, scoped claims and account hints.
 
 use super::*;
-use piquel_repository::SessionScope;
+use sourceorigin_repository::SessionScope;
 
 /// Checks public-client consent, PKCE, scoped claims and one-use authorization codes:
 /// a redemption with the wrong verifier expires its code, so it cannot be tried

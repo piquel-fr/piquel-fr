@@ -3,14 +3,14 @@
 use super::{JsonArray, OidcRepository, RepositoryExecutor};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, SessionId, TokenId, UserId,
     admin::Consent,
     protocol::{claims::Acr, oauth::Interaction},
 };
 use sqlx::types::Json;
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// Purpose of a registered OIDC continuation.
     pub enum OidcRedirectKind {
         /// Receives the authorization code.

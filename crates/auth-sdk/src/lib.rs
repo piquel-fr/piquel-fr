@@ -1,4 +1,4 @@
-//! Rust SDK for auth.piquel.fr.
+//! Rust SDK for auth.sourceorigin.dev.
 //!
 //! - **Resource servers** validate access tokens with a [`ResourceValidator`], and
 //!   declare their scopes as types with [`scopes!`], so a misspelled scope does not
@@ -9,16 +9,16 @@
 //!   rotation without letting unknown key IDs flood the issuer.
 //!
 //! The user guide shows how to use it, with the `axum` feature:
-//! [signing in with Rust](https://docs.piquel.fr/user/apps/sign-in-rust.html) and
-//! [protecting an API](https://docs.piquel.fr/user/apps/protect-an-api.html).
+//! [signing in with Rust](https://docs.sourceorigin.dev/user/apps/sign-in-rust.html) and
+//! [protecting an API](https://docs.sourceorigin.dev/user/apps/protect-an-api.html).
 //!
 //! Everything starts from a discovered [`Issuer`]:
 //!
 //! ```no_run
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-//! use piquel_auth::{Issuer, Resource, Subject};
+//! use sourceorigin_auth::{Issuer, Resource, Subject};
 //!
-//! piquel_auth::scopes! {
+//! sourceorigin_auth::scopes! {
 //!     /// Scopes of the notes API.
 //!     pub mod notes {
 //!         Read = "notes:read",
@@ -26,7 +26,7 @@
 //!     }
 //! }
 //!
-//! let issuer = Issuer::discover("https://auth.piquel.fr").await?;
+//! let issuer = Issuer::discover("https://auth.sourceorigin.dev").await?;
 //! let notes = issuer.resource(Resource::new("notes-api")?);
 //! let token = notes.validate::<notes::Read>("eyJ...").await?;
 //! if let Subject::User(user) = token.subject() {
@@ -90,10 +90,10 @@
 //! request is `https`, follows no redirect, and gives up after 10 seconds.
 //!
 //! Each request runs in an `http.client` `tracing` span, at `info` under the
-//! `piquel_common` target, with its method, host and status only, as OpenTelemetry's
+//! `sourceorigin_common` target, with its method, host and status only, as OpenTelemetry's
 //! HTTP client conventions name them.
 //!
-//! The behavior follows `docs/dev/architecture/sdk.md` in the piquel-fr repository, and is
+//! The behavior follows `docs/dev/architecture/sdk.md` in the sourceorigin repository, and is
 //! tested against the shared vectors in `tests/sdk-vectors`.
 
 // Documented by its own inner docs, so their links resolve inside the module.
@@ -133,8 +133,8 @@ pub use token::{
 /// The wire types this SDK reads, shared with auth itself. Each item is re-exported
 /// by name, so this list is the SDK's contract.
 pub mod protocol {
-    pub use piquel_common::protocol::{challenge, claims, jwt, metadata, oauth, sdk, step_up};
-    pub use piquel_common::{ClientId, DeliveryId, InvalidValue, SessionId, TokenId, UserId};
+    pub use sourceorigin_common::protocol::{challenge, claims, jwt, metadata, oauth, sdk, step_up};
+    pub use sourceorigin_common::{ClientId, DeliveryId, InvalidValue, SessionId, TokenId, UserId};
 }
 pub use protocol::{
     ClientId, SessionId, TokenId, UserId,
@@ -157,7 +157,7 @@ const LEEWAY: TimeDelta = TimeDelta::seconds(30);
 ///
 /// ```
 /// use chrono::{DateTime, TimeDelta, Utc};
-/// use piquel_auth::Clock;
+/// use sourceorigin_auth::Clock;
 ///
 /// /// A clock pinned to one instant, for tests.
 /// struct Fixed(DateTime<Utc>);

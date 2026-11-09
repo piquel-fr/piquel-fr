@@ -2,7 +2,7 @@
 //! and stay their owner's.
 use super::*;
 use crate::{Database, DatabaseTransaction, InsertUser};
-use piquel_common::{
+use sourceorigin_common::{
     Personal, SessionId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
 };

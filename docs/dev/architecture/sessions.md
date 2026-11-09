@@ -16,7 +16,7 @@ it, when it signed in (`authenticated_at`), when a passkey last confirmed it
 (`passkey_confirmed_at`) and with which passkey (`passkey_id`), its absolute
 expiry, and the coarse browser family and IP address it was last seen from.
 
-The browser holds a random secret in the `__Host-piquel_session` cookie:
+The browser holds a random secret in the `__Host-sourceorigin_session` cookie:
 host-only, `Path=/`, `Secure`, `HttpOnly`, `SameSite=Lax`, for 30 days
 (`BrowserCookie` in `src/security/cookie.rs`). Only the secret's SHA-256 digest is
 stored, in `browser_session_secrets`. A cookie that is malformed, or sent twice,
@@ -89,7 +89,7 @@ recovery's passkey in probation never confirms.
 authenticated, as tokens report it:
 
 - `acr` is `phr` once a passkey confirmed the session, and
-  `urn:piquel:acr:social` before.
+  `urn:sourceorigin:acr:social` before.
 - `auth_time` is the last passkey confirmation, or else the sign-in.
 - `amr` is the union of its methods' values: `pop`, `mfa` and `user` for a
   passkey, `fed` for a provider.
@@ -162,9 +162,9 @@ an auth session (`DashboardSignIn` in `src/admin/sign_in.rs`):
 1. Auth's handoff page hands a session signed in with a passkey, of an account
    that holds administrator rights, to the dashboard with a code that works once,
    for 60 seconds, bound to the dashboard's state cookie
-   (`__Host-piquel_dashboard_state`).
+   (`__Host-sourceorigin_dashboard_state`).
 2. Redeeming the code creates a `dashboard_sessions` row naming the auth session,
-   and the `__Host-piquel_dashboard` cookie on the dashboard's origin, whose
+   and the `__Host-sourceorigin_dashboard` cookie on the dashboard's origin, whose
    digest alone is stored.
 3. Every request finds the dashboard session only while its auth session is
    active, and checks again that the account holds administrator rights and that
@@ -174,5 +174,5 @@ So signing out of auth, revoking the auth session or replacing it ends the
 dashboard's too, while signing out of the dashboard ends only its own. The
 dashboard keeps its own confirmation time, set only by a passkey proof made for
 it, and a change needs that confirmation from the last five minutes; the auth
-session's confirmation never counts. [admin.piquel.fr](surfaces.md#adminpiquelfr)
+session's confirmation never counts. [admin.sourceorigin.dev](surfaces.md#adminsourceorigindev)
 describes the handoff and confirmation from the administrator's side.

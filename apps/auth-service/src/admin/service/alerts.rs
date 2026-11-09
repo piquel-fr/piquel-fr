@@ -2,12 +2,12 @@
 
 use super::AdminService;
 use crate::admin::{AdminError, Operator, Reason};
-use piquel_common::{
+use sourceorigin_common::{
     AlertId,
     alerts::{AlertDetail, AlertStatus, AlertUpdate, AlertsShown, StoredAlert},
     events::{DomainEvent, EventContext},
 };
-use piquel_repository::{DatabaseError, DatabaseTransaction};
+use sourceorigin_repository::{DatabaseError, DatabaseTransaction};
 use std::collections::HashMap;
 
 /// How many alerts a list shows.

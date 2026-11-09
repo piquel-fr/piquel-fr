@@ -664,7 +664,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (http_request_method, http_route) (rate(http_server_request_duration_seconds_count{job=\"auth-service\", deployment_environment_name=~\"$environment\", piquel_listener=\"admin\"}[$__rate_interval]))",
+          "expr": "sum by (http_request_method, http_route) (rate(http_server_request_duration_seconds_count{job=\"auth-service\", deployment_environment_name=~\"$environment\", sourceorigin_listener=\"admin\"}[$__rate_interval]))",
           "legendFormat": "{{http_request_method}} {{http_route}}",
           "datasource": {
             "type": "prometheus",
@@ -716,7 +716,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"auth-service\", deployment_environment_name=~\"$environment\", piquel_listener=\"admin\"}[$__rate_interval]))",
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"auth-service\", deployment_environment_name=~\"$environment\", sourceorigin_listener=\"admin\"}[$__rate_interval]))",
           "legendFormat": "{{http_response_status_code}}",
           "datasource": {
             "type": "prometheus",
@@ -885,7 +885,7 @@
           "queryType": "traceql",
           "limit": 50,
           "tableType": "traces",
-          "query": "{resource.service.name=\"auth-service\" && resource.deployment.environment.name=~\"$environment\" && kind=server && span.piquel.listener=\"admin\"}"
+          "query": "{resource.service.name=\"auth-service\" && resource.deployment.environment.name=~\"$environment\" && kind=server && span.sourceorigin.listener=\"admin\"}"
         }
       ]
     }

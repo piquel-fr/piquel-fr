@@ -4,19 +4,19 @@
 use super::{AuditChain, AuditError, AuditKeys, AuditVerification};
 use crate::jobs::{ExclusiveJob, JobCount, Shutdown, Streak};
 use chrono::{TimeDelta, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     alerts::Alert,
     events::{DomainEvent, EventContext, JobName},
 };
-use piquel_repository::{ExclusiveConnection, LockKey, RecordedEvent, Verifications};
-use piquel_telemetry::Gauge;
+use sourceorigin_repository::{ExclusiveConnection, LockKey, RecordedEvent, Verifications};
+use sourceorigin_telemetry::Gauge;
 use std::time::Duration;
 
 /// Whether the newest recorded verification found the chain broken, read after
 /// each run of the verifier.
 static BROKEN: JobCount = JobCount::new(
     Gauge::new(
-        "piquel.auth.audit.broken",
+        "sourceorigin.auth.audit.broken",
         "1",
         "1 when the newest recorded verification of the audit chain found it broken, 0 when \
          intact.",

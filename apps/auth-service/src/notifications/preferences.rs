@@ -12,14 +12,14 @@ use crate::{
     routes::page,
     security::RequestContext,
 };
-use piquel_common::{
+use sourceorigin_common::{
     UserId,
     config::Origin,
     events::{Actor, DomainEvent},
     notifications::{EmailCategory, NotificationPreference},
 };
-use piquel_crypto::{CryptoError, Secret};
-use piquel_repository::DatabaseTransaction;
+use sourceorigin_crypto::{CryptoError, Secret};
+use sourceorigin_repository::DatabaseTransaction;
 use serde::{Deserialize, Serialize};
 
 /// The links that turn an account's announcements' email off, which every
@@ -137,7 +137,7 @@ impl AccountService {
     /// records it as `context`'s if it changed anything.
     async fn prefer(
         tx: &mut DatabaseTransaction<'_>,
-        context: piquel_common::events::EventContext,
+        context: sourceorigin_common::events::EventContext,
         user: UserId,
         preference: NotificationPreference,
     ) -> Result<(), AccountError> {

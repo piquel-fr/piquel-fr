@@ -15,7 +15,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use chrono::{Duration, Utc};
-use piquel_repository::{OidcRepository, StoredAuthorizationRequest};
+use sourceorigin_repository::{OidcRepository, StoredAuthorizationRequest};
 use serde::Serialize;
 use url::Url;
 
