@@ -18,7 +18,7 @@ path_param!(pub key: KeyId, error = not_found);
 #[derive(Clone, Serialize, Deserialize)]
 struct Rotation {
     /// Whether the new key signs at once, skipping its day of waiting.
-    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
+    #[serde(default)]
     now: Checkbox,
 }
 

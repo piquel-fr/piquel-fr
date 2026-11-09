@@ -60,7 +60,7 @@ struct NewHandle {
     /// Why, recorded with the change and shown to the owner in their history.
     reason: String,
     /// Whether a reserved handle, or one that looks like another, is allowed.
-    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
+    #[serde(default)]
     allow_reserved: Checkbox,
 }
 

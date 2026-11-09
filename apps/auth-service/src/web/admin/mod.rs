@@ -36,8 +36,6 @@ mod audit;
 mod clients;
 /// The outbound delivery queue.
 mod deliveries;
-/// What the dashboard keeps of the changes its forms post.
-mod forms;
 /// The reserved and released handles, and the accounts holding a reserved one.
 mod handles;
 /// Signup invitations.
@@ -54,6 +52,8 @@ mod overview;
 mod reveal;
 /// An account's settings, which administrators change on its owner's behalf.
 mod settings;
+/// The claims on the changes the dashboard's forms post.
+mod submissions;
 #[cfg(test)]
 mod tests;
 /// Account search, one account, and the changes made to it.
@@ -73,7 +73,6 @@ use crate::{
 };
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
-use forms::Claimed;
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{ClientId, ErrorChain, UserId, config::Origin};
 use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
@@ -88,6 +87,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration as StdDuration, Instant},
 };
+use submissions::Claimed;
 use topcoat::{
     Error, Result,
     context::{Cx, app_context, memoize},
@@ -206,7 +206,7 @@ pub(crate) struct AdminApplication {
     /// The settings administrators share with owners.
     account: AccountService,
     /// The claims on changes, so none is made twice.
-    forms: forms::DashboardForms,
+    submissions: submissions::Submissions,
     /// Who is signed in, and signing in through auth.
     sign_in: DashboardSignIn,
     /// The passkey ceremonies that confirm the dashboard on its own pages.
@@ -327,7 +327,7 @@ impl AdminApplication {
         Ok(Self {
             service: AdminService::new(database.clone(), config.email.smtp.is_some()),
             account: AccountService::new(database.clone()),
-            forms: forms::DashboardForms::new(database.clone()),
+            submissions: submissions::Submissions::new(database.clone()),
             keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             passkeys,
@@ -581,7 +581,7 @@ impl AdminApplication {
         let Some(Form(input)) = form.filter(|_| method(cx) == Method::POST) else {
             return Ok(None);
         };
-        let claim = match app.forms.claim(admin.user_id, page, &input).await? {
+        let claim = match app.submissions.claim(admin.user_id, page, &input).await? {
             Claimed::New(claim) => claim,
             Claimed::Made => return Err(see_other(again).into()),
             Claimed::Pending => {
@@ -999,6 +999,7 @@ impl AdminApplication {
                 finish,
                 left: admin.operator.confirmation_left().num_seconds(),
                 form_time: FORM_TIME.num_seconds(),
+                target: parent.as_ref().map(Parent::target),
             }),
         };
         let page = Child::new(page);

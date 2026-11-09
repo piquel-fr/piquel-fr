@@ -2137,7 +2137,7 @@ async fn a_change_posted_twice_is_made_once() {
     let url = format!("{DASHBOARD}{new}");
     let fields = [("shown", "first"), ("expires_in", "2d")];
     let post = || dashboard.submit(&harness.dashboard, &url, &fields, OWN_PAGE);
-    let forms = super::forms::DashboardForms::new(harness.database.clone());
+    let forms = super::submissions::Submissions::new(harness.database.clone());
     let posted = super::invitations::InvitationForm {
         invitation: CreateInvitation {
             expires_in: Some("2d".into()),
@@ -2145,7 +2145,7 @@ async fn a_change_posted_twice_is_made_once() {
         shown: "first".into(),
     };
     let claim = async || match forms.claim(admin.user_id, new, &posted).await {
-        Ok(super::forms::Claimed::New(claim)) => claim,
+        Ok(super::submissions::Claimed::New(claim)) => claim,
         _ => panic!("claimed"),
     };
     let created = async || {

@@ -333,9 +333,10 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<NoInput>>) -> Resu
     })
     .await?;
     // The session, of the account the crumb names.
-    let session = session.to_string();
-    let target = App::target(cx).await.map(|account| Target {
-        name: account.name,
+    let (session, account) = (session.to_string(), App::target(cx).await);
+    let named = account.map(|account| format!("{}, session", account.name));
+    let target = named.as_deref().map(|name| Target {
+        name,
         id: Some(&session),
     });
     let page = view! { cx =>

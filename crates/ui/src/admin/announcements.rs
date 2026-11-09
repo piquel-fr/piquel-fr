@@ -107,6 +107,8 @@ pub async fn announcement_page<'a>(
     let unmailed = announcement.recipients.saturating_sub(detail.mailed);
     let emails = detail.emails;
     let revision = announcement.revision.to_string();
+    // The announcement, as the passkey dialog names it.
+    let named = format!("{} ({})", announcement.subject, announcement.id);
     Ok(view! {
         page_head(
             title: announcement.subject.as_str(),
@@ -161,10 +163,11 @@ pub async fn announcement_page<'a>(
                         confirm(
                             action: &actions.send,
                             change: Change::SendAnnouncement,
+                            target: named.as_str(),
                             <input type="hidden" name="revision" value=(revision.as_str())>
                         )
                         <a class="button secondary small" href=(actions.edit)>"Edit"</a>
-                        confirm(action: &actions.discard, change: Change::DiscardAnnouncement)
+                        confirm(action: &actions.discard, change: Change::DiscardAnnouncement, target: named.as_str())
                     </div>
                 }
             </div>

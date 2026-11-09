@@ -1,4 +1,4 @@
-//! What the dashboard keeps of the changes its forms post, which
+//! The claims on the changes the dashboard's forms post, which
 //! [`AdminApplication::change`](super::AdminApplication) runs every one through:
 //!
 //! - a claim on each change, by the digest of its administrator, page, query and
@@ -18,25 +18,25 @@ use sourceorigin_repository::{Database, DatabaseError, Submission, SubmissionTok
 /// How long a change blocks the same form posted again: a double click, or a
 /// slow first answer, but rarely a real repeat.
 const SUBMISSION_WINDOW: Duration = Duration::seconds(10);
-/// Why the dashboard could not keep or read a form.
+/// Why the dashboard could not claim a change.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum FormsError {
+pub(super) enum SubmissionsError {
     /// The database failed.
-    #[error("the dashboard's forms could not be stored")]
+    #[error("a dashboard change's claim could not be stored")]
     Database(#[from] DatabaseError),
     /// The form could not be written as JSON.
-    #[error("a dashboard form could not be kept")]
+    #[error("a dashboard change's form could not be written as JSON")]
     Json(#[from] serde_json::Error),
 }
 
 /// The dashboard's claims on changes, over the database.
 #[derive(Clone)]
-pub(super) struct DashboardForms {
+pub(super) struct Submissions {
     /// The claims.
     database: Database,
 }
 
-/// What [`DashboardForms::claim`] found of a change just posted.
+/// What [`Submissions::claim`] found of a change just posted.
 pub(super) enum Claimed<'a> {
     /// It is claimed now, to be made.
     New(Claim<'a>),
@@ -47,19 +47,19 @@ pub(super) enum Claimed<'a> {
     Pending,
 }
 
-/// A change [`DashboardForms::claim`] claimed, while it is made.
+/// A change [`Submissions::claim`] claimed, while it is made.
 pub(super) struct Claim<'a> {
     /// Where its claim is kept.
-    forms: &'a DashboardForms,
+    submissions: &'a Submissions,
     /// Its claim's own token, which only this request holds.
     token: SubmissionToken,
 }
 
 impl Claim<'_> {
     /// Keeps the claim for [`SUBMISSION_WINDOW`]: the change was made.
-    pub(super) async fn keep(self) -> Result<(), FormsError> {
+    pub(super) async fn keep(self) -> Result<(), SubmissionsError> {
         let expires_at = Utc::now() + SUBMISSION_WINDOW;
-        (self.forms.database.dashboard())
+        (self.submissions.database.dashboard())
             .made_submission(self.token, expires_at)
             .await?;
         Ok(())
@@ -67,15 +67,15 @@ impl Claim<'_> {
 
     /// Gives up the claim: the change made nothing, so posting it again tries
     /// again.
-    pub(super) async fn release(self) -> Result<(), FormsError> {
-        (self.forms.database.dashboard())
+    pub(super) async fn release(self) -> Result<(), SubmissionsError> {
+        (self.submissions.database.dashboard())
             .release_submission(self.token)
             .await?;
         Ok(())
     }
 }
 
-impl DashboardForms {
+impl Submissions {
     /// Keeps the dashboard's forms in `database`.
     pub(super) const fn new(database: Database) -> Self {
         Self { database }
@@ -88,7 +88,7 @@ impl DashboardForms {
         user_id: UserId,
         page: &str,
         form: &impl Serialize,
-    ) -> Result<Claimed<'_>, FormsError> {
+    ) -> Result<Claimed<'_>, SubmissionsError> {
         let mut posted = user_id.as_uuid().as_bytes().to_vec();
         posted.extend_from_slice(page.as_bytes());
         // A page cannot hold a NUL, so the form cannot shift into it.
@@ -102,7 +102,10 @@ impl DashboardForms {
             .claim_submission(digest.as_bytes(), user_id, expires_at)
             .await?;
         Ok(match found {
-            Submission::Claimed(token) => Claimed::New(Claim { forms: self, token }),
+            Submission::Claimed(token) => Claimed::New(Claim {
+                submissions: self,
+                token,
+            }),
             Submission::Made => Claimed::Made,
             Submission::Pending => Claimed::Pending,
         })

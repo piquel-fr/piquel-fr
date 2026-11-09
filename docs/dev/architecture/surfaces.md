@@ -145,8 +145,10 @@ being misread or made twice:
   administrator, page, query and form, such as `/handles/release?handle=alice`,
   while it is made and for ten seconds after. The same form posted again
   meanwhile, such as by a double click or a reload, changes nothing. Once the
-  first is made, the repeat goes where the first one went. While the first is
-  still being made, the repeat shows its form again, at `409`, saying so. A
+  first is made, the repeat goes to the page listing what it changed, such as
+  the account's or the invitations. While the first is still being made, the
+  repeat shows its form again, at `409`, saying so. The dashboard's script
+  posts a form only once, so a double click sends no repeat at all. A
   refused change gives up its claim, so posting it again tries again. No
   transaction stays open while a change is made: the claim is written, then
   marked made or deleted, by its own token, so a request whose claim expired

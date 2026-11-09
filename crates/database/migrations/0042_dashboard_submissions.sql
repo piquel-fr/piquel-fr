@@ -8,7 +8,7 @@ CREATE TABLE dashboard_submissions (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     -- This claim's own, so a request whose claim expired and was taken by a
     -- repeat cannot mark or release the repeat's.
-    token UUID NOT NULL,
+    token UUID NOT NULL UNIQUE,
     made BOOLEAN NOT NULL DEFAULT FALSE,
     expires_at TIMESTAMPTZ NOT NULL
 );

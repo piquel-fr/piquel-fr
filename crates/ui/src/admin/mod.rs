@@ -244,6 +244,9 @@ pub struct Confirmation<'a> {
     /// The seconds a change's page needs left to show its form: a link to one
     /// followed with less confirms first.
     pub form_time: i64,
+    /// What the page acts on, such as the account it is under, which the dialog
+    /// names when the link or form that opened it names nothing.
+    pub target: Option<Target<'a>>,
 }
 
 /// The document around every dashboard page, in the shell `dashboard` describes:
@@ -323,7 +326,7 @@ pub async fn dashboard_frame<'a>(
                 <p class="help" id="passkey-confirmation-help">"This change needs your passkey. It confirms the dashboard only, for five minutes."</p>
                 // What the change is, and what it acts on, which the dashboard's
                 // script writes from the link or form that opened the dialog.
-                <p data-confirming="" hidden=""><strong></strong></p>
+                <p data-confirming="" data-default=(confirmation.target.map(Target::text)) hidden=""><strong></strong></p>
                 <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
                 <div class="row actions">
                     <button type="button" data-passkey-confirm="" autofocus="">"Confirm with a passkey"</button>

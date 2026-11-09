@@ -202,7 +202,7 @@ pub async fn user_page<'a>(
         <div class="two">
             credentials(detail: detail)
         </div>
-        session_list(sessions: sessions, pages: pages, account: named.as_str())
+        session_list(sessions: sessions, pages: pages, account: named.as_str(), handle: user.handle.as_str())
         <section class="card">
             <header><h2>"Consents " <span class="count">(detail.consents.len().to_string())</span></h2></header>
             if detail.consents.is_empty() {
@@ -232,12 +232,13 @@ pub async fn user_page<'a>(
 
 /// An account's `sessions`, each with the change ending it, and the one ending
 /// them all, or why the `pages` offer none. The passkey dialog names the
-/// `account`, and the session.
+/// `account` when ending them all, and each session by the account's `handle`.
 #[component]
 async fn session_list<'a>(
     sessions: &'a [SessionRow<'a>],
     pages: Result<AccountPages<'a>, &'a str>,
     account: &'a str,
+    handle: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
     <section class="card">
@@ -278,7 +279,7 @@ async fn session_list<'a>(
                                 <td>moment(at: row.session.expires_at)</td>
                                 <td class="right">
                                     if let Some(revoke) = &row.revoke {
-                                        let session = format!("{account}, session {}", row.session.id);
+                                        let session = format!("{handle}, session ({})", row.session.id);
                                         confirm(action: revoke, change: Change::RevokeSession, target: session.as_str())
                                     }
                                 </td>
