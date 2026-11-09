@@ -1,7 +1,7 @@
 # Registering an app
 
 Register your app in the developer console to get the client ID, and for an app
-with a backend the client secret, it needs to sign users in with sourceorigin.dev.
+with a backend the client secret, it needs to sign users in with Origin Auth.
 
 ## Before you start
 

@@ -12,9 +12,9 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use serde_json::{Value, json};
 use sourceorigin_common::protocol::jwt::{Jwk, TokenType};
 use sourceorigin_repository::InsertSigningKey;
-use serde_json::{Value, json};
 use tower::ServiceExt;
 
 /// The issuer the test tokens name.

@@ -129,7 +129,7 @@ anything else.
 
 The key is named after the auth host, e.g. `auth.sourceorigin.dev/audit`. Production
 and staging each have their own, kept in piqueld's secret store as
-`audit-key-production` and `audit-key-staging`, and their verifier keys are
+`audit-key-production-2` and `audit-key-staging-2`, and their verifier keys are
 committed to [`audit-key.pub`](audit-key.pub), one key per line. Every build
 compiles that file in, so a compromised server cannot swap the key that `audit
 verify` trusts. `audit verify` and `audit prune` trust only the key named after
@@ -269,7 +269,7 @@ that would. The command verifies again first.
 ## Rotating the audit key
 
 1. Generate a seed with `openssl rand -hex 32 > seed`, and store it under a new
-   name, e.g. `piquelctl app secret sourceorigin set audit-key-production-2 --file
+   name, e.g. `piquelctl app secret sourceorigin set audit-key-production-3 --file
    seed --environments production --no-previews`.
 2. Print its verifier key with your local configuration, overriding the key and
    host: `AUTH_AUDIT_KEY_PROVIDER=file://$PWD/seed

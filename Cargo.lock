@@ -254,12 +254,6 @@ dependencies = [
  "ipnet",
  "lettre",
  "percent-encoding",
- "sourceorigin-auth",
- "sourceorigin-common",
- "sourceorigin-crypto",
- "sourceorigin-repository",
- "sourceorigin-telemetry",
- "sourceorigin-ui",
  "psl",
  "rcgen",
  "reqwest",
@@ -267,6 +261,12 @@ dependencies = [
  "serde_json",
  "serde_json_canonicalizer",
  "serde_urlencoded",
+ "sourceorigin-auth",
+ "sourceorigin-common",
+ "sourceorigin-crypto",
+ "sourceorigin-repository",
+ "sourceorigin-telemetry",
+ "sourceorigin-ui",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
@@ -2196,136 +2196,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
-name = "sourceorigin-auth"
-version = "0.1.0"
-dependencies = [
- "aws-lc-rs",
- "axum",
- "base64 0.22.1",
- "chrono",
- "jsonwebtoken",
- "sourceorigin-common",
- "rand 0.8.7",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "tower",
- "tracing",
- "trybuild",
- "url",
-]
-
-[[package]]
-name = "sourceorigin-common"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "openssl",
- "sourceorigin-crypto",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.18",
- "tracing",
- "ts-rs",
- "unicode-normalization",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "sourceorigin-crypto"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "openssl",
- "sourceorigin-common",
- "rand 0.8.7",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "sourceorigin-repository"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "sourceorigin-common",
- "sourceorigin-crypto",
- "sourceorigin-telemetry",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "sourceorigin-telemetry"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "bytes",
- "http",
- "opentelemetry",
- "opentelemetry-appender-tracing",
- "opentelemetry-http",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "sourceorigin-common",
- "reqwest",
- "thiserror 2.0.18",
- "tokio",
- "tower",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "sourceorigin-ui"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "sourceorigin-common",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "tokio",
- "topcoat",
- "url",
-]
-
-[[package]]
-name = "sourceorigin-web"
-version = "0.1.0"
-dependencies = [
- "axum",
- "sourceorigin-common",
- "sourceorigin-telemetry",
- "sourceorigin-ui",
- "thiserror 2.0.18",
- "tokio",
- "topcoat",
- "tower",
- "tracing",
-]
-
-[[package]]
 name = "pkcs1"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3087,6 +2957,136 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sourceorigin-auth"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "jsonwebtoken",
+ "rand 0.8.7",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sourceorigin-common",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+ "trybuild",
+ "url",
+]
+
+[[package]]
+name = "sourceorigin-common"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "openssl",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sourceorigin-crypto",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tracing",
+ "ts-rs",
+ "unicode-normalization",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "sourceorigin-crypto"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "openssl",
+ "rand 0.8.7",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sourceorigin-common",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "sourceorigin-repository"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "sourceorigin-common",
+ "sourceorigin-crypto",
+ "sourceorigin-telemetry",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "sourceorigin-telemetry"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "http",
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-http",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "reqwest",
+ "sourceorigin-common",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "sourceorigin-ui"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sourceorigin-common",
+ "tokio",
+ "topcoat",
+ "url",
+]
+
+[[package]]
+name = "sourceorigin-web"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "sourceorigin-common",
+ "sourceorigin-telemetry",
+ "sourceorigin-ui",
+ "thiserror 2.0.18",
+ "tokio",
+ "topcoat",
+ "tower",
+ "tracing",
 ]
 
 [[package]]

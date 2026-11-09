@@ -3,6 +3,7 @@
 
 use super::moment;
 use crate::layout::{Pager, page_head, pager};
+use serde_json::Value;
 use sourceorigin_common::{
     AlertId, AuthenticationMethod, Personal, Provider,
     admin::Event,
@@ -12,7 +13,6 @@ use sourceorigin_common::{
         RevocationReason, SignInFailure,
     },
 };
-use serde_json::Value;
 use std::fmt::Display;
 use topcoat::{
     Result,

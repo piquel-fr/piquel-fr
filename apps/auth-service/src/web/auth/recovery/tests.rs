@@ -352,7 +352,12 @@ async fn settings_show_the_recovery() {
     let recovering = Recovering::new(&database, true).await;
     let browser = recovering.signed_in().await;
     // The passkey sign-in confirmed the session.
-    let key = |stage| format!("sourceorigin-recovery:{}:{stage}:confirmed", browser.session_id);
+    let key = |stage| {
+        format!(
+            "sourceorigin-recovery:{}:{stage}:confirmed",
+            browser.session_id
+        )
+    };
     let asks = |page: &str, stage, refusal| {
         let key = key(stage);
         let banner = r#"<section class="notice warning stack" "#;

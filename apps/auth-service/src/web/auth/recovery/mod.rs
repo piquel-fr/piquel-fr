@@ -37,7 +37,9 @@ impl From<RecoveryNotice> for Recovery {
     /// The recovery, as its pages show it.
     fn from(notice: RecoveryNotice) -> Self {
         let stage = match notice.stage {
-            RecoveryStage::Open { expires_at } => sourceorigin_ui::RecoveryStage::Open { expires_at },
+            RecoveryStage::Open { expires_at } => {
+                sourceorigin_ui::RecoveryStage::Open { expires_at }
+            }
             RecoveryStage::Probation {
                 completed_at,
                 settles_at,

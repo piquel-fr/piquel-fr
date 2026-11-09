@@ -70,11 +70,11 @@ use crate::{
     settings::{Tab as SettingsTab, settings_tabs},
 };
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     AccountStatus, TraceId,
     admin::{EventSearch, SendAnnouncement, UserSearch},
 };
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
@@ -851,7 +851,7 @@ impl Change {
     }
 
     /// Whether it needs the dashboard's recent passkey confirmation, which the
-    /// dashboard's script asks for in a dialog before its link or form goes on. A
+    /// dashboard asks for in a dialog before its link or form goes on. A
     /// draft announcement's own changes don't: a long text never outlasts one.
     const fn confirms(self) -> bool {
         !matches!(
@@ -1141,7 +1141,7 @@ pub async fn dashboard_failure<'a>(
 }
 
 /// What the dashboard says once signed out: signing in again, at `sign_in`, is
-/// quick while the SourceOrigin session lasts, which signs out at `auth_sign_out`.
+/// quick while the Origin Account session lasts, which signs out at `auth_sign_out`.
 #[component]
 pub async fn dashboard_signed_out<'a>(
     cx: &Cx,
@@ -1153,7 +1153,7 @@ pub async fn dashboard_signed_out<'a>(
         <p class="lead">"You are still signed in to your Origin Account, so signing in to the dashboard again is quick."</p>
         <div class="row actions">
             <a class="button" href=(sign_in)>"Sign in again"</a>
-            <a class="button secondary" href=(auth_sign_out)>"Sign out of SourceOrigin"</a>
+            <a class="button secondary" href=(auth_sign_out)>"Sign out of your Origin Account"</a>
         </div>
     })
 }

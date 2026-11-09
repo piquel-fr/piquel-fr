@@ -1,5 +1,10 @@
 # sourceorigin
 
+SourceOrigin is the project and its site. Origin Auth is its sign-in service
+(sign-in, the account settings, the developer console, the admin dashboard and
+the SDKs), and a person's account is an Origin Account. Use these names in
+everything people read.
+
 This repository contains everything under the sourceorigin.dev domain:
 
 - `apps/auth-service`: auth.sourceorigin.dev (OIDC, its sign-in pages, the account

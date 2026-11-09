@@ -7,12 +7,12 @@ use crate::{
     form::{Checkbox, Fields, Lines, Precision, change_form, time},
 };
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     ClientId,
     clients::{ClientField, ClientKind},
     protocol::oauth::Scope,
 };
-use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt};
 use topcoat::{
     Result,
@@ -95,7 +95,7 @@ pub struct SecretRow {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-/// Where a client's `OpenID` Connect library finds SourceOrigin.
+/// Where a client's `OpenID` Connect library finds Origin Auth.
 #[derive(Clone, Copy, Debug)]
 pub struct Connection<'a> {
     /// The issuer.
@@ -104,7 +104,7 @@ pub struct Connection<'a> {
     pub discovery: &'a str,
 }
 
-/// A secret SourceOrigin just generated, shown only in the response to the change that
+/// A secret Origin Auth just generated, shown only in the response to the change that
 /// made it. It never serializes and its `Debug` is redacted, so no query, link or
 /// log can hold it.
 pub struct Revealed(String);
@@ -722,7 +722,7 @@ async fn backchannel_input<'a>(cx: &Cx, uri: &'a str, of: &'a Described<'a>) -> 
         </label>
         help(
             of: of,
-            "Optional: where Origin Auth posts a logout token when a user's session ends, so your app can end its own. The SourceOrigin SDKs serve it beside their login routes, e.g. at " <code>"/auth/backchannel-logout"</code> ". Origin Auth posts only to HTTPS URIs with public addresses."
+            "Optional: where Origin Auth posts a logout token when a user's session ends, so your app can end its own. The Origin Auth SDKs serve it beside their login routes, e.g. at " <code>"/auth/backchannel-logout"</code> ". Origin Auth posts only to HTTPS URIs with public addresses."
         )
         refusal(of: of)
     })
@@ -763,7 +763,7 @@ pub(crate) async fn secrets_list<'a>(
     })
 }
 
-/// A client `secret` SourceOrigin just made, shown once, with a button copying it, on
+/// A client `secret` Origin Auth just made, shown once, with a button copying it, on
 /// `page`, whose address the browser puts back so that reloading it gets the page
 /// without the secret; saving it leads on to `next`.
 #[component]

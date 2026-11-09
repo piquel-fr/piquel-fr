@@ -13,12 +13,24 @@ use uuid::Uuid;
 fn transport_is_verified_tls_a_local_socket_or_explicit_plaintext() {
     use DatabaseConnectionError::{AmbiguousTransport, InsecureTransport, InvalidSocket};
     for (url, expected) in [
-        ("postgres://db.example/sourceorigin?sslmode=verify-full", None),
-        ("postgres://db.example/sourceorigin?ssl-mode=verify-full", None),
+        (
+            "postgres://db.example/sourceorigin?sslmode=verify-full",
+            None,
+        ),
+        (
+            "postgres://db.example/sourceorigin?ssl-mode=verify-full",
+            None,
+        ),
         ("postgres://db.example/sourceorigin?sslmode=disable", None),
         ("postgres://[::1]/sourceorigin?sslmode=disable", None),
-        ("postgres://localhost/sourceorigin?host=/run/postgresql", None),
-        ("postgres://db.example/sourceorigin", Some(InsecureTransport)),
+        (
+            "postgres://localhost/sourceorigin?host=/run/postgresql",
+            None,
+        ),
+        (
+            "postgres://db.example/sourceorigin",
+            Some(InsecureTransport),
+        ),
         ("postgres://localhost/sourceorigin", Some(InsecureTransport)),
         ("postgres://127.0.0.1/sourceorigin", Some(InsecureTransport)),
         (

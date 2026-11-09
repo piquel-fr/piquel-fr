@@ -1,13 +1,13 @@
 ---
 name: sourceorigin-deploy
 description: >
-  Deploy an app that signs in with SourceOrigin on piqueld: its client secret and
+  Deploy an app that signs in with Origin Auth on piqueld: its client secret and
   cookie key as piqueld secrets, a redirect URI for each environment, and a
   check of the sign-in once it is deployed. Use when the person wants to ship,
-  deploy or host their sourceorigin.dev app with piqueld or piquelctl.
+  deploy or host their Origin Auth app with piqueld or piquelctl.
 ---
 
-# Deploy a sourceorigin.dev app on piqueld
+# Deploy an Origin Auth app on piqueld
 
 The app signs in with the SDKs' login routes, from the sourceorigin-sign-in skill,
 and reads `SOURCEORIGIN_CLIENT_ID`, `SOURCEORIGIN_REDIRECT_URI`, and the client secret and

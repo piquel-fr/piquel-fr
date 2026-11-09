@@ -15,8 +15,8 @@ use crate::{
     layout::{Label, navigation, page_head},
 };
 use chrono::{DateTime, Utc};
-use sourceorigin_common::{clients::ClientKind, protocol::oauth::Scope};
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::{clients::ClientKind, protocol::oauth::Scope};
 use topcoat::{
     Result,
     context::Cx,
@@ -26,7 +26,8 @@ use topcoat::{
 /// The Rust SDK's source and guide.
 const RUST_SDK: &str = "https://github.com/sourceorigin-dev/sourceorigin/tree/main/crates/auth-sdk";
 /// The TypeScript SDK, whose `@sourceorigin/auth/browser` signs users in from the browser.
-const TYPESCRIPT_SDK: &str = "https://github.com/sourceorigin-dev/sourceorigin/tree/main/packages/auth";
+const TYPESCRIPT_SDK: &str =
+    "https://github.com/sourceorigin-dev/sourceorigin/tree/main/packages/auth";
 /// The guide to asking for a passkey before sensitive actions.
 const STEP_UP_GUIDE: &str = "https://docs.sourceorigin.dev/user/apps/step-up.html";
 
@@ -293,7 +294,7 @@ pub async fn apps<'a>(
             <header><h2 id="docs-heading">"How it works"</h2></header>
             <div class="body">
                 <p>
-                    "SourceOrigin is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust SDK, or any OpenID Connect library with the settings on your app's page."
+                    "Origin Auth is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust SDK, or any OpenID Connect library with the settings on your app's page."
                 </p>
                 <ul>
                     <li><a href=(RUST_SDK)>"Rust SDK (" <code>"sourceorigin-auth"</code> ")"</a></li>

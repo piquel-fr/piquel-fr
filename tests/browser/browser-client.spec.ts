@@ -175,7 +175,9 @@ test('the browser client signs in with a passkey without leaving the page', asyn
   expect(navigations).toEqual([]);
   await expectNoStoredTokens(page, signedIn?.tokens ?? []);
   expect(
-    (await context.cookies(authUrl)).filter((cookie) => cookie.name === '__Host-sourceorigin_session')
+    (await context.cookies(authUrl)).filter(
+      (cookie) => cookie.name === '__Host-sourceorigin_session'
+    )
   ).toEqual([]);
 });
 

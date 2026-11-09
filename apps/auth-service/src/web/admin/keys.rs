@@ -2,9 +2,9 @@
 //! deployment's PEM key stays at the terminal.
 
 use super::AdminApplication as App;
+use serde::{Deserialize, de::IgnoredAny};
 use sourceorigin_common::protocol::jwt::KeyId;
 use sourceorigin_ui::{Action, Change, Checkbox, SigningKeyRow};
-use serde::{Deserialize, de::IgnoredAny};
 use topcoat::{
     Result,
     context::Cx,

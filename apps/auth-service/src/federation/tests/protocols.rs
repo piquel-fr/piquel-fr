@@ -287,7 +287,8 @@ fn google_is_authoritative_only_for_verified_addresses_it_hosts() {
 /// Resolved credentials fail at startup with variable context and the original source.
 #[test]
 fn provider_secrets_fail_early_with_context() {
-    let path = std::env::temp_dir().join(format!("sourceorigin-provider-secret-{}", TokenId::new()));
+    let path =
+        std::env::temp_dir().join(format!("sourceorigin-provider-secret-{}", TokenId::new()));
     let config = || ProviderConfig::test(&path);
     let error = config()
         .resolve(Provider::GitHub)

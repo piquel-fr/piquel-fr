@@ -5,12 +5,12 @@ use crate::account::{AccountError, AccountService, Subject, Viewer};
 use crate::security::{BrowserCookie, RequestContext, Session, SessionError};
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sourceorigin_common::{
     AuthenticationMethod, SessionId,
     events::{RevocationReason, UserAgentFamily},
 };
 use sourceorigin_repository::{SessionScope, StoredSession};
-use serde::Serialize;
 use std::net::IpAddr;
 
 /// Sign-out failures and their browser response mapping.

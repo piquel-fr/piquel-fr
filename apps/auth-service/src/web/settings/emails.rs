@@ -9,10 +9,10 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
+use serde::Deserialize;
 use sourceorigin_ui::{
     Audience, EmailChange, EmailRow, EmailsState, Messages, Notice, Section, Tab, Title,
 };
-use serde::Deserialize;
 use topcoat::{
     context::{Cx, context},
     router::{Body, StatusCode, response::Response},
@@ -123,7 +123,11 @@ impl WebApplication {
         let owner = web.owner(cx).await?;
         let Some(Verification { token }) = Self::change(cx, body).await else {
             return web
-                .verify_page(cx, StatusCode::BAD_REQUEST, Some(sourceorigin_ui::OUT_OF_DATE))
+                .verify_page(
+                    cx,
+                    StatusCode::BAD_REQUEST,
+                    Some(sourceorigin_ui::OUT_OF_DATE),
+                )
                 .await;
         };
         match web

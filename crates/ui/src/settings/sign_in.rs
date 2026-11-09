@@ -6,11 +6,11 @@ use crate::{
     form::{Ceremony, Precision, Query, change_form, new_passkey, open, passkey_form, time},
     layout::page_head,
 };
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     PasskeyId, Provider,
     protocol::api::{Identity, Passkey},
 };
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,

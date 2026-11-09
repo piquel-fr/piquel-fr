@@ -1,6 +1,6 @@
 # Security boundaries
 
-This page maps where trust changes in sourceorigin.dev: who can send what to auth, what
+This page maps where trust changes in SourceOrigin: who can send what to auth, what
 auth checks at each crossing, and where in the code that check lives. Read it
 before you change a listener, a role, a secret or an outbound call. The
 [threat model](threat-model.md) builds on it, and
@@ -157,7 +157,7 @@ needs no passkey: whoever can run it is trusted. It records its changes as
 `apps/auth-service/src/admin/operator.rs`). The `keys` commands also need the
 key-encryption key, and `user recover` the token digest key.
 
-Database access is therefore the root of trust. Nothing sourceorigin.dev runs on may
+Database access is therefore the root of trust. Nothing SourceOrigin runs on may
 require auth to sign in ([recovering auth](../architecture/surfaces.md#recovering-auth)),
 and support's [evidence policy](account-recovery.md#supports-evidence-policy)
 is what stands between an operator and a request to recover an account.

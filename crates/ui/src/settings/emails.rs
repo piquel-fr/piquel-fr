@@ -5,8 +5,8 @@ use crate::{
     form::{Query, change_form, fragment_form, open},
     layout::{page_head, private_address},
 };
-use sourceorigin_common::EmailId;
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::EmailId;
 use topcoat::{
     Result,
     context::Cx,

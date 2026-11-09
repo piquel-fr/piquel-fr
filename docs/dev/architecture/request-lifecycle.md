@@ -115,8 +115,8 @@ otherwise. Then `check_browser` applies the CSRF rule of the endpoint's class:
   `Referrer-Policy: no-referrer`, so the CSRF header would not work there.
 - **Every other route**, the account APIs and ceremonies included, refuses an
   origin that is not allowed, and a mutation (any method but `GET` and `HEAD`)
-  without an allowed `Origin` or without the `x-sourceorigin-csrf` header. The passkey
-  script sends the header; a cross-site form cannot.
+  without an allowed `Origin` or without the `x-sourceorigin-csrf` header. The pages'
+  ceremonies send the header; a cross-site form cannot.
 
 ### Rate limit
 
@@ -203,6 +203,6 @@ errors and preflights included:
   its class takes, which may then read `X-Trace-Id`.
 
 Pages add their own `Content-Security-Policy` when they render
-(`WebApplication::render_document`): the stylesheet, the passkey and picture
-scripts, auth's own images and the `blob:` of a picture being chosen, and a
+(`WebApplication::render_document`): the stylesheet, Topcoat's runtime and
+expressions scripts, auth's own images and the `blob:` of a picture being chosen, and a
 `form-action` naming auth and the origins the form may redirect to.

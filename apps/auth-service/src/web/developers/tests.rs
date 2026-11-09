@@ -12,7 +12,9 @@ use axum::{
     response::Response,
 };
 use chrono::{Duration, Utc};
-use sourceorigin_common::{AuthenticationMethod, ClientId, clients::ClientKind, protocol::oauth::Scope};
+use sourceorigin_common::{
+    AuthenticationMethod, ClientId, clients::ClientKind, protocol::oauth::Scope,
+};
 use sourceorigin_ui::{
     AppChange, AppSettingsState, Checkbox, ClientDraft, Grace, Lines, MISSING, NewAppChange, Query,
     SecretsChange,

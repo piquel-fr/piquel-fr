@@ -23,13 +23,13 @@ use axum::{
     response::Response,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::Serialize;
 use sourceorigin_common::{
     ClientId, PasskeyId,
     clients::{ClientKind, ClientOwner, ClientRegistration},
 };
 use sourceorigin_repository::InsertPasskey;
 use sourceorigin_ui::{DeviceChange, Section};
-use serde::Serialize;
 use tower::ServiceExt;
 use url::{Position, Url, form_urlencoded};
 
@@ -225,7 +225,9 @@ async fn consent_page_decides_from_its_own_form() {
     assert_eq!(response.status(), StatusCode::OK);
     let policy = policy(&response).to_owned();
     assert!(
-        policy.starts_with("default-src 'none'; style-src https://auth.sourceorigin.dev/assets/style."),
+        policy.starts_with(
+            "default-src 'none'; style-src https://auth.sourceorigin.dev/assets/style."
+        ),
         "{policy}"
     );
     assert!(
@@ -531,12 +533,18 @@ async fn account_pages_tell_the_password_manager_every_passkey() {
         let response = browser.visit(&replicas.a, path).await;
         assert_eq!(response.status(), StatusCode::OK, "{path}");
         let page = html(response).await;
-        assert_eq!(
-            value_after(&page, r#"data-passkey-user=""#),
-            browser.user_id.to_string(),
-            "{path}"
+        // The signal captures the account's ID first and its passkeys' credential
+        // IDs last, one space between each.
+        let signal = value_after(
+            &page,
+            &format!("{{&quot;v&quot;:&quot;{}&quot;}}", browser.user_id),
         );
-        let mut told: Vec<_> = value_after(&page, r#"data-passkey-credentials=""#)
+        let credentials = signal
+            .rsplit("{&quot;v&quot;:&quot;")
+            .next()
+            .and_then(|last| last.split("&quot;").next())
+            .unwrap_or_default();
+        let mut told: Vec<_> = credentials
             .split(' ')
             .filter(|id| !id.is_empty())
             .map(str::to_owned)
