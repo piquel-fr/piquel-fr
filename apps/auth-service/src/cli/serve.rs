@@ -3,6 +3,7 @@
 use super::{CliError, Command};
 use crate::{AuthConfig, Jobs, KeyStore};
 use axum::Router;
+use sourceorigin_common::ErrorChain;
 use sourceorigin_repository::Database;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::watch};
@@ -62,7 +63,7 @@ impl Command {
         use tokio::signal::unix::{SignalKind, signal};
         let ctrl_c = async {
             if let Err(error) = tokio::signal::ctrl_c().await {
-                tracing::error!(?error, "Ctrl+C handler unavailable");
+                tracing::error!(error = %ErrorChain(&error), "Ctrl+C handler unavailable");
                 std::future::pending::<()>().await;
             }
         };
@@ -72,7 +73,7 @@ impl Command {
                     terminate.recv().await;
                 }
                 Err(error) => {
-                    tracing::error!(?error, "SIGTERM handler unavailable");
+                    tracing::error!(error = %ErrorChain(&error), "SIGTERM handler unavailable");
                     std::future::pending::<()>().await;
                 }
             }

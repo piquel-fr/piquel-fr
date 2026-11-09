@@ -18,7 +18,7 @@ mod transaction;
 
 pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub(crate) use connection::{Limit, Scope};
-pub use error::{DatabaseConnectionError, DatabaseError};
+pub use error::{DatabaseConnectionError, DatabaseError, DecodeFailure};
 pub use exclusive::{ExclusiveConnection, LockKey};
 #[cfg(any(test, feature = "test-util"))]
 pub use repositories::audit::Tamper;

@@ -232,9 +232,9 @@ code or kind, never the receiver's answer.
 application's collector, inside piqueld (`OTEL_EXPORTER_OTLP_ENDPOINT`).
 
 **What is checked:** nothing secret may be recorded: no cookie, code, token,
-ceremony state, invitation or client secret, no query string, request header,
-client IP or user agent. Metric labels are `&'static str`, so no user or IP can
-become one. The collector deletes query, address and header attributes as a
+ceremony state, invitation or client secret, no request path, query string,
+request header, client IP or user agent. Metric labels are `&'static str`, so no user or IP can
+become one. The collector deletes path, query, address and header attributes as a
 second line of defense (`infra/telemetry/collector.yaml`), and a test fails if
 a sign-in or code exchange exports a secret
 ([what never goes in telemetry](../architecture/telemetry.md#what-never-goes-in-telemetry)).
