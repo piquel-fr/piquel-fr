@@ -332,9 +332,9 @@ pub(super) async fn notifications(cx: &Cx) -> Result<Response> {
     let shown = parse_query_params::<InboxState>(cx).unwrap_or_default();
     let viewer = App::viewer(user, admin);
     let account = &App::of(cx).account;
-    let notifications = account.notifications(&viewer, shown.before).await?;
-    let unread = account.unread_notifications(&viewer).await?;
-    let rows: Vec<_> = notifications
+    let inbox = account.inbox(&viewer, shown.before).await?;
+    let rows: Vec<_> = inbox
+        .page
         .notifications
         .iter()
         .map(InboxRow::from)
@@ -344,13 +344,22 @@ pub(super) async fn notifications(cx: &Cx) -> Result<Response> {
         page: &here,
         item: None,
         shown,
-        next: notifications.next,
-        unread,
+        next: inbox.page.next,
+        unread: inbox.unread,
         audience: Audience::Administrator { reason: "" },
+        preferences: &inbox.preferences,
+        alert: None,
     };
     let rows = &rows;
     let section = view! { cx => piquel_ui::inbox(rows: rows, page: page) };
-    App::settings_page(cx, user, Tab::Notifications, None, section).await
+    Box::pin(App::settings_page(
+        cx,
+        user,
+        Tab::Notifications,
+        None,
+        section,
+    ))
+    .await
 }
 
 /// `/users/{account}/handle`: gives the account a new handle, such as one that

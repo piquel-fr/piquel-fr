@@ -13,22 +13,28 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{EventId, NotificationId, UserId, notifications::Notification};
+use piquel_common::{
+    EventId, NotificationId, UserId,
+    notifications::{Notification, NotificationPreference},
+};
 use piquel_repository::{Database, DatabaseError, DatabaseTransaction, StoredNotification};
 use serde::{Deserialize, Serialize};
 
 /// Notification failures and their response mapping.
 mod error;
+/// Email preferences and unsubscribe links.
+mod preferences;
 pub(crate) use error::NotificationError;
+pub(crate) use preferences::{Unsubscribe, UnsubscribeLinks};
 
 /// Notifications per page.
 const PAGE_SIZE: u16 = 50;
 
-/// The owner's routes that change their inbox's read state, and count what is
-/// unread.
+/// The owner's routes that change their inbox's read state and email
+/// preferences, and count what is unread.
 #[derive(Clone)]
 pub(crate) struct NotificationApplication {
     /// The operations behind the routes.
@@ -79,6 +85,17 @@ pub(crate) struct NotificationView {
     pub(crate) item: NotificationItem,
     /// Its event's entry in the security history, while the history keeps it.
     pub(crate) history: Option<HistoryItem>,
+}
+
+/// What an inbox page shows: a page of notifications, how many are unread, and
+/// which categories are emailed.
+pub(crate) struct Inbox {
+    /// The page.
+    pub(crate) page: NotificationPage,
+    /// How many notifications are unread.
+    pub(crate) unread: u64,
+    /// Whether each category's notifications are emailed.
+    pub(crate) preferences: Vec<NotificationPreference>,
 }
 
 /// How many notifications are unread.
@@ -146,16 +163,21 @@ impl AccountService {
             .notifications()
             .list(viewer.user(), before, u32::from(PAGE_SIZE))
             .await?;
+        Ok(Self::page(batch))
+    }
+
+    /// The page a `batch` of at most [`PAGE_SIZE`] notifications makes.
+    fn page(batch: Vec<StoredNotification>) -> NotificationPage {
         let next = (batch.len() == usize::from(PAGE_SIZE))
             .then(|| batch.last().map(|stored| stored.id))
             .flatten();
-        Ok(NotificationPage {
+        NotificationPage {
             notifications: batch
                 .into_iter()
                 .filter_map(NotificationItem::new)
                 .collect(),
             next,
-        })
+        }
     }
 
     /// The account's notification `id`, with its event's history entry. Reading
@@ -178,6 +200,26 @@ impl AccountService {
             None => None,
         };
         Ok(NotificationView { item, history })
+    }
+
+    /// The inbox's page of notifications older than `before`, with how many are
+    /// unread and the email preferences, as its pages show them, authorized once.
+    pub(crate) async fn inbox(
+        &self,
+        viewer: &Viewer,
+        before: Option<NotificationId>,
+    ) -> Result<Inbox, AccountError> {
+        viewer.authorize(&self.database).await?;
+        let mut notifications = self.database.notifications();
+        Ok(Inbox {
+            page: Self::page(
+                notifications
+                    .list(viewer.user(), before, u32::from(PAGE_SIZE))
+                    .await?,
+            ),
+            unread: notifications.unread(viewer.user()).await?,
+            preferences: notifications.preferences(viewer.user()).await?,
+        })
     }
 
     /// How many of the account's notifications are unread.
@@ -229,9 +271,10 @@ impl NotificationApplication {
 
     /// Returns the owner's inbox routes, with this application as state.
     pub(crate) fn routes(self) -> Router {
-        use routes::notifications::{MARK_UNREAD, READ, READ_ALL, UNREAD};
+        use routes::notifications::{MARK_UNREAD, PREFERENCES, READ, READ_ALL, UNREAD};
         Router::new()
             .route(UNREAD, get(Self::unread))
+            .route(PREFERENCES, put(Self::prefer))
             .route(READ, post(Self::read))
             .route(MARK_UNREAD, post(Self::mark_unread))
             .route(READ_ALL, post(Self::read_all))
@@ -268,6 +311,18 @@ impl NotificationApplication {
     /// Marks every notification read.
     async fn read_all(State(app): State<Self>, owner: Owner) -> Result<StatusCode, ApiError> {
         app.service.read_all_notifications(&owner).await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Sets whether one category's notifications are emailed.
+    async fn prefer(
+        State(app): State<Self>,
+        owner: Owner,
+        Json(preference): Json<NotificationPreference>,
+    ) -> Result<StatusCode, ApiError> {
+        app.service
+            .set_notification_preference(&owner, preference)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     }
 }

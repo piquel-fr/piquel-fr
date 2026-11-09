@@ -3,20 +3,24 @@
 
 use super::{Audience, HistoryRow, Holdings, timeline::report_form};
 use crate::{
-    form::{Precision, Query, change_form, open, time},
+    form::{Checkbox, Precision, Query, change_form, open, time},
     icons::{Icon, icon},
-    layout::{announcement_text, page_head},
+    layout::{announcement_text, dialog, page_head},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::NotificationId;
+use piquel_common::{
+    NotificationId,
+    notifications::{EmailCategory, NotificationPreference},
+};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{View, component, view},
 };
 
-/// A change the inbox posts, named by its `action` field. Read state changes
-/// nothing about the account, so it needs no passkey confirmation.
+/// A change the inbox posts, named by its `action` field. Read state and email
+/// preferences change nothing about the account, so they need no passkey
+/// confirmation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum InboxChange {
@@ -27,14 +31,30 @@ pub enum InboxChange {
         /// The notification.
         id: NotificationId,
     },
+    /// Turns a category's email on, or off.
+    Email {
+        /// The category.
+        category: EmailCategory,
+        /// Whether it is emailed from now on.
+        #[serde(default, skip_serializing_if = "Checkbox::is_off")]
+        email: Checkbox,
+    },
 }
 
-/// Which page of the inbox shows, as its query names it.
+/// Which page of the inbox shows, and whether its email preferences dialog shows
+/// open, as its query names them.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct InboxState {
     /// The notification the page starts after, if not the newest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<NotificationId>,
+    /// Whether the email preferences dialog shows open, as after a change in it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub email: bool,
 }
+
+/// The element ID of the inbox's email preferences dialog.
+const EMAIL_DIALOG: &str = "dialog-email";
 
 impl Query for InboxState {}
 
@@ -81,6 +101,11 @@ pub struct InboxPage<'a> {
     /// Who reads it: the owner opens each notification and marks them read; an
     /// administrator only reads them, which marks nothing.
     pub audience: Audience<'a>,
+    /// Whether each category's notifications are emailed, which only the owner
+    /// changes.
+    pub preferences: &'a [NotificationPreference],
+    /// Why a change to them was refused, which their dialog, shown again, says.
+    pub alert: Option<&'a str>,
 }
 
 impl InboxPage<'_> {
@@ -99,7 +124,13 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
     let before = page.shown.before;
     let older = page
         .next
-        .map(|next| InboxState { before: Some(next) }.on(page.page))
+        .map(|next| {
+            InboxState {
+                before: Some(next),
+                email: false,
+            }
+            .on(page.page)
+        })
         .transpose()?;
     let empty = match (before, owner) {
         (Some(_), _) => "No older notifications.",
@@ -112,7 +143,8 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
         if owner {
             page_head(
                 title: "Notifications",
-                lead: "What Piquel tells you about your account. Opening one marks it read.".to_owned(),
+                lead: "What Piquel tells you. Opening one marks it read.".to_owned(),
+                actions: view! { email_button() },
             )
         }
         <section class="card" aria-labelledby="inbox-heading">
@@ -130,6 +162,9 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
                         label: "Mark all as read",
                         class: "secondary small",
                     )
+                }
+                if !owner {
+                    email_button()
                 }
             </header>
             <ul class="list inbox">
@@ -163,6 +198,119 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
                 <a class="button secondary" href=(page.page)>"Newest notifications"</a>
             }
         </div>
+        email_preferences(page: page)
+    })
+}
+
+/// The button opening the email preferences dialog: in the page's head for the
+/// owner, in the inbox's for an administrator.
+#[component]
+async fn email_button() -> Result<impl View> {
+    Ok(view! {
+        <button type="button" class="secondary small" popovertarget=(EMAIL_DIALOG)>
+            icon(kind: Icon::Mail)
+            "Email preferences"
+        </button>
+    })
+}
+
+/// The dialog saying which categories of notifications are emailed, each with a
+/// button turning its email on or off for the owner, read-only for an
+/// administrator. A change reopens it, showing what changed.
+#[component]
+async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
+    let owner = page.audience.owns();
+    Ok(view! {
+        dialog(id: EMAIL_DIALOG, title: "Email preferences", shown: page.shown.email, back: page.page, alert: page.alert, focus_close: true,
+            <p class="help">
+                (if owner {
+                    "Piquel always emails you about your account itself, at your primary address: its addresses, sign-in methods and recovery, and what support changes. Choose what else it emails you."
+                } else {
+                    "Piquel always emails the owner about their account itself. Only the owner turns the rest on or off."
+                })
+            </p>
+            <ul class="list">
+                for preference in page.preferences {
+                    <li>
+                        <div class="text">
+                            <strong>(preference.category.label())</strong>
+                            " "
+                            if preference.email {
+                                <span class="badge ok">"Emailed"</span>
+                            } else {
+                                <span class="badge">"Not emailed"</span>
+                            }
+                            <small>(preference.category.description())</small>
+                        </div>
+                        if owner {
+                            change_form(
+                                action: page.page,
+                                change: InboxChange::Email {
+                                    category: preference.category,
+                                    email: Checkbox(!preference.email),
+                                },
+                                label: if preference.email { "Turn off" } else { "Turn on" },
+                                class: "secondary small",
+                                aria_label: format!(
+                                    "Turn {} emails for {}",
+                                    if preference.email { "off" } else { "on" },
+                                    preference.category.label(),
+                                ),
+                            )
+                        }
+                    </li>
+                }
+            </ul>
+        )
+    })
+}
+
+/// What the unsubscribe page shows.
+#[derive(Clone, Copy, Debug)]
+pub enum UnsubscribeStep<'a> {
+    /// Asks to turn announcements' email off, posting to `action`, the link
+    /// itself.
+    Confirm {
+        /// The link.
+        action: &'a str,
+    },
+    /// It is off; the inbox at `notifications` turns it back on.
+    Done {
+        /// The inbox.
+        notifications: &'a str,
+    },
+    /// The link is not one Piquel made, or not whole.
+    Invalid,
+}
+
+/// The page an announcement's unsubscribe link opens, at `step`.
+#[component]
+pub async fn unsubscribe(step: UnsubscribeStep<'_>) -> Result<impl View> {
+    Ok(view! {
+        match step {
+            UnsubscribeStep::Confirm { action } => {
+                <h1>"Stop announcement emails?"</h1>
+                <p class="lead">
+                    "You will still find Piquel’s announcements in your notifications, and receive by email those about a security incident or a change to the privacy policy or terms. Emails about your account itself keep coming."
+                </p>
+                <form method="post" action=(action) data-submit-once="true">
+                    <button type="submit">"Stop announcement emails"</button>
+                </form>
+            }
+            UnsubscribeStep::Done { notifications } => {
+                <h1>"Announcement emails stopped"</h1>
+                <p class="lead">
+                    "Piquel no longer emails you its announcements, except those about a security incident or a change to the privacy policy or terms. Turn them back on from your notifications."
+                </p>
+                <a class="button secondary" href=(notifications)>"Open your notifications"</a>
+            }
+            UnsubscribeStep::Invalid => {
+                <h1>"This link doesn’t work"</h1>
+                <p class="lead">
+                    "Open the link from the email again, or turn announcement emails off from your notifications."
+                </p>
+            }
+        }
     })
 }
 
@@ -180,7 +328,7 @@ pub(crate) async fn unread_hint(unread: u64, page: &str) -> Result<impl View> {
                 icon(kind: Icon::Bell)
                 <div class="text">
                     <strong>(said)</strong>
-                    <small>"Piquel told you about something that happened to your account."</small>
+                    <small>"Piquel has something to tell you."</small>
                 </div>
                 <a class="button small" href=(page)>"Read"</a>
             </section>
@@ -200,6 +348,9 @@ pub struct NotificationPage<'a> {
     /// The page undoing the account's recovery, while one can still be undone
     /// and the notification is about it.
     pub undo: Option<&'a str>,
+    /// The admin dashboard's Alerts tab, for an alert's notification, unless
+    /// the dashboard is off.
+    pub alerts: Option<&'a str>,
     /// Its event's entry in the security history, while kept.
     pub entry: Option<&'a HistoryRow<'a>>,
     /// What the account holds, to name what the entry refers to.
@@ -210,7 +361,8 @@ pub struct NotificationPage<'a> {
 
 /// One notification's page: what it says, its security history entry while the
 /// history keeps it, which the owner may report as not theirs where the history
-/// allows, the recovery's undo page when it is about one, and marking it unread.
+/// allows, the recovery's undo page when it is about one, the dashboard's
+/// alerts for an alert's, and marking it unread.
 #[component]
 pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> Result<impl View> {
     let reportable = page.entry.filter(|entry| entry.reportable);
@@ -224,6 +376,9 @@ pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> 
                 announcement_text(body: row.body)
                 if let Some(undo) = page.undo {
                     <p><a class="button danger" href=(undo)>"Undo the recovery"</a></p>
+                }
+                if let Some(alerts) = page.alerts {
+                    <p><a class="button" href=(alerts)>"See the alerts"</a></p>
                 }
             </div>
             if let Some(entry) = page.entry {

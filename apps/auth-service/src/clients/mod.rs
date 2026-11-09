@@ -600,7 +600,8 @@ impl<'a, 't> ClientRegistry<'a, 't> {
 
     /// Records `event`, about no account, as made in this registry's context.
     async fn record(&mut self, event: DomainEvent) -> Result<(), ClientRegistryError> {
-        Ok(self.tx.record(&self.context, None, event).await?)
+        self.tx.record(&self.context, None, event).await?;
+        Ok(())
     }
 }
 

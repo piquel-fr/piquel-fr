@@ -306,6 +306,9 @@ impl AccountOperation {
                 .notification(viewer, piquel_common::NotificationId::new())
                 .await
                 .map(drop),
+            Self::ViewNotificationPreferences => {
+                service.notification_preferences(viewer).await.map(drop)
+            }
             Self::RenamePasskey
             | Self::RevokePasskey
             | Self::UnlinkIdentity

@@ -1,7 +1,9 @@
 # Security properties
 
-What auth guarantees about passkeys, handles, sessions and browser flows, and
-the limits it enforces. The pages after this one explain the larger designs in
+This page lists the guarantees auth makes about passkeys, handles, sessions and
+browser flows, and the limits it enforces. [Security boundaries](boundaries.md)
+maps where they are checked, and the [threat model](threat-model.md) says what
+they defend against. The pages after this one explain the larger designs in
 detail.
 
 - Passkeys require user verification and prefer resident credentials. Synced
@@ -63,7 +65,9 @@ detail.
 - One Google and one GitHub identity may be linked. Unlinking releases the provider
   identity so another account can link it; account data and credentials never move.
   Settings keep listing identities of disabled providers so they can be unlinked.
-- The last passkey cannot be removed. Removing a passkey/provider revokes other
+- An account keeps at most 100 active passkeys (`PasskeyRepository::LIMIT`): a
+  database trigger enforces it, and enrollment refuses the 101st before the
+  authenticator creates it. The last passkey cannot be removed. Removing a passkey/provider revokes other
   central sessions. An owner who lost every passkey is recovered with a link to
   auth's `/recover` that enrolls one new passkey; for 15 days after, it confirms
   no change, and another passkey of the account can undo the recovery on
@@ -88,6 +92,9 @@ detail.
   endpoints instead validate their protocol credentials. A form posted to one of
   auth's server-rendered pages must come from auth's own pages: `Sec-Fetch-Site:
   same-origin`, or the auth origin when the browser sends no `Sec-Fetch-Site`.
+  The one exception is `/unsubscribe`, which mail clients post to from anywhere
+  (RFC 8058): its link's token is its credential, and it only turns one
+  account's announcements' email off.
 - Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token, userinfo, account and page budgets per client IP, and covers every API route except health probes and discovery.
   By default it uses the direct peer IP; only peers in `AUTH_TRUSTED_PROXIES`
   may supply a single overwritten `X-Forwarded-For`. Configure this when terminating TLS

@@ -15,7 +15,9 @@ use piquel_common::{
     notifications::Notification,
 };
 use piquel_crypto::Secret;
-use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser};
+use piquel_repository::{
+    DraftedAnnouncement, InsertRecovery, InsertUnverifiedEmail, InsertUser, Recipients,
+};
 use std::{
     net::{IpAddr, Ipv6Addr},
     sync::{
@@ -530,5 +532,188 @@ async fn notifications_are_emailed_to_the_addresses_their_kind_names() {
             .iter()
             .any(|delivery| delivery.destination.starts_with(&to)),
         "no email without a verified address"
+    );
+}
+
+/// A raised alert notifies every active administrator, in their inbox and at
+/// their primary verified address only, and nobody else: not a disabled
+/// administrator, nor an account that administers nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_raised_alert_notifies_active_administrators() {
+    use piquel_common::{
+        AlertId,
+        admin::{ChainBreak, ChainProblem},
+        alerts::Alert,
+        events::JobName,
+    };
+    let database = Replicas::database().await;
+    let addressed = async || {
+        let user_id = account(&database).await;
+        let primary =
+            verified_address(&database, user_id, &format!("{user_id}@example.com"), true).await;
+        let other = format!("other-{user_id}@example.com");
+        let other = verified_address(&database, user_id, &other, false).await;
+        (user_id, primary, other)
+    };
+    let (admin, primary, other) = addressed().await;
+    let (disabled, disabled_primary, _) = addressed().await;
+    let (member, member_primary, _) = addressed().await;
+    for user_id in [admin, disabled] {
+        database
+            .administrators()
+            .grant(user_id)
+            .await
+            .expect("grant");
+    }
+    database
+        .users()
+        .set_status(disabled, AccountStatus::Disabled)
+        .await
+        .expect("disable");
+    let alert = Alert::AuditChainBroken(ChainBreak {
+        position: 5,
+        problem: ChainProblem::EventChanged,
+    });
+    let alert_id = AlertId::new();
+    let context = EventContext::system(JobName::AuditVerification);
+    let raised = DomainEvent::AlertRaised {
+        alert_id,
+        alert: alert.clone(),
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    tx.record(&context, None, raised).await.expect("record");
+    tx.commit().await.expect("commit");
+
+    let notified = async |user_id: UserId| {
+        let inbox = database.notifications().list(user_id, None, 10).await;
+        inbox
+            .expect("inbox")
+            .into_iter()
+            .filter_map(|stored| stored.notification)
+            .collect::<Vec<_>>()
+    };
+    let expected = Notification::AlertRaised {
+        alert_id,
+        title: format!("Alert: {}", alert.subject()),
+        text: alert.body(),
+    };
+    assert_eq!(notified(admin).await, [expected]);
+    assert_eq!(notified(disabled).await, []);
+    assert_eq!(notified(member).await, []);
+    let emailed = async |user_id: UserId, email_id: EmailId| {
+        let destination = format!("account {user_id}, address {email_id}");
+        let payloads = database.deliveries().payloads(&destination).await;
+        payloads.expect("payloads").len()
+    };
+    assert_eq!(emailed(admin, primary).await, 1);
+    assert_eq!(emailed(admin, other).await, 0);
+    assert_eq!(emailed(disabled, disabled_primary).await, 0);
+    assert_eq!(emailed(member, member_primary).await, 0);
+}
+
+/// An alert's email links the dashboard's Alerts tab, and only when auth serves
+/// a dashboard.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_alerts_email_links_the_dashboard() {
+    let database = Replicas::database().await;
+    let user_id = account(&database).await;
+    let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
+    let message = EmailMessage::Notification {
+        address: format!("{user_id}@example.com"),
+        notification_id: NotificationId::new(),
+        notification: Notification::AlertRaised {
+            alert_id: piquel_common::AlertId::new(),
+            title: "The audit chain is broken".into(),
+            text: "A verification found the chain broken.".into(),
+        },
+        recovery_id: None,
+    };
+    let dashboard: Origin = "https://admin.piquel.fr".parse().expect("origin");
+    for (linked, expected) in [
+        (Some(&dashboard), Some("https://admin.piquel.fr/alerts")),
+        (None, None),
+    ] {
+        let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config)
+            .linking(linked);
+        let content = sender.content(user_id, &message).await.expect("content");
+        assert!(
+            matches!(&content, Some(Content::Notification { alerts, .. }) if alerts.as_deref() == expected),
+            "{linked:?}"
+        );
+        sender.assert_renders(user_id, &message).await;
+    }
+}
+
+/// An announcement's email offers a one-click unsubscribe (RFC 8058) whose
+/// link turns only its recipient's announcements' email off, in its headers and
+/// its body; an essential one, which its recipient cannot turn off, offers none.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn announcement_emails_offer_unsubscribing_unless_essential() {
+    let database = Replicas::database().await;
+    let user_id = account(&database).await;
+    verified_address(&database, user_id, &format!("{user_id}@example.com"), true).await;
+    let sent = async |essential| {
+        let id = AnnouncementId::new();
+        let mut tx = database.begin().await.expect("transaction");
+        tx.announcements()
+            .insert_draft(&DraftedAnnouncement {
+                id,
+                subject: "News",
+                body: "Something changed.",
+                recipients: Recipients::Accounts(&[user_id]),
+                essential,
+            })
+            .await
+            .expect("draft");
+        tx.announcements().send(id, 1).await.expect("send");
+        tx.commit().await.expect("commit");
+        id
+    };
+    let origin: Origin = AUTH_ORIGIN.parse().expect("origin");
+    let config = EmailConfig::test(&origin, true);
+    let outbox = Arc::new(Outbox::default());
+    let sender = EmailSender::with_mailer(database.clone(), Some(outbox.clone()), &config);
+    for id in [sent(false).await, sent(true).await] {
+        sender
+            .announce(DeliveryId::new(), user_id, id)
+            .await
+            .expect("sent");
+    }
+    let sent = outbox.sent.lock().expect("outbox");
+    let [news, essential] = sent.as_slice() else {
+        panic!("two messages");
+    };
+    let header = |message: &Message, name| message.headers().get_raw(name).map(str::to_owned);
+    let link = header(news, "List-Unsubscribe").expect("an unsubscribe link");
+    let link = link
+        .strip_prefix('<')
+        .and_then(|link| link.strip_suffix('>'))
+        .expect("in angle brackets");
+    assert_eq!(
+        header(news, "List-Unsubscribe-Post").as_deref(),
+        Some("List-Unsubscribe=One-Click")
+    );
+    let url = url::Url::parse(link).expect("URL");
+    let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let unsubscribe = crate::notifications::Unsubscribe {
+        account: query["account"].parse().expect("account"),
+        token: query["token"].clone(),
+    };
+    assert_eq!(
+        config.unsubscribe_links.check(&unsubscribe).expect("check"),
+        Some(user_id)
+    );
+    let body = String::from_utf8_lossy(&news.formatted())
+        .replace("=\r\n", "")
+        .replace("=3D", "=")
+        .replace("&amp;", "&");
+    assert!(body.contains(link), "{body}");
+    assert_eq!(header(essential, "List-Unsubscribe"), None);
+    assert!(
+        !String::from_utf8_lossy(&essential.formatted()).contains("/unsubscribe"),
+        "no link in its body"
     );
 }

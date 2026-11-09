@@ -22,7 +22,7 @@
 ### Keys
 
 - `AUTH_KEY_ENCRYPTION_KEY`: Where to read the key that seals signing keys in the database: 32 bytes as unpadded base64url text, through `env://NAME` or `file:///path`. A trailing newline is ignored. Required. It can't be changed yet: the stored signing keys would no longer open.
-- `AUTH_TOKEN_DIGEST_KEY`: Where to read the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Email verification and recovery links derive from it too. Required. Replacing it at once ends every refresh token and every login in progress, so change it in two deploys.
+- `AUTH_TOKEN_DIGEST_KEY`: Where to read the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Email verification, recovery and unsubscribe links derive from it too. Required. Replacing it at once ends every refresh token and every login in progress, so change it in two deploys.
 - `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`: Where to read another token digest key, accepted but never used for new digests: the next key before it becomes current, or the old one after.
 - `AUTH_AUDIT_KEY_PROVIDER`: Where to read the key that signs audit checkpoints: a 32-byte Ed25519 seed as 64 hex characters. Required.
 

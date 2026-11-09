@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use piquel_common::admin::Consent;
 use piquel_common::{
     AccountStatus, Handle, PasskeyId, PictureId, Provider, RecoveryId, SessionId, UserId,
+    notifications::NotificationPreference,
 };
 use piquel_repository::{
     DatabaseError, DatabaseTransaction, RecentRecovery, RecoveryState, StoredExternalIdentity,
@@ -71,6 +72,8 @@ pub(crate) struct AccountExport {
     history: Vec<HistoryItem>,
     /// The inbox, newest first, with when each notification was read.
     notifications: Vec<NotificationItem>,
+    /// Whether each category of notifications is emailed.
+    notification_preferences: Vec<NotificationPreference>,
 }
 
 /// The account's profile.
@@ -315,6 +318,7 @@ impl AccountExport {
                 .collect(),
             history: HistoryItem::all(tx, user_id).await?,
             notifications: NotificationItem::all(tx, user_id).await?,
+            notification_preferences: tx.notifications().preferences(user_id).await?,
             profile: user.into(),
         })
     }

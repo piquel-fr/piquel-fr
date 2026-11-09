@@ -128,6 +128,8 @@ impl AdminOperation {
             ],
             Self::DiscardAnnouncement => &["announcement", "discard", AN_ID],
             Self::SendAnnouncement => &["announcement", "send", AN_ID, "--revision", "1", "--yes"],
+            Self::ListAlerts => &["alerts", "list"],
+            Self::UpdateAlert => &["alerts", "update", AN_ID, "--status", "fixing"],
         }
     }
 }
@@ -192,6 +194,9 @@ impl AccountOperation {
             ],
             Self::ListNotifications => &["account", "alice", "notifications", "list"],
             Self::ViewNotification => &["account", "alice", "notifications", "show", AN_ID],
+            Self::ViewNotificationPreferences => {
+                &["account", "alice", "notifications", "preferences"]
+            }
         }
     }
 }

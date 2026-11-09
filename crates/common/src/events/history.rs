@@ -4,7 +4,7 @@
 use super::{Actor, DomainEvent, GrantRevocation, RevocationReason};
 use crate::{
     AuthenticationMethod, EmailId, EventId, PasskeyId, Personal, Provider, clients::RelatedOrigin,
-    email::NormalizedEmail,
+    email::NormalizedEmail, notifications::NotificationPreference,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -113,6 +113,9 @@ impl DomainEvent {
                 event_id: *event_id,
             },
             Self::AccountExported {} => HistoryEntry::AccountExported,
+            Self::NotificationPreferenceChanged(preference) => {
+                HistoryEntry::NotificationPreferenceChanged(*preference)
+            }
             Self::AccountDeletionScheduled { purge_after } => HistoryEntry::DeletionScheduled {
                 purge_after: *purge_after,
             },
@@ -153,6 +156,7 @@ impl DomainEvent {
             | Self::AuditChainVerified(_)
             // Alerts are the administrators', about the service.
             | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
             // A read may be a misclick or a confidential inquiry; the owner sees
             // changes, each with its reason, not what an administrator looked at.
@@ -320,6 +324,9 @@ pub enum HistoryEntry {
     /// The user downloaded their data.
     #[serde(rename = "account.exported")]
     AccountExported,
+    /// The user turned a category of notifications' email on or off.
+    #[serde(rename = "notifications.preference_changed")]
+    NotificationPreferenceChanged(NotificationPreference),
     /// The account was scheduled for deletion.
     #[serde(rename = "account.deletion_scheduled")]
     DeletionScheduled {
@@ -381,6 +388,7 @@ impl HistoryEntry {
             | Self::PictureChanged
             | Self::PictureRemoved
             | Self::AccountExported
+            | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
             | Self::Legacy { .. } => true,
@@ -432,6 +440,7 @@ impl HistoryEntry {
             | Self::RecoveryUndone
             | Self::CompromiseReported { .. }
             | Self::AccountExported
+            | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
             | Self::Legacy { .. } => None,
