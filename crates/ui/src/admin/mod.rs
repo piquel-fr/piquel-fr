@@ -88,38 +88,9 @@ pub struct HandoffQuery {
     pub state: String,
     /// The dashboard path to go on to.
     pub return_to: String,
-    /// `confirm=on`, for the previous release's handoff page.
-    #[serde(default)]
-    pub confirm: LegacyConfirm,
 }
 
 impl Query for HandoffQuery {}
-
-/// `confirm=on`, which every link to auth's handoff page carries, the sign-in
-/// that comes back to it included: the previous release's handoff page asks for
-/// a passkey only then, and a handoff without one never redeems. Drop it once no
-/// release reads it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct LegacyConfirm;
-
-impl Serialize for LegacyConfirm {
-    /// Writes `on`, as a checked box.
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str("on")
-    }
-}
-
-impl<'de> Deserialize<'de> for LegacyConfirm {
-    /// Whatever the value: the handoff page asks for a passkey anyway.
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Self)
-    }
-}
 
 /// What the handoff page's form posts once a passkey proved the handoff: the
 /// handoff, and the proof, which the passkey script fills in.

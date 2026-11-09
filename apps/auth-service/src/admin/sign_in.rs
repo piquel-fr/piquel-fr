@@ -46,7 +46,7 @@ use sourceorigin_common::{
 };
 use sourceorigin_crypto::Secret;
 use sourceorigin_repository::{Database, DatabaseTransaction, InsertHandoff};
-use sourceorigin_ui::{HandoffQuery, LegacyConfirm, Query};
+use sourceorigin_ui::{HandoffQuery, Query};
 use url::Url;
 
 /// How long a handoff code works: the redirect from auth to the dashboard.
@@ -134,7 +134,6 @@ impl DashboardSignIn {
         let query = HandoffQuery {
             state: state.encoded(),
             return_to: return_to.to_owned(),
-            confirm: LegacyConfirm,
         };
         let page = query.url(self.auth.as_url(), routes::page::ADMIN)?;
         Ok((page, DashboardCookie(Step::Started(state))))
