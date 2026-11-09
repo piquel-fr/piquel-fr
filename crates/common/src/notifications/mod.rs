@@ -71,7 +71,8 @@ pub enum Notification {
         text: String,
     },
     /// Administrators sent this account a message, such as why it was disabled
-    /// or what support needs from its owner. It is the message's only copy:
+    /// or what support needs from its owner. It and its queued email hold the
+    /// message's only copies, which purging the account deletes:
     /// [`DomainEvent::MessageSent`] records who sent it, not what it says.
     Message {
         /// Its subject, as they wrote it, which becomes the notification's

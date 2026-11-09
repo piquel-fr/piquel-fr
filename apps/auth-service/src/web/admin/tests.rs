@@ -2207,7 +2207,7 @@ fn a_read_started_before_forgetting_is_not_kept() {
 /// An administrator writes a message from an account's page and sees its email
 /// as it will be sent, without a fresh confirmation. Sending it needs one, then
 /// goes back to the account's page, and its owner reads it in their inbox. An
-/// administrator's page offers no message.
+/// administrator's page offers no message, and its form refuses to open.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn messages_are_previewed_then_sent_from_the_dashboard() {
@@ -2262,4 +2262,9 @@ async fn messages_are_previewed_then_sent_from_the_dashboard() {
     let administrator = format!("/users/{}", admin.user_id);
     let page = html(harness.visit(&confirmed, &administrator).await).await;
     assert!(!page.contains("/message"), "{page}");
+    // Nor does its form open, so nothing is written for nothing.
+    let refused = harness
+        .visit(&confirmed, &format!("{administrator}/message"))
+        .await;
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
 }

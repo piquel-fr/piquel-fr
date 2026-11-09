@@ -1,3 +1,9 @@
+{#- Administrators' text, a paragraph each, keeping its line breaks. #}
+{%- macro text(paragraphs) %}
+{%- for paragraph in paragraphs %}
+<p>{% for line in paragraph %}{% if !loop.first %}<br>{% endif %}{{ line }}{% endfor %}</p>
+{%- endfor %}
+{%- endmacro %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,14 +38,10 @@
 {%- endif %}
 <p><a href="{{ page }}">Read it in your Origin Account notifications</a></p>
 {%- when Content::Message { address: _, subject: _, body: _, paragraphs, inbox } %}
-{%- for paragraph in paragraphs %}
-<p>{% for line in paragraph %}{% if !loop.first %}<br>{% endif %}{{ line }}{% endfor %}</p>
-{%- endfor %}
-<p style="font-size:14px;color:#555555">SourceOrigin support wrote this message about your Origin Account. You can read it again in <a href="{{ inbox }}">your Origin Account notifications</a>.</p>
+{%- call text(paragraphs) %}{%- endcall %}
+<p style="font-size:14px;color:#555555">SourceOrigin support wrote this message about your Origin Account. It is also in <a href="{{ inbox }}">your Origin Account notifications</a> whenever you can sign in.</p>
 {%- when Content::Announcement { address: _, subject: _, body: _, paragraphs, everyone, inbox, unsubscribe } %}
-{%- for paragraph in paragraphs %}
-<p>{% for line in paragraph %}{% if !loop.first %}<br>{% endif %}{{ line }}{% endfor %}</p>
-{%- endfor %}
+{%- call text(paragraphs) %}{%- endcall %}
 <p style="font-size:14px;color:#555555">{% if everyone %}SourceOrigin sent this announcement to every account.{% else %}SourceOrigin sent this announcement to your account.{% endif %} You can read it again in <a href="{{ inbox }}">your Origin Account notifications</a>.</p>
 {%- if let Some(unsubscribe) = unsubscribe %}
 <p style="font-size:14px;color:#555555"><a href="{{ unsubscribe }}">Stop receiving announcements by email</a></p>

@@ -371,12 +371,16 @@ enum Composed {
 /// sending needs the dashboard's recent one, which its script asks for first.
 /// Without the script, a confirmation that ran out goes through auth's handoff
 /// page and back to an empty form. Refused for an administrator's account,
-/// which the account's page links no message for.
+/// which the account's page links no message for, before anything is written.
 #[route([GET, POST] "/users/{account}/message")]
 pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let app = App::of(cx);
     let id = *path_param::<Account>(cx)?;
+    let account = app.service.view_user(&admin.operator, id).await?;
+    if account.administrator {
+        return Err(AdminError::AdministratorTarget.into());
+    }
     let back = App::account(cx, id);
     let composed = App::change(cx, form, |input: MessageUser| async move {
         if input.intent == MessageIntent::Edit {
@@ -402,7 +406,6 @@ pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<
             (form.clone(), Letter::try_from(&form).ok(), Some(message))
         }
     };
-    let account = app.service.view_user(&admin.operator, id).await?;
     let email = letter
         .map(|letter| EmailSender::preview(&letter, &app.auth))
         .transpose()

@@ -39,7 +39,7 @@ Read it in your Origin Account notifications:
 {%- when Content::Message { address: _, subject: _, body, paragraphs: _, inbox } %}
 {{ body }}
 
-SourceOrigin support wrote this message about your Origin Account. You can read it again in your Origin Account notifications:
+SourceOrigin support wrote this message about your Origin Account. It is also in your Origin Account notifications whenever you can sign in:
 
 {{ inbox }}
 {%- when Content::Announcement { address: _, subject: _, body, paragraphs: _, everyone, inbox, unsubscribe } %}

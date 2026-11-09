@@ -437,8 +437,8 @@ pub enum DomainEvent {
     },
     /// An administrator or operator sent the account a message, which its owner
     /// finds in their inbox and at their primary verified address. Its text,
-    /// which may be personal, is not recorded: the account's notification is its
-    /// only copy, deleted with the account.
+    /// which may be personal, is not recorded: the account's notification and its
+    /// queued email hold the only copies, deleted with the account.
     MessageSent {},
     /// A condition that needs an administrator's attention began to hold, so the
     /// alert `alert_id` was raised. It concerns no account.

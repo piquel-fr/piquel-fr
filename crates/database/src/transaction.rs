@@ -77,8 +77,8 @@ impl<'a> DatabaseTransaction<'a> {
     /// `user_id` a message, [`DomainEvent::MessageSent`], as [`Self::record`]
     /// does, and gives the account the message, `title` and `text`, as a
     /// notification, emailed as every other. The event, which the audit chain
-    /// keeps, holds no text: the notification is the message's only copy, which
-    /// purging the account deletes.
+    /// keeps, holds no text: the notification and its queued email hold the
+    /// message's only copies, which purging the account deletes.
     ///
     /// # Errors
     ///

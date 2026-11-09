@@ -29,8 +29,8 @@ announcement's text may name its recipients, so it goes with them: purging an
 account deletes its notifications, and the announcement once its last
 recipient is purged. `Message` holds the subject and text of
 [a message to the account](../operations/administration.md#message-an-account),
-which may be personal: it is the message's only copy, so purging the account
-deletes it, and its `message_sent` event, which the audit chain keeps, records
+which may be personal: it and its queued email hold the message's only copies,
+so purging the account deletes both, and its `message_sent` event, which the audit chain keeps, records
 only who sent it. `AlertRaised` holds the alert's subject and text, which
 name no account, rather than the `Alert`, so an older release's inbox never
 meets an alert it cannot decode. Today the variants are a replaced primary
