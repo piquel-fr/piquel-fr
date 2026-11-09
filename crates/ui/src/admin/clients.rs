@@ -346,7 +346,7 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
                 <header>
                     <h2 id="secrets-heading">"Client secrets " <span class="count">(page.secrets.len().to_string())</span></h2>
                     if let Some(rotate) = page.changes.as_ref().and_then(|changes| changes.secret.as_deref()) {
-                        <a data-confirm-first="" class="button secondary small" href=(rotate)>"Rotate the secret"</a>
+                        <a data-confirm-first="" data-confirming=(format!("Rotate the secret: {} ({})", client.name, client.id)) class="button secondary small" href=(rotate)>"Rotate the secret"</a>
                     }
                 </header>
                 secrets_list(secrets: page.secrets, now: now)
@@ -356,7 +356,7 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
             <header>
                 <h2 id="origins-heading">"Passkey sign-in"</h2>
                 if let Ok(href) = &page.approve {
-                    <a data-confirm-first="" class="button secondary small" href=(href.as_str())>(Change::ApproveOrigin.title())</a>
+                    <a data-confirm-first="" data-confirming=(Change::ApproveOrigin.confirming(Some(&format!("{} ({})", client.name, client.id)))) class="button secondary small" href=(href.as_str())>(Change::ApproveOrigin.title())</a>
                 }
             </header>
             <div class="body">
@@ -372,7 +372,7 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
                     for (origin, remove) in &page.origins {
                         <li>
                             <div class="text"><code>(*origin)</code></div>
-                            <a data-confirm-first="" class="button secondary small" href=(remove.as_str()) aria-label=(format!("Remove {origin}"))>"Remove"</a>
+                            <a data-confirm-first="" data-confirming=(Change::RemoveOrigin.confirming(Some(&format!("{origin} ({})", client.id)))) class="button secondary small" href=(remove.as_str()) aria-label=(format!("Remove {origin}"))>"Remove"</a>
                         </li>
                     }
                 </ul>
@@ -479,19 +479,22 @@ async fn client_actions<'a>(
     changes: &'a ClientChanges,
 ) -> Result<impl View> {
     Ok(view! {
+        // The client, as the passkey dialog names it.
+        let named = format!("{} ({})", client.name, client.id);
+        let target = Some(named.as_str());
         <div class="row actions">
-            <a data-confirm-first="" class="button secondary small" href=(changes.settings.as_str())>"Edit settings"</a>
+            <a data-confirm-first="" data-confirming=(format!("Edit settings: {named}")) class="button secondary small" href=(changes.settings.as_str())>"Edit settings"</a>
             match &changes.status {
-                Some(action) if client.status == ClientStatus::Enabled => confirm(action: action, change: Change::DisableClient),
-                Some(action) => confirm(action: action, change: Change::EnableClient),
+                Some(action) if client.status == ClientStatus::Enabled => confirm(action: action, change: Change::DisableClient, target: target),
+                Some(action) => confirm(action: action, change: Change::EnableClient, target: target),
                 None => refused_action(label: "Enable", reason: "Lift the suspension first."),
             }
             if let ClientStatus::Suspended { .. } = client.status {
-                confirm(action: &changes.suspension, change: Change::UnsuspendClient)
+                confirm(action: &changes.suspension, change: Change::UnsuspendClient, target: target)
             } else {
-                confirm(action: &changes.suspension, change: Change::SuspendClient)
+                confirm(action: &changes.suspension, change: Change::SuspendClient, target: target)
             }
-            confirm(action: &changes.delete, change: Change::DeleteClient)
+            confirm(action: &changes.delete, change: Change::DeleteClient, target: target)
         </div>
     })
 }

@@ -4,7 +4,7 @@
 use super::AdminApplication as App;
 use serde::{Deserialize, de::IgnoredAny};
 use sourceorigin_common::protocol::jwt::KeyId;
-use sourceorigin_ui::{Action, Change, Checkbox, SigningKeyRow};
+use sourceorigin_ui::{Action, Change, Checkbox, SigningKeyRow, Target};
 use topcoat::{
     Result,
     context::Cx,
@@ -85,12 +85,16 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
             .map(drop)
     })
     .await?;
+    let target = Target {
+        name: "Signing key",
+        id: Some(id.as_str()),
+    };
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::RevokeSigningKey,
+            target: target,
             back: back.as_str(),
             refusal: refused.as_deref(),
-            <p><code>(id.as_str())</code></p>
         )
     };
     App::render(cx, StatusCode::OK, Change::RevokeSigningKey.title(), page).await

@@ -356,13 +356,13 @@ impl Toggle {
         let refusal =
             App::submit(cx, form, done, |_| self.make(service, &admin.operator, &id)).await?;
         let change = self.change();
-        let which = format!("Client {id}.");
+        let target = App::target(cx).await;
         let page = view! { cx =>
             sourceorigin_ui::dashboard_change(
                 change: change,
+                target: target,
                 back: back.as_str(),
                 refusal: refusal.as_deref(),
-                <p class="help">(which.as_str())</p>
             )
         };
         App::render(cx, StatusCode::OK, change.title(), page).await

@@ -159,8 +159,22 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
+  // The dashboard's script lets a change's form post once: a second click, once
+  // the first has posted, is cancelled.
   await admin.getByRole('button', { name: 'Enable', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Enable', exact: true }).click();
+  const again = await dialog
+    .getByRole('button', { name: 'Enable', exact: true })
+    .evaluate((button: HTMLButtonElement) => {
+      button.click();
+      const second = new SubmitEvent('submit', {
+        bubbles: true,
+        cancelable: true,
+        submitter: button
+      });
+      button.form?.dispatchEvent(second);
+      return second.defaultPrevented;
+    });
+  expect(again, 'the second submit is cancelled').toBe(true);
   await expect(admin.getByText('Active', { exact: true })).toBeVisible();
 
   await user.goto('/settings');

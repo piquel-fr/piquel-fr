@@ -67,7 +67,7 @@ pub use admin::{
     DeliveryRow, DraftActions, EventRow, FoundAccount, HandlesPage, HandoffProof, HandoffQuery,
     InvitationRow, Measure, NewClientForm, OperatorDraft, Problem, RecoveryKey, RecoveryRow,
     RecoveryStanding, Registration, ReleasedRow, ReservationRow, ReservedHolder, SessionRow,
-    SigningKeyRow, Tab as DashboardTab, UserRow, account_settings, admin_overview,
+    SigningKeyRow, Tab as DashboardTab, Target, UserRow, account_settings, admin_overview,
     administrator_list, alert_list, alert_update_fields, announcement_form, announcement_list,
     announcement_page, audit_page, client_created, client_list, client_page, client_registration,
     client_secrets, dashboard_change, dashboard_failure, dashboard_frame, dashboard_signed_out,

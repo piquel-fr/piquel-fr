@@ -17,6 +17,7 @@ use sourceorigin_common::{
 };
 use sourceorigin_ui::{
     Action, AdminAnnouncementRow, Change, Checkbox, Crumb, DraftActions, FoundAccount, Query,
+    Target,
 };
 use topcoat::{
     Error, Result,
@@ -167,9 +168,15 @@ pub(super) async fn send(cx: &Cx, form: Option<Form<SendAnnouncement>>) -> Resul
     };
     let mailed = &format!("{} {}", detail.mailed, announcement.emailed());
     let revision = &checked.revision.to_string();
+    let shown = id.to_string();
+    let target = Target {
+        name: &announcement.subject,
+        id: Some(&shown),
+    };
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::SendAnnouncement,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
             <dl class="facts">
@@ -195,9 +202,15 @@ pub(super) async fn discard(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<R
     })
     .await?;
     let back = &href!(show, Announcement(id)).resolve(cx);
+    let shown = id.to_string();
+    let target = Target {
+        name: "Draft",
+        id: Some(&shown),
+    };
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::DiscardAnnouncement,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )
