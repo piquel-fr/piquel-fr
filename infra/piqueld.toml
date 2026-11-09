@@ -31,9 +31,9 @@ audit_key = "audit-key"
 # See docs/dev/operations/replicas.md before raising it.
 auth_replicas = 1
 # Where auth, with the admin dashboard it serves, and sourceorigin.dev's web server
-# send telemetry: the `telemetry` application's collector, imported below.
+# send telemetry: the `sourceorigin-observability` application's collector, imported below.
 # Empty sends none.
-otlp_endpoint = "http://collector.telemetry:4318"
+otlp_endpoint = "http://collector.sourceorigin-observability:4318"
 # GitHub and Google sign-in. An empty client ID turns the provider off; its
 # secret is then mounted but never read, so environments without the provider
 # mount the unused placeholder. Production and staging each have their own OAuth
@@ -140,11 +140,11 @@ hostname = "${{ vars.www_host }}"
 redirect = { to = "https://${{ vars.web_host }}", status = 308, preserve_path = true }
 visibility = "public"
 
-# The collector of the `telemetry` application (infra/telemetry.toml), as
-# `collector.telemetry`. It has only a production environment, which staging
+# The collector of the `sourceorigin-observability` application (infra/telemetry.toml), as
+# `collector.sourceorigin-observability`. It has only a production environment, which staging
 # and production share; `deployment.environment.name` tells them apart.
 [[spec.imports]]
-application = "telemetry"
+application = "sourceorigin-observability"
 service = "collector"
 environment = "production"
 

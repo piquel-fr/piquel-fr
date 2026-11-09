@@ -23,7 +23,7 @@ deployment its own hostnames:
 | `staging` | `main`, on every push | `staging.sourceorigin.dev` | `auth.staging.sourceorigin.dev` | `admin.staging.sourceorigin.dev` | `docs.staging.sourceorigin.dev` | tailnet |
 | previews | a branch or a local worktree | `<slug>.dev.sourceorigin.dev` | `auth-<slug>.dev.sourceorigin.dev` | `admin-<slug>.dev.sourceorigin.dev` | `docs-<slug>.dev.sourceorigin.dev` | tailnet |
 
-A second application, `telemetry` (`infra/telemetry.toml`), stores and shows
+A second application, `sourceorigin-observability` (`infra/telemetry.toml`), stores and shows
 staging's and production's traces, metrics and logs: see
 [the telemetry stack](telemetry.md).
 
