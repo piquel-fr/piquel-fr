@@ -277,6 +277,8 @@ struct Cleanup {
     budget: Duration,
     /// Passes in a row on this replica that ran out of time.
     overruns: Streak,
+    /// Passes in a row on this replica that failed.
+    failures: Streak,
 }
 
 impl Cleanup {
@@ -286,6 +288,9 @@ impl Cleanup {
     /// alert is raised: the next pass picks up what one leaves, so a single
     /// burst is no problem.
     const BEHIND_AFTER: u32 = 3;
+    /// Passes in a row that fail before the [`Alert::CleanupFailing`] alert is
+    /// raised: a single one may be the database's passing failure.
+    const FAILING_AFTER: u32 = 3;
 
     /// Pause between full batches, allowing live requests to use the pool.
     const PAUSE: Duration = Duration::from_millis(100);
@@ -297,7 +302,90 @@ impl Cleanup {
         Self {
             budget: Self::BUDGET,
             overruns: Streak::new(Self::BEHIND_AFTER),
+            failures: Streak::new(Self::FAILING_AFTER),
         }
+    }
+
+    /// Drains one pass, until it finds nothing, runs out of time or shutdown is
+    /// requested. Returns whether it ran out of time, or `None` when shutdown
+    /// stopped it.
+    async fn drain(
+        &self,
+        connection: &mut ExclusiveConnection,
+        shutdown: &Shutdown,
+    ) -> Result<Option<bool>, DatabaseError> {
+        let started = Instant::now();
+        let deadline = started + self.budget;
+        let mut behind = Some(false);
+        let mut changed = Self::batch(connection).await?;
+        while changed > 0 {
+            CLEANUP_CHANGED.add(changed, &());
+            if Instant::now() >= deadline {
+                CLEANUP_OVERRUNS.add(1, &());
+                tracing::warn!("expired authentication state cleanup is falling behind");
+                behind = Some(true);
+                break;
+            }
+            tokio::select! {
+                biased;
+                () = shutdown.requested() => {
+                    behind = None;
+                    break;
+                },
+                () = tokio::time::sleep(Self::PAUSE) => {}
+            }
+            changed = Self::batch(connection).await?;
+        }
+        CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
+        Ok(behind)
+    }
+
+    /// Changes the alerts after a pass that ended with `drained`, and returns
+    /// how it ended. The [`Self::FAILING_AFTER`]th pass in a row that fails
+    /// raises [`Alert::CleanupFailing`], and one that works clears it. The
+    /// [`Self::BEHIND_AFTER`]th in a row that runs out of time raises
+    /// [`Alert::CleanupBehind`], and one that deletes everything due clears it. A
+    /// pass that shutdown stopped changes neither.
+    async fn ended(
+        &self,
+        connection: &mut ExclusiveConnection,
+        drained: Result<Option<bool>, DatabaseError>,
+    ) -> Result<(), DatabaseError> {
+        let behind = match drained {
+            Ok(Some(behind)) => behind,
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                let alert = Alert::CleanupFailing {};
+                self.failures
+                    .failed(connection, JobName::Cleanup, alert)
+                    .await;
+                return Err(error);
+            }
+        };
+        // The pass counts before anything that may fail: its alerts change in a
+        // transaction that may not commit, and the streaks must still see it.
+        self.failures.reset();
+        let due = if behind {
+            self.overruns.extend()
+        } else {
+            self.overruns.reset();
+            None
+        };
+        let mut tx = connection.begin().await?;
+        let context = EventContext::system(JobName::Cleanup);
+        let mut alerts = Alerts::new(&mut tx, &context);
+        alerts.clear(AlertKind::CleanupFailing).await?;
+        let mut holds = None;
+        if let Some(due) = due {
+            holds = Some(due.apply(&mut alerts, Alert::CleanupBehind {}).await?);
+        } else if !behind {
+            alerts.clear(AlertKind::CleanupBehind).await?;
+        }
+        tx.commit().await?;
+        if let Some(holds) = holds {
+            self.overruns.settle(holds);
+        }
+        Ok(())
     }
 
     /// Runs one batch and returns how many rows it changed. Abandoning stuck keys
@@ -320,65 +408,15 @@ impl ExclusiveJob for Cleanup {
     const EVERY: Duration = Duration::from_mins(5);
     type Error = DatabaseError;
 
-    /// Stops after the current batch once shutdown is requested. The
-    /// [`Self::BEHIND_AFTER`]th pass in a row that runs out of time raises the
-    /// [`Alert::CleanupBehind`] alert, and one that deletes everything due clears
-    /// it.
+    /// Stops after the current batch once shutdown is requested. Raises and
+    /// clears its alerts as [`Self::ended`] says.
     async fn run(
         &self,
         connection: &mut ExclusiveConnection,
         shutdown: &Shutdown,
     ) -> Result<(), DatabaseError> {
-        let started = Instant::now();
-        let deadline = started + self.budget;
-        // Whether the pass fell behind, unless shutdown stopped it.
-        let mut behind = Some(false);
-        let mut changed = Self::batch(connection).await?;
-        while changed > 0 {
-            CLEANUP_CHANGED.add(changed, &());
-            if Instant::now() >= deadline {
-                CLEANUP_OVERRUNS.add(1, &());
-                tracing::warn!("expired authentication state cleanup is falling behind");
-                behind = Some(true);
-                break;
-            }
-            tokio::select! {
-                biased;
-                () = shutdown.requested() => {
-                    behind = None;
-                    break;
-                },
-                () = tokio::time::sleep(Self::PAUSE) => {}
-            }
-            changed = Self::batch(connection).await?;
-        }
-        CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
-        let Some(behind) = behind else {
-            return Ok(());
-        };
-        let due = if behind {
-            let Some(due) = self.overruns.extend() else {
-                return Ok(());
-            };
-            Some(due)
-        } else {
-            self.overruns.reset();
-            None
-        };
-        let mut tx = connection.begin().await?;
-        let context = EventContext::system(JobName::Cleanup);
-        let mut alerts = Alerts::new(&mut tx, &context);
-        let holds = if let Some(due) = due {
-            Some(due.apply(&mut alerts, Alert::CleanupBehind {}).await?)
-        } else {
-            alerts.clear(AlertKind::CleanupBehind).await?;
-            None
-        };
-        tx.commit().await?;
-        if let Some(holds) = holds {
-            self.overruns.settle(holds);
-        }
-        Ok(())
+        let drained = self.drain(connection, shutdown).await;
+        self.ended(connection, drained).await
     }
 }
 
