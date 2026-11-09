@@ -72,7 +72,9 @@ email's last link, **sign it out of every device and app**:
 2. Select **Sign out everywhere**. Every device and every app signed in to your
    account is signed out.
 3. Sign in again with your passkey, then review your
-   [security history](security-history.md).
+   [security history](security-history.md). It lists the link's use as
+   **Signed out everywhere with a security email's link**, with the device and
+   place it was used from.
 
 The link signs you out without signing in, so it works even if someone else is
 signed in as you. It never removes a passkey or sign-in method: the worst

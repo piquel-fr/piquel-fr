@@ -17,8 +17,8 @@ emails, you need a [confirmed email address](email-addresses.md).
   account is disabled.
 - Your primary email address changed, or an address was removed.
 - SourceOrigin support changed your handle or display name, renamed one of your
-  passkeys, or removed your profile picture. When you change these yourself, SourceOrigin doesn't tell you: you
-  already know.
+  passkeys, or removed your profile picture. When you change these yourself,
+  SourceOrigin doesn't tell you: you already know.
 - SourceOrigin support started a recovery or secured your account, someone used
   a recovery link to add a passkey, or a recovery was undone.
 - SourceOrigin support signed your devices out.

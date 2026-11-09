@@ -89,11 +89,14 @@ The email of every security notification carries
 was stolen while their passkey is out of reach. The token is the HMAC of the
 notification's ID under a key derived from the token digest key, like an
 unsubscribe link's (`Links` in `src/notifications/links.rs`). Opening the link
-shows a page asking first, so a mail scanner changes nothing. Its form, posted
-from that page without a session, runs `AccountService::sign_out_everywhere`:
-under the account lock, it marks the notification's `signed_out_at`, then ends
-every session and refresh grant with `RevocationReason::SignOutLink`, as the
-owner without a session. It revokes no credential, so the worst a leaked link
+shows a page asking first, so a mail scanner changes nothing, and only while the
+link still works (`AccountService::sign_out_link_works`); otherwise it says the
+link doesn't work, with a 404. Its form, posted from that page without a
+session, runs `AccountService::sign_out_everywhere`: under the account lock, it
+marks the notification's `signed_out_at`, records
+`DomainEvent::SignedOutEverywhere`, even when no session is left, so the owner's
+history shows every use, then ends every session and refresh grant with
+`RevocationReason::SignOutLink`, as the owner without a session. It revokes no credential, so the worst a leaked link
 can do is sign the owner out. The link works once, within seven days of the
 notification (`SIGN_OUT_LINK_LIFETIME`).
 

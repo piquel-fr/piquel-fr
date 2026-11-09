@@ -147,9 +147,9 @@ impl PasskeyApplication {
         let (mut tx, verified) = app.verify_undo(context, &headers, input).await?;
         AccountService::undo_recovery(&mut tx, context, &verified).await?;
         let session = match verified.accepted {
-            // The undo tells its owner, and ended every session: no alert of its own.
+            // The undo's own notification tells its owner: no alert of its own.
             Accepted::Active(passkey) => Some(
-                security::Session::sign_in_anew(
+                security::Session::sign_in_quietly(
                     &mut tx,
                     context,
                     &headers,

@@ -5,6 +5,7 @@ use super::AdminService;
 use crate::{
     account::AccountService,
     admin::{AdminError, Operator, Reason},
+    emails::EmailApplication,
     recovery::{LINK_LIFETIME, PROBATION, RecoveryLinks, Revoke},
     security::Session,
 };
@@ -75,11 +76,8 @@ impl AdminService {
             Some(revoke) => Some(Self::take_back(&mut tx, &context, user_id, revoke).await?),
             None => None,
         };
-        // Steps of the recovery, which tells the account itself.
         for email in emails.iter().filter(|email| email.verified_at.is_none()) {
-            let removed = DomainEvent::EmailRemoved { email_id: email.id };
-            tx.record_quietly(&context, Some(user_id), removed).await?;
-            tx.emails().remove(user_id, email.id).await?;
+            EmailApplication::delete_quietly(&mut tx, &context, user_id, email.id).await?;
         }
         let id = RecoveryId::new();
         let token = links.token(id)?;

@@ -272,9 +272,35 @@ impl Session {
         user_id: UserId,
         credential: Credential,
     ) -> Result<SignedIn, SessionError> {
+        Self::sign_in_alerting(tx, context, headers, user_id, credential, true).await
+    }
+
+    /// Signs `user_id` in as [`Self::sign_in`] does, but a new device's sign-in
+    /// alerts nobody: for an operation whose own notification tells the owner,
+    /// such as undoing a recovery.
+    pub(crate) async fn sign_in_quietly(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        headers: &HeaderMap,
+        user_id: UserId,
+        credential: Credential,
+    ) -> Result<SignedIn, SessionError> {
+        Self::sign_in_alerting(tx, context, headers, user_id, credential, false).await
+    }
+
+    /// [`Self::sign_in`], alerting the owner of a new device's sign-in when
+    /// `alert`.
+    async fn sign_in_alerting(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        headers: &HeaderMap,
+        user_id: UserId,
+        credential: Credential,
+        alert: bool,
+    ) -> Result<SignedIn, SessionError> {
         let device = Device::of(headers)?;
         let current = Self::browser_session(tx, headers, user_id).await?;
-        let new_device = device.remember(tx, context, user_id).await?;
+        let new_device = device.remember(tx, context, user_id).await? && alert;
         let session = match current {
             Some(current) if current.user_id == user_id => {
                 let session = Self::reauthenticate(tx, &current, credential).await?;
@@ -299,10 +325,10 @@ impl Session {
     /// Signs `user_id` in on this browser with a new session, as [`Self::sign_in`]
     /// does, but never re-authenticates the browser's session: whatever session it
     /// had, of this account or another, is revoked first. The browser becomes one of
-    /// the account's devices without an alert. Signing up, a recovery's link and its
-    /// undo page sign in this way: a new account has nothing to alert about, and a
-    /// recovery and its undo tell their owner themselves. An existing session can neither make a recovery's link fail
-    /// nor carry over.
+    /// the account's devices without an alert. Signing up and a recovery's link sign
+    /// in this way: a new account has nothing to alert about, and a recovery tells
+    /// its owner itself. An existing session can neither make a recovery's link
+    /// fail nor carry over.
     pub(crate) async fn sign_in_anew(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
