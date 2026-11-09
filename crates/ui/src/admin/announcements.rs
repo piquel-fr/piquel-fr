@@ -226,13 +226,17 @@ pub async fn announcement_form<'a>(
     refusal: Option<&'a str>,
 ) -> Result<impl View> {
     let chosen = form.audience == AnnouncementAudience::Accounts;
+    // What its Send asks a passkey for: the announcement, by the subject it
+    // was shown with, if it has one yet.
+    let subject = Some(form.subject.trim()).filter(|subject| !subject.is_empty());
+    let sending = Change::SendAnnouncement.confirming(subject);
     Ok(view! {
         page_head(title: change.title(), lead: change.description().to_owned())
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>
         }
         <section class="card">
-            <form class="stack" method="post" data-submit-once="" data-unconfirmed="">
+            <form class="stack" method="post" data-submit-once="" data-unconfirmed="" data-confirming=(sending.as_str())>
                 <label>
                     "Subject"
                     <input name="subject" required="" maxlength="150" value=(form.subject.as_str())>

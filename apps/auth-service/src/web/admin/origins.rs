@@ -51,11 +51,12 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
     })
     .await?;
     let typed = refusal.as_ref().map(|refused| refused.form.origin.clone());
-    let client =
-        format!("Client {id}. Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
+    let client = format!("Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
+    let target = App::target(cx).await;
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::ApproveOrigin,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
             <p class="help">(client.as_str())</p>
