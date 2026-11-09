@@ -1,7 +1,7 @@
 //! Recording, personal data, the consumer cursor and the audit log import.
 use super::*;
 use crate::{Database, DatabaseTransaction};
-use piquel_common::{
+use sourceorigin_common::{
     PasskeyId, Provider,
     clients::RelatedOrigin,
     events::{RecordedOrigin, RevocationReason},
@@ -441,7 +441,7 @@ async fn migration_imports_the_audit_log() {
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn an_alert_updates_note_erases_with_its_event() {
     use crate::repositories::AlertRepository;
-    use piquel_common::{
+    use sourceorigin_common::{
         AlertId,
         admin::{ChainBreak, ChainProblem},
         alerts::{Alert, AlertStatus},

@@ -20,8 +20,8 @@ pub use keys::{AuditConfig, TokenDigestKeys};
 use crate::recovery::RecoveryLinks;
 use email::SMTP_URL;
 use ipnet::IpNet;
-use piquel_common::config::{ConfigurationError, Origin, SecretReference, Variable};
-use piquel_crypto::KeyEncryptionKey;
+use sourceorigin_common::config::{ConfigurationError, Origin, SecretReference, Variable};
+use sourceorigin_crypto::KeyEncryptionKey;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -31,30 +31,30 @@ use url::Url;
 /// [`PUBLIC_LISTENER`] when none is configured; the HTTPS ingress proxies to it.
 const DEFAULT_PUBLIC_LISTENER: &str = "127.0.0.1:8080";
 /// [`WEB_ORIGIN`] when none is configured: production's.
-const DEFAULT_WEB_ORIGIN: &str = "https://piquel.fr";
+const DEFAULT_WEB_ORIGIN: &str = "https://sourceorigin.dev";
 /// [`REQUESTS_PER_MINUTE`] when none is configured: enough for a person, not
 /// for a browser suite or a scraper.
 const DEFAULT_REQUESTS_PER_MINUTE: &str = "120";
 
-piquel_common::variables! {
+sourceorigin_common::variables! {
     /// The service's own variables, in the configuration reference's order.
     #[cfg(test)]
     pub(crate) const VARIABLES;
 
-    /// The exact origin auth serves, such as `https://auth.piquel.fr`. It is the
+    /// The exact origin auth serves, such as `https://auth.sourceorigin.dev`. It is the
     /// OpenID Connect issuer and the passkeys' relying party, so it must use a
     /// domain name. Required.
     pub const PUBLIC_BASE_URL = "AUTH_PUBLIC_BASE_URL";
     /// The address auth listens on, behind the HTTPS ingress.
     const PUBLIC_LISTENER = "AUTH_PUBLIC_LISTENER", default DEFAULT_PUBLIC_LISTENER;
-    /// piquel.fr's origin. Every page links its privacy policy and terms, and
+    /// sourceorigin.dev's origin. Every page links its privacy policy and terms, and
     /// discovery advertises them.
     const WEB_ORIGIN = "AUTH_WEB_ORIGIN", default DEFAULT_WEB_ORIGIN;
     /// The address the admin dashboard listens on, such as `0.0.0.0:8081`. Set it
     /// together with `AUTH_ADMIN_ORIGIN`; without them, auth serves no dashboard.
     /// Only a private route may reach this listener.
     const ADMIN_LISTENER = "AUTH_ADMIN_LISTENER";
-    /// The admin dashboard's origin, such as `https://admin.piquel.fr`. Set it
+    /// The admin dashboard's origin, such as `https://admin.sourceorigin.dev`. Set it
     /// together with `AUTH_ADMIN_LISTENER`.
     const ADMIN_ORIGIN = "AUTH_ADMIN_ORIGIN";
     /// `false` lets anyone sign up; `true`, the default, requires an invitation.
@@ -97,8 +97,9 @@ impl PasskeyConfig {
     /// Reads the passkey policy and validates that the origin has a domain RP ID.
     pub(crate) fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
         if !matches!(origin.as_url().host(), Some(url::Host::Domain(_))) {
-            return Err(PUBLIC_BASE_URL
-                .invalid("must use a domain name for WebAuthn, e.g. https://auth.piquel.fr"));
+            return Err(PUBLIC_BASE_URL.invalid(
+                "must use a domain name for WebAuthn, e.g. https://auth.sourceorigin.dev",
+            ));
         }
         Ok(Self {
             origin: origin.clone(),
@@ -115,11 +116,11 @@ pub(crate) struct OidcConfig {
     pub origin: Origin,
     /// Keys under which opaque token secrets are stored.
     pub digest_keys: Arc<TokenDigestKeys>,
-    /// Piquel's policies, which discovery advertises.
+    /// SourceOrigin's policies, which discovery advertises.
     pub policies: PolicyLinks,
 }
 
-/// Piquel's policies, at their paths on piquel.fr: every page's footer links them,
+/// SourceOrigin's policies, at their paths on sourceorigin.dev: every page's footer links them,
 /// and discovery advertises them as `op_policy_uri` and `op_tos_uri`.
 #[derive(Clone)]
 pub(crate) struct PolicyLinks {
@@ -130,9 +131,9 @@ pub(crate) struct PolicyLinks {
 }
 
 impl PolicyLinks {
-    /// The policies piquel.fr serves at `web`.
+    /// The policies sourceorigin.dev serves at `web`.
     pub(crate) fn on(web: &Origin) -> Self {
-        let paths = piquel_ui::Policies::PATHS;
+        let paths = sourceorigin_ui::Policies::PATHS;
         Self {
             privacy: web.url(paths.privacy),
             terms: web.url(paths.terms),
@@ -140,8 +141,8 @@ impl PolicyLinks {
     }
 
     /// The policies, as a page's footer links them.
-    pub(crate) fn links(&self) -> piquel_ui::Policies<'_> {
-        piquel_ui::Policies {
+    pub(crate) fn links(&self) -> sourceorigin_ui::Policies<'_> {
+        sourceorigin_ui::Policies {
             privacy: self.privacy.as_str(),
             terms: self.terms.as_str(),
         }
@@ -169,7 +170,7 @@ impl DashboardConfig {
                 origin: ADMIN_ORIGIN.parse()?,
             })),
             (Some(_), None) => Err(ADMIN_ORIGIN.invalid(
-                "must be set with AUTH_ADMIN_LISTENER: the dashboard's origin, e.g. https://admin.piquel.fr",
+                "must be set with AUTH_ADMIN_LISTENER: the dashboard's origin, e.g. https://admin.sourceorigin.dev",
             )),
             (None, Some(_)) => Err(ADMIN_LISTENER.invalid(
                 "must be set with AUTH_ADMIN_ORIGIN: the address the dashboard listens on",

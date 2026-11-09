@@ -8,14 +8,14 @@ use crate::{
     tests::{Replicas, operator},
 };
 use chrono::{SubsecRound, TimeDelta};
-use piquel_common::alerts::{Alert, AlertKind};
-use piquel_common::{
+use sourceorigin_common::alerts::{Alert, AlertKind};
+use sourceorigin_common::{
     Personal, Provider,
     config::Origin,
     events::{Actor, DomainEvent, EventContext, JobName, RequestOrigin},
 };
-use piquel_crypto::NoteKey;
-use piquel_repository::{
+use sourceorigin_crypto::NoteKey;
+use sourceorigin_repository::{
     Checkpoint, DatabaseTransaction, EventFilter, ExclusiveConnection, LockKey, Tamper,
     Verifications,
 };
@@ -799,7 +799,7 @@ async fn checkpoints_are_published() {
 #[test]
 fn checkpoint_text_round_trips() {
     let text = CheckpointText {
-        origin: "auth.piquel.fr/audit".into(),
+        origin: "auth.sourceorigin.dev/audit".into(),
         head: ChainLink {
             position: 48_211,
             hash: [0xde; 32],
@@ -809,7 +809,7 @@ fn checkpoint_text_round_trips() {
     let rendered = text.render();
     assert_eq!(
         rendered,
-        "auth.piquel.fr/audit\nposition 48211\nhead 3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t4=\n\
+        "auth.sourceorigin.dev/audit\nposition 48211\nhead 3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t4=\n\
          time 2026-10-13T12:00:00Z\n"
     );
     assert_eq!(CheckpointText::parse(&rendered), Some(text));
@@ -829,8 +829,8 @@ fn checkpoint_text_round_trips() {
 #[test]
 fn committed_keys_are_per_environment() {
     for (host, other) in [
-        ("auth.piquel.fr", "auth.staging.piquel.fr"),
-        ("auth.staging.piquel.fr", "auth.piquel.fr"),
+        ("auth.sourceorigin.dev", "auth.staging.sourceorigin.dev"),
+        ("auth.staging.sourceorigin.dev", "auth.sourceorigin.dev"),
     ] {
         let keys = AuditKeys::committed(&format!("https://{host}").parse().expect("origin"))
             .expect("committed keys");
@@ -846,7 +846,7 @@ fn committed_keys_are_per_environment() {
     ));
     let own = NoteKey::generate("auth.example/audit").expect("key");
     for (origin, source) in [
-        ("https://auth.piquel.fr", VerificationKeys::Committed),
+        ("https://auth.sourceorigin.dev", VerificationKeys::Committed),
         ("https://auth.example", VerificationKeys::Uncommitted),
     ] {
         let keys =

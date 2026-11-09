@@ -6,12 +6,14 @@ use crate::config::EmailConfig;
 use crate::emails::EmailApplication;
 use crate::security::BrowserCookie;
 use axum::http::HeaderMap;
-use piquel_common::{
+use sourceorigin_common::{
     Personal, TokenId, UserId,
     events::{DomainEvent, EventContext, RevocationReason},
     protocol::api::Identity,
 };
-use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
+use sourceorigin_repository::{
+    Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation,
+};
 use std::net::IpAddr;
 
 impl FederationApplication {

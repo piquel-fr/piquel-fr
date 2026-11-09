@@ -3,8 +3,8 @@
 use super::{JsonArray, RepositoryExecutor, TokenRepository};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_common::{ClientId, SessionId, TokenId, UserId, clients::ClientKind};
 use serde::Serialize;
+use sourceorigin_common::{ClientId, SessionId, TokenId, UserId, clients::ClientKind};
 use sqlx::types::Json;
 use thiserror::Error;
 

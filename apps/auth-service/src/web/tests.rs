@@ -23,13 +23,13 @@ use axum::{
     response::Response,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use piquel_common::{
+use serde::Serialize;
+use sourceorigin_common::{
     ClientId, PasskeyId,
     clients::{ClientKind, ClientOwner, ClientRegistration},
 };
-use piquel_repository::InsertPasskey;
-use piquel_ui::{DeviceChange, Section};
-use serde::Serialize;
+use sourceorigin_repository::InsertPasskey;
+use sourceorigin_ui::{DeviceChange, Section};
 use tower::ServiceExt;
 use url::{Position, Url, form_urlencoded};
 
@@ -225,7 +225,9 @@ async fn consent_page_decides_from_its_own_form() {
     assert_eq!(response.status(), StatusCode::OK);
     let policy = policy(&response).to_owned();
     assert!(
-        policy.starts_with("default-src 'none'; style-src https://auth.piquel.fr/assets/style."),
+        policy.starts_with(
+            "default-src 'none'; style-src https://auth.sourceorigin.dev/assets/style."
+        ),
         "{policy}"
     );
     assert!(
@@ -601,11 +603,11 @@ fn every_page_is_mounted_and_classified() {
     assert_eq!(mounted, routes::page::ALL);
 }
 
-/// Piquel's policies are piquel.fr's: every page's footer links them there, the
+/// SourceOrigin's policies are sourceorigin.dev's: every page's footer links them there, the
 /// registration form agrees to them there, and discovery advertises them there.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn pages_and_discovery_link_piquel_fr_policies() {
+async fn pages_and_discovery_link_sourceorigin_policies() {
     let replicas = Replicas::new().await;
     let browser = Browser::signed_out();
     let page = html(browser.visit(&replicas.a, REGISTER).await).await;

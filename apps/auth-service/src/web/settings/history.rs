@@ -8,7 +8,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{
+use sourceorigin_ui::{
     Audience, EmailRow, HistoryChange, HistoryPage, HistoryState, Holdings, Messages, Section, Tab,
 };
 use topcoat::{
@@ -97,8 +97,9 @@ impl AccountPage for History {
                 confirmed: reader.is_recent(),
             },
         };
-        let page =
-            Child::new(view! { cx => piquel_ui::history(rows: &rows, holds: holds, page: page) });
+        let page = Child::new(
+            view! { cx => sourceorigin_ui::history(rows: &rows, holds: holds, page: page) },
+        );
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await
     }

@@ -14,14 +14,14 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
-use piquel_common::{
+use serde_json::{Value, json};
+use sourceorigin_common::{
     AuthenticationMethod, Handle, PasskeyId, UserId,
     clients::{ClientKind, ClientRegistration},
     events::{Actor, CodeRedemptionFailure, DomainEvent, RevocationReason},
     protocol::claims::{Acr, IdTokenClaims},
 };
-use piquel_crypto::{KeySet, Rs256Key};
-use serde_json::{Value, json};
+use sourceorigin_crypto::{KeySet, Rs256Key};
 use std::sync::Arc;
 use tower::ServiceExt;
 use url::Url;
@@ -89,7 +89,7 @@ impl Flow {
             )
         });
         let origin = origin
-            .parse::<piquel_common::config::Origin>()
+            .parse::<sourceorigin_common::config::Origin>()
             .expect("issuer");
         let config = AuthConfig::test(&origin);
         let federation =
@@ -165,7 +165,7 @@ impl Flow {
             .uri(uri)
             .header(header::COOKIE, &self.cookie)
             .header(header::ORIGIN, &self.app.issuer)
-            .header("x-piquel-csrf", "1");
+            .header("x-sourceorigin-csrf", "1");
         if let Some(basic) = basic {
             builder = builder.header(header::AUTHORIZATION, basic);
         }
@@ -263,7 +263,7 @@ impl Flow {
             ("code_challenge_method", CodeChallengeMethod::S256.as_str()),
             (
                 "code_challenge",
-                &piquel_crypto::Pkce::challenge(Self::verifier()).expect("PKCE"),
+                &sourceorigin_crypto::Pkce::challenge(Self::verifier()).expect("PKCE"),
             ),
         ]);
         if let Some(prompt) = prompt {

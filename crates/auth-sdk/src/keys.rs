@@ -7,11 +7,11 @@ use crate::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use jsonwebtoken::{DecodingKey, crypto::aws_lc::DEFAULT_PROVIDER};
-use piquel_common::protocol::{
+use serde::Deserialize;
+use sourceorigin_common::protocol::{
     jwt::{Algorithm, Jwk, JwkSet, TokenType},
     sdk::{ErrorCategory, ErrorReason, SdkError},
 };
-use serde::Deserialize;
 use std::{
     fmt,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -60,7 +60,7 @@ impl JwsHeader {
 /// verify it with a [`KeyCache`] before reading the payload.
 ///
 /// ```
-/// use piquel_auth::{
+/// use sourceorigin_auth::{
 ///     Jws, TokenError,
 ///     protocol::jwt::{Algorithm, TokenType},
 /// };
@@ -316,7 +316,7 @@ impl Key {
 /// The usable keys of a JSON Web Key Set.
 ///
 /// ```
-/// use piquel_auth::{KeyError, KeySet};
+/// use sourceorigin_auth::{KeyError, KeySet};
 ///
 /// let keys = KeySet::parse(br#"{"keys": [
 ///     {"kty": "RSA", "kid": "key-2026", "use": "sig", "alg": "RS256", "n": "AQAB", "e": "AQAB"},
@@ -439,7 +439,7 @@ struct KeyCacheInner {
 ///
 /// ```no_run
 /// # async fn run(token: &str) -> Result<(), Box<dyn std::error::Error>> {
-/// use piquel_auth::{Jws, KeyCache, protocol::jwt::Algorithm};
+/// use sourceorigin_auth::{Jws, KeyCache, protocol::jwt::Algorithm};
 ///
 /// // One cache per issuer, shared by every request: clones share keys and fetch spacing.
 /// let keys = KeyCache::new(
@@ -496,13 +496,13 @@ impl KeyCache {
     /// Keys that never change and are never fetched, for tests and pinned keys.
     ///
     /// ```
-    /// use piquel_auth::{KeyCache, KeySet};
+    /// use sourceorigin_auth::{KeyCache, KeySet};
     ///
     /// let pinned = KeySet::parse(
     ///     br#"{"keys": [{"kty": "RSA", "kid": "key-2026", "n": "AQAB", "e": "AQAB"}]}"#,
     /// )?;
     /// let keys = KeyCache::fixed(pinned);
-    /// # Ok::<(), piquel_auth::KeyError>(())
+    /// # Ok::<(), sourceorigin_auth::KeyError>(())
     /// ```
     #[must_use]
     pub fn fixed(keys: KeySet) -> Self {

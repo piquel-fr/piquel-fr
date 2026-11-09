@@ -50,14 +50,14 @@ use axum::{
     routing::{MethodRouter, delete, get, patch, post},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use serde::Deserialize;
+use sourceorigin_common::{
     ClientId, EmailId, Handle, NotificationId, PasskeyId, Personal, PictureId, SessionId,
     events::DomainEvent,
     notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
 };
-use piquel_repository::{Database, StoredUser};
-use serde::Deserialize;
+use sourceorigin_repository::{Database, StoredUser};
 
 operations! {
     /// Every shared settings operation of the settings API. The owner's router

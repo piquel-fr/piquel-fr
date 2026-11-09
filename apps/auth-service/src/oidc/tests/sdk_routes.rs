@@ -1,7 +1,7 @@
 //! The Rust SDK's login routes, pushing and step-up against the real provider.
 
 use super::*;
-use piquel_common::protocol::step_up::StepUpRequirement;
+use sourceorigin_common::protocol::step_up::StepUpRequirement;
 
 /// A clock the SDK scenarios move by hand, to reach access token expiry.
 #[derive(Clone)]
@@ -14,7 +14,7 @@ impl ManualClock {
     }
 }
 
-impl piquel_auth::Clock for ManualClock {
+impl sourceorigin_auth::Clock for ManualClock {
     fn now(&self) -> chrono::DateTime<Utc> {
         *self.0.lock().expect("clock")
     }
@@ -33,7 +33,7 @@ struct LoginApp {
 impl LoginApp {
     /// Serves the provider over TLS and builds the app.
     async fn start() -> Self {
-        use piquel_auth::{
+        use sourceorigin_auth::{
             ClientConfig, Credentials, Resource,
             axum::{BearerLayer, CookieKey, LoginRoutes, RequireAuthentication, SignedIn},
             protocol::challenge::BearerChallenge,
@@ -47,7 +47,7 @@ impl LoginApp {
         let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
         let http = reqwest::Client::builder().add_root_certificate(certificate);
         let clock = ManualClock(Arc::new(std::sync::Mutex::new(Utc::now())));
-        let issuer = piquel_auth::Issuer::builder()
+        let issuer = sourceorigin_auth::Issuer::builder()
             .http_client(http)
             .clock(clock.clone())
             .discover(&origin)
@@ -131,7 +131,7 @@ impl LoginApp {
     /// The name of the login routes' cookie ending in `suffix`, which names the
     /// client.
     fn named(&self, suffix: &str) -> String {
-        format!("__Host-piquel-{}-{suffix}", self.flow.client.id)
+        format!("__Host-sourceorigin-{}-{suffix}", self.flow.client.id)
     }
 
     /// Sends a request to the app with an optional cookie, as a browser navigating to
@@ -346,7 +346,7 @@ async fn sdk_login_routes_push_for_clients_that_must() {
 /// A passkey confirmation within five minutes.
 struct RecentPasskey;
 
-impl piquel_auth::AuthenticationPolicy for RecentPasskey {
+impl sourceorigin_auth::AuthenticationPolicy for RecentPasskey {
     const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(300);
 }
 

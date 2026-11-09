@@ -1,7 +1,7 @@
 ---
 name: preview
 description: >
-  Deploy this worktree to its piqueld preview: a disposable copy of piquel.fr
+  Deploy this worktree to its piqueld preview: a disposable copy of SourceOrigin
   (auth with its settings pages, the admin dashboard and PostgreSQL) on private
   tailnet URLs, built from the worktree's files without committing or pushing.
   Use whenever a change needs the running app: to try it, debug it against real
@@ -17,11 +17,11 @@ generated secrets, and URLs.
 
 | Route | URL |
 | --- | --- |
-| auth, with the settings at `/settings` | `https://auth-<slug>.dev.piquel.fr` |
-| admin | `https://admin-<slug>.dev.piquel.fr` |
-| docs, the documentation book | `https://docs-<slug>.dev.piquel.fr` |
-| web (redirects to auth, keeping the path) | `https://<slug>.dev.piquel.fr` |
-| www (redirects to web) | `https://www-<slug>.dev.piquel.fr` |
+| auth, with the settings at `/settings` | `https://auth-<slug>.dev.sourceorigin.dev` |
+| admin | `https://admin-<slug>.dev.sourceorigin.dev` |
+| docs, the documentation book | `https://docs-<slug>.dev.sourceorigin.dev` |
+| web (redirects to auth, keeping the path) | `https://<slug>.dev.sourceorigin.dev` |
+| www (redirects to web) | `https://www-<slug>.dev.sourceorigin.dev` |
 
 URLs are private: they work from devices on the tailnet, including this machine
 and the user's devices, and nowhere else. Each preview's database starts empty
@@ -50,7 +50,7 @@ On failure, the exit code says what happened:
 | --- | --- | --- |
 | 2 | Invalid command or manifest | Fix it; retrying won't help |
 | 3 | Superseded by a newer deployment, or preview limit reached | Wait for the newer one; on the limit, ask the user which preview to delete |
-| 4 | Timed out or daemon unreachable | The deployment continues: `piquelctl --timeout 15m preview wait piquel-fr "$(git branch --show-current)" --ready routes` |
+| 4 | Timed out or daemon unreachable | The deployment continues: `piquelctl --timeout 15m preview wait sourceorigin "$(git branch --show-current)" --ready routes` |
 | 5 | Deployment failed | Read the error, then the logs below; fix, deploy again |
 
 Permission errors mean the credentials lack `previews:deploy` or
@@ -61,19 +61,19 @@ credentials.
 
 ```sh
 branch=$(git branch --show-current)
-piquelctl preview show piquel-fr "$branch"                    # state, commit, URLs
-piquelctl preview logs piquel-fr "$branch" --service auth --tail 100
-piquelctl preview url piquel-fr "$branch" --route auth       # or --route admin
+piquelctl preview show sourceorigin "$branch"                    # state, commit, URLs
+piquelctl preview logs sourceorigin "$branch" --service auth --tail 100
+piquelctl preview url sourceorigin "$branch" --route auth       # or --route admin
 ```
 
 Build and `migrate` job output live in the build history:
-`piquelctl --json preview show piquel-fr "$branch"` gives the preview's
+`piquelctl --json preview show sourceorigin "$branch"` gives the preview's
 `environment_id`, then `piquelctl builds list --environment ID` and
 `piquelctl builds logs BUILD_ID`.
 
 ## Pushed branches
 
-`piquelctl preview create piquel-fr --branch NAME` previews a pushed branch
+`piquelctl preview create sourceorigin --branch NAME` previews a pushed branch
 instead. Previews redeploy when their branch moves, so a pushed branch's preview
 follows its pushes, and a local snapshot is replaced once its branch is pushed
 again.

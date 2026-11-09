@@ -60,8 +60,8 @@ fn decoding_is_strict() {
 fn skeleton_vectors() {
     let skeleton = |handle: &str| Handle::parse(handle).expect("valid").skeleton();
     for (left, right) in [
-        ("pique1", "piquel"),
-        ("p-iquel", "piquel"),
+        ("s0urce0rigin", "sourceorigin"),
+        ("source-origin", "sourceorigin"),
         ("rnoon", "moon"),
         ("vvave", "wave"),
         ("b0b", "bob"),
@@ -81,8 +81,8 @@ fn reserved_names() {
     for (handle, name) in [
         ("admin", "admin"),
         ("adm1n", "admin"),
-        ("pique1", "piquel"),
-        ("p-iquel", "piquel"),
+        ("s0urce0rigin", "sourceorigin"),
+        ("source-origin", "sourceorigin"),
         ("postmaster", "postmaster"),
         ("www", "www"),
     ] {
@@ -92,7 +92,7 @@ fn reserved_names() {
             "{handle}"
         );
     }
-    for handle in ["alice", "admins", "piquel-fan"] {
+    for handle in ["alice", "admins", "sourceorigin-fan"] {
         assert_eq!(reserved(handle), Ok(()), "{handle}");
     }
 }

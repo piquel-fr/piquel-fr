@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::federation::providers::{GoogleClaims, GoogleProtocol};
-use piquel_auth::{KeyCache, KeySet};
-use piquel_common::protocol::jwt::{Algorithm, TokenType};
-use piquel_crypto::Rs256Key;
+use sourceorigin_auth::{KeyCache, KeySet};
+use sourceorigin_common::protocol::jwt::{Algorithm, TokenType};
+use sourceorigin_crypto::Rs256Key;
 use tracing::Instrument;
 
 impl TestApp {
@@ -100,7 +100,7 @@ async fn google_token_responses_yield_identities_without_email() {
 /// with its method, host and status only.
 #[tokio::test]
 async fn google_key_fetch_is_a_client_span_of_its_request() {
-    let capture = piquel_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
+    let capture = sourceorigin_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
     let rsa = Rs256Key::generate("google-test").expect("RSA test key");
     let token = rsa
         .sign(TokenType::Id, &serde_json::json!({}))
@@ -108,7 +108,7 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
     let keys = rsa.jwks().clone();
     let mock = Router::new().route("/keys", get(move || async move { Json(keys) }));
     let cache = tls_keys(mock, "/keys?client=secret").await;
-    let jws = piquel_auth::Jws::parse(&token).expect("JWS");
+    let jws = sourceorigin_auth::Jws::parse(&token).expect("JWS");
     let request = tracing::info_span!("request");
     cache
         .verify(&jws, Algorithm::Rs256)
@@ -287,7 +287,8 @@ fn google_is_authoritative_only_for_verified_addresses_it_hosts() {
 /// Resolved credentials fail at startup with variable context and the original source.
 #[test]
 fn provider_secrets_fail_early_with_context() {
-    let path = std::env::temp_dir().join(format!("piquel-provider-secret-{}", TokenId::new()));
+    let path =
+        std::env::temp_dir().join(format!("sourceorigin-provider-secret-{}", TokenId::new()));
     let config = || ProviderConfig::test(&path);
     let error = config()
         .resolve(Provider::GitHub)

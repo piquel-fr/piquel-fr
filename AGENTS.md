@@ -1,10 +1,15 @@
-# piquel-fr
+# sourceorigin
 
-This repository contains everything under the piquel.fr domain:
+SourceOrigin is the project and its site. Origin Auth is its sign-in service
+(sign-in, the account settings, the developer console, the admin dashboard and
+the SDKs), and a person's account is an Origin Account. Use these names in
+everything people read.
 
-- `apps/auth-service`: auth.piquel.fr (OIDC, its sign-in pages, the account
+This repository contains everything under the sourceorigin.dev domain:
+
+- `apps/auth-service`: auth.sourceorigin.dev (OIDC, its sign-in pages, the account
   settings and the developer console), the admin dashboard and the operator CLI.
-- `apps/web`: piquel.fr's own site.
+- `apps/web`: sourceorigin.dev's own site.
 - `crates/`: `auth-sdk` (the Rust SDK), `common`, `crypto`, `database`,
   `telemetry` and `ui`.
 - `packages/auth`: the TypeScript SDK.
@@ -22,7 +27,7 @@ appropriate. This includes the operator CLI (`apps/auth-service/src/cli`), the
 developer console, the user settings, the admin panel, the SDKs and the
 documentation. All surfaces should support all features. Don't let anything be
 left behind. A feature ships with its documentation in the same pull request:
-use the `piquel-docs` skill.
+use the `sourceorigin-docs` skill.
 
 The CLI is the most complete surface. An admin operation may stay CLI-only
 (`AdminApplication::page()` in `apps/auth-service/src/web/admin/mod.rs` maps

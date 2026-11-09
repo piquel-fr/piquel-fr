@@ -93,12 +93,12 @@ after one fails, such as over a broken chain, it waits five minutes before tryin
 again:
 
 ```text
-auth.piquel.fr/audit
+auth.sourceorigin.dev/audit
 position 48211
 head 3q2+7w…
 time 2026-10-13T12:00:00Z
 
-— auth.piquel.fr/audit <base64 key ID and Ed25519 signature>
+— auth.sourceorigin.dev/audit <base64 key ID and Ed25519 signature>
 ```
 
 `head` is the base64 chain hash at `position`. The note is stored in
@@ -110,7 +110,7 @@ recomputes the chain from there, checking each event's hash and order. The
 database cannot check signatures, so someone with auth's database role but not
 the key could add a checkpoint that does not verify. The sealer logs every such
 newer checkpoint as an error, counts it in
-`piquel.auth.audit.untrusted_checkpoints` each time it passes over it, and
+`sourceorigin.auth.audit.untrusted_checkpoints` each time it passes over it, and
 recomputes nothing while one holds the head's position. It cannot postpone
 signing past the next sealed event, after which the next checkpoint follows it.
 `audit verify` keeps reporting it. The sealer and `/audit/checkpoints/latest`
@@ -127,9 +127,9 @@ signing key, so each can be rotated on its own. `AUTH_AUDIT_KEY_PROVIDER` is an
 characters. Auth ignores one trailing newline, and refuses to start with
 anything else.
 
-The key is named after the auth host, e.g. `auth.piquel.fr/audit`. Production
+The key is named after the auth host, e.g. `auth.sourceorigin.dev/audit`. Production
 and staging each have their own, kept in piqueld's secret store as
-`audit-key-production` and `audit-key-staging`, and their verifier keys are
+`audit-key-production-2` and `audit-key-staging-2`, and their verifier keys are
 committed to [`audit-key.pub`](audit-key.pub), one key per line. Every build
 compiles that file in, so a compromised server cannot swap the key that `audit
 verify` trusts. `audit verify` and `audit prune` trust only the key named after
@@ -213,7 +213,7 @@ minutes one replica checks the newest recorded verification, other than one
 made with `--key`, and once that is six hours old, whoever made it, verifies the
 whole chain with the dashboard's keys (below) and records it as the
 `audit_verification` job. After each check, that
-replica's `piquel.auth.audit.broken` gauge says whether the newest recorded
+replica's `sourceorigin.auth.audit.broken` gauge says whether the newest recorded
 verification found the chain broken (1) or intact (0), leaving out those made
 with `--key`, as the alert does. A replica that has not checked lately reports
 nothing, so an absent gauge does not mean intact. A verification that
@@ -269,11 +269,11 @@ that would. The command verifies again first.
 ## Rotating the audit key
 
 1. Generate a seed with `openssl rand -hex 32 > seed`, and store it under a new
-   name, e.g. `piquelctl app secret piquel-fr set audit-key-production-2 --file
+   name, e.g. `piquelctl app secret sourceorigin set audit-key-production-3 --file
    seed --environments production --no-previews`.
 2. Print its verifier key with your local configuration, overriding the key and
    host: `AUTH_AUDIT_KEY_PROVIDER=file://$PWD/seed
-   AUTH_PUBLIC_BASE_URL=https://auth.piquel.fr just auth keys audit`.
+   AUTH_PUBLIC_BASE_URL=https://auth.sourceorigin.dev just auth keys audit`.
    Then delete `seed`.
 3. In one change, add that line to `audit-key.pub`, keeping the old key, and
    point the environment's `audit_key` variable in `infra/piqueld.toml` at the
@@ -302,9 +302,9 @@ so keep every key that signed a checkpoint still in the database.
 - **Open sessions.** Rotating the runtime role's password does not end the
   sessions already open with it, and one of them could set the role's password
   and settings again. So after a compromise, as the schema owner, first stop
-  the role logging in (`ALTER ROLE piquel_auth NOLOGIN`), then end its sessions
+  the role logging in (`ALTER ROLE sourceorigin_auth NOLOGIN`), then end its sessions
   (`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename =
-  'piquel_auth'`), then deploy with a new `database-runtime-password`, whose
+  'sourceorigin_auth'`), then deploy with a new `database-runtime-password`, whose
   `migrate` sets it, logs the role in again and resets its settings. Auth cannot
   reach the database in between. Until then, the old sessions can still take the
   sealer's lock or hold a transaction open, which stops sealing.

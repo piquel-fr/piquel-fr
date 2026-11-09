@@ -2,8 +2,8 @@
 
 use super::{CliError, Console};
 use clap::Subcommand;
-use piquel_common::DeliveryId;
-use piquel_repository::DeliveryStatus;
+use sourceorigin_common::DeliveryId;
+use sourceorigin_repository::DeliveryStatus;
 
 /// Inspecting, retrying and cancelling outbound deliveries.
 #[derive(Subcommand)]

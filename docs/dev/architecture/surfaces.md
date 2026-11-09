@@ -1,16 +1,16 @@
 # Auth, account and admin surfaces
 
-This page sets out what each of piquel.fr's three hosts serves, and how
+This page sets out what each of SourceOrigin's three hosts serves, and how
 administrators act on accounts without signing in as their owners. Parts not
 built yet are marked *(planned)*.
 
 | Host | Serves | Used by |
 | --- | --- | --- |
-| `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages, account settings, the developer console and the JSON APIs; security center *(planned)* | every application and user |
-| `piquel.fr` | Its own web server: the homepage and Piquel's policies, and a redirect to auth.piquel.fr that keeps every other path; public profiles *(planned)* | visitors, old links and bookmarks |
-| `admin.piquel.fr` | The admin dashboard, which auth serves on a listener of its own | administrators |
+| `auth.sourceorigin.dev` | OIDC/OAuth endpoints, ceremony pages, account settings, the developer console and the JSON APIs; security center *(planned)* | every application and user |
+| `sourceorigin.dev` | Its own web server: the homepage and SourceOrigin's policies, and a redirect to auth.sourceorigin.dev that keeps every other path; public profiles *(planned)* | visitors, old links and bookmarks |
+| `admin.sourceorigin.dev` | The admin dashboard, which auth serves on a listener of its own | administrators |
 
-## auth.piquel.fr
+## auth.sourceorigin.dev
 
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
@@ -19,9 +19,9 @@ recovery at `/recover` and `/recover/undo`, device verification *(planned)*). It
 also serves the account settings at `/settings`, an overview first, then the
 inbox at `/settings/notifications`, the sign-in methods at `/settings/sign-in` and
 the other pages on the paths
-piquel.fr used, and redirects its root there, and the developer console, where
+sourceorigin.dev used, and redirects its root there, and the developer console, where
 accounts register their own OIDC clients, at `/developers`. The admin dashboard is the same
-executable too, on another listener and host (see admin.piquel.fr below).
+executable too, on another listener and host (see admin.sourceorigin.dev below).
 
 The account API is routes in the same executable. It is small next to the pages
 that use it, and keeping it there keeps one binary, one database owner and one
@@ -33,15 +33,15 @@ never cached. Their scripts are the passkey script, which runs the passkey
 ceremonies their forms need and keeps a form from posting twice, and the picture
 script, which lets the picture form choose its crop.
 
-Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
+Passkeys are bound to the `auth.sourceorigin.dev` RP ID, so passkey ceremonies always
 run on auth. A settings change that needs a recent passkey confirmation asks for
 it on its page before the form posts. Users never unlock settings explicitly.
 
-## piquel.fr
+## sourceorigin.dev
 
-piquel.fr is its own product, served by its own web server, `apps/web`. It relies
+sourceorigin.dev is its own product, served by its own web server, `apps/web`. It relies
 on auth only to sign people in: it links auth's pages and never shares auth's
-database, keys or process. Today it serves the homepage, which says what Piquel's
+database, keys or process. Today it serves the homepage, which says what SourceOrigin's
 sign-in is and links each surface, the privacy policy at `/privacy` and the terms
 of service at `/terms`. They are static, with no session, form or script, and the
 only pages search engines may index. Auth links the policies there
@@ -50,20 +50,20 @@ so does the registration form, which agrees to them. OIDC discovery advertises
 them as `op_policy_uri` and `op_tos_uri`, which the SDK reads with the rest of the
 metadata.
 
-Every other path redirects to the same one on auth.piquel.fr, with a temporary
+Every other path redirects to the same one on auth.sourceorigin.dev, with a temporary
 `307` keeping the path and query; browsers keep the fragment, so links to
-`piquel.fr/settings/…` open the same page on auth. The security notices among
+`sourceorigin.dev/settings/…` open the same page on auth. The security notices among
 them never expire, so the redirect stays until
-piquel.fr serves pages of its own at those paths, such as public profiles
+sourceorigin.dev serves pages of its own at those paths, such as public profiles
 *(planned)*.
 
-## admin.piquel.fr
+## admin.sourceorigin.dev
 
 Auth serves the admin dashboard itself, on its admin listener
 (`AUTH_ADMIN_LISTENER`), for the dashboard's own origin (`AUTH_ADMIN_ORIGIN`). Only
 a private route reaches that listener, so the dashboard is reachable only on the
 tailnet. Its pages are server-rendered in `apps/auth-service/src/web/admin`,
-render the views of `piquel_common::admin` with `piquel-ui`'s dashboard
+render the views of `sourceorigin_common::admin` with `sourceorigin-ui`'s dashboard
 components, and call `AdminService` in-process, as the CLI does, and
 `AccountService` for an account's settings (see below): there is no admin API.
 The network path is a second wall, not the authorization.
@@ -197,7 +197,7 @@ When an administrator or operator acts:
 
 - Every change to a shared setting needs their reason, renaming the handle
   included. It is stored with each event as personal data, and the owner sees
-  it in their security history, next to "By a Piquel administrator".
+  it in their security history, next to "By a SourceOrigin administrator".
 - Events record the administrator or operator as their actor. Their reads are
   recorded as a view of the account, as `user show` is, once an hour per
   administrator session or operator. The owner's history leaves views out: it
@@ -255,7 +255,7 @@ claim under the `profile` scope, in ID tokens, access tokens and UserInfo, and
 which every avatar shows in place of the initials: the account's sidebar and top
 bar, and the dashboard's account lists and pages. The SDKs read it as
 `SignedIn::picture()` in Rust and `user.picture` in TypeScript, and the admin
-views of accounts and administrators (`piquel_common::admin`), which the dashboard
+views of accounts and administrators (`sourceorigin_common::admin`), which the dashboard
 shows and the CLI prints as JSON, carry its ID. The owner sets it on the settings' Profile tab, which
 shows the account as apps do, with its handle, display name and picture, each
 changed in a dialog the popover API opens with no script; the picture's is a

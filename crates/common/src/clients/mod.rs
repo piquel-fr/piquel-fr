@@ -5,7 +5,7 @@
 //! `URI http://example.com/cb must use https`.
 //!
 //! ```
-//! use piquel_common::clients::{ClientId, InvalidRedirectUri, RedirectUri};
+//! use sourceorigin_common::clients::{ClientId, InvalidRedirectUri, RedirectUri};
 //!
 //! let id: ClientId = "notes-web".parse()?;
 //! let callback: RedirectUri = "https://notes.example/callback".parse()?;
@@ -38,7 +38,9 @@ const MAX_DISPLAY_NAME_CHARS: usize = 80;
 /// [`DisplayName::ensure_unreserved`]. Short common words, such as "apple" or
 /// "meta", are left out, since they appear inside ordinary names.
 pub const RESERVED_BRANDS: &[&str] = &[
-    "piquel",
+    "sourceorigin",
+    "originauth",
+    "originaccount",
     "google",
     "microsoft",
     "github",
@@ -78,7 +80,7 @@ impl ClientId {
     /// The ID auth gives a client an account registers: `c_` and 20 base32
     /// characters, one per byte of `random`, 100 bits in all. Only operators and
     /// administrators choose IDs, so an account can never claim a name such as
-    /// `piquel-admin`.
+    /// `sourceorigin-admin`.
     #[must_use]
     pub fn generated(random: &[u8; 32]) -> Self {
         let suffix = random
@@ -261,7 +263,7 @@ impl DisplayName {
 
     /// Refuses a name containing a brand of [`RESERVED_BRANDS`], as clients accounts
     /// own must. The name is compared without case, spaces or punctuation, and by
-    /// its handle [skeleton](Handle::skeleton), so "P1quel-Settings" and "G00gle"
+    /// its handle [skeleton](Handle::skeleton), so "S0urce0r1gin-Settings" and "G00gle"
     /// are refused too. Letters outside ASCII are dropped, not folded.
     ///
     /// # Errors
@@ -411,7 +413,7 @@ impl fmt::Display for RedirectUri {
 /// as browsers send it in an `Origin` header.
 ///
 /// ```
-/// use piquel_common::clients::RelatedOrigin;
+/// use sourceorigin_common::clients::RelatedOrigin;
 ///
 /// let origin: RelatedOrigin = "https://notes.example".parse()?;
 /// assert_eq!(origin.host(), "notes.example");

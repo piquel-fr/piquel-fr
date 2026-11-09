@@ -16,12 +16,12 @@ use axum::{
     routing::{get, post, put},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use serde::{Deserialize, Serialize};
+use sourceorigin_common::{
     EventId, NotificationId, UserId,
     notifications::{Notification, NotificationPreference},
 };
-use piquel_repository::{Database, DatabaseError, DatabaseTransaction, StoredNotification};
-use serde::{Deserialize, Serialize};
+use sourceorigin_repository::{Database, DatabaseError, DatabaseTransaction, StoredNotification};
 
 /// Notification failures and their response mapping.
 mod error;

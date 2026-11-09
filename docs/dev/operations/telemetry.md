@@ -3,9 +3,9 @@
 This page helps you watch staging and production: sign in to Grafana, look up a
 failed request by its trace ID, and follow what administrators do.
 
-`infra/telemetry.toml` is the `telemetry` application. Its one environment,
-`production`, follows `main`, and serves both of piquel-fr's environments, which
-dashboards tell apart. Grafana, at `grafana.piquel.fr`, is reachable from the
+`infra/telemetry.toml` is the `sourceorigin-observability` application. Its one environment,
+`production`, follows `main`, and serves both of sourceorigin's environments, which
+dashboards tell apart. Grafana, at `grafana.sourceorigin.dev`, is reachable from the
 tailnet only, and never signs in through auth: it is needed most when auth is
 down.
 
@@ -14,12 +14,12 @@ down.
 1. Print the `admin` password piqueld generated:
 
    ```sh
-   piquelctl app exec telemetry grafana -- cat /run/secrets/grafana-admin-password
+   piquelctl app exec sourceorigin-observability grafana -- cat /run/secrets/grafana-admin-password
    ```
 
-2. From a device on the tailnet, open `https://grafana.piquel.fr`, and sign in
+2. From a device on the tailnet, open `https://grafana.sourceorigin.dev`, and sign in
    as `admin` with that password.
-3. Open **Dashboards**, then the **piquel.fr** folder, and choose the
+3. Open **Dashboards**, then the **SourceOrigin** folder, and choose the
    environment at the top of a dashboard.
 
 Grafana stores that password on its first start, so regenerating the secret
@@ -79,14 +79,14 @@ Once, after `infra/telemetry.toml` is on `main`:
 2. Create its webhook's secret, and print its payload URL:
 
    ```sh
-   piquelctl app repository webhook rotate telemetry   # prints the secret once
-   piquelctl app repository webhook show telemetry     # prints the payload URL
+   piquelctl app repository webhook rotate sourceorigin-observability   # prints the secret once
+   piquelctl app repository webhook show sourceorigin-observability     # prints the payload URL
    ```
 
 3. Add that webhook to this repository, as for
-   [piquel-fr](deploying.md#set-up-the-environments).
+   [sourceorigin](deploying.md#set-up-the-environments).
 
-Telemetry never blocks a deployment of piquel-fr. Until the collector is
+Telemetry never blocks a deployment of sourceorigin. Until the collector is
 deployed and linked, export fails, the services log a warning on stderr, and
 serve normally.
 
@@ -108,14 +108,14 @@ This runs Grafana's all-in-one OpenTelemetry backend, with both dashboards, at
 | `prometheus` | `prom/prometheus` | Metrics, received over OTLP, kept 30 days |
 | `tempo` | `grafana/tempo` | Traces, kept 14 days |
 | `loki` | `grafana/loki` | Logs, received over OTLP, kept 30 days |
-| `grafana` | `grafana/grafana` | Dashboards at `grafana.piquel.fr` |
+| `grafana` | `grafana/grafana` | Dashboards at `grafana.sourceorigin.dev` |
 
 Their configuration is in `infra/telemetry/`, mounted as piqueld files.
 
 ## Dashboards
 
 Grafana provisions the three data sources, linked so a log line opens its trace
-and a trace its logs, and two dashboards in the **piquel.fr** folder:
+and a trace its logs, and two dashboards in the **SourceOrigin** folder:
 
 - **Auth overview**: traffic, errors and latency by route, sign-ins,
   registrations, tokens, refresh revocations, throttling, events by kind, the
@@ -128,13 +128,13 @@ and a trace its logs, and two dashboards in the **piquel.fr** folder:
 
 ## How applications connect
 
-piquel-fr imports the collector (`[[spec.imports]]` in `infra/piqueld.toml`),
-so its staging and production reach it as `collector.telemetry`. Their `auth`
+sourceorigin imports the collector (`[[spec.imports]]` in `infra/piqueld.toml`),
+so its staging and production reach it as `collector.sourceorigin-observability`. Their `auth`
 and `web` services set:
 
 | Variable | Value |
 | --- | --- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://collector.telemetry:4318`, from the `otlp_endpoint` variable; empty in previews, which keep telemetry on stderr |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://collector.sourceorigin-observability:4318`, from the `otlp_endpoint` variable; empty in previews, which keep telemetry on stderr |
 | `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=${{ env.name }}`, so dashboards tell staging and production apart |
 
 Every other `OTEL_*` variable keeps its default: see

@@ -2,16 +2,16 @@
 
 use super::{AdminApplication as App, invitations, lists, settings};
 use crate::{Reason, routes};
-use piquel_common::{
+use serde::de::IgnoredAny;
+use sourceorigin_common::{
     AccountStatus, PictureId, SessionId, UserId,
     admin::{DisableUser, EventSearch, User, UserSearch},
 };
-use piquel_repository::{RecentRecovery, RecoveryState};
-use piquel_ui::{
+use sourceorigin_repository::{RecentRecovery, RecoveryState};
+use sourceorigin_ui::{
     AccountPages, Action, Change, Crumb, Pager, Query, RecoveryKey, RecoveryRow, RecoveryStanding,
     SessionRow, UserRow,
 };
-use serde::de::IgnoredAny;
 use topcoat::{
     Result,
     context::Cx,
@@ -71,7 +71,7 @@ pub(super) async fn search(cx: &Cx) -> Result<Response> {
         .then(|| href!(invitations::create).resolve(cx));
     let (q, rows, pager, invite) = (&q, &rows, &pager, invite.as_deref());
     let page = view! { cx =>
-        piquel_ui::user_search(q: q.as_str(), rows: rows, pages: pager, invite: invite)
+        sourceorigin_ui::user_search(q: q.as_str(), rows: rows, pages: pager, invite: invite)
     };
     App::render(cx, StatusCode::OK, "Users", page).await
 }
@@ -161,7 +161,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let picture = App::picture(cx, detail.user.picture);
     let (detail, sessions, events, all_events) = (&detail, &sessions, &events, &all_events);
     let page = view! { cx =>
-        piquel_ui::user_page(
+        sourceorigin_ui::user_page(
             detail: detail,
             picture: picture.as_deref(),
             pages: pages,
@@ -198,7 +198,7 @@ pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::Disable,
             back: back.as_str(),
             refusal: refusal,
@@ -221,7 +221,7 @@ pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     })
     .await?;
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::Enable,
             back: back.as_str(),
             refusal: refusal.as_deref(),
@@ -249,7 +249,7 @@ pub(super) async fn delete(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Re
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::Delete,
             back: back.as_str(),
             refusal: refusal,
@@ -277,7 +277,7 @@ pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::Restore,
             back: back.as_str(),
             refusal: refusal,
@@ -300,7 +300,7 @@ pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> 
     })
     .await?;
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::RevokeSessions,
             back: back.as_str(),
             refusal: refusal.as_deref(),
@@ -323,7 +323,7 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
     })
     .await?;
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::RevokeSession,
             back: back.as_str(),
             refusal: refusal.as_deref(),
@@ -365,12 +365,12 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::Recover,
             back: back.as_str(),
             refusal: refusal,
             reason: reason,
-            piquel_ui::recovery_list(rows: rows)
+            sourceorigin_ui::recovery_list(rows: rows)
         )
     };
     App::render(cx, StatusCode::OK, "Recover", page).await
@@ -397,12 +397,12 @@ pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<ReasonForm>>) -> Re
     let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::UndoRecovery,
             back: back.as_str(),
             refusal: refusal,
             reason: reason,
-            piquel_ui::recovery_list(rows: rows)
+            sourceorigin_ui::recovery_list(rows: rows)
         )
     };
     App::render(cx, StatusCode::OK, "Undo a recovery", page).await

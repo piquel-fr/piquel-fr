@@ -10,11 +10,11 @@ use openssl::{
     rsa::Rsa,
     sign::{Signer, Verifier},
 };
-use piquel_common::protocol::jwt::{
-    Algorithm, Claim, Jwk, JwkSet, KeyId, KeyType, KeyUse, TokenType,
-};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use sourceorigin_common::protocol::jwt::{
+    Algorithm, Claim, Jwk, JwkSet, KeyId, KeyType, KeyUse, TokenType,
+};
 use std::{borrow::Cow, collections::BTreeSet};
 
 /// RSA key size used by generated keys.

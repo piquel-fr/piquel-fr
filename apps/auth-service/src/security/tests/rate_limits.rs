@@ -104,7 +104,7 @@ async fn budgets_are_separate_and_unknown_paths_do_not_consume_them() {
         (
             Method::POST,
             "/webauthn/authenticate/start",
-            Some("https://auth.piquel.fr"),
+            Some("https://auth.sourceorigin.dev"),
             true,
         ),
         (Method::GET, passkey::LIST, None, false),

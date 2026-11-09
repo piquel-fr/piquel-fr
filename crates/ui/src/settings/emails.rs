@@ -5,8 +5,8 @@ use crate::{
     form::{Query, change_form, fragment_form, open},
     layout::{page_head, private_address},
 };
-use piquel_common::EmailId;
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::EmailId;
 use topcoat::{
     Result,
     view::{View, component, view},
@@ -68,7 +68,7 @@ pub struct EmailRow<'a> {
 
 /// The email addresses page: the account's `emails`, primary first. Its rows open
 /// on `page` as `state` says, and its changes post there, for `audience`. Only the
-/// owner adds addresses, or sends one a new link, and only when Piquel `sends`
+/// owner adds addresses, or sends one a new link, and only when SourceOrigin `sends`
 /// email.
 #[component]
 pub async fn addresses<'a>(
@@ -85,7 +85,7 @@ pub async fn addresses<'a>(
         if audience.owns() {
             page_head(
                 title: "Email addresses",
-                lead: "Piquel sends security notices to your primary address, and apps you sign in to receive it. Every address is verified before it is used.".to_owned(),
+                lead: "Origin Auth sends security notices to your primary address, and apps you sign in to receive it. Every address is verified before it is used.".to_owned(),
             )
         }
         <section class="card" aria-labelledby="emails-heading">
@@ -105,7 +105,7 @@ pub async fn addresses<'a>(
                 }
             </ul>
             if emails.is_empty() {
-                <p class="empty">"Add an address so Piquel can tell you about changes to your account."</p>
+                <p class="empty">"Add an address so SourceOrigin can tell you about changes to your account."</p>
             }
             // Open again after an addition that failed, with what was typed.
             if audience.owns() && sends {
@@ -132,7 +132,7 @@ pub async fn addresses<'a>(
                     </div>
                 </details>
             } else if audience.owns() {
-                <p class="help">"Piquel cannot send email right now, so addresses cannot be added."</p>
+                <p class="help">"Origin Auth cannot send email right now, so addresses cannot be added."</p>
             }
         </section>
     })
@@ -141,7 +141,7 @@ pub async fn addresses<'a>(
 /// One address of [`addresses`]: its status and changes, and its removal row when
 /// `state` opens it, which takes the focus. The primary address can be removed only
 /// while no other verified one is `replaceable` with it, and an unverified one sent
-/// a new link only when Piquel `sends` email.
+/// a new link only when SourceOrigin `sends` email.
 #[component]
 async fn address_row<'a>(
     page: &'a str,
@@ -160,7 +160,7 @@ async fn address_row<'a>(
                 <p tabindex="-1" autofocus="">
                     (format!("Remove {address}?"))
                     if email.primary {
-                        " Piquel will no longer be able to email you security notices."
+                        " SourceOrigin will no longer be able to email you security notices."
                     }
                 </p>
                 change_form(
@@ -263,7 +263,7 @@ pub async fn verify<'a>(
                 <a class="button secondary" href=(emails)>"Manage your addresses"</a>
             },
             <p class="help">
-                "Confirm only if you added this address to your own Piquel account: the email names the account it joins."
+                "Confirm only if you added this address to your own Origin Account: the email names the account it joins."
             </p>
         )
     })

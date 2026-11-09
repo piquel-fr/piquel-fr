@@ -1,6 +1,6 @@
 # Administration
 
-This page helps you run piquel.fr's accounts: grant administrators, invite
+This page helps you run SourceOrigin's accounts: grant administrators, invite
 people, help an owner who lost their passkeys, act on an account that breaks the
 rules, send announcements, respond to alerts, and repair auth's own state.
 
@@ -8,7 +8,7 @@ Two surfaces run the same code (`AdminService` in
 `apps/auth-service/src/admin`, and `AccountService` in
 `apps/auth-service/src/account` for an account's settings):
 
-- **The admin dashboard**, for administrators, at `admin.piquel.fr`, from the
+- **The admin dashboard**, for administrators, at `admin.sourceorigin.dev`, from the
   tailnet only.
 - **The `auth-service` command line**, for operators. It has a command for every
   administrative operation, and needs only the database, so it works while auth
@@ -27,17 +27,17 @@ deployed. In production (for staging, use `--env staging` and its own hosts):
 1. Create an invitation, since signing up needs one:
 
    ```sh
-   piquelctl app exec piquel-fr auth --env production -- auth-service invite create
+   piquelctl app exec sourceorigin auth --env production -- auth-service invite create
    ```
 
 2. Open the link it prints, and sign up with a passkey.
 3. Grant the new account administrator rights:
 
    ```sh
-   piquelctl app exec piquel-fr auth --env production -- auth-service admin grant <handle>
+   piquelctl app exec sourceorigin auth --env production -- auth-service admin grant <handle>
    ```
 
-4. From a device on the tailnet, open `https://admin.piquel.fr`, and sign in
+4. From a device on the tailnet, open `https://admin.sourceorigin.dev`, and sign in
    with the passkey.
 
 Grant further administrators on the dashboard's **Administrators** page, with
@@ -278,7 +278,7 @@ Sending sends only the revision that was saved or checked: a draft changed
 meanwhile, by another administrator say, is refused, to be checked again. Once
 sent, its page says how many recipients read it. One to everyone goes to every
 account at that moment, disabled ones and ones being deleted included, since
-Piquel still holds their data. Sending records an `announcement_sent` event with
+SourceOrigin still holds their data. Sending records an `announcement_sent` event with
 who sent it and to how many accounts. Its emails go out on a delivery channel of
 their own, so sending one to every account holds back no verification or
 recovery link (see
@@ -360,7 +360,7 @@ clears on its own once the condition no longer does. If the condition changes,
 or clears and comes back, a new alert is raised.
 
 When an alert is raised, every active administrator gets a notification in
-their Piquel inbox, emailed to their primary verified address. Its email can't
+their SourceOrigin inbox, emailed to their primary verified address. Its email can't
 be turned off. Both link the dashboard's **Alerts** tab, unless auth serves no
 dashboard. An alert raises no new notification while it stays current, so
 follow it on the dashboard's **Alerts** tab, or with `auth-service alerts list`.
@@ -424,11 +424,11 @@ Each alert says what to look at. Auth raises these:
   `identities unlink` and `sessions revoke-all`. Without a terminal, they
   refuse unless given `--yes`.
 - `--output json` prints the views the dashboard shows, as defined in
-  `piquel_common::admin`: `user search` (`UserPage`), `user show`
+  `sourceorigin_common::admin`: `user search` (`UserPage`), `user show`
   (`UserDetail`), `audit list` (`EventPage`), `client list`, `invite list`,
   `admin list`, `announcement list`, `announcement show`
   (`AnnouncementDetail`), `audit verify`'s result, and `alerts list`
-  (`AlertDetail`, from `piquel_common::alerts`).
+  (`AlertDetail`, from `sourceorigin_common::alerts`).
 - Each change is recorded as an event with its operator: `$USER` and the host
   name.
 - Failures print their causes and exit with 1. Usage errors exit with 2.
@@ -457,5 +457,5 @@ digest in PostgreSQL, so it survives restarts and replicas.
   account: revoke their rights first.
 - Every change is recorded as an event with its administrator.
 
-See [admin.piquel.fr](../architecture/surfaces.md#adminpiquelfr) for the
+See [admin.sourceorigin.dev](../architecture/surfaces.md#adminsourceorigindev) for the
 design.

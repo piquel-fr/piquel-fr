@@ -1,6 +1,6 @@
 # Getting started
 
-This page sets up a checkout of piquel-fr so you can build it, test it and run
+This page sets up a checkout of sourceorigin so you can build it, test it and run
 your changes on a preview.
 
 ## Install the tools
@@ -13,8 +13,8 @@ your changes on a preview.
   tests and `just coverage`.
 - For previews, [piquelctl](https://docs.piqueld.dev), piqueld's CLI
   (`cargo install --locked piquelctl`), signed in to the daemon that runs
-  piquel.fr's previews with a token that has `previews:deploy` and
-  `previews:delete` on `piquel-fr`. Ask [contact@piquel.fr](mailto:contact@piquel.fr)
+  SourceOrigin's previews with a token that has `previews:deploy` and
+  `previews:delete` on `sourceorigin`. Ask [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev)
   for one.
 
 Then install the rest:
@@ -38,10 +38,10 @@ Building needs no database: SQL is checked against the committed query cache in
 JavaScript.
 
 The executables are `target/release/auth-service` and
-`target/release/piquel-web`. Both embed the stylesheet (`crates/ui/assets/style/`,
+`target/release/sourceorigin-web`. Both embed the stylesheet (`crates/ui/assets/style/`,
 its parts joined into one file) and its typefaces (`crates/ui/assets/fonts`,
 under the SIL Open Font License). Auth also embeds its pages' scripts
-(`apps/auth-service/assets/`), and piquel-web the policies
+(`apps/auth-service/assets/`), and sourceorigin-web the policies
 (`apps/web/assets/policies/`). Rebuild after changing them.
 
 ## Run your changes

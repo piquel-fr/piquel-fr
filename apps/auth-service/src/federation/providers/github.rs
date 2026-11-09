@@ -5,8 +5,8 @@ use super::{
     ProviderError, ProviderRejection, VerifiedIdentity,
 };
 use axum::http::StatusCode;
-use piquel_telemetry::SendTraced;
 use serde::Deserialize;
+use sourceorigin_telemetry::SendTraced;
 use thiserror::Error;
 
 /// GitHub scopes: the public profile plus the account's email addresses.

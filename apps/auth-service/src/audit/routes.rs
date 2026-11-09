@@ -14,8 +14,8 @@ use axum::{
     routing::get,
 };
 use chrono::{DateTime, Utc};
-use piquel_repository::{ChainLink, Checkpoint, Database, DatabaseError};
 use serde::{Deserialize, Serialize};
+use sourceorigin_repository::{ChainLink, Checkpoint, Database, DatabaseError};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

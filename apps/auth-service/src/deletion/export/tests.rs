@@ -3,13 +3,13 @@ use super::*;
 use crate::history::{ClientView, HistoryItem};
 use crate::notifications::NotificationItem;
 use chrono::TimeZone;
-use piquel_common::{
+use serde_json::json;
+use sourceorigin_common::{
     AuthenticationMethod, ClientId, EmailId, EventId, NotificationId, TokenId,
     events::{Browser, HistoryActor, HistoryEntry, Platform, UserAgentFamily},
     notifications::{EmailCategory, Notification, NotificationPreference},
 };
-use piquel_repository::{RecoveryPasskey, StoredSession};
-use serde_json::json;
+use sourceorigin_repository::{RecoveryPasskey, StoredSession};
 
 /// Every category serializes under its documented name and shape.
 #[test]
@@ -160,12 +160,15 @@ fn serializes_every_category_in_its_documented_shape() {
             email: false,
         }],
     };
-    assert_eq!(export.file_name(), "piquel-account-ada-2026-10-22.json");
+    assert_eq!(
+        export.file_name(),
+        "sourceorigin-account-ada-2026-10-22.json"
+    );
     let time = "2026-10-22T09:30:00Z";
     assert_eq!(
         serde_json::to_value(&export).expect("export"),
         json!({
-            "format": "piquel.account-export",
+            "format": "sourceorigin.account-export",
             "version": 2,
             "exported_at": time,
             "profile": {

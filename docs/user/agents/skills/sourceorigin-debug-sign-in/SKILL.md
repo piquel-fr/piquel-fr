@@ -1,23 +1,23 @@
 ---
-name: piquel-debug-sign-in
+name: sourceorigin-debug-sign-in
 description: >
-  Find out why a sign-in with piquel.fr fails: read the error the app or SDK
-  got, check auth.piquel.fr's discovery and the app's registration (client ID,
+  Find out why a sign-in with Origin Auth fails: read the error the app or SDK
+  got, check auth.sourceorigin.dev's discovery and the app's registration (client ID,
   secret, redirect URIs, scopes), and fix the common causes. Use when signing
-  in with piquel.fr fails, loops, ends too soon, or answers an error such as
+  in with Origin Auth fails, loops, ends too soon, or answers an error such as
   invalid_client, invalid_scope or "Sign-in could not start".
 ---
 
-# Debug a piquel.fr sign-in
+# Debug an Origin Auth sign-in
 
 Work from the error the person or the app saw. Most failures come from a
-registration that doesn't match the app's configuration: `PIQUEL_CLIENT_ID`,
-`PIQUEL_CLIENT_SECRET`, `PIQUEL_REDIRECT_URI` and the scopes.
+registration that doesn't match the app's configuration: `SOURCEORIGIN_CLIENT_ID`,
+`SOURCEORIGIN_CLIENT_SECRET`, `SOURCEORIGIN_REDIRECT_URI` and the scopes.
 
 The guides behind this skill:
 
-- Registering an app: https://docs.piquel.fr/user/apps/register-an-app.html
-- OpenID Connect reference: https://docs.piquel.fr/user/reference/oidc.html
+- Registering an app: https://docs.sourceorigin.dev/user/apps/register-an-app.html
+- OpenID Connect reference: https://docs.sourceorigin.dev/user/reference/oidc.html
 
 ## 1. Read the error
 
@@ -32,7 +32,7 @@ stopped:
 | `400` from `/auth/callback`: `This sign-in has no pending login; start again.` | The browser didn't bring back the cookie of the sign-in it started. See the causes below |
 | `400` from `/auth/callback`: `This sign-in expired; start again.` | The sign-in took more than 10 minutes |
 | `502` from `/auth/callback`: `Signing in could not end your previous session; start again.` | Auth was unreachable while the app revoked the session this sign-in replaces |
-| The app fails to start: `metadata names issuer ..., expected ...` | `PIQUEL_ISSUER` differs from auth's issuer, for example by a trailing slash |
+| The app fails to start: `metadata names issuer ..., expected ...` | `SOURCEORIGIN_ISSUER` differs from auth's issuer, for example by a trailing slash |
 | The app fails to start: `environment variable not found` | A variable is missing from the app's environment |
 | The app fails to start: `the login routes need a confidential client` (Rust), or a `TypeError` from `new Login` (TypeScript) | No client secret reached the SDK |
 | The app fails to start: `a cookie key must be standard base64` or `a cookie key must hold 32 bytes` | Make a key with `openssl rand -base64 32` |
@@ -44,10 +44,10 @@ instead, a JSON object such as
 ## 2. Check discovery
 
 ```console
-curl -s https://auth.piquel.fr/.well-known/openid-configuration
+curl -s https://auth.sourceorigin.dev/.well-known/openid-configuration
 ```
 
-The SDKs require its `issuer`, `https://auth.piquel.fr`, to equal the issuer
+The SDKs require its `issuer`, `https://auth.sourceorigin.dev`, to equal the issuer
 the app discovers, character for character.
 
 ## 3. Read auth's reason
@@ -55,13 +55,13 @@ the app discovers, character for character.
 The SDKs' message names the error code only. Send the app's request yourself
 to read auth's description. Run it where the app's environment is set, and
 don't print the secret. On piqueld, the secret is in the file
-`PIQUEL_CLIENT_SECRET_FILE` names rather than in `PIQUEL_CLIENT_SECRET`:
+`SOURCEORIGIN_CLIENT_SECRET_FILE` names rather than in `SOURCEORIGIN_CLIENT_SECRET`:
 
 ```console
-secret="${PIQUEL_CLIENT_SECRET:-$(cat "$PIQUEL_CLIENT_SECRET_FILE")}"
-curl -s -u "$PIQUEL_CLIENT_ID:$secret" https://auth.piquel.fr/oauth/par \
+secret="${SOURCEORIGIN_CLIENT_SECRET:-$(cat "$SOURCEORIGIN_CLIENT_SECRET_FILE")}"
+curl -s -u "$SOURCEORIGIN_CLIENT_ID:$secret" https://auth.sourceorigin.dev/oauth/par \
   --data-urlencode response_type=code \
-  --data-urlencode "redirect_uri=$PIQUEL_REDIRECT_URI" \
+  --data-urlencode "redirect_uri=$SOURCEORIGIN_REDIRECT_URI" \
   --data-urlencode "scope=openid profile offline_access" \
   --data-urlencode code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
   --data-urlencode code_challenge_method=S256
@@ -77,13 +77,13 @@ names the problem:
 | `invalid_client` | `client_id is not a registered, enabled client` | Wrong client ID, or the app is disabled, suspended or deleted |
 | `invalid_client` | `the client secret is incorrect or expired` | Wrong secret, or one replaced by a rotation whose grace period ended |
 | `invalid_client` | `this public client must not send HTTP Basic credentials` | The app was registered without a backend. The login routes need one with a secret: register a new app, since the kind never changes |
-| `invalid_request` | `redirect_uri is not registered for this client; it must match exactly` | Compare `PIQUEL_REDIRECT_URI` with the registration |
+| `invalid_request` | `redirect_uri is not registered for this client; it must match exactly` | Compare `SOURCEORIGIN_REDIRECT_URI` with the registration |
 | `invalid_scope` | `scope includes values this client may not request` | The registration doesn't allow every scope, often `offline_access` |
 
 ## 4. Compare with the registration
 
 You can't open the developer console: ask the person to open the app from
-https://auth.piquel.fr/developers and read you its overview, which holds
+https://auth.sourceorigin.dev/developers and read you its overview, which holds
 nothing secret. Its **Client authentication** is `client_secret_basic` for an
 app with a backend. Compare its **Client ID**, **Scopes** and **Redirect URIs**
 with the app's configuration, character for character: the scheme, the host,

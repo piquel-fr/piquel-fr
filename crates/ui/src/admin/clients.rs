@@ -14,8 +14,8 @@ use crate::{
     layout::page_head,
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{UserId, admin::Client, clients::ClientKind, protocol::oauth::Scope};
 use serde::Deserialize;
+use sourceorigin_common::{UserId, admin::Client, clients::ClientKind, protocol::oauth::Scope};
 use topcoat::{
     Result,
     view::{View, class, component, view},
@@ -189,7 +189,7 @@ pub async fn client_registration<'a>(
                 checked: settings.trusted.0,
                 label: view! { "Trusted" },
                 detail: view! {
-                    "Skips the consent screen, and its pages may sign users in with their passkeys on approved origins. Only for Piquel's own apps."
+                    "Skips the consent screen, and its pages may sign users in with their passkeys on approved origins. Only for SourceOrigin's own apps."
                 },
             )
         )
@@ -246,7 +246,7 @@ pub async fn client_list<'a>(rows: &'a [AdminClientRow<'a>], new: &'a str) -> Re
     Ok(view! {
         page_head(
             title: "Clients",
-            lead: "Applications that sign users in with Piquel.".to_owned(),
+            lead: "Applications that sign users in with Origin Auth.".to_owned(),
             actions: view! {
                 <a data-confirm-first="" class="button" href=(new)>"Register a client"</a>
             },
@@ -361,7 +361,7 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
             </header>
             <div class="body">
                 <p class="help">
-                    "The origins whose pages sign users in with their Piquel passkeys, without sending them to Piquel's pages."
+                    "The origins whose pages sign users in with their Origin Account passkeys, without sending them to Origin Auth's pages."
                     if let Err(reason) = &page.approve { " " (*reason) }
                 </p>
             </div>

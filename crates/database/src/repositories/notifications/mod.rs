@@ -5,12 +5,12 @@
 use super::{KindProbe, NotificationRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use serde::Serialize;
+use serde_json::Value;
+use sourceorigin_common::{
     EventId, NotificationId, UserId,
     notifications::{EmailCategory, Notification, NotificationPreference},
 };
-use serde::Serialize;
-use serde_json::Value;
 
 /// A notification of an account's inbox, as stored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

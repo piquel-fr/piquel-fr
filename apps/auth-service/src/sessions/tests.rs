@@ -11,9 +11,9 @@ use axum::{
     Router,
     http::{Method, StatusCode},
 };
-use piquel_common::events::{Actor, DomainEvent, RevocationReason};
-use piquel_repository::Database;
 use serde_json::{Value, json};
+use sourceorigin_common::events::{Actor, DomainEvent, RevocationReason};
+use sourceorigin_repository::Database;
 
 /// The session routes over the test database.
 struct Harness {

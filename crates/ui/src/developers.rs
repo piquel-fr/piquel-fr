@@ -15,19 +15,20 @@ use crate::{
     layout::{Label, navigation, page_head},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{clients::ClientKind, protocol::oauth::Scope};
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::{clients::ClientKind, protocol::oauth::Scope};
 use topcoat::{
     Result,
     view::{View, component, view},
 };
 
 /// The Rust SDK's source and guide.
-const RUST_SDK: &str = "https://github.com/piquel-fr/piquel-fr/tree/main/crates/auth-sdk";
-/// The TypeScript SDK, whose `@piquel/auth/browser` signs users in from the browser.
-const TYPESCRIPT_SDK: &str = "https://github.com/piquel-fr/piquel-fr/tree/main/packages/auth";
+const RUST_SDK: &str = "https://github.com/sourceorigin-dev/sourceorigin/tree/main/crates/auth-sdk";
+/// The TypeScript SDK, whose `@sourceorigin/auth/browser` signs users in from the browser.
+const TYPESCRIPT_SDK: &str =
+    "https://github.com/sourceorigin-dev/sourceorigin/tree/main/packages/auth";
 /// The guide to asking for a passkey before sensitive actions.
-const STEP_UP_GUIDE: &str = "https://docs.piquel.fr/user/apps/step-up.html";
+const STEP_UP_GUIDE: &str = "https://docs.sourceorigin.dev/user/apps/step-up.html";
 
 /// What an app's page says when the account has no such app.
 pub const MISSING: &str = "This app does not exist, or it is not yours.";
@@ -198,12 +199,12 @@ impl ClientRow<'_> {
         format!(
             r#"// Cargo.toml, with axum at the SDK's version, so its router and layer fit yours:
 // [dependencies]
-// piquel-auth = {{ git = "https://github.com/piquel-fr/piquel-fr", features = ["axum"] }}
+// sourceorigin-auth = {{ git = "https://github.com/sourceorigin-dev/sourceorigin", features = ["axum"] }}
 // axum = "0.8"
 // tokio = {{ version = "1", features = ["macros", "rt-multi-thread", "net"] }}
 use axum::{{Router, routing::get}};
-use piquel_auth::axum::{{CookieKey, LoginRoutes, SignedIn}};
-use piquel_auth::{{ClientConfig, Credentials, Issuer}};
+use sourceorigin_auth::axum::{{CookieKey, LoginRoutes, SignedIn}};
+use sourceorigin_auth::{{ClientConfig, Credentials, Issuer}};
 
 async fn home(user: SignedIn) -> String {{
     format!("Hello {{}}", user.name())
@@ -214,13 +215,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
     let issuer = Issuer::discover("{issuer}").await?;
     let config = ClientConfig {{
         client_id: "{id}".parse()?,
-        credentials: Credentials::Secret(std::env::var("PIQUEL_CLIENT_SECRET")?.into()),
+        credentials: Credentials::Secret(std::env::var("SOURCEORIGIN_CLIENT_SECRET")?.into()),
         // The login routes' callback, nested at /auth below: register it as a redirect URI.
         redirect_uri: "{redirect}".parse()?,
     }};
     // Seals the session cookie, which holds the user's tokens: the same key on every
     // server, generated once with `openssl rand -base64 32`.
-    let key = CookieKey::from_base64(&std::env::var("PIQUEL_COOKIE_KEY")?)?;
+    let key = CookieKey::from_base64(&std::env::var("SOURCEORIGIN_COOKIE_KEY")?)?;
     let auth = LoginRoutes::new(issuer.client(config), key)?.scopes("{scopes}".parse()?);
     let app = Router::new()
         .route("/", get(home))
@@ -244,7 +245,7 @@ pub async fn apps<'a>(links: &'a [AppLink<'a>], limit: u32, new: &'a str) -> Res
     Ok(view! {
         page_head(
             title: "Your apps",
-            lead: "The apps you registered, which sign users in with Piquel.".to_owned(),
+            lead: "The apps you registered, which sign users in with Origin Auth.".to_owned(),
             actions: view! {
                 if room {
                     <a class="button" href=(new)>"New app"</a>
@@ -286,10 +287,10 @@ pub async fn apps<'a>(links: &'a [AppLink<'a>], limit: u32, new: &'a str) -> Res
             <header><h2 id="docs-heading">"How it works"</h2></header>
             <div class="body">
                 <p>
-                    "Piquel is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust SDK, or any OpenID Connect library with the settings on your app's page."
+                    "Origin Auth is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust SDK, or any OpenID Connect library with the settings on your app's page."
                 </p>
                 <ul>
-                    <li><a href=(RUST_SDK)>"Rust SDK (" <code>"piquel-auth"</code> ")"</a></li>
+                    <li><a href=(RUST_SDK)>"Rust SDK (" <code>"sourceorigin-auth"</code> ")"</a></li>
                     <li><a href=(STEP_UP_GUIDE)>"Asking for a passkey before sensitive actions (step-up)"</a></li>
                 </ul>
             </div>
@@ -400,7 +401,7 @@ pub async fn overview<'a>(
                 client_facts(client: client, connection: connection)
                 if let Some(secrets) = secrets {
                     <p class="help">
-                        "Keep the client secret on your server, for example in a " <code>"PIQUEL_CLIENT_SECRET"</code>
+                        "Keep the client secret on your server, for example in a " <code>"SOURCEORIGIN_CLIENT_SECRET"</code>
                         " environment variable. Lost it? Rotate it on the " <a href=(secrets)>"Secrets"</a> " tab."
                     </p>
                 }
@@ -424,7 +425,7 @@ pub async fn overview<'a>(
                 <header><h2 id="browser-heading">"Signing in from the browser"</h2></header>
                 <p class="help">
                     "A public app has no secret, so it signs users in from the browser, with the "
-                    <a href=(TYPESCRIPT_SDK)>"TypeScript SDK"</a> "'s " <code>"@piquel/auth/browser"</code>
+                    <a href=(TYPESCRIPT_SDK)>"TypeScript SDK"</a> "'s " <code>"@sourceorigin/auth/browser"</code>
                     ". To sign users in on a server, register a confidential app."
                 </p>
             </section>
@@ -553,7 +554,7 @@ pub async fn app_secrets<'a>(
             <header><h2 id="secrets-heading">"Client secrets " <span class="count">(secrets.len().to_string())</span></h2></header>
             secrets_list(secrets: secrets, now: now)
             <p class="help">
-                "Your server sends one with HTTP Basic authentication. Piquel shows a secret only when it creates it."
+                "Your server sends one with HTTP Basic authentication. Origin Auth shows a secret only when it creates it."
             </p>
         </section>
         <section class="card" aria-labelledby="rotate-heading">

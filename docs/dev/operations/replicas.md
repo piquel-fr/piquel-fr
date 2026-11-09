@@ -23,7 +23,7 @@ adds no capacity.
 3. [Promote](deploying.md#promote-to-production) staging to apply it to
    production.
 
-Change it in the file: piquel-fr reads its manifest from the repository.
+Change it in the file: sourceorigin reads its manifest from the repository.
 
 ## What replicas share
 
@@ -36,7 +36,7 @@ Change it in the file: piquel-fr reads its manifest from the repository.
   signing keys in the database, and the token digest keys, from which
   refresh-token digests and email and recovery links derive. They sign audit
   checkpoints with the same key, `AUTH_AUDIT_KEY_PROVIDER`: the stored
-  `audit-key-production` or `audit-key-staging`, or a preview's generated
+  `audit-key-production-2` or `audit-key-staging-2`, or a preview's generated
   `audit-key`. See [secrets](secrets.md).
 - **Clients.** OIDC clients, and the public-client origins CORS allows, are read
   from the database on each request, so a client change reaches every replica at

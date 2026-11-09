@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn related_origins_count_registrable_domain_labels() {
     let domain = |origin: &str| {
-        ClientRegistry::domain(&origin.parse().expect("origin"), "auth.piquel.fr")
+        ClientRegistry::domain(&origin.parse().expect("origin"), "auth.sourceorigin.dev")
             .expect("countable origin")
     };
     assert_eq!(
@@ -18,10 +18,13 @@ fn related_origins_count_registrable_domain_labels() {
         domain("https://notes.alice.github.io").as_deref(),
         Some("alice")
     );
-    assert_eq!(domain("https://piquel.fr").as_deref(), Some("piquel"));
     assert_eq!(
-        domain("https://notes.auth.piquel.fr").as_deref(),
-        Some("piquel")
+        domain("https://sourceorigin.dev").as_deref(),
+        Some("sourceorigin")
+    );
+    assert_eq!(
+        domain("https://notes.auth.sourceorigin.dev").as_deref(),
+        Some("sourceorigin")
     );
     let localhost = "https://localhost:4443".parse().expect("origin");
     assert_eq!(
@@ -30,7 +33,7 @@ fn related_origins_count_registrable_domain_labels() {
     );
     for public in ["https://github.io", "https://localhost"] {
         assert!(matches!(
-            ClientRegistry::domain(&public.parse().expect("origin"), "auth.piquel.fr"),
+            ClientRegistry::domain(&public.parse().expect("origin"), "auth.sourceorigin.dev"),
             Err(ClientRegistryError::PublicSuffix(_))
         ));
     }
@@ -50,7 +53,7 @@ async fn origin_approval_needs_trust_a_redirect_origin_and_few_domains() {
         .chain([format!("https://www.d0-{unique}.example")])
         .map(|origin| origin.parse().expect("origin"))
         .collect();
-    let inside: RelatedOrigin = format!("https://{unique}.auth.piquel.fr")
+    let inside: RelatedOrigin = format!("https://{unique}.auth.sourceorigin.dev")
         .parse()
         .expect("origin");
     origins.push(inside.clone());
@@ -67,7 +70,7 @@ async fn origin_approval_needs_trust_a_redirect_origin_and_few_domains() {
     let approve = async |origin: &RelatedOrigin| {
         change(&database, async |registry| {
             registry
-                .approve_origin(&client.id, origin, "auth.piquel.fr")
+                .approve_origin(&client.id, origin, "auth.sourceorigin.dev")
                 .await
         })
         .await
@@ -91,7 +94,7 @@ async fn origin_approval_needs_trust_a_redirect_origin_and_few_domains() {
     )
     .await
     .expect("trusted");
-    let elsewhere = format!("https://elsewhere-{unique}.auth.piquel.fr")
+    let elsewhere = format!("https://elsewhere-{unique}.auth.sourceorigin.dev")
         .parse()
         .expect("origin");
     assert!(matches!(
@@ -116,7 +119,7 @@ async fn origin_approval_needs_trust_a_redirect_origin_and_few_domains() {
         panic!("a sixth domain is refused, not {error}");
     };
     assert_eq!(domains.len(), MAX_RELATED_ORIGIN_DOMAINS + 1);
-    // Other tests' origins within auth's domain count as `piquel`, and a database
+    // Other tests' origins within auth's domain count as `sourceorigin`, and a database
     // other runs left full refuses the first domain. Otherwise another origin on an
     // approved domain still fits.
     if !approved.is_empty() {

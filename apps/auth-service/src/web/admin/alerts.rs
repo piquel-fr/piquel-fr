@@ -3,12 +3,12 @@
 
 use super::AdminApplication as App;
 use crate::{AdminError, Reason, admin::ALERTS_SHOWN};
-use piquel_common::{
+use serde::Deserialize;
+use sourceorigin_common::{
     AlertId,
     alerts::{AlertStatus, AlertsShown},
 };
-use piquel_ui::{Action, AlertCard, Change};
-use serde::Deserialize;
+use sourceorigin_ui::{Action, AlertCard, Change};
 use topcoat::{
     Result,
     context::Cx,
@@ -50,7 +50,8 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let cleared = href!(previous).resolve(cx);
-    let view = view! { cx => piquel_ui::alert_list(cards: &cards, previous: cleared.as_str()) };
+    let view =
+        view! { cx => sourceorigin_ui::alert_list(cards: &cards, previous: cleared.as_str()) };
     App::render(cx, StatusCode::OK, "Alerts", view).await
 }
 
@@ -73,7 +74,7 @@ pub(super) async fn previous(cx: &Cx) -> Result<Response> {
         .collect();
     let current = href!(list).resolve(cx);
     let view = view! { cx =>
-        piquel_ui::previous_alerts(cards: &cards, current: current.as_str(), limit: ALERTS_SHOWN)
+        sourceorigin_ui::previous_alerts(cards: &cards, current: current.as_str(), limit: ALERTS_SHOWN)
     };
     App::render(cx, StatusCode::OK, "Previous alerts", view).await
 }
@@ -115,12 +116,12 @@ pub(super) async fn update(cx: &Cx, form: Option<Form<UpdateForm>>) -> Result<Re
     });
     let refusal = refused.as_deref();
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::UpdateAlert,
             back: back.as_str(),
             refusal: refusal,
             <p><strong>(subject)</strong></p>
-            piquel_ui::alert_update_fields(status: status, note: note)
+            sourceorigin_ui::alert_update_fields(status: status, note: note)
         )
     };
     App::render(cx, StatusCode::OK, Change::UpdateAlert.title(), page).await

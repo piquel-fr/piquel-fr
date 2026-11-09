@@ -1,9 +1,9 @@
-//! The components, layouts, stylesheet and typefaces of auth.piquel.fr's
+//! The components, layouts, stylesheet and typefaces of auth.sourceorigin.dev's
 //! server-rendered pages. The admin dashboard serves them too, under its own
 //! origin, and shares the shell: a sidebar beside the page, a status bar below
 //! it, and the theme and sidebar preferences a cookie keeps.
 //!
-//! Components render plain data: `piquel-common` identifiers, vocabularies and
+//! Components render plain data: `sourceorigin-common` identifiers, vocabularies and
 //! events, and plain rows a page fills from what the service returns. They take
 //! every URL as a prop, since only the router serving a request resolves its own
 //! paths, and know nothing of the domain, the database or HTTP. Auth's page handlers
@@ -19,10 +19,10 @@
 //! # async fn main() -> topcoat::Result<()> {
 //! let cx = Cx::default();
 //! let html = view! { cx =>
-//!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
+//!     sourceorigin_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
 //!         scripts: &["/assets/passkey.js"],
-//!         piquel_ui::auth_shell(home: "/settings", policies: piquel_ui::Policies::PATHS,
-//!             piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
+//!         sourceorigin_ui::auth_shell(home: "/settings", policies: sourceorigin_ui::Policies::PATHS,
+//!             sourceorigin_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
 //!         )
 //!     )
 //! }

@@ -125,7 +125,7 @@ impl Endpoint {
     }
 }
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// Independent request budgets persisted under stable category names, so one kind of
     /// traffic from a client cannot exhaust another: a relying party's `UserInfo` calls
     /// never block its code exchanges, and browsing auth's pages never blocks a passkey

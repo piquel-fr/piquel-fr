@@ -2,7 +2,7 @@
 
 use crate::security::ApiError;
 use chrono::{DateTime, Utc};
-use piquel_common::protocol::api::ErrorCode;
+use sourceorigin_common::protocol::api::ErrorCode;
 use thiserror::Error;
 
 /// Why a recovery link, a passkey of a recovery, or an undo was refused.
@@ -35,7 +35,7 @@ impl From<RecoveryError> for ApiError {
     fn from(error: RecoveryError) -> Self {
         match error {
             RecoveryError::InvalidLink => Self::bad_request(
-                "This recovery link no longer works. Ask Piquel support for a new one.",
+                "This recovery link no longer works. Ask SourceOrigin support for a new one.",
             )
             .with_code(ErrorCode::InvalidLink),
             RecoveryError::NothingToUndo => {
@@ -43,7 +43,7 @@ impl From<RecoveryError> for ApiError {
                     .with_code(ErrorCode::NothingToUndo)
             }
             RecoveryError::OlderPasskeyRequired => Self::forbidden(
-                "Use a passkey you had before this recovery to undo it, or ask Piquel support.",
+                "Use a passkey you had before this recovery to undo it, or ask SourceOrigin support.",
             )
             .with_code(ErrorCode::OlderPasskeyRequired),
             RecoveryError::Probation { settles_at } => Self::forbidden(

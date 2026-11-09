@@ -3,9 +3,11 @@
 
 use super::{AdminApplication as App, settings, users::Account};
 use crate::{Reason, handles::HandlesError};
-use piquel_common::{Handle, handle::RESERVED};
-use piquel_ui::{Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
+use sourceorigin_common::{Handle, handle::RESERVED};
+use sourceorigin_ui::{
+    Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder,
+};
 use topcoat::{
     Result,
     context::Cx,
@@ -89,7 +91,7 @@ pub(super) async fn check(cx: &Cx) -> Result<Response> {
         holders: &holders,
         released: &released,
     };
-    let view = view! { cx => piquel_ui::handle_list(page: page) };
+    let view = view! { cx => sourceorigin_ui::handle_list(page: page) };
     App::render(cx, StatusCode::OK, "Handles", view).await
 }
 
@@ -113,7 +115,7 @@ pub(super) async fn reserve(cx: &Cx, form: Option<Form<Reservation>>) -> Result<
     });
     let refusal = refused.as_deref();
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::ReserveHandle,
             back: back.as_str(),
             refusal: refusal,
@@ -163,7 +165,7 @@ impl App {
         })
         .await?;
         let page = view! { cx =>
-            piquel_ui::dashboard_change(
+            sourceorigin_ui::dashboard_change(
                 change: change,
                 back: back.as_str(),
                 refusal: refusal.as_deref(),

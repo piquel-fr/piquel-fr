@@ -22,7 +22,7 @@ use thiserror::Error;
 /// Byte length of 256-bit secrets and SHA-256 results.
 const SECRET_BYTES: usize = 32;
 /// Starts every generated client secret, so secret scanners can recognize leaked ones.
-const CLIENT_SECRET_PREFIX: &str = "pqcs_";
+const CLIENT_SECRET_PREFIX: &str = "socs_";
 /// RFC 7636 minimum verifier length.
 const MIN_PKCE_VERIFIER_LENGTH: usize = 43;
 /// RFC 7636 maximum verifier length.
@@ -196,7 +196,7 @@ impl Digest {
     }
 }
 
-/// A confidential OIDC client's secret: `pqcs_` followed by 256 random bits in
+/// A confidential OIDC client's secret: `socs_` followed by 256 random bits in
 /// unpadded base64url. It is shown once; only its digest is stored.
 ///
 /// SHA-256 suffices for the digest, rather than a slow password hash: a 256-bit

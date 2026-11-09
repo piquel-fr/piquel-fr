@@ -1,7 +1,7 @@
 //! Scopes as types: an application declares its scopes once with [`scopes!`], and a
 //! required scope that was never declared does not compile.
 
-use piquel_common::protocol::oauth::Scopes;
+use sourceorigin_common::protocol::oauth::Scopes;
 
 /// One scope, declared with [`scopes!`](crate::scopes), which checks its name at
 /// compile time.
@@ -19,9 +19,9 @@ pub trait Scope: ScopeSet {
 /// holds a set is always this SDK's check, every name granted.
 ///
 /// ```
-/// use piquel_auth::ScopeSet;
+/// use sourceorigin_auth::ScopeSet;
 ///
-/// piquel_auth::scopes! {
+/// sourceorigin_auth::scopes! {
 ///     /// Scopes of the notes API.
 ///     pub mod notes {
 ///         Read = "notes:read",
@@ -35,7 +35,7 @@ pub trait Scope: ScopeSet {
 /// // What a challenge names when the scopes are missing.
 /// assert_eq!(<(notes::Write, notes::Read)>::required().to_string(), "notes:read notes:write");
 /// assert_eq!(notes::All::required().to_string(), "notes:read notes:write");
-/// # Ok::<(), piquel_auth::protocol::oauth::InvalidScope>(())
+/// # Ok::<(), sourceorigin_auth::protocol::oauth::InvalidScope>(())
 /// ```
 pub trait ScopeSet: sealed::Names + Send + Sync + 'static {
     /// Whether `granted` holds every required scope.
@@ -64,7 +64,7 @@ impl<T: sealed::Names + Send + Sync + 'static> ScopeSet for T {}
 /// implement [`ScopeSet`] and change how a set is checked.
 mod sealed {
     use super::Declared;
-    use piquel_common::protocol::oauth::Scopes;
+    use sourceorigin_common::protocol::oauth::Scopes;
 
     /// Lists the names a scope set requires.
     pub trait Names {
@@ -114,7 +114,7 @@ pub trait Declared: Send + Sync + 'static {
 /// Declares an application's scopes once, as types.
 ///
 /// ```
-/// piquel_auth::scopes! {
+/// sourceorigin_auth::scopes! {
 ///     /// Scopes of the notes API.
 ///     pub mod notes {
 ///         /// Read every note.
@@ -123,7 +123,7 @@ pub trait Declared: Send + Sync + 'static {
 ///     }
 /// }
 ///
-/// use piquel_auth::{Scope, ScopeSet};
+/// use sourceorigin_auth::{Scope, ScopeSet};
 /// assert_eq!(notes::Read::NAME, "notes:read");
 /// assert_eq!(notes::All::required().to_string(), "notes:read notes:write");
 /// ```

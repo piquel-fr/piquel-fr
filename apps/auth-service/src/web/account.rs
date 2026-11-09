@@ -20,13 +20,13 @@ use crate::{
     security::{ApiError, BrowserCookie, SessionError},
     web::settings::TABS,
 };
-use piquel_common::ErrorChain;
-use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{
+use serde::{Deserialize, de::DeserializeOwned};
+use sourceorigin_common::ErrorChain;
+use sourceorigin_telemetry::HttpTelemetry;
+use sourceorigin_ui::{
     AccountNav, Alert, Crumb, FieldError, LoginQuery, Messages, Notice, PasskeySignal, Query,
     Recovery, Section, Tab, Who,
 };
-use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
     Error,
     context::{Cx, app_context},
@@ -302,7 +302,7 @@ impl WebApplication {
         let Some(change) = P::decode(cx, body).await else {
             let outcome = (
                 StatusCode::BAD_REQUEST,
-                Messages::alert(Alert::Page(piquel_ui::OUT_OF_DATE)),
+                Messages::alert(Alert::Page(sourceorigin_ui::OUT_OF_DATE)),
             );
             let reader = Reader::new(web, owner).await?;
             return web
@@ -365,7 +365,7 @@ impl WebApplication {
             Err(Failure::Missing) => {
                 let head = match P::SECTION {
                     Section::Developers => Child::new(
-                        view! { cx => piquel_ui::back_to_apps(home: page::developers::HOME) },
+                        view! { cx => sourceorigin_ui::back_to_apps(home: page::developers::HOME) },
                     ),
                     Section::Account => Child::default(),
                 };
@@ -377,7 +377,7 @@ impl WebApplication {
                     head,
                     page: Child::default(),
                 };
-                let missing = Messages::alert(Alert::Page(piquel_ui::MISSING));
+                let missing = Messages::alert(Alert::Page(sourceorigin_ui::MISSING));
                 self.account_page(cx, reader, (StatusCode::NOT_FOUND, missing), &[], framed)
                     .await
             }
@@ -483,7 +483,7 @@ impl WebApplication {
             unread,
         };
         let page = view! { cx =>
-            piquel_ui::account(
+            sourceorigin_ui::account(
                 nav: nav,
                 who: who,
                 signal: PasskeySignal {
@@ -501,7 +501,7 @@ impl WebApplication {
                 reference: HttpTelemetry::trace_id(status),
                 recovery: view! {
                     if let Some(recovery) = reader.recovery() {
-                        piquel_ui::recovery_banner(
+                        sourceorigin_ui::recovery_banner(
                             recovery: recovery,
                             session: session,
                             confirmed: confirmed,
@@ -537,7 +537,7 @@ impl WebApplication {
             ..LoginQuery::default()
         }
         .on(page::LOGIN)?;
-        let page = view! { cx => piquel_ui::signed_out(section: section, sign_in: &sign_in) };
+        let page = view! { cx => sourceorigin_ui::signed_out(section: section, sign_in: &sign_in) };
         Ok(self.render(cx, status, title, &[], page).await?)
     }
 }

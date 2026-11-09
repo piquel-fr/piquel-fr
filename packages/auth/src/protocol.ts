@@ -1,4 +1,4 @@
-// Generated from piquel_common::protocol by `just sdk-types`. Do not edit.
+// Generated from sourceorigin_common::protocol by `just sdk-types`. Do not edit.
 // The wire types auth and every SDK share; docs/dev/architecture/sdk.md describes them.
 
 /**
@@ -339,10 +339,10 @@ jkt?: string, };
 
 export type Amr = "pop" | "mfa" | "user" | "fed";
 
-export type Acr = "phr" | "urn:piquel:acr:social";
+export type Acr = "phr" | "urn:sourceorigin:acr:social";
 
 /**
- * The metadata Piquel auth publishes. Every field it sends is required, except the
+ * The metadata Origin Auth publishes. Every field it sends is required, except the
  * PKCE methods, so a client parsing it learns of a missing capability at once. Lists
  * keep only the values this version knows, so a newer auth advertising more does not
  * break older clients. Later capabilities add fields

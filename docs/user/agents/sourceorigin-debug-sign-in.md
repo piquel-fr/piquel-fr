@@ -1,7 +1,7 @@
 # Debugging a sign-in
 
-The `piquel-debug-sign-in` skill teaches an agent to find out why a sign-in
-with piquel.fr fails. Use it when your app answers an error during sign-in,
+The `sourceorigin-debug-sign-in` skill teaches an agent to find out why a sign-in
+with Origin Auth fails. Use it when your app answers an error during sign-in,
 when sign-in loops, or when sessions end too soon.
 
 The agent reads the error your app answered, checks auth's discovery, asks
@@ -10,9 +10,9 @@ you read it from the app's page in the developer console. When the fix is a
 change to the registration, it asks you to make it.
 
 To install it, save this file as
-`.claude/skills/piquel-debug-sign-in/SKILL.md` in your project, or under
+`.claude/skills/sourceorigin-debug-sign-in/SKILL.md` in your project, or under
 `.agents/skills/` for agents that read that directory:
 
 ````markdown
-{{#include skills/piquel-debug-sign-in/SKILL.md}}
+{{#include skills/sourceorigin-debug-sign-in/SKILL.md}}
 ````

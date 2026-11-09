@@ -1,6 +1,6 @@
 # Security boundaries
 
-This page maps where trust changes in piquel.fr: who can send what to auth, what
+This page maps where trust changes in SourceOrigin: who can send what to auth, what
 auth checks at each crossing, and where in the code that check lives. Read it
 before you change a listener, a role, a secret or an outbound call. The
 [threat model](threat-model.md) builds on it, and
@@ -14,7 +14,7 @@ before you change a listener, a role, a secret or an outbound call. The
  browsers, relying parties                     administrators, operators
         │                                              │
         ▼                                              ▼
- Cloudflare Tunnel or the gateway (TLS)        private route admin.piquel.fr
+ Cloudflare Tunnel or the gateway (TLS)        private route admin.sourceorigin.dev
         │                                              │
  ═══════╪══ piqueld application network ═══════════════╪═══════════════════
         ▼                                              ▼
@@ -26,7 +26,7 @@ before you change a listener, a role, a secret or an outbound call. The
  │ the old signing-key PEM, audit key, SMTP and provider secrets, runtime │
  │ role password                                                          │
  └──────┬─────────────┬──────────────┬──────────────┬─────────────┬───────┘
-        │ piquel_auth │ HTTPS        │ HTTPS        │ SMTP, TLS   │ OTLP
+        │ sourceorigin_auth │ HTTPS        │ HTTPS        │ SMTP, TLS   │ OTLP
         ▼             ▼              ▼              ▼             ▼
    PostgreSQL    GitHub,        logout URIs,   Resend relay   telemetry
    (owner role:  Google         pictures:                     collector
@@ -35,13 +35,13 @@ before you change a listener, a role, a secret or an outbound call. The
  auth-service CLI ──▶ PostgreSQL directly: database access is the root of trust
 ```
 
-`piquel-web` and the documentation also sit behind the public routes, but hold
-no state and no secret: piquel.fr links to auth and never shares its database,
-keys or process ([surfaces](../architecture/surfaces.md#piquelfr)).
+`sourceorigin-web` and the documentation also sit behind the public routes, but hold
+no state and no secret: sourceorigin.dev links to auth and never shares its database,
+keys or process ([surfaces](../architecture/surfaces.md#sourceorigindev)).
 
 ## The internet and the public listener
 
-**What crosses:** every browser request to auth.piquel.fr and every relying
+**What crosses:** every browser request to auth.sourceorigin.dev and every relying
 party's call to the OIDC endpoints. TLS ends at the Cloudflare Tunnel or the
 gateway; auth listens on plain HTTP on the application's private network
 (`AUTH_PUBLIC_LISTENER`, `infra/piqueld.toml`). Staging and previews are private
@@ -58,7 +58,7 @@ routes, so only the tailnet reaches them
   (`apps/auth-service/src/security/endpoint.rs`), counted per client IP in
   PostgreSQL. Only health probes and discovery are uncounted.
 - **The browser's origin.** A JSON mutation needs an allowed `Origin` and the
-  `x-piquel-csrf` header. A form posted to a page must come from auth's own pages
+  `x-sourceorigin-csrf` header. A form posted to a page must come from auth's own pages
   (`check_browser`). Protocol endpoints skip this and check their own
   credentials: client authentication, PKCE, codes and tokens.
 - **Size and time.** Bodies are limited to 64 KiB, except a profile picture's
@@ -67,7 +67,7 @@ routes, so only the tailnet reaches them
 - **Caching.** Auth sets every `Cache-Control` itself, and anything not marked
   cacheable is `no-store` ([caching](../operations/deploying.md#caching)).
 
-Behind those checks, the session cookie (`__Host-piquel_session`) identifies the
+Behind those checks, the session cookie (`__Host-sourceorigin_session`) identifies the
 account. Auth stores only its SHA-256 digest
 (`apps/auth-service/src/security/session.rs`). Sensitive changes also need a
 passkey confirmation from the last five minutes
@@ -80,7 +80,7 @@ private in every environment, so only the tailnet reaches it
 (`infra/piqueld.toml`, route `admin`).
 
 **What is checked:** the network path is a second wall, not the authorization
-([admin.piquel.fr](../architecture/surfaces.md#adminpiquelfr)). The admin
+([admin.sourceorigin.dev](../architecture/surfaces.md#adminsourceorigindev)). The admin
 listener refuses any request that does not name the dashboard's host
 (`Listener::Admin` in `security/http.rs`), takes forms only from the dashboard's
 own pages, and spends a budget of its own. An administrator signs in by a
@@ -106,8 +106,8 @@ Two roles hold different rights
 
 | Role | Who connects as it | What it may do |
 | --- | --- | --- |
-| `piquel`, the schema owner | the `migrate` job, and `audit prune` | Everything: it is PostgreSQL's superuser. It changes the schema and provisions the runtime role. |
-| `piquel_auth`, the runtime role | `serve` and every other command | Read and write rows. It inserts only the columns auth writes, so an event's time, transaction, position and chain columns keep their defaults on insert and it can't backdate them; sealing sets the chain columns once, in order, which triggers check, and verification checks their hashes. It may not rewrite sealed audit events or checkpoints, move the audit anchor, change the schema, disable triggers or run programs on the server. |
+| `sourceorigin`, the schema owner | the `migrate` job, and `audit prune` | Everything: it is PostgreSQL's superuser. It changes the schema and provisions the runtime role. |
+| `sourceorigin_auth`, the runtime role | `serve` and every other command | Read and write rows. It inserts only the columns auth writes, so an event's time, transaction, position and chain columns keep their defaults on insert and it can't backdate them; sealing sets the chain columns once, in order, which triggers check, and verification checks their hashes. It may not rewrite sealed audit events or checkpoints, move the audit anchor, change the schema, disable triggers or run programs on the server. |
 
 `Database::provision` grants the runtime role its rights on every `migrate`, from
 `crates/database/src/connection/runtime_role.sql`. Triggers in the migrations
@@ -157,7 +157,7 @@ needs no passkey: whoever can run it is trusted. It records its changes as
 `apps/auth-service/src/admin/operator.rs`). The `keys` commands also need the
 key-encryption key, and `user recover` the token digest key.
 
-Database access is therefore the root of trust. Nothing piquel.fr runs on may
+Database access is therefore the root of trust. Nothing SourceOrigin runs on may
 require auth to sign in ([recovering auth](../architecture/surfaces.md#recovering-auth)),
 and support's [evidence policy](account-recovery.md#supports-evidence-policy)
 is what stands between an operator and a request to recover an account.

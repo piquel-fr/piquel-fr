@@ -8,7 +8,7 @@ use tracing::{Instrument, field::Empty};
 /// request either sends looks the same in a trace.
 pub trait SendTraced {
     /// Sends the request in an `http.client` span, at `info` under the
-    /// `piquel_common` target, recording only its method, host and response status
+    /// `sourceorigin_common` target, recording only its method, host and response status
     /// as OpenTelemetry's HTTP client conventions name them: never its path, query,
     /// headers or body, which carry codes and tokens. A failure or 4xx/5xx status
     /// marks the span failed.

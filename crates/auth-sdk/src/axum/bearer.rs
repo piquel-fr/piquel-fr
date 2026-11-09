@@ -8,8 +8,8 @@ use axum::{
     http::{HeaderValue, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
-use piquel_common::protocol::challenge::{BearerChallenge, BearerError};
 use serde::de::DeserializeOwned;
+use sourceorigin_common::protocol::challenge::{BearerChallenge, BearerError};
 use std::{
     future::Future,
     marker::PhantomData,
@@ -43,9 +43,9 @@ enum Outcome<X> {
 /// the query string.
 ///
 /// ```no_run
-/// # async fn run(issuer: piquel_auth::Issuer) -> Result<(), Box<dyn std::error::Error>> {
+/// # async fn run(issuer: sourceorigin_auth::Issuer) -> Result<(), Box<dyn std::error::Error>> {
 /// use axum::{Router, routing::get};
-/// use piquel_auth::{
+/// use sourceorigin_auth::{
 ///     Resource,
 ///     axum::{Authenticated, BearerLayer},
 /// };
@@ -199,7 +199,7 @@ enum Reason {
 ///
 /// ```no_run
 /// use axum::response::{IntoResponse, Response};
-/// use piquel_auth::axum::{AuthRejection, Authenticated};
+/// use sourceorigin_auth::axum::{AuthRejection, Authenticated};
 ///
 /// async fn audited(token: Result<Authenticated, AuthRejection>) -> Response {
 ///     match token {
@@ -337,7 +337,7 @@ fn token<X: Clone + Send + Sync + 'static>(
 /// invalid.
 ///
 /// ```no_run
-/// use piquel_auth::axum::Authenticated;
+/// use sourceorigin_auth::axum::Authenticated;
 ///
 /// async fn whoami(Authenticated(token): Authenticated) -> String {
 ///     format!("{:?}", token.subject())
@@ -361,13 +361,13 @@ impl<St: Send + Sync, X: Clone + Send + Sync + 'static> FromRequestParts<St> for
 /// no token was sent, and with 403 `insufficient_scope` naming `S` when it lacks one.
 ///
 /// ```no_run
-/// piquel_auth::scopes! {
+/// sourceorigin_auth::scopes! {
 ///     pub mod notes {
 ///         Read = "notes:read",
 ///         Write = "notes:write",
 ///     }
 /// }
-/// use piquel_auth::axum::Scoped;
+/// use sourceorigin_auth::axum::Scoped;
 ///
 /// async fn edit(Scoped(token): Scoped<(notes::Read, notes::Write)>) {}
 /// ```
@@ -399,7 +399,7 @@ impl<St: Send + Sync, S: ScopeSet, X: Clone + Send + Sync + 'static> FromRequest
 /// requirement, as auth judges it.
 ///
 /// ```no_run
-/// use piquel_auth::{AuthenticationPolicy, StepUpRequirement, axum::RequireAuthentication};
+/// use sourceorigin_auth::{AuthenticationPolicy, StepUpRequirement, axum::RequireAuthentication};
 ///
 /// /// A passkey confirmation within the last five minutes.
 /// struct RecentPasskey;

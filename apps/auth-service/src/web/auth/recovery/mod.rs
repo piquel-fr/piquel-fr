@@ -16,7 +16,7 @@ use crate::{
     routes::page::{self, settings},
     security::ApiError,
 };
-use piquel_ui::{
+use sourceorigin_ui::{
     Notice, RecoverChange, RecoverStep, Recovery, RecoveryPasskey, Title, UndoChange, UndoStep,
 };
 use topcoat::{
@@ -37,12 +37,14 @@ impl From<RecoveryNotice> for Recovery {
     /// The recovery, as its pages show it.
     fn from(notice: RecoveryNotice) -> Self {
         let stage = match notice.stage {
-            RecoveryStage::Open { expires_at } => piquel_ui::RecoveryStage::Open { expires_at },
+            RecoveryStage::Open { expires_at } => {
+                sourceorigin_ui::RecoveryStage::Open { expires_at }
+            }
             RecoveryStage::Probation {
                 completed_at,
                 settles_at,
                 passkey,
-            } => piquel_ui::RecoveryStage::Probation {
+            } => sourceorigin_ui::RecoveryStage::Probation {
                 completed_at,
                 settles_at,
                 passkey: passkey.map(|passkey| RecoveryPasskey {
@@ -110,7 +112,7 @@ impl WebApplication {
                     None => Ok(see_other(page::LOGIN).into_response(cx)?),
                 };
             }
-            None => ApiError::bad_request(piquel_ui::OUT_OF_DATE),
+            None => ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE),
         };
         let (status, message) = refused.public();
         web.recover_page(cx, status, RecoverStep::Open, Some(message))
@@ -150,7 +152,7 @@ impl WebApplication {
         let web = app_context::<Self>(cx);
         let Some(change) = Self::change(cx, body).await else {
             let step = UndoStep::Open { signed_in: None };
-            let alert = Some(piquel_ui::OUT_OF_DATE);
+            let alert = Some(sourceorigin_ui::OUT_OF_DATE);
             return web
                 .undo_page(cx, StatusCode::BAD_REQUEST, step, alert)
                 .await;
@@ -198,8 +200,7 @@ impl WebApplication {
         step: RecoverStep<'_>,
         alert: Option<&str>,
     ) -> Result<Response, Failure> {
-        let view =
-            view! { cx => piquel_ui::recover(action: page::RECOVER, step: step, alert: alert) };
+        let view = view! { cx => sourceorigin_ui::recover(action: page::RECOVER, step: step, alert: alert) };
         let title = Title::Recover.as_str();
         Ok(self.render(cx, status, title, &[], view).await?)
     }
@@ -214,7 +215,7 @@ impl WebApplication {
         alert: Option<&str>,
     ) -> Result<Response, Failure> {
         let view = view! { cx =>
-            piquel_ui::undo_recovery(action: page::RECOVER_UNDO, step: step, alert: alert)
+            sourceorigin_ui::undo_recovery(action: page::RECOVER_UNDO, step: step, alert: alert)
         };
         let title = Title::UndoRecovery.as_str();
         Ok(self.render(cx, status, title, &[], view).await?)

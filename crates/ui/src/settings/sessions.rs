@@ -6,8 +6,8 @@ use crate::{
     layout::page_head,
 };
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
 use std::net::IpAddr;
 use topcoat::{
     Result,

@@ -1,17 +1,17 @@
 Hello,
 {% match content %}
 {%- when Content::VerifyAddress { address, handle, link, hours } %}
-Someone, hopefully you, added {{ address }} to the Piquel account @{{ handle }}. If that is your account, open this link and select "Confirm this address":
+Someone, hopefully you, added {{ address }} to the Origin Account @{{ handle }}. If that is your account, open this link and select "Confirm this address":
 
 {{ link }}
 
 The link works once, for {{ hours }} hours. If you did not add this address, ignore this email: the address will be removed when the link expires.
 {%- when Content::RecoveryLink { address: _, handle, link, hours, undo } %}
-Piquel support started a recovery of the Piquel account @{{ handle }}, so its owner can add a new passkey. The account was signed out everywhere. If it is yours, open this link and follow the steps to add a passkey:
+SourceOrigin support started a recovery of the Origin Account @{{ handle }}, so its owner can add a new passkey. The account was signed out everywhere. If it is yours, open this link and follow the steps to add a passkey:
 
 {{ link }}
 
-The link works once, for {{ hours }} hours. If you didn't ask for this, contact Piquel support. If you still have a passkey, you can also cancel the recovery:
+The link works once, for {{ hours }} hours. If you didn't ask for this, contact SourceOrigin support. If you still have a passkey, you can also cancel the recovery:
 
 {{ undo }}
 {%- when Content::Notification { address: _, subject, body, page, undo, alerts } %}
@@ -33,13 +33,13 @@ See the alerts on the admin dashboard:
 {{ alerts }}
 {%- endif %}
 
-Read it in your Piquel notifications:
+Read it in your Origin Account notifications:
 
 {{ page }}
 {%- when Content::Announcement { address: _, subject: _, body, paragraphs: _, everyone, inbox, unsubscribe } %}
 {{ body }}
 
-{% if everyone %}Piquel sent this announcement to every account.{% else %}Piquel sent this announcement to your account.{% endif %} You can read it again in your Piquel notifications:
+{% if everyone %}SourceOrigin sent this announcement to every account.{% else %}SourceOrigin sent this announcement to your account.{% endif %} You can read it again in your Origin Account notifications:
 
 {{ inbox }}
 {%- if let Some(unsubscribe) = unsubscribe %}
@@ -50,4 +50,4 @@ To stop receiving announcements by email, open:
 {%- endif %}
 {%- endmatch %}
 
-Piquel
+SourceOrigin

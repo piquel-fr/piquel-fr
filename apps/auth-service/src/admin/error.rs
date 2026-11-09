@@ -5,9 +5,9 @@ use crate::{
     ClientRegistryError, KeyError, deletion::DeletionError, handles::HandlesError,
     security::ApiError,
 };
-use piquel_common::{DeliveryId, PasskeyId, protocol::step_up::StepUpRequirement};
-use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
+use sourceorigin_common::{DeliveryId, PasskeyId, protocol::step_up::StepUpRequirement};
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::DatabaseError;
 
 /// Failures of an administrative operation, or of signing its administrator in.
 #[derive(Debug, thiserror::Error)]
@@ -182,7 +182,7 @@ pub enum AdminError {
     Event(#[from] serde_json::Error),
     /// A link could not be written.
     #[error("could not write a link")]
-    Link(#[from] piquel_ui::QueryError),
+    Link(#[from] sourceorigin_ui::QueryError),
     /// The audit chain could not be verified or pruned.
     #[error(transparent)]
     Audit(#[from] crate::AuditError),

@@ -9,10 +9,10 @@
 use super::{DeliveryRepository, RepositoryExecutor, Unsigned};
 use crate::{DatabaseError, DatabaseTransaction, repositories::notifications::Notified};
 use chrono::{DateTime, Utc};
-pub use piquel_common::admin::{DeliveryStatus, DeliverySummary};
-use piquel_common::{DeliveryId, EventId, UserId, events::DomainEvent};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
+pub use sourceorigin_common::admin::{DeliveryStatus, DeliverySummary};
+use sourceorigin_common::{DeliveryId, EventId, UserId, events::DomainEvent};
 use std::time::Duration;
 use uuid::Uuid;
 

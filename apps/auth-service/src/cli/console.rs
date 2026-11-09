@@ -5,9 +5,9 @@
 use super::CliError;
 use crate::{AdminService, AuthConfig, Operator, UserRef, account::AccountService};
 use clap::{Args, ValueEnum};
-use piquel_common::{UserId, admin::Paging};
-use piquel_repository::Database;
 use serde::Serialize;
+use sourceorigin_common::{UserId, admin::Paging};
+use sourceorigin_repository::Database;
 use std::io::{BufRead, IsTerminal};
 
 /// Administrative commands' view of auth: every operation, run by the operator at
@@ -49,7 +49,7 @@ pub(super) enum OutputFormat {
     /// Tab-separated lines for people.
     Table,
     /// The view the admin dashboard shows, as JSON, for scripts: its shape is
-    /// `piquel_common`'s, as its `admin` and `alerts` modules define it.
+    /// `sourceorigin_common`'s, as its `admin` and `alerts` modules define it.
     Json,
 }
 

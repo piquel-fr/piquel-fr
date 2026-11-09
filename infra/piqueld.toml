@@ -1,5 +1,5 @@
-#:schema https://raw.githubusercontent.com/piquel-fr/piqueld/main/docs/application-manifest.schema.json
-# piquel.fr on piqueld. The environments below are the application's only ones:
+#:schema https://raw.githubusercontent.com/sourceorigin-dev/piqueld/main/docs/application-manifest.schema.json
+# SourceOrigin on piqueld. The environments below are the application's only ones:
 # staging builds `main` on every push, production only receives releases
 # promoted from staging, and previews deploy branches or local worktrees. See
 # docs/dev/operations/deploying.md.
@@ -7,20 +7,20 @@ api_version = "piqueld.dev/v1alpha1"
 kind = "Application"
 
 [metadata]
-name = "piquel-fr"
+name = "sourceorigin"
 
 [spec.manifest]
 path = "infra/piqueld.toml"
 sync = { mode = "webhook" }
 
 [spec.manifest.repository]
-url = "https://github.com/piquel-fr/piquel-fr.git"
+url = "https://github.com/sourceorigin-dev/sourceorigin.git"
 branch = "main"
 
 # Hostnames have no default: an environment without its own fails to deploy
 # instead of competing for another one's. Neither do `smtp_secret`, the stored
 # Resend key an environment sends with, and `email_from`: production sends as
-# piquel.fr with its own key, staging and previews as dev.piquel.fr with
+# sourceorigin.dev with its own key, staging and previews as dev.sourceorigin.dev with
 # another, so their mail never spends production's reputation. See
 # docs/dev/operations/email.md.
 [spec.variables]
@@ -30,10 +30,10 @@ invite_required = "true"
 audit_key = "audit-key"
 # See docs/dev/operations/replicas.md before raising it.
 auth_replicas = 1
-# Where auth, with the admin dashboard it serves, and piquel.fr's web server
-# send telemetry: the `telemetry` application's collector, imported below.
+# Where auth, with the admin dashboard it serves, and sourceorigin.dev's web server
+# send telemetry: the `sourceorigin-observability` application's collector, imported below.
 # Empty sends none.
-otlp_endpoint = "http://collector.telemetry:4318"
+otlp_endpoint = "http://collector.sourceorigin-observability:4318"
 # GitHub and Google sign-in. An empty client ID turns the provider off; its
 # secret is then mounted but never read, so environments without the provider
 # mount the unused placeholder. Production and staging each have their own OAuth
@@ -49,17 +49,17 @@ google_secret = "no-provider-secret"
 promote_from = "staging"
 
 [spec.environments.production.variables]
-web_host = "piquel.fr"
-auth_host = "auth.piquel.fr"
-www_host = "www.piquel.fr"
-admin_host = "admin.piquel.fr"
-docs_host = "docs.piquel.fr"
+web_host = "sourceorigin.dev"
+auth_host = "auth.sourceorigin.dev"
+www_host = "www.sourceorigin.dev"
+admin_host = "admin.sourceorigin.dev"
+docs_host = "docs.sourceorigin.dev"
 smtp_secret = "resend-production"
-email_from = "Piquel <security@piquel.fr>"
-audit_key = "audit-key-production"
+email_from = "Origin Account <security@sourceorigin.dev>"
+audit_key = "audit-key-production-2"
 github_client_id = "Ov23litrz0WrDWqrawEM"
 github_secret = "github-production"
-google_client_id = "329657457544-fmlaqdhf3ofcuglb254jmnprdb5s65hc.apps.googleusercontent.com"
+google_client_id = "981383173703-lvo8t7i276v7umdf2hq14l30gknbmdgt.apps.googleusercontent.com"
 google_secret = "google-production"
 
 [spec.environments.staging]
@@ -67,39 +67,39 @@ sync = true
 visibility = "private"
 
 [spec.environments.staging.variables]
-web_host = "staging.piquel.fr"
-auth_host = "auth.staging.piquel.fr"
-www_host = "www.staging.piquel.fr"
-admin_host = "admin.staging.piquel.fr"
-docs_host = "docs.staging.piquel.fr"
+web_host = "staging.sourceorigin.dev"
+auth_host = "auth.staging.sourceorigin.dev"
+www_host = "www.staging.sourceorigin.dev"
+admin_host = "admin.staging.sourceorigin.dev"
+docs_host = "docs.staging.sourceorigin.dev"
 smtp_secret = "resend-dev"
-email_from = "Piquel <security@dev.piquel.fr>"
-audit_key = "audit-key-staging"
+email_from = "Origin Account <security@dev.sourceorigin.dev>"
+audit_key = "audit-key-staging-2"
 github_client_id = "Ov23liZe9WmU9A4fqlqw"
 github_secret = "github-staging"
-google_client_id = "329657457544-v4rtrpcqouifihtc3as6impmn8065ncn.apps.googleusercontent.com"
+google_client_id = "981383173703-rvipsfet9n9270sqp30jttjrsl8beo66.apps.googleusercontent.com"
 google_secret = "google-staging"
 
-# Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
+# Flat hostnames, so the `*.dev.sourceorigin.dev` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.
 [spec.previews]
 visibility = "private"
 
 [spec.previews.variables]
-web_host = "${{ env.slug }}.dev.piquel.fr"
-auth_host = "auth-${{ env.slug }}.dev.piquel.fr"
-www_host = "www-${{ env.slug }}.dev.piquel.fr"
-admin_host = "admin-${{ env.slug }}.dev.piquel.fr"
-docs_host = "docs-${{ env.slug }}.dev.piquel.fr"
+web_host = "${{ env.slug }}.dev.sourceorigin.dev"
+auth_host = "auth-${{ env.slug }}.dev.sourceorigin.dev"
+www_host = "www-${{ env.slug }}.dev.sourceorigin.dev"
+admin_host = "admin-${{ env.slug }}.dev.sourceorigin.dev"
+docs_host = "docs-${{ env.slug }}.dev.sourceorigin.dev"
 smtp_secret = "resend-dev"
-email_from = "Piquel <security@dev.piquel.fr>"
+email_from = "Origin Account <security@dev.sourceorigin.dev>"
 invite_required = "false"
 # Previews keep their telemetry on stderr: the collector does not export to them.
 otlp_endpoint = ""
 
-# piquel.fr, its own web server: the homepage and the policies. It redirects
+# sourceorigin.dev, its own web server: the homepage and the policies. It redirects
 # every other path, with its query, to the same one on auth, so links to
-# piquel.fr's settings paths keep working. See "piquel.fr" in
+# sourceorigin.dev's settings paths keep working. See "sourceorigin.dev" in
 # docs/dev/operations/deploying.md.
 [[spec.routes]]
 name = "web"
@@ -140,11 +140,11 @@ hostname = "${{ vars.www_host }}"
 redirect = { to = "https://${{ vars.web_host }}", status = 308, preserve_path = true }
 visibility = "public"
 
-# The collector of the `telemetry` application (infra/telemetry.toml), as
-# `collector.telemetry`. It has only a production environment, which staging
+# The collector of the `sourceorigin-observability` application (infra/telemetry.toml), as
+# `collector.sourceorigin-observability`. It has only a production environment, which staging
 # and production share; `deployment.environment.name` tells them apart.
 [[spec.imports]]
-application = "telemetry"
+application = "sourceorigin-observability"
 service = "collector"
 environment = "production"
 
@@ -160,7 +160,7 @@ generate = { type = "random", bytes = 32, encoding = "hex" }
 name = "database-password"
 generate = { type = "random", bytes = 32, encoding = "hex" }
 
-# The password of `piquel_auth`, the restricted role auth connects as. `migrate`
+# The password of `sourceorigin_auth`, the restricted role auth connects as. `migrate`
 # sets it on every deploy.
 [[spec.secrets]]
 name = "database-runtime-password"
@@ -196,7 +196,7 @@ generate = { type = "rsa", bits = 3072 }
 name = "audit-key"
 generate = { type = "random", bytes = 32, encoding = "hex" }
 
-# Applies migrations as the superuser, then creates or resets `piquel_auth`.
+# Applies migrations as the superuser, then creates or resets `sourceorigin_auth`.
 [[spec.jobs]]
 name = "migrate"
 service = "auth"
@@ -204,7 +204,7 @@ command = ["auth-service", "migrate"]
 run = "before-rollout"
 
 [spec.jobs.environment]
-AUTH_DATABASE_OWNER_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
+AUTH_DATABASE_OWNER_URL = "postgres://sourceorigin@postgres:5432/sourceorigin?sslmode=disable"
 AUTH_DATABASE_OWNER_PASSWORD = "file:///run/secrets/database-password"
 
 [[spec.jobs.secrets]]
@@ -235,7 +235,7 @@ dockerfile = "infra/auth.Dockerfile"
 
 [spec.services.environment]
 # Plaintext stays on the application's private network, which ingress cannot reach.
-AUTH_DATABASE_URL = "postgres://piquel_auth@postgres:5432/piquel?sslmode=disable"
+AUTH_DATABASE_URL = "postgres://sourceorigin_auth@postgres:5432/sourceorigin?sslmode=disable"
 AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-runtime-password"
 AUTH_KEY_ENCRYPTION_KEY = "file:///run/secrets/key-encryption-key"
 AUTH_TOKEN_DIGEST_KEY = "file:///run/secrets/token-digest-key"
@@ -246,7 +246,7 @@ AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # origin.
 AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
 AUTH_ADMIN_ORIGIN = "https://${{ vars.admin_host }}"
-# piquel.fr, whose policies auth's pages link and discovery advertises.
+# sourceorigin.dev, whose policies auth's pages link and discovery advertises.
 AUTH_WEB_ORIGIN = "https://${{ vars.web_host }}"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
@@ -301,7 +301,7 @@ type = "http"
 port = 8080
 path = "/health/ready"
 
-# piquel.fr's web server. It needs no database and no secret: it relies on auth
+# sourceorigin.dev's web server. It needs no database and no secret: it relies on auth
 # only to sign people in, through links and redirects.
 [[spec.services]]
 name = "web"
@@ -355,8 +355,8 @@ type = "image"
 image = "postgres:18-bookworm"
 
 [spec.services.environment]
-POSTGRES_USER = "piquel"
-POSTGRES_DB = "piquel"
+POSTGRES_USER = "sourceorigin"
+POSTGRES_DB = "sourceorigin"
 POSTGRES_PASSWORD_FILE = "/run/secrets/database-password"
 
 [[spec.services.secrets]]
@@ -364,14 +364,14 @@ name = "database-password"
 target = "/run/secrets/database-password"
 
 [[spec.services.mounts]]
-volume = "postgres-data"
+volume = "database"
 target = "/var/lib/postgresql"
 
 # Over TCP: the server initializing a new volume listens only on its socket, so
 # the migration job waits for the real one.
 [spec.services.healthcheck]
 type = "command"
-command = ["pg_isready", "-h", "127.0.0.1", "-U", "piquel", "-d", "piquel"]
+command = ["pg_isready", "-h", "127.0.0.1", "-U", "sourceorigin", "-d", "sourceorigin"]
 
 [[spec.volumes]]
-name = "postgres-data"
+name = "database"

@@ -3,12 +3,12 @@
 use super::AdminApplication as App;
 use crate::{AdminError, InviteExpiry};
 use chrono::Utc;
-use piquel_common::{
+use serde::de::IgnoredAny;
+use sourceorigin_common::{
     TokenId,
     admin::{CreateInvitation, CreatedInvitation},
 };
-use piquel_ui::{Action, Change, InvitationRow};
-use serde::de::IgnoredAny;
+use sourceorigin_ui::{Action, Change, InvitationRow};
 use topcoat::{
     Result,
     context::Cx,
@@ -59,7 +59,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     });
     let (creating, rows) = (&href!(create).resolve(cx), rows.as_deref());
     let page = view! { cx =>
-        piquel_ui::invitation_list(rows: rows, create: creating.as_str(), now: Utc::now())
+        sourceorigin_ui::invitation_list(rows: rows, create: creating.as_str(), now: Utc::now())
     };
     App::render(cx, StatusCode::OK, "Invitations", page).await
 }
@@ -104,14 +104,14 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
     let page = view! { cx =>
         match created {
             Some(created) => {
-                piquel_ui::invitation_created(
+                sourceorigin_ui::invitation_created(
                     link: created.url.as_str(),
                     expires_at: created.expires_at,
                     back: back.as_str(),
                 )
             },
             None => {
-                piquel_ui::dashboard_change(
+                sourceorigin_ui::dashboard_change(
                     change: Change::Invite,
                     back: back.as_str(),
                     refusal: refused,
@@ -141,7 +141,7 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     })
     .await?;
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::RevokeInvitation,
             back: back.as_str(),
             refusal: refusal.as_deref(),

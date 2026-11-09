@@ -1,5 +1,5 @@
 # The documentation book, which the `docs` service of infra/piqueld.toml serves:
-# docs.piquel.fr in production. Every deployment serves the book of its own
+# docs.sourceorigin.dev in production. Every deployment serves the book of its own
 # commit. See "Documentation" in docs/dev/operations/deploying.md.
 
 # mdBook's release binary, at the version `just install-tools` and CI use.

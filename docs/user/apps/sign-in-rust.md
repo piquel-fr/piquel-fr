@@ -1,11 +1,11 @@
 # Signing in with Rust
 
-The Rust SDK, `piquel-auth`, signs users in to an axum app. Its `axum` feature
+The Rust SDK, `sourceorigin-auth`, signs users in to an axum app. Its `axum` feature
 mounts the login routes, keeps each user's session in a sealed cookie, and hands
 your handlers the signed-in user. Your app stores nothing.
 
 The code on this page comes from the SDK's example app,
-[`examples/notes.rs`](https://github.com/piquel-fr/piquel-fr/blob/main/crates/auth-sdk/examples/notes.rs).
+[`examples/notes.rs`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/crates/auth-sdk/examples/notes.rs).
 
 ## Before you start
 
@@ -28,7 +28,7 @@ The code on this page comes from the SDK's example app,
 
    ```toml
    [dependencies]
-   piquel-auth = { git = "https://github.com/piquel-fr/piquel-fr", features = ["axum"] }
+   sourceorigin-auth = { git = "https://github.com/sourceorigin-dev/sourceorigin", features = ["axum"] }
    axum = "0.8"
    tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
    ```
@@ -62,7 +62,7 @@ The router serves:
 To mount the routes elsewhere, nest them there and tell `LoginRoutes::mounted_at`.
 `after_login` sets where a sign-in lands when it came from no page, `/` by default.
 
-The session lives in the `__Host-piquel-<client ID>-session` cookie, which is
+The session lives in the `__Host-sourceorigin-<client ID>-session` cookie, which is
 `Secure`, `HttpOnly` and `SameSite=Lax`, so scripts can't read its tokens. It
 lasts 12 hours, or what `session_lifetime` says. It ends sooner when auth refuses
 its refresh token, such as after the user signs out at auth. A browser can have
@@ -99,7 +99,7 @@ Post a form to the logout route from one of your pages:
 
 The route revokes the session's refresh token, clears the cookie and sends the
 browser to auth, which asks **Ready to sign out?**. **Sign out** also ends the
-user's piquel.fr session in that browser, and **Keep my session** keeps it. Auth
+user's Origin Account session in that browser, and **Keep my session** keeps it. Auth
 then sends the browser to the URL you gave `LoginRoutes::after_logout`, which must
 be one of the app's post-logout URIs. Without one, auth shows its own page.
 

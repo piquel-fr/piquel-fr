@@ -4,10 +4,10 @@ use super::MAX_RETURN_TO_BYTES;
 use crate::emails::EmailError;
 use crate::security::{ApiError, SessionError};
 use axum::http::header::InvalidHeaderValue;
-use piquel_common::{VocabularyError, config::ConfigurationError};
-use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
-use piquel_ui::QueryError;
+use sourceorigin_common::{VocabularyError, config::ConfigurationError};
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::DatabaseError;
+use sourceorigin_ui::QueryError;
 use thiserror::Error;
 
 /// Federation failures that reach the browser, mapped to HTTP once in `From<FederationError>`.
@@ -106,7 +106,7 @@ impl From<FederationError> for ApiError {
                 "No provider sign-in is waiting in this browser. Please start again.",
             ),
             FederationError::LinkedAccountUnavailable => Self::unauthorized(
-                "The Piquel account linked to this provider account is disabled or has no passkey.",
+                "The Origin Account linked to this provider account is disabled or has no passkey.",
             ),
             FederationError::InvalidAttempt => Self::bad_request(
                 "This sign-in attempt is invalid or has expired. Please start again.",
@@ -115,7 +115,7 @@ impl From<FederationError> for ApiError {
                 Self::forbidden("Your session changed. Please start linking this provider again.")
             }
             FederationError::IdentityAlreadyLinked => Self::forbidden(
-                "This provider account is already linked to another Piquel account.",
+                "This provider account is already linked to another Origin Account.",
             ),
             FederationError::PendingSignupExpired => {
                 Self::bad_request("This signup has expired. Please start again.")
@@ -189,5 +189,5 @@ pub enum FederationConfigError {
     ProviderEndpoint(#[source] url::ParseError),
     /// A provider's signing key cache could not be built.
     #[error("could not initialize a provider's signing key cache")]
-    Keys(#[source] piquel_auth::KeyError),
+    Keys(#[source] sourceorigin_auth::KeyError),
 }

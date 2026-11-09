@@ -1,4 +1,4 @@
-use piquel_auth::{AccessToken, ProfileClaims, Scopes, Subject};
+use sourceorigin_auth::{AccessToken, ProfileClaims, Scopes, Subject};
 
 fn main() {
     let now = chrono::Utc::now();

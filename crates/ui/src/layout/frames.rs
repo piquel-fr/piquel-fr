@@ -1,20 +1,20 @@
 //! The frames of the pages outside the shell: the narrow column a signed-out
-//! browser sees and piquel.fr's wide one, and the status bar below every page.
+//! browser sees and sourceorigin.dev's wide one, and the status bar below every page.
 
 use crate::clients::copyable;
-use piquel_common::TraceId;
+use sourceorigin_common::TraceId;
 use topcoat::{
     Result,
     view::{Child, View, component, view},
 };
 
 /// The repository every page links in its status bar.
-pub const SOURCE: &str = "https://github.com/piquel-fr/piquel-fr";
+pub const SOURCE: &str = "https://github.com/sourceorigin-dev/sourceorigin";
 
-/// Where Piquel's users and developers write to.
-pub const SUPPORT_ADDRESS: &str = "support@piquel.fr";
+/// Where SourceOrigin's users and developers write to.
+pub const SUPPORT_ADDRESS: &str = "support@sourceorigin.dev";
 
-/// Where every page's footer links Piquel's policies, which piquel.fr serves.
+/// Where every page's footer links SourceOrigin's policies, which sourceorigin.dev serves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Policies<'a> {
     /// The privacy policy.
@@ -24,7 +24,7 @@ pub struct Policies<'a> {
 }
 
 impl Policies<'static> {
-    /// The policies' paths on piquel.fr: piquel.fr routes them, and auth links
+    /// The policies' paths on sourceorigin.dev: sourceorigin.dev routes them, and auth links
     /// them on its origin.
     pub const PATHS: Self = Self {
         privacy: "/privacy",
@@ -43,8 +43,8 @@ pub enum Health {
 }
 
 /// The status bar below every page: whether the service needs attention, when a
-/// page knows, the `environment` it runs in, if named, that Piquel is open
-/// source, and the links: the source, Piquel's `policies` and support.
+/// page knows, the `environment` it runs in, if named, that SourceOrigin is open
+/// source, and the links: the source, SourceOrigin's `policies` and support.
 #[component]
 pub(crate) async fn status_bar<'a>(
     #[default] health: Option<Health>,
@@ -68,7 +68,7 @@ pub(crate) async fn status_bar<'a>(
             if let Some(environment) = environment {
                 <span class="mono">(environment)</span>
             }
-            <span>"Piquel's code is public"</span>
+            <span>"SourceOrigin's code is public"</span>
             <span class="right">
                 <a href=(SOURCE)>"Source"</a>
                 <a href=(policies.privacy)>"Privacy"</a>
@@ -84,7 +84,7 @@ pub(crate) async fn status_bar<'a>(
 /// status bar below. The brand links `home`. A page answering a server error
 /// shows the `reference` of its trace, for the user to quote in a report. A page
 /// on the way to the `admin` dashboard says so beside the brand. The status bar
-/// links Piquel's `policies`.
+/// links SourceOrigin's `policies`.
 #[component]
 pub async fn auth_shell<'a>(
     home: &'a str,
@@ -97,9 +97,9 @@ pub async fn auth_shell<'a>(
     Ok(view! {
         <div class="auth">
             <header>
-                <a class="brand" href=(home) aria-label="Piquel home">
-                    <span class="mark">"p"</span>
-                    "piquel"
+                <a class="brand" href=(home) aria-label="Origin Auth home">
+                    <span class="mark">"o"</span>
+                    "Origin Auth"
                     if admin {
                         <span class="area">"Admin"</span>
                     }
@@ -119,7 +119,7 @@ pub async fn auth_shell<'a>(
     })
 }
 
-/// The frame of piquel.fr's own pages: the brand, the `links` beside it, the
+/// The frame of sourceorigin.dev's own pages: the brand, the `links` beside it, the
 /// page as `child` in a wide column, and the status bar linking the `policies`.
 /// Its pages have no forms, so the theme follows the browser alone.
 #[component]
@@ -132,11 +132,11 @@ pub async fn site_shell<'a>(
     Ok(view! {
         <div class="auth site">
             <header>
-                <a class="brand" href=(home) aria-label="Piquel home">
-                    <span class="mark">"p"</span>
-                    "piquel"
+                <a class="brand" href=(home) aria-label="SourceOrigin home">
+                    <span class="mark">"s"</span>
+                    "SourceOrigin"
                 </a>
-                <nav class="site-links" aria-label="Piquel">
+                <nav class="site-links" aria-label="SourceOrigin">
                     for (label, href) in links {
                         <a href=(*href)>(*label)</a>
                     }

@@ -23,15 +23,15 @@ use axum::{
     routing::{delete, post},
 };
 use chrono::{Duration, Utc};
-use piquel_common::clients::{ClientId, ClientKind, ClientOwner};
-use piquel_common::{
+use sourceorigin_common::clients::{ClientId, ClientKind, ClientOwner};
+use sourceorigin_common::{
     AuthenticationMethod, EmailId, Provider, TokenId, UserId,
     events::{Actor, DomainEvent, RevocationReason},
     protocol::step_up::StepUpRequirement,
 };
-use piquel_crypto::Secret;
-use piquel_repository::PendingFederation;
-use piquel_repository::{InsertExternalIdentity, InsertPasskey};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::PendingFederation;
+use sourceorigin_repository::{InsertExternalIdentity, InsertPasskey};
 use std::{fmt::Debug, mem::discriminant};
 
 /// The reason the scenarios give.
@@ -303,7 +303,7 @@ impl AccountOperation {
             Self::ListNotifications => service.notifications(viewer, None).await.map(drop),
             // Checked before it looks the notification up, so any ID will do.
             Self::ViewNotification => service
-                .notification(viewer, piquel_common::NotificationId::new())
+                .notification(viewer, sourceorigin_common::NotificationId::new())
                 .await
                 .map(drop),
             Self::ViewNotificationPreferences => {

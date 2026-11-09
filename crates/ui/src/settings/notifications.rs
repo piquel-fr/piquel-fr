@@ -8,11 +8,11 @@ use crate::{
     layout::{announcement_text, dialog, page_head},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use serde::{Deserialize, Serialize};
+use sourceorigin_common::{
     NotificationId,
     notifications::{EmailCategory, NotificationPreference},
 };
-use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{View, component, view},
@@ -135,7 +135,7 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
     let empty = match (before, owner) {
         (Some(_), _) => "No older notifications.",
         (None, true) => {
-            "Nothing to tell you yet. Piquel lets you know here when something important happens to your account."
+            "Nothing to tell you yet. SourceOrigin lets you know here when something important happens to your account."
         }
         (None, false) => "This account has no notifications.",
     };
@@ -143,7 +143,7 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
         if owner {
             page_head(
                 title: "Notifications",
-                lead: "What Piquel tells you. Opening one marks it read.".to_owned(),
+                lead: "What SourceOrigin tells you. Opening one marks it read.".to_owned(),
                 actions: view! { email_button() },
             )
         }
@@ -224,9 +224,9 @@ async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
         dialog(id: EMAIL_DIALOG, title: "Email preferences", shown: page.shown.email, back: page.page, alert: page.alert, focus_close: true,
             <p class="help">
                 (if owner {
-                    "Piquel always emails you about your account itself, at your primary address: its addresses, sign-in methods and recovery, and what support changes. Choose what else it emails you."
+                    "SourceOrigin always emails you about your account itself, at your primary address: its addresses, sign-in methods and recovery, and what support changes. Choose what else it emails you."
                 } else {
-                    "Piquel always emails the owner about their account itself. Only the owner turns the rest on or off."
+                    "SourceOrigin always emails the owner about their account itself. Only the owner turns the rest on or off."
                 })
             </p>
             <ul class="list">
@@ -279,7 +279,7 @@ pub enum UnsubscribeStep<'a> {
         /// The inbox.
         notifications: &'a str,
     },
-    /// The link is not one Piquel made, or not whole.
+    /// The link is not one Origin Auth made, or not whole.
     Invalid,
 }
 
@@ -291,7 +291,7 @@ pub async fn unsubscribe(step: UnsubscribeStep<'_>) -> Result<impl View> {
             UnsubscribeStep::Confirm { action } => {
                 <h1>"Stop announcement emails?"</h1>
                 <p class="lead">
-                    "You will still find Piquel’s announcements in your notifications, and receive by email those about a security incident or a change to the privacy policy or terms. Emails about your account itself keep coming."
+                    "You will still find SourceOrigin’s announcements in your notifications, and receive by email those about a security incident or a change to the privacy policy or terms. Emails about your account itself keep coming."
                 </p>
                 <form method="post" action=(action) data-submit-once="true">
                     <button type="submit">"Stop announcement emails"</button>
@@ -300,7 +300,7 @@ pub async fn unsubscribe(step: UnsubscribeStep<'_>) -> Result<impl View> {
             UnsubscribeStep::Done { notifications } => {
                 <h1>"Announcement emails stopped"</h1>
                 <p class="lead">
-                    "Piquel no longer emails you its announcements, except those about a security incident or a change to the privacy policy or terms. Turn them back on from your notifications."
+                    "SourceOrigin no longer emails you its announcements, except those about a security incident or a change to the privacy policy or terms. Turn them back on from your notifications."
                 </p>
                 <a class="button secondary" href=(notifications)>"Open your notifications"</a>
             }
@@ -328,7 +328,7 @@ pub(crate) async fn unread_hint(unread: u64, page: &str) -> Result<impl View> {
                 icon(kind: Icon::Bell)
                 <div class="text">
                     <strong>(said)</strong>
-                    <small>"Piquel has something to tell you."</small>
+                    <small>"SourceOrigin has something to tell you."</small>
                 </div>
                 <a class="button small" href=(page)>"Read"</a>
             </section>

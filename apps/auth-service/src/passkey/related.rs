@@ -20,11 +20,11 @@ use axum::{
     http::{HeaderMap, header},
     response::Response,
 };
-use piquel_common::{
+use serde::Deserialize;
+use sourceorigin_common::{
     clients::RelatedOrigin,
     events::{Actor, InlineSignIn},
 };
-use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
 use webauthn_rs::prelude::PublicKeyCredential;
@@ -170,7 +170,7 @@ impl PasskeyApplication {
         // Only auth's sign-in page offers to restore an account being deleted.
         let SignIn::Session(credential) = signed_in else {
             return Err(ApiError::interaction_required(
-                "This account is scheduled for deletion. Sign in on Piquel's pages to restore it.",
+                "This account is scheduled for deletion. Sign in on Origin Auth's pages to restore it.",
             ));
         };
         let session = security::Session::create_inline(

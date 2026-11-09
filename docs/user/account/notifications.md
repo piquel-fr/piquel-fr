@@ -1,27 +1,27 @@
 # Notifications
 
-Piquel tells you when something important happens to your account. Each
+SourceOrigin tells you when something important happens to your account. Each
 notice goes to your inbox, the **Notifications** tab of your settings at
-`auth.piquel.fr/settings/notifications`, and is emailed to you.
+`auth.sourceorigin.dev/settings/notifications`, and is emailed to you.
 
 ## Before you start
 
 You need to be [signed in](signing-in.md) to read your inbox. To receive the
 emails, you need a [confirmed email address](email-addresses.md).
 
-## What Piquel tells you
+## What SourceOrigin tells you
 
 - Your primary email address changed, or an address was removed.
-- Piquel support changed your handle or display name, or removed your profile
-  picture. When you change these yourself, Piquel doesn't tell you: you
+- SourceOrigin support changed your handle or display name, or removed your profile
+  picture. When you change these yourself, SourceOrigin doesn't tell you: you
   already know.
-- Piquel support secured your account, or someone used a recovery link to add
+- SourceOrigin support secured your account, or someone used a recovery link to add
   a passkey, or a recovery was undone.
 - Your account was disabled, enabled again, scheduled for deletion or
   restored.
-- Piquel sent an announcement, such as news of a security incident or a change
+- SourceOrigin sent an announcement, such as news of a security incident or a change
   to its privacy policy, to every account or to yours.
-- If you administer Piquel, an alert about the service was raised, such as a
+- If you administer Origin Auth, an alert about the service was raised, such as a
   broken audit chain. Its subject starts with **Alert:**.
 
 ## Read your inbox
@@ -30,7 +30,7 @@ The sidebar's **Notifications** tab shows how many are unread, and the
 **Overview** says **You have an unread notification** while one is.
 
 1. Open **Notifications**. The newest come first, with unread ones in bold.
-2. Select one to open it. Opening it from Piquel, a bookmark or the address
+2. Select one to open it. Opening it from SourceOrigin, a bookmark or the address
    bar marks it read. A link to it on another website, such as your webmail,
    doesn't.
 
@@ -49,10 +49,10 @@ Each notification is also emailed, in one of two categories:
 
 - **Security:** everything about your account itself. You always receive these,
   so nobody can hide one from you.
-- **Announcements:** news from Piquel, such as a new feature. You receive these
+- **Announcements:** news from SourceOrigin, such as a new feature. You receive these
   by default, and can [turn them off](#turn-announcement-emails-off).
 
-If you administer Piquel, you always receive alerts by email too, like
+If you administer Origin Auth, you always receive alerts by email too, like
 **Security** notifications.
 
 Some announcements are **essential**: a security incident, or a change to the
@@ -68,7 +68,7 @@ announcement's email links your inbox.
   to every confirmed address.
 - Everything else goes to your primary address.
 
-Piquel's emails carry no tracking and no remote images.
+SourceOrigin's emails carry no tracking and no remote images.
 
 ## Turn announcement emails off
 
@@ -101,4 +101,4 @@ back on with **Turn on**, in the same place.
   settings.
 - **A notification you don't recognize.** Open it, then follow its advice. If
   it wasn't you, report the entry with **This wasn’t me**, or write to
-  [contact@piquel.fr](mailto:contact@piquel.fr).
+  [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev).

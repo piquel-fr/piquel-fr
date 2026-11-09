@@ -1,13 +1,13 @@
 # Signing in with TypeScript
 
-`@piquel/auth/server` signs users in to a server-side app. It serves the login
+`@sourceorigin/auth/server` signs users in to a server-side app. It serves the login
 routes, keeps each user's session in a sealed cookie, and gives your code the
 signed-in user. It takes a standard `Request` and returns a `Response`, so it runs
 in Node, Bun, Cloudflare Workers, Hono, SvelteKit and the like. Your app stores
 nothing.
 
 The code on this page comes from the SDK's example app,
-[`examples/server.ts`](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/examples/server.ts),
+[`examples/server.ts`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/packages/auth/examples/server.ts),
 which runs on Node's `http` server.
 
 ## Before you start
@@ -28,12 +28,12 @@ which runs on Node's `http` server.
    Keep it secret, like the client secret, and give every replica the same one.
    Changing it signs every user out. `CookieKey.generate()` makes a random one,
    for development and tests.
-4. Add `@piquel/auth` to your app. It is not on npm yet: build it from a checkout
+4. Add `@sourceorigin/auth` to your app. It is not on npm yet: build it from a checkout
    of the repository, then install it from there.
 
    ```console
    pnpm install --frozen-lockfile
-   pnpm --filter @piquel/auth build
+   pnpm --filter @sourceorigin/auth build
    npm install <checkout>/packages/auth
    ```
 
@@ -45,8 +45,8 @@ Discover the issuer, then make a `Login` from your app's registration and the
 cookie key:
 
 ```ts
-import { Issuer } from '@piquel/auth';
-import { CookieKey, Login, type SignedIn } from '@piquel/auth/server';
+import { Issuer } from '@sourceorigin/auth';
+import { CookieKey, Login, type SignedIn } from '@sourceorigin/auth/server';
 
 {{#include ../../../packages/auth/examples/server.ts:login}}
 ```
@@ -57,7 +57,7 @@ login requests. `backchannelLogout` is optional: see
 
 Then answer each request: the login routes first, then your own pages with the
 session. The snippets come from
-[the full example](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/examples/server.ts),
+[the full example](https://github.com/sourceorigin-dev/sourceorigin/blob/main/packages/auth/examples/server.ts),
 which also defines the small helpers they call, `env`, `page` and `escape`.
 
 ```ts
@@ -77,7 +77,7 @@ sign-in lands when it came from no page, `/` by default. `Issuer.discover` takes
 time in tests. Whatever `fetch` you give it, the SDK sends only `https` requests,
 follows no redirect and gives up after 10 seconds.
 
-The session lives in the `__Host-piquel-<client ID>-session` cookie, which is
+The session lives in the `__Host-sourceorigin-<client ID>-session` cookie, which is
 `Secure`, `HttpOnly` and `SameSite=Lax`, so scripts can't read its tokens. It
 lasts 12 hours, or what the `sessionLifetime` option says, in milliseconds. It
 ends sooner when auth refuses its refresh token, such as after the user signs out
@@ -117,7 +117,7 @@ Post a form to the logout route from one of your pages:
 
 The route revokes the session's refresh token, clears the cookies and sends the
 browser to auth, which asks **Ready to sign out?**. **Sign out** also ends the
-user's piquel.fr session in that browser, and **Keep my session** keeps it. Auth
+user's Origin Account session in that browser, and **Keep my session** keeps it. Auth
 then sends the browser to the `afterLogout` URL, which must be one of the app's
 post-logout URIs. Without one, auth shows its own page.
 
@@ -142,7 +142,7 @@ logout URI**.
 or the response that signs the user in again, as the example's `/settings` page
 does. When an API you call answers with an `insufficient_user_authentication`
 challenge, read its `WWW-Authenticate` header with `parseChallenge` from
-`@piquel/auth`, and return `user.stepUp(challenge)`.
+`@sourceorigin/auth`, and return `user.stepUp(challenge)`.
 
 Either way, the browser goes through login and comes back to the same page, which
 tries again. If the page asks again on that return, the answer is `403` rather than

@@ -9,10 +9,10 @@ use axum::{
     http::HeaderMap,
     response::Redirect,
 };
-use piquel_common::{ClientId, events::RevocationReason};
-use piquel_ui::LoginQuery;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
+use sourceorigin_common::{ClientId, events::RevocationReason};
+use sourceorigin_ui::LoginQuery;
 use url::Url;
 
 /// RP-initiated logout parameters bound to a registered destination and optional ID

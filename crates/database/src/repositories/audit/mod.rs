@@ -549,7 +549,7 @@ impl DatabaseTransaction<'_> {
     pub async fn prune_audit_chain(&mut self, through: u64) -> Result<u64, DatabaseError> {
         let through = Unsigned::bind(through)?;
         let connection = &mut *self.inner;
-        sqlx::query!("SELECT set_config('piquel.audit_prune', 'on', true)")
+        sqlx::query!("SELECT set_config('sourceorigin.audit_prune', 'on', true)")
             .fetch_one(&mut *connection)
             .await?;
         Limit::STATEMENT
@@ -571,7 +571,7 @@ impl DatabaseTransaction<'_> {
         )
         .execute(&mut *connection)
         .await?;
-        sqlx::query!("SELECT set_config('piquel.audit_prune', 'off', true)")
+        sqlx::query!("SELECT set_config('sourceorigin.audit_prune', 'off', true)")
             .fetch_one(&mut *connection)
             .await?;
         Ok(deleted)

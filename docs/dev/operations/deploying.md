@@ -1,16 +1,16 @@
 # Deploying with piqueld
 
-This page helps you run piquel.fr's deployments: set up its environments on a
+This page helps you run SourceOrigin's deployments: set up its environments on a
 piqueld daemon, ship a change to staging and then to production, roll
 production back, and try a branch on a preview.
 
-`infra/piqueld.toml` deploys piquel.fr as one piqueld application, `piquel-fr`,
+`infra/piqueld.toml` deploys SourceOrigin as one piqueld application, `sourceorigin`,
 read from this repository. It runs four services in every environment:
 
 | Service | What it serves |
 | --- | --- |
-| `auth` | auth.piquel.fr, with the account settings and the developer console, and the admin dashboard on a second listener |
-| `web` | piquel.fr: the homepage and the policies (see [piquel.fr](#piquelfr)) |
+| `auth` | auth.sourceorigin.dev, with the account settings and the developer console, and the admin dashboard on a second listener |
+| `web` | sourceorigin.dev: the homepage and the policies (see [sourceorigin.dev](#sourceorigindev)) |
 | `docs` | this book (see [documentation](#documentation)) |
 | `postgres` | the environment's database (see [database](#database)) |
 
@@ -19,34 +19,34 @@ deployment its own hostnames:
 
 | Deployment | Source | Web | Auth | Admin | Docs | Reachable from |
 | --- | --- | --- | --- | --- | --- | --- |
-| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | `admin.piquel.fr` | `docs.piquel.fr` | internet; admin from the tailnet |
-| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | `admin.staging.piquel.fr` | `docs.staging.piquel.fr` | tailnet |
-| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | `admin-<slug>.dev.piquel.fr` | `docs-<slug>.dev.piquel.fr` | tailnet |
+| `production` | promoted from staging | `sourceorigin.dev` | `auth.sourceorigin.dev` | `admin.sourceorigin.dev` | `docs.sourceorigin.dev` | internet; admin from the tailnet |
+| `staging` | `main`, on every push | `staging.sourceorigin.dev` | `auth.staging.sourceorigin.dev` | `admin.staging.sourceorigin.dev` | `docs.staging.sourceorigin.dev` | tailnet |
+| previews | a branch or a local worktree | `<slug>.dev.sourceorigin.dev` | `auth-<slug>.dev.sourceorigin.dev` | `admin-<slug>.dev.sourceorigin.dev` | `docs-<slug>.dev.sourceorigin.dev` | tailnet |
 
-A second application, `telemetry` (`infra/telemetry.toml`), stores and shows
+A second application, `sourceorigin-observability` (`infra/telemetry.toml`), stores and shows
 staging's and production's traces, metrics and logs: see
 [the telemetry stack](telemetry.md).
 
 ## Before you start
 
-- `piquelctl`, signed in to the daemon, with `apps:deploy` on `piquel-fr`,
+- `piquelctl`, signed in to the daemon, with `apps:deploy` on `sourceorigin`,
   `apps:exec` to run commands in its containers, and `secrets:write` to change
   its secrets.
 - A piqueld daemon with in-container HTTP probes, local previews and
   manifest-declared environments, configured with:
   - managed ingress, with the private apps node, and a DNS provider for
-    `piquel.fr`. Private routes get DNS-01 certificates: `*.dev.piquel.fr`
+    `sourceorigin.dev`. Private routes get DNS-01 certificates: `*.dev.sourceorigin.dev`
     covers every preview.
   - `ingress.webhook_hostname`, for deploy-on-push.
   - `reconciliation.prepare_timeout_seconds = 1200`, for cold Rust builds.
 - A DNS record for every hostname, either from the provider with
   `manage_records = true` or by hand:
-  - the public hosts, `piquel.fr`, `auth.piquel.fr`, `docs.piquel.fr` and
-    `www.piquel.fr`, point at the server. Through the Cloudflare Tunnel, each is
+  - the public hosts, `sourceorigin.dev`, `auth.sourceorigin.dev`, `docs.sourceorigin.dev` and
+    `www.sourceorigin.dev`, point at the server. Through the Cloudflare Tunnel, each is
     a proxied CNAME to the tunnel. On ports 80 and 443, each is an A record, and
     Caddy obtains its certificate over HTTP-01.
-  - `admin.piquel.fr`, `staging.piquel.fr`, `*.staging.piquel.fr`,
-    `*.dev.piquel.fr` and `grafana.piquel.fr` point at the apps node's tailnet
+  - `admin.sourceorigin.dev`, `staging.sourceorigin.dev`, `*.staging.sourceorigin.dev`,
+    `*.dev.sourceorigin.dev` and `grafana.sourceorigin.dev` point at the apps node's tailnet
     addresses.
 
 ## Set up the environments
@@ -73,15 +73,15 @@ To set them up on a new daemon, once the manifest is on `main`:
 3. Deploy staging:
 
    ```sh
-   piquelctl --timeout 30m env deploy piquel-fr staging
+   piquelctl --timeout 30m env deploy sourceorigin staging
    ```
 
    piqueld generates each environment's other secrets on its first deployment.
 4. Create the webhook's secret, then print its payload URL:
 
    ```sh
-   piquelctl app repository webhook rotate piquel-fr   # prints the secret once
-   piquelctl app repository webhook show piquel-fr     # prints the payload URL
+   piquelctl app repository webhook rotate sourceorigin   # prints the secret once
+   piquelctl app repository webhook show sourceorigin     # prints the payload URL
    ```
 
 5. Add a webhook to this repository on GitHub, with that URL and secret, the
@@ -104,14 +104,14 @@ rollout: `migrate`, which applies migrations, and `signing-key-import` (see
 To follow it:
 
 ```sh
-piquelctl env history piquel-fr staging                   # its deployments, newest first
-piquelctl --timeout 30m env wait piquel-fr staging --ready routes
-piquelctl env logs piquel-fr staging --service auth
+piquelctl env history sourceorigin staging                   # its deployments, newest first
+piquelctl --timeout 30m env wait sourceorigin staging --ready routes
+piquelctl env logs sourceorigin staging --service auth
 ```
 
 `env wait` returns once the deployment succeeded and every route answers. To
 deploy `main` again without a push, run
-`piquelctl --timeout 30m env deploy piquel-fr staging`.
+`piquelctl --timeout 30m env deploy sourceorigin staging`.
 
 ## Promote to production
 
@@ -121,17 +121,17 @@ per-environment value is a runtime `environment` entry.
 
 1. Test staging, from a device on the tailnet.
 2. Note the ID of the deployment you tested, the newest one
-   `piquelctl env history piquel-fr staging` lists.
+   `piquelctl env history sourceorigin staging` lists.
 3. Review what the promotion would change:
 
    ```sh
-   piquelctl env promote piquel-fr production --deployment <deployment-id> --plan
+   piquelctl env promote sourceorigin production --deployment <deployment-id> --plan
    ```
 
 4. Promote it:
 
    ```sh
-   piquelctl --timeout 30m env promote piquel-fr production --deployment <deployment-id> --yes
+   piquelctl --timeout 30m env promote sourceorigin production --deployment <deployment-id> --yes
    ```
 
 piqueld refuses the promotion unless staging's current deployment succeeded and
@@ -140,7 +140,7 @@ deployed again since, so it never promotes something you didn't test.
 
 Production renders the release with its own variables and its current secrets,
 and runs its jobs before the rollout. Check it with `piquelctl env history
-piquel-fr production`, and `piquelctl env url piquel-fr production`, which says
+sourceorigin production`, and `piquelctl env url sourceorigin production`, which says
 whether each route is ready.
 
 ## Roll back production
@@ -156,13 +156,13 @@ misbehaves without failing its health check:
 1. List its deployments:
 
    ```sh
-   piquelctl env history piquel-fr production --limit 10
+   piquelctl env history sourceorigin production --limit 10
    ```
 
 2. Restore the one to return to:
 
    ```sh
-   piquelctl env restore piquel-fr production <deployment-id>
+   piquelctl env restore sourceorigin production <deployment-id>
    ```
 
 A restore deploys the earlier deployment exactly as it ran, with its images,
@@ -176,8 +176,8 @@ further back, read the migrations added since.
 > versions the earlier deployment used. After rotating a secret, restore only a
 > deployment made since, or promote again instead.
 
-`piquelctl app releases piquel-fr` lists the releases.
-`piquelctl env promote piquel-fr production --release <release-id>` deploys an
+`piquelctl app releases sourceorigin` lists the releases.
+`piquelctl env promote sourceorigin production --release <release-id>` deploys an
 earlier one, with production's current secrets, and runs its `migrate` job.
 That job fails when the database holds a migration the release doesn't know,
 which stops the deployment before its rollout, so production keeps running what
@@ -192,17 +192,17 @@ while staging's current deployment is unhealthy. To pick up the new value
 without new code, deploy production's own release again:
 
 1. Find the release production runs: the newest deployment that succeeded in
-   `piquelctl env history piquel-fr production --limit 10`.
+   `piquelctl env history sourceorigin production --limit 10`.
 2. Check what it would deploy, and that it can use every secret:
 
    ```sh
-   piquelctl --timeout 30m env promote piquel-fr production --release <release-id> --plan
+   piquelctl --timeout 30m env promote sourceorigin production --release <release-id> --plan
    ```
 
 3. Deploy it:
 
    ```sh
-   piquelctl --timeout 30m env promote piquel-fr production --release <release-id>
+   piquelctl --timeout 30m env promote sourceorigin production --release <release-id>
    ```
 
 It deploys the same images with production's current secrets. Its `migrate`
@@ -210,7 +210,7 @@ job finds nothing to apply, since production already ran that release.
 
 ## Previews
 
-A preview is a disposable copy of piquel.fr, with its own database and secrets,
+A preview is a disposable copy of SourceOrigin, with its own database and secrets,
 on tailnet URLs. To deploy the current worktree, uncommitted files included:
 
 ```sh
@@ -219,9 +219,9 @@ just preview-delete   # deletes it and its database
 ```
 
 `just preview --slot <name>` keeps several previews of one branch. A pushed
-branch can also be previewed with `piquelctl preview create piquel-fr --branch
+branch can also be previewed with `piquelctl preview create sourceorigin --branch
 <branch>`, which deploys again on every push. `piquelctl preview prune
-piquel-fr --branch-gone` deletes the previews whose branch is gone.
+sourceorigin --branch-gone` deletes the previews whose branch is gone.
 
 A preview's database starts empty, and anyone may register without an
 invitation. Previews send mail with the development key (see
@@ -230,11 +230,11 @@ stderr, and sign audit checkpoints with a key they generate. The daemon's
 `[previews]` settings bound their number, CPU, memory and replicas.
 
 Agents follow the
-[`preview`](https://github.com/piquel-fr/piquel-fr/tree/main/.agents/skills/preview)
+[`preview`](https://github.com/sourceorigin-dev/sourceorigin/tree/main/.agents/skills/preview)
 and
-[`test-change`](https://github.com/piquel-fr/piquel-fr/tree/main/.agents/skills/test-change)
+[`test-change`](https://github.com/sourceorigin-dev/sourceorigin/tree/main/.agents/skills/test-change)
 skills. Their token needs `previews:deploy` and `previews:delete` on
-`piquel-fr`, which cannot touch staging or production.
+`sourceorigin`, which cannot touch staging or production.
 
 ## Running auth-service commands
 
@@ -242,13 +242,13 @@ skills. Their token needs `previews:deploy` and `previews:delete` on
 `auth-service` commands. In an environment, run them in an auth container:
 
 ```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service admin list
+piquelctl app exec sourceorigin auth --env production -- auth-service admin list
 ```
 
 The command shares the container's configuration and secrets, and `piquelctl`
 exits with its exit code. A command that asks for confirmation needs a
 terminal: add `-t`, or give the command `--yes`. For a preview, run
-`piquelctl preview exec piquel-fr <branch> auth -- auth-service …`.
+`piquelctl preview exec sourceorigin <branch> auth -- auth-service …`.
 
 ## Documentation
 
@@ -262,13 +262,13 @@ not-found page.
 ## Routes and redirects
 
 The `www` route redirects permanently (`308`) to the web host, keeping the path
-and query: `www.piquel.fr/settings?x=1` goes to `piquel.fr/settings?x=1`. The
+and query: `www.sourceorigin.dev/settings?x=1` goes to `sourceorigin.dev/settings?x=1`. The
 gateway answers it itself. piqueld renders every route in every environment, so
 staging and previews redirect their own `www` names too, which fall under the
 existing wildcard records and certificates.
 
-piquel.fr's web server redirects every path it doesn't serve to auth: see
-[piquel.fr](#piquelfr).
+sourceorigin.dev's web server redirects every path it doesn't serve to auth: see
+[sourceorigin.dev](#sourceorigindev).
 
 ## Database
 
@@ -277,10 +277,10 @@ over TCP to `postgres:5432` on the application's private network, which ingress
 and other environments cannot reach, so the URL opts into plaintext with
 `sslmode=disable`. Connections require SCRAM password authentication.
 
-Auth connects as `piquel_auth`, a role with row access to the app tables only
+Auth connects as `sourceorigin_auth`, a role with row access to the app tables only
 (see [roles](../architecture/database.md#roles)). Only PostgreSQL itself and the
-`migrate` job get the superuser `piquel`'s password. Once PostgreSQL is healthy,
-`migrate` applies migrations, then creates `piquel_auth` or resets its
+`migrate` job get the superuser `sourceorigin`'s password. Once PostgreSQL is healthy,
+`migrate` applies migrations, then creates `sourceorigin_auth` or resets its
 privileges and password.
 
 An environment's volume survives the environment's deletion. A PostgreSQL major
@@ -318,23 +318,23 @@ everyone, with `Access-Control-Allow-Origin: *` and no credentials, as profile
 pictures have. The stylesheet and script carry no CORS headers. Staging and
 previews are private routes, which bypass Cloudflare.
 
-## piquel.fr
+## sourceorigin.dev
 
 The `web` service (`apps/web`, built by `infra/web.Dockerfile`) serves
-piquel.fr's homepage at `/`, the privacy policy at `/privacy` and the terms of
+sourceorigin.dev's homepage at `/`, the privacy policy at `/privacy` and the terms of
 service at `/terms`. Google's OAuth branding links the policies, and so do
 auth's pages (`AUTH_WEB_ORIGIN`). It keeps no state, so it has no database or
 secret, and any number of replicas can serve it.
 
 Every other path redirects, temporarily (`307`) and with its query, to the same
-path on auth. So links to piquel.fr's settings paths (`/settings`,
+path on auth. So links to sourceorigin.dev's settings paths (`/settings`,
 `/settings/emails`, `/settings/emails/verify`, `/settings/sessions` and
 `/settings/history`) open auth's page, and browsers keep a verification link's
 fragment (`/settings/emails/verify#token=…`). Notice emails link to
 `/settings/history` and never expire: keep the redirect, and those paths on
-auth, for as long as piquel.fr serves nothing at them. A path ending in a slash
+auth, for as long as sourceorigin.dev serves nothing at them. A path ending in a slash
 redirects to the page. Being temporary, the redirect leaves browsers nothing
-cached once piquel.fr serves pages of its own.
+cached once sourceorigin.dev serves pages of its own.
 
-Cloudflare's edge sets piquel.fr's `Strict-Transport-Security`, with the values
-piquel-web sends: `max-age=31536000`, without `includeSubDomains` or `preload`.
+Cloudflare's edge sets sourceorigin.dev's `Strict-Transport-Security`, with the values
+sourceorigin-web sends: `max-age=31536000`, without `includeSubDomains` or `preload`.

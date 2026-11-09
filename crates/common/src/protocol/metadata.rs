@@ -19,7 +19,7 @@ pub const OAUTH_AUTHORIZATION_SERVER_PATH: &str = "/.well-known/oauth-authorizat
 /// Path of the OIDC Discovery document.
 pub const OPENID_CONFIGURATION_PATH: &str = "/.well-known/openid-configuration";
 
-/// The metadata Piquel auth publishes. Every field it sends is required, except the
+/// The metadata Origin Auth publishes. Every field it sends is required, except the
 /// PKCE methods, so a client parsing it learns of a missing capability at once. Lists
 /// keep only the values this version knows, so a newer auth advertising more does not
 /// break older clients. Later capabilities add fields

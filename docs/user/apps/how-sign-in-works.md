@@ -1,19 +1,19 @@
 # How sign-in works
 
 This page covers what you need to know before you sign users in to your own app
-with their piquel.fr account, and which SDK to pick. The
+with their Origin Account, and which SDK to pick. The
 [OpenID Connect reference](../reference/oidc.md) has the details.
 
-## auth.piquel.fr is an OpenID Connect provider
+## auth.sourceorigin.dev is an OpenID Connect provider
 
-Your app sends the user to auth.piquel.fr. The user signs in there with a passkey,
+Your app sends the user to auth.sourceorigin.dev. The user signs in there with a passkey,
 GitHub or Google, and auth sends them back to your app with a one-time code. Your
 app then exchanges the code for tokens. This is OpenID Connect's authorization
 code flow, with PKCE.
 
-Any OpenID Connect library sets itself up from the issuer, `https://auth.piquel.fr`.
+Any OpenID Connect library sets itself up from the issuer, `https://auth.sourceorigin.dev`.
 It reads the endpoints from the discovery document at
-`https://auth.piquel.fr/.well-known/openid-configuration`.
+`https://auth.sourceorigin.dev/.well-known/openid-configuration`.
 
 ## Apps
 
@@ -49,7 +49,7 @@ Scopes say what your app asks to receive about the user:
 | `offline_access` | A refresh token, if the app is allowed refresh tokens |
 
 Apps registered in the developer console can request only these four. An API's own
-scopes, such as `notes:read`, are registered by piquel.fr's operators for the
+scopes, such as `notes:read`, are registered by SourceOrigin's operators for the
 clients they manage.
 
 ## Tokens
@@ -86,11 +86,11 @@ app then asks for consent again at its next sign-in.
 
 | Your app | Use |
 | --- | --- |
-| A server built with axum | The Rust SDK, `piquel-auth`: [signing in with Rust](sign-in-rust.md) |
-| A server that answers standard `Request`s with `Response`s: Node, Bun, Cloudflare Workers, Hono, SvelteKit | `@piquel/auth/server`: [signing in with TypeScript](sign-in-typescript.md) |
-| A page with no server | `@piquel/auth/browser`: [browser apps](browser-apps.md) |
+| A server built with axum | The Rust SDK, `sourceorigin-auth`: [signing in with Rust](sign-in-rust.md) |
+| A server that answers standard `Request`s with `Response`s: Node, Bun, Cloudflare Workers, Hono, SvelteKit | `@sourceorigin/auth/server`: [signing in with TypeScript](sign-in-typescript.md) |
+| A page with no server | `@sourceorigin/auth/browser`: [browser apps](browser-apps.md) |
 | An API that accepts access tokens | Either SDK: [protecting an API](protect-an-api.md) |
-| Anything else, such as a mobile app | Any OpenID Connect library, with the issuer `https://auth.piquel.fr` |
+| Anything else, such as a mobile app | Any OpenID Connect library, with the issuer `https://auth.sourceorigin.dev` |
 
 The server SDKs need a web app with a backend. A browser app is a browser or
 native app.

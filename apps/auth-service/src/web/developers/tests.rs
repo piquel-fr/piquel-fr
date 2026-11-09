@@ -11,8 +11,10 @@ use axum::{
     response::Response,
 };
 use chrono::{Duration, Utc};
-use piquel_common::{AuthenticationMethod, ClientId, clients::ClientKind, protocol::oauth::Scope};
-use piquel_ui::{
+use sourceorigin_common::{
+    AuthenticationMethod, ClientId, clients::ClientKind, protocol::oauth::Scope,
+};
+use sourceorigin_ui::{
     AppChange, AppSettingsState, Checkbox, ClientDraft, Grace, Lines, MISSING, NewAppChange, Query,
     SecretsChange,
 };
@@ -47,7 +49,7 @@ fn app_id(overview: &str) -> ClientId {
 /// The client secret `page` shows, and that it shows it once.
 fn secret(page: &str) -> &str {
     let secret = value_after(page, r#"<code id="client-secret">"#);
-    assert!(secret.starts_with("pqcs_"), "{page}");
+    assert!(secret.starts_with("socs_"), "{page}");
     assert_eq!(page.matches(secret).count(), 1, "{page}");
     secret
 }

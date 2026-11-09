@@ -28,7 +28,7 @@ const KEY_ID_BYTES: usize = 4;
 /// Byte length of an Ed25519 signature.
 const ED25519_SIGNATURE_BYTES: usize = 64;
 
-/// An Ed25519 key that signs notes under its name, e.g. `auth.piquel.fr/audit`.
+/// An Ed25519 key that signs notes under its name, e.g. `auth.sourceorigin.dev/audit`.
 pub struct NoteKey {
     /// The private key.
     key: PKey<Private>,

@@ -6,8 +6,8 @@ use crate::{
     layout::page_head,
     oidc::scope_label,
 };
-use piquel_common::ClientId;
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::ClientId;
 use topcoat::{
     Result,
     view::{View, component, view},
@@ -42,7 +42,7 @@ pub struct ConnectedAppRow<'a> {
     pub client_id: &'a ClientId,
     /// The name its consent screen shows.
     pub name: &'a str,
-    /// Whether Piquel makes it: its next sign-in grants it access again.
+    /// Whether SourceOrigin makes it: its next sign-in grants it access again.
     pub first_party: bool,
     /// What it can read.
     pub scopes: &'a [String],
@@ -63,7 +63,7 @@ pub async fn connected_apps<'a>(
         if audience.owns() {
             page_head(
                 title: "Connected apps",
-                lead: "The apps you sign in to with Piquel that keep access to your account, and what they can see. Remove any you no longer use.".to_owned(),
+                lead: "The apps you sign in to with Origin Auth that keep access to your account, and what they can see. Remove any you no longer use.".to_owned(),
             )
         }
         <section class="card" aria-labelledby="apps-heading">
@@ -106,7 +106,9 @@ async fn app_row<'a>(
         (false, false) => "Can use the account only while its owner is signed in to it.",
     };
     let again = if row.first_party {
-        format!("Piquel makes {name}, so signing in to it again gives it access without asking.")
+        format!(
+            "SourceOrigin makes {name}, so signing in to it again gives it access without asking."
+        )
     } else if audience.owns() {
         format!("{name} will need your approval again to use your account.")
     } else {
@@ -118,7 +120,7 @@ async fn app_row<'a>(
             <div class="text">
                 <strong>(name)</strong>
                 if row.first_party {
-                    " " <span class="badge">"Made by Piquel"</span>
+                    " " <span class="badge">"Made by SourceOrigin"</span>
                 }
                 <small>(format!("Sees: {}", sees.join(", ")))</small>
                 <small>(away)</small>

@@ -148,7 +148,7 @@ impl Variable {
 #[derive(Debug, Error)]
 pub enum OriginError {
     /// The value is not an absolute URL.
-    #[error("must be an absolute URL, e.g. https://auth.piquel.fr")]
+    #[error("must be an absolute URL, e.g. https://auth.sourceorigin.dev")]
     Malformed(#[source] url::ParseError),
     /// Only HTTPS is accepted; every environment is served over TLS.
     #[error("must use https://")]
@@ -163,11 +163,11 @@ pub enum OriginError {
     #[error("must not contain a query or fragment")]
     QueryOrFragment,
     /// An origin cannot carry a path.
-    #[error("must be an origin without a path, e.g. https://auth.piquel.fr")]
+    #[error("must be an origin without a path, e.g. https://auth.sourceorigin.dev")]
     Path,
 }
 
-/// An HTTPS origin such as `https://auth.piquel.fr`, validated once at startup.
+/// An HTTPS origin such as `https://auth.sourceorigin.dev`, validated once at startup.
 #[derive(Clone, Debug)]
 pub struct Origin {
     /// The origin as a URL, always with the root path.
@@ -181,7 +181,7 @@ impl Origin {
     pub const fn as_url(&self) -> &Url {
         &self.url
     }
-    /// The origin's host name, e.g. `auth.piquel.fr`.
+    /// The origin's host name, e.g. `auth.sourceorigin.dev`.
     #[must_use]
     pub fn host(&self) -> &str {
         &self.host

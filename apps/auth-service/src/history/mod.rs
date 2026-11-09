@@ -10,18 +10,18 @@ use axum::{
     routing::post,
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use serde::{Deserialize, Serialize};
+use sourceorigin_common::{
     ClientId, EventId, Personal, UserId,
     events::{
         Actor, DomainEvent, FollowUp, HistoryActor, HistoryEntry, RequestOrigin, RevocationReason,
         UserAgentFamily,
     },
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, EventFilter, EventRepository, OidcRepository,
     SessionScope, StoredEvent,
 };
-use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
 
 /// History failures and their browser response mapping.
@@ -274,7 +274,7 @@ impl AccountService {
         })
     }
 
-    /// Whether the account administers Piquel, which its pages mark.
+    /// Whether the account administers Origin Auth, which its pages mark.
     pub(crate) async fn is_administrator(&self, viewer: &Viewer) -> Result<bool, AccountError> {
         viewer.authorize(&self.database).await?;
         Ok(self

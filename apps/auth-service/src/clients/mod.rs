@@ -9,15 +9,17 @@
 //! Nothing is cached: every request reads the registration it needs from the
 //! database, so a change applies to the next request on every replica.
 
-use piquel_common::{
+use serde::Serialize;
+use sourceorigin_common::{
     ClientId, UserId,
     clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RelatedOrigin},
     events::{DomainEvent, EventContext},
     protocol::oauth::Scope,
 };
-use piquel_crypto::{ClientSecret, CryptoError};
-use piquel_repository::{DatabaseError, DatabaseTransaction, StoredClientSecret, StoredOidcClient};
-use serde::Serialize;
+use sourceorigin_crypto::{ClientSecret, CryptoError};
+use sourceorigin_repository::{
+    DatabaseError, DatabaseTransaction, StoredClientSecret, StoredOidcClient,
+};
 use std::collections::BTreeSet;
 use thiserror::Error;
 use url::Url;

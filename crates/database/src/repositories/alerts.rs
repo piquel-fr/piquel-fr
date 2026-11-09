@@ -5,12 +5,12 @@
 use super::{AlertRepository, KindProbe, RepositoryExecutor};
 use crate::{DatabaseError, LockKey};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use serde_json::Value;
+use sourceorigin_common::{
     AlertId, EventId, Handle,
     alerts::{Alert, AlertAuthor, AlertKind, AlertStatus, AlertUpdate, AlertsShown, StoredAlert},
     events::{Actor, DomainEvent},
 };
-use serde_json::Value;
 use sqlx::types::{Json, Uuid};
 
 /// An alert as the queries return it, before its payload decodes.

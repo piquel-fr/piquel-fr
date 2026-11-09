@@ -8,14 +8,14 @@
 //! NOTES_CLIENT_ID=notes-web NOTES_CLIENT_SECRET=… \
 //! NOTES_REDIRECT_URI=https://notes.example.com/auth/callback \
 //! NOTES_COOKIE_KEY="$(openssl rand -base64 32)" \
-//! cargo run -p piquel-auth --features axum --example notes
+//! cargo run -p sourceorigin-auth --features axum --example notes
 //! ```
 //!
 //! The `ANCHOR` comments mark the parts `docs/user/apps/sign-in-rust.md` and
 //! `docs/user/apps/protect-an-api.md` show.
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
-use piquel_auth::{
+use sourceorigin_auth::{
     ClientConfig, Credentials, Issuer, LogoutScope, Resource, SessionId,
     axum::{BearerLayer, CookieKey, LoginRoutes, Scoped, SignedIn},
 };
@@ -28,7 +28,7 @@ use std::{
 };
 
 // ANCHOR: scopes
-piquel_auth::scopes! {
+sourceorigin_auth::scopes! {
     /// Scopes of the notes API.
     pub mod notes {
         /// Read every note.
@@ -80,7 +80,8 @@ async fn home(State(ended): State<Ended>, user: SignedIn) -> Result<String, Stat
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // ANCHOR: issuer
-    let issuer = env::var("PIQUEL_ISSUER").unwrap_or_else(|_| "https://auth.piquel.fr".into());
+    let issuer =
+        env::var("SOURCEORIGIN_ISSUER").unwrap_or_else(|_| "https://auth.sourceorigin.dev".into());
     let issuer = Issuer::discover(&issuer).await?;
     // ANCHOR_END: issuer
 

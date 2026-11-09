@@ -1,7 +1,7 @@
 //! Instruments declared as `static`s, bound to the meter provider on first use.
 //!
 //! ```
-//! use piquel_telemetry::{Counter, Label, Labels};
+//! use sourceorigin_telemetry::{Counter, Label, Labels};
 //!
 //! /// Why a request was throttled.
 //! struct Throttled {
@@ -17,7 +17,7 @@
 //!
 //! /// Requests refused for exceeding their budget.
 //! static THROTTLED: Counter<Throttled> =
-//!     Counter::new("piquel.auth.throttled", "{request}", "Requests refused by rate limits.");
+//!     Counter::new("sourceorigin.auth.throttled", "{request}", "Requests refused by rate limits.");
 //!
 //! THROTTLED.add(1, &Throttled { category: "login" });
 //! ```
@@ -62,7 +62,7 @@ impl<const N: usize> Labels for [Label; N] {
 /// What every instrument declares: its semantic-convention name, its UCUM unit
 /// (e.g. `s`, or `{request}` for a count of requests) and a description.
 struct Descriptor {
-    /// e.g. `piquel.auth.sign_ins`.
+    /// e.g. `sourceorigin.auth.sign_ins`.
     name: &'static str,
     /// e.g. `{sign_in}`.
     unit: &'static str,

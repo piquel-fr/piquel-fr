@@ -17,12 +17,12 @@ use crate::{
     DatabaseError, DatabaseTransaction, Notified,
     repositories::{EmailRepository, RepositoryExecutor},
 };
-use piquel_common::{
+use serde::{Deserialize, Serialize};
+use sourceorigin_common::{
     EmailId, Handle, NotificationId, RecoveryId, UserId,
     events::DomainEvent,
     notifications::{Addressees, Notification},
 };
-use serde::{Deserialize, Serialize};
 
 /// Email to account holders, sent over SMTP by auth-service.
 pub struct Email;

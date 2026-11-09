@@ -3,10 +3,10 @@
 use super::{PasskeyRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{Handle, PasskeyId, SessionId, TokenId, UserId, protocol::api::Passkey};
 use serde_json::Value;
+use sourceorigin_common::{Handle, PasskeyId, SessionId, TokenId, UserId, protocol::api::Passkey};
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// SQL-compatible `WebAuthn` ceremony purpose.
     pub enum CeremonyKind {
         /// First passkey during account creation.

@@ -2,7 +2,7 @@
 use crate::{
     Database, DatabaseError, InsertUser, connection::MIGRATOR, repositories::UserRepository,
 };
-use piquel_common::{Handle, UserId};
+use sourceorigin_common::{Handle, UserId};
 
 /// The schema's `handle_skeleton` is the Rust type's skeleton, which the generated
 /// `skeleton` column, and so look-alike uniqueness, relies on.
@@ -11,8 +11,8 @@ use piquel_common::{Handle, UserId};
 async fn the_schema_computes_the_rust_skeleton() {
     let pool = Database::test_pool().await;
     for handle in [
-        "pique1",
-        "p-iquel",
+        "s0urce0rigin",
+        "source-origin",
         "rnoon",
         "vvave",
         "b0b-5am",
@@ -201,7 +201,7 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
         .find(|migration| migration.description == "handles")
         .expect("the handles migration");
     let mut connection = Database::scratch_schema(..handles.version).await;
-    for username in ["a_b", "piquel", "pique1", "fine"] {
+    for username in ["a_b", "sourceorigin", "s0urce0rigin", "fine"] {
         sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Migration test')")
             .bind(UserId::new().as_uuid())
             .bind(username)
@@ -215,12 +215,14 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
         .await
         .expect_err("invalid usernames");
     assert!(
-        refused.to_string().contains("a_b, pique1, piquel"),
+        refused
+            .to_string()
+            .contains("a_b, s0urce0rigin, sourceorigin"),
         "{refused}"
     );
     sqlx::raw_sql(
         "UPDATE users SET username = 'a-b' WHERE username = 'a_b';
-        UPDATE users SET username = 'renamed' WHERE username = 'pique1'",
+        UPDATE users SET username = 'renamed' WHERE username = 's0urce0rigin'",
     )
     .execute(&mut connection)
     .await
@@ -239,6 +241,6 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
     .expect("handles");
     assert_eq!(
         copied,
-        ["a-b", "fine", "piquel", "renamed"].map(|handle| (handle.to_owned(), true))
+        ["a-b", "fine", "renamed", "sourceorigin"].map(|handle| (handle.to_owned(), true))
     );
 }

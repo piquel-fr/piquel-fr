@@ -3,7 +3,7 @@
 use super::{CliError, Console, Output};
 use crate::Reason;
 use clap::Subcommand;
-use piquel_common::{
+use sourceorigin_common::{
     AlertId,
     alerts::{Alert, AlertDetail, AlertState, AlertStatus, AlertsShown},
 };

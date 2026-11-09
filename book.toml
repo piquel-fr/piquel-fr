@@ -2,8 +2,8 @@
 # previews it. See docs/dev/documentation.md.
 
 [book]
-title = "piquel.fr"
-description = "Passkey-first accounts for piquel.fr and the apps that sign in with them."
+title = "SourceOrigin"
+description = "Origin Accounts: passkey-first accounts for SourceOrigin and the apps that sign in with them."
 language = "en"
 src = "docs"
 
@@ -16,5 +16,5 @@ create-missing = false
 site-url = "/"
 # Chapters are grouped into the user and contributor guides, not numbered.
 no-section-label = true
-git-repository-url = "https://github.com/piquel-fr/piquel-fr"
-edit-url-template = "https://github.com/piquel-fr/piquel-fr/edit/main/{path}"
+git-repository-url = "https://github.com/sourceorigin-dev/sourceorigin"
+edit-url-template = "https://github.com/sourceorigin-dev/sourceorigin/edit/main/{path}"

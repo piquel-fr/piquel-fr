@@ -9,12 +9,12 @@ use axum::http::{
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use ipnet::{Ipv4Net, Ipv6Net};
-use piquel_telemetry::SendTraced;
 use reqwest::{
     RequestBuilder,
     dns::{Addrs, Name, Resolve, Resolving},
     redirect,
 };
+use sourceorigin_telemetry::SendTraced;
 use std::{
     error::Error as StdError,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -27,7 +27,7 @@ use url::{Host, Url};
 /// The longest connecting to a destination may take.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Sent with every request.
-const USER_AGENT: &str = "piquel-auth";
+const USER_AGENT: &str = "sourceorigin-auth";
 /// The most of a response body that is read; the rest is ignored.
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 /// The obsolete HTTP-date formats receivers must still accept (RFC 9110 section

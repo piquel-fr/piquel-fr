@@ -30,10 +30,10 @@ use axum::{
     http::HeaderMap,
     response::Redirect,
 };
-use piquel_common::{RecoveryId, protocol::claims::Acr};
-use piquel_repository::StoredAuthorizationRequest;
-use piquel_ui::{Checkbox, LoginQuery};
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::{RecoveryId, protocol::claims::Acr};
+use sourceorigin_repository::StoredAuthorizationRequest;
+use sourceorigin_ui::{Checkbox, LoginQuery};
 use url::Url;
 
 /// Rejection of a pending authorization that cannot be found.
@@ -49,7 +49,7 @@ pub(crate) struct TransactionQuery {
     pub(crate) transaction: String,
 }
 
-impl piquel_ui::Query for TransactionQuery {}
+impl sourceorigin_ui::Query for TransactionQuery {}
 
 /// Whether the browser answered the question a sign-in for an application asks
 /// while the account has a recovery that can still be undone: was it the

@@ -10,7 +10,8 @@ use crate::{
     repositories::{JsonArray, OidcRepository, RepositoryExecutor, Unsigned},
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use serde::Serialize;
+use sourceorigin_common::{
     ClientId, ClientSecretId, UserId,
     admin::{ApprovedOrigin, Client},
     clients::{
@@ -18,7 +19,6 @@ use piquel_common::{
         ScopeName,
     },
 };
-use serde::Serialize;
 use sqlx::types::Json;
 
 /// A registered client with its exact URI allowlists. A deleted client is still
