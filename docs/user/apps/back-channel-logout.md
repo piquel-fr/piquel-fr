@@ -26,7 +26,7 @@ disables their account. It follows OpenID Connect Back-Channel Logout 1.0.
 3. Select **Save changes**.
 
 Operators set it for SourceOrigin's own apps with
-`auth-service client update <id> --backchannel-logout-uri <uri>`: see
+`auth-service client update <id> --backchannel-logout-uri <uri> --reason "…"`: see
 [OIDC clients](../../dev/operations/clients.md).
 
 ## Handle logout tokens

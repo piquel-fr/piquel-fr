@@ -241,14 +241,6 @@ pub struct Consent {
     pub scopes: Vec<String>,
 }
 
-/// The form disabling an account.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DisableUser {
-    /// Why the account is disabled: 1 to 500 characters, without control
-    /// characters. Kept with the event as personal data.
-    pub reason: String,
-}
-
 /// A signup invitation, without its secret.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invitation {
@@ -272,6 +264,9 @@ pub struct CreateInvitation {
     /// Seven days when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>,
+    /// Why: 1 to 500 characters, without control characters.
+    #[serde(default)]
+    pub reason: String,
 }
 
 /// A new invitation. Its link holds the secret and is shown only this once.
@@ -415,6 +410,9 @@ pub struct ApprovedOrigin {
 pub struct ApproveOrigin {
     /// The origin, as browsers send it, e.g. `https://notes.example`.
     pub origin: String,
+    /// Why: 1 to 500 characters, without control characters.
+    #[serde(default)]
+    pub reason: String,
 }
 
 /// An administrator account.
@@ -547,8 +545,8 @@ pub struct AnnouncementEmails {
     pub cancelled: u64,
 }
 
-/// The form sending a draft: the revision its sender checked, so a change made
-/// meanwhile is not sent unseen.
+/// The send page's query: the revision of the draft its sender checked, so a
+/// change made meanwhile is not sent unseen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendAnnouncement {
     /// The draft's revision, as its page showed it.

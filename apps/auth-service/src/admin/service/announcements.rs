@@ -2,7 +2,7 @@
 //! privacy policy: drafting, changing and sending them.
 
 use super::AdminService;
-use crate::admin::{AdminError, AnnouncementDraft, AnnouncementRecipients, Operator};
+use crate::admin::{AdminError, AnnouncementDraft, AnnouncementRecipients, Operator, Reason};
 use sourceorigin_common::{
     AnnouncementId, UserId,
     admin::{Announcement, AnnouncementDetail},
@@ -131,7 +131,8 @@ impl AdminService {
             recipients: sent.recipients,
             essential: sent.essential,
         };
-        Self::finish(tx, operator, None, vec![event]).await?;
+        // Its text says why it was sent, so nobody writes a reason for it.
+        Self::finish(tx, operator, &Reason::see_message(), None, vec![event]).await?;
         Ok(sent.recipients)
     }
 

@@ -552,6 +552,11 @@ pub(crate) fn recovery_links() -> RecoveryLinks {
     RecoveryLinks::new(AUTH_ORIGIN.parse().expect("origin"), LinkKeys::generate())
 }
 
+/// Why the scenarios make an administrative change.
+pub(crate) fn reason() -> Reason {
+    Reason::parse("Asked by email".into()).expect("reason")
+}
+
 /// Why the scenarios recover an account.
 pub(crate) fn recovery_reason() -> Reason {
     Reason::parse("Lost every passkey".into()).expect("reason")
@@ -570,7 +575,11 @@ pub(crate) async fn change<T, E: From<ClientRegistryError>>(
     change: impl AsyncFnOnce(&mut ClientRegistry<'_, '_>) -> Result<T, E>,
 ) -> Result<T, E> {
     let mut tx = database.begin().await.map_err(ClientRegistryError::from)?;
-    let value = change(&mut ClientRegistry::new(&mut tx, operator().context())).await?;
+    let value = change(&mut ClientRegistry::new(
+        &mut tx,
+        operator().context(&reason()),
+    ))
+    .await?;
     tx.commit().await.map_err(ClientRegistryError::from)?;
     Ok(value)
 }

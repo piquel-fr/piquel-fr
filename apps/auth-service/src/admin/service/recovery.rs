@@ -68,7 +68,7 @@ impl AdminService {
         if !mailed && !shown {
             return Err(AdminError::RecoveryNeedsEmail);
         }
-        let context = Self::context(operator, reason);
+        let context = operator.context(&reason);
         // Cancelled before any revocation, which the database refuses while a
         // recovery's link works.
         tx.recoveries().cancel_open(user_id).await?;
@@ -98,7 +98,7 @@ impl AdminService {
         tx.record(&context, Some(user_id), started).await?;
         Session::end_all(&mut tx, &context, user_id, RevocationReason::Admin).await?;
         let link = shown.then(|| links.url(&token));
-        Self::finish(tx, operator, Some(user_id), vec![]).await?;
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await?;
         Ok(link)
     }
 
@@ -184,8 +184,8 @@ impl AdminService {
         let recovery = AccountService::undoable(&mut tx, user_id)
             .await?
             .ok_or(AdminError::NoRecoveryToUndo)?;
-        let context = Self::context(operator, reason);
+        let context = operator.context(&reason);
         AccountService::revert(&mut tx, &context, &recovery, RevocationReason::Admin).await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 }

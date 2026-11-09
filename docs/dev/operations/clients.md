@@ -21,14 +21,14 @@ and [clients accounts register](#clients-accounts-register).
 At the terminal, a first-party app running in the browser:
 
 ```sh
-auth-service client create blog --name Blog --trusted \
+auth-service client create blog --name Blog --trusted --reason "SourceOrigin's blog" \
     --redirect-uri https://blog.sourceorigin.dev/callback --post-logout-uri https://blog.sourceorigin.dev/
 ```
 
 An app with a server, which keeps a secret and may refresh tokens:
 
 ```sh
-auth-service client create notes --name Notes --confidential --refresh \
+auth-service client create notes --name Notes --confidential --refresh --reason "Notes app" \
     --redirect-uri https://notes.example/callback --scope openid --scope notes:read
 ```
 
@@ -38,7 +38,8 @@ app's configuration straight away.
 On the dashboard:
 
 1. Open **Clients**, and select **Register a client**.
-2. Fill in its **Client ID**, which never changes, and its settings.
+2. Fill in its **Client ID**, which never changes, its settings, and a
+   **Reason**.
 3. Select **Register**. The next page shows a confidential client's secret,
    once.
 
@@ -48,23 +49,25 @@ On the dashboard:
 
 ```sh
 auth-service client show notes     # its registration and its secrets' lifetimes, as JSON
-auth-service client update blog --add-redirect-uri https://blog.sourceorigin.dev/auth/callback
-auth-service client update notes --backchannel-logout-uri https://notes.example/auth/backchannel-logout
+auth-service client update blog --add-redirect-uri https://blog.sourceorigin.dev/auth/callback --reason "New callback"
+auth-service client update notes --backchannel-logout-uri https://notes.example/auth/backchannel-logout --reason "Logout"
 ```
 
 `update` changes only what you give it. On the dashboard, open the client's
-settings, change them, and select **Save changes**.
+settings, change them, give a **Reason**, and select **Save changes**. Every
+change to a client needs a reason, recorded with its event.
 
 ## Rotate a client's secret
 
 1. Give the client a new secret:
 
    ```sh
-   auth-service client rotate-secret notes --grace 24h
+   auth-service client rotate-secret notes --grace 24h --reason "Yearly rotation"
    ```
 
    On the dashboard, open the client and select **Rotate the secret**, choose
-   how long **Earlier secrets keep working**, and select **Rotate secret**.
+   how long **Earlier secrets keep working**, give a **Reason**, and select
+   **Rotate secret**.
 2. Store the new secret, printed once, in the app's configuration, and deploy
    the app.
 3. Check with `auth-service client show notes` that the earlier secrets end
@@ -90,9 +93,9 @@ leaked, see [a leaked client secret](incidents.md#a-leaked-client-secret).
 > **Warning:** deleting a client can't be undone.
 
 ```sh
-auth-service client disable notes
-auth-service client suspend notes
-auth-service client delete notes
+auth-service client disable notes --reason "Leaking tokens"
+auth-service client suspend notes --reason "Phishing"
+auth-service client delete notes --reason "Retired"
 ```
 
 Each asks for confirmation. On the dashboard, open the client and select
@@ -105,7 +108,8 @@ same options as `create`, from a deployment job:
 
 ```sh
 auth-service client apply blog --name Blog --confidential \
-    --redirect-uri https://blog.sourceorigin.dev/callback --secret file:///run/secrets/blog-client-secret
+    --redirect-uri https://blog.sourceorigin.dev/callback --secret file:///run/secrets/blog-client-secret \
+    --reason "Deployment"
 ```
 
 It registers the client, or updates what differs, and records nothing when
@@ -125,9 +129,9 @@ A trusted client's own pages may sign users in with their passkeys, without
 sending them to auth's pages, from origins you approve:
 
 ```sh
-auth-service client origin add blog https://blog.sourceorigin.dev
+auth-service client origin add blog https://blog.sourceorigin.dev --reason "Blog sign-in"
 auth-service client origin list
-auth-service client origin remove blog https://blog.sourceorigin.dev
+auth-service client origin remove blog https://blog.sourceorigin.dev --reason "Blog moved"
 ```
 
 The client must be trusted, with a redirect URI on the origin. Approved origins

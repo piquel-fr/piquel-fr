@@ -9,7 +9,7 @@ run *ARGS:
 serve:
     @just auth run serve
 
-# Create, list or revoke signup invitations, e.g. `just auth invite create --expires-in 7d`.
+# Create, list or revoke signup invitations, e.g. `just auth invite create --reason "For Jane"`.
 [positional-arguments]
 invite *ARGS:
     @just auth run invite "$@"
@@ -19,7 +19,7 @@ invite *ARGS:
 user *ARGS:
     @just auth run user "$@"
 
-# End sessions, e.g. `just auth session revoke-all alice`.
+# End sessions, e.g. `just auth session revoke-all alice --reason "Phone stolen"`.
 [positional-arguments]
 session *ARGS:
     @just auth run session "$@"
@@ -44,7 +44,7 @@ client *ARGS:
 deliveries *ARGS:
     @just auth run deliveries "$@"
 
-# Grant, revoke or list administrators, e.g. `just auth admin grant alice`.
+# Grant, revoke or list administrators, e.g. `just auth admin list`.
 [positional-arguments]
 admin *ARGS:
     @just auth run admin "$@"

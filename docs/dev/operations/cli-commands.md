@@ -101,12 +101,13 @@ Options:
 Publish a new signing key, which signs after 24 hours. Prints its ID.
 
 ```text
-auth-service keys rotate [OPTIONS]
+auth-service keys rotate [OPTIONS] --reason <REASON>
 ```
 
 Options:
 
 - `--now`: Sign with it at once, skipping pre-publication: verifiers that cached the previous key set reject its tokens until they fetch keys again. Asks first.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -115,7 +116,7 @@ Options:
 Delete a signing key at once, e.g. a compromised one. When it was the active key, the `next` and `retiring` keys go with it, since their private keys were stored alongside, and a new one signs at once. Verifiers that cached it keep accepting it until their cache expires, up to an hour.
 
 ```text
-auth-service keys revoke [OPTIONS] <ID>
+auth-service keys revoke [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -124,6 +125,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -144,7 +146,7 @@ Options:
 Import the deployment's PEM signing key as the active key, so tokens it signed keep verifying. Does nothing unless the key set is empty.
 
 ```text
-auth-service keys import [OPTIONS] <REFERENCE>
+auth-service keys import [OPTIONS] --reason <REASON> <REFERENCE>
 ```
 
 Arguments:
@@ -154,6 +156,7 @@ Arguments:
 Options:
 
 - `--id <ID>`: The key's ID, as tokens it signed name it. Default: `primary`.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service keys audit`
@@ -240,7 +243,7 @@ Arguments:
 
 Options:
 
-- `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -249,7 +252,7 @@ Options:
 Let a disabled account sign in again.
 
 ```text
-auth-service user enable [OPTIONS] <USER>
+auth-service user enable [OPTIONS] --reason <REASON> <USER>
 ```
 
 Arguments:
@@ -258,6 +261,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service user recover`
@@ -296,7 +300,7 @@ Arguments:
 
 Options:
 
-- `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--immediately`: Purge the account now, in any status, without a grace period. This cannot be undone.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
@@ -335,7 +339,7 @@ Arguments:
 
 Options:
 
-- `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service session`
@@ -360,7 +364,7 @@ Commands:
 End one session of an account and its applications' refresh tokens.
 
 ```text
-auth-service session revoke [OPTIONS] <USER> <SESSION>
+auth-service session revoke [OPTIONS] --reason <REASON> <USER> <SESSION>
 ```
 
 Arguments:
@@ -370,6 +374,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service session revoke-all`
@@ -377,7 +382,7 @@ Options:
 End every session of an account and its applications' refresh tokens.
 
 ```text
-auth-service session revoke-all [OPTIONS] <USER>
+auth-service session revoke-all [OPTIONS] --reason <REASON> <USER>
 ```
 
 Arguments:
@@ -386,6 +391,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -412,12 +418,13 @@ Commands:
 Print a single-use signup link. Only its digest is stored, so it is shown only this once.
 
 ```text
-auth-service invite create [OPTIONS]
+auth-service invite create [OPTIONS] --reason <REASON>
 ```
 
 Options:
 
 - `--expires-in <EXPIRES_IN>`: How long the link stays valid, e.g. 24h or 7d. Default: `7d`.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service invite list`
@@ -438,7 +445,7 @@ Options:
 Revoke an unredeemed invitation.
 
 ```text
-auth-service invite revoke [OPTIONS] <ID>
+auth-service invite revoke [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -447,6 +454,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client`
@@ -481,7 +489,7 @@ Commands:
 Register a client. A confidential client's secret is printed once.
 
 ```text
-auth-service client create [OPTIONS] --name <NAME> --redirect-uri <REDIRECT_URIS> <ID>
+auth-service client create [OPTIONS] --name <NAME> --redirect-uri <REDIRECT_URIS> --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -499,6 +507,7 @@ Options:
 - `--trusted`: The client skips the consent screen. Only for first-party clients.
 - `--require-par`: The client must push its authorization requests (RFC 9126), so none of their parameters travel through the browser.
 - `--backchannel-logout-uri <BACKCHANNEL_LOGOUT_URI>`: Where auth posts a logout token when a session the client holds tokens from ends (OIDC Back-Channel Logout); HTTPS with a public address.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client apply`
@@ -506,7 +515,7 @@ Options:
 Register a client, or update it to match, with the secret its deployment generated: for clients a deployment manages, from its deployment job. Records nothing when the client already matches.
 
 ```text
-auth-service client apply [OPTIONS] --name <NAME> --redirect-uri <REDIRECT_URIS> <ID>
+auth-service client apply [OPTIONS] --name <NAME> --redirect-uri <REDIRECT_URIS> --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -524,6 +533,7 @@ Options:
 - `--trusted`: The client skips the consent screen. Only for first-party clients.
 - `--require-par`: The client must push its authorization requests (RFC 9126), so none of their parameters travel through the browser.
 - `--backchannel-logout-uri <BACKCHANNEL_LOGOUT_URI>`: Where auth posts a logout token when a session the client holds tokens from ends (OIDC Back-Channel Logout); HTTPS with a public address.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--secret <REFERENCE>`: A confidential client's secret, at `file://PATH` or `env://NAME`: 32 random bytes in unpadded base64url, generated by its deployment. Never printed.
 - `--grace <GRACE>`: How long earlier secrets keep working once the secret changes, so the running deployment keeps signing in until it rolls out. Default: `1h`.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
@@ -562,7 +572,7 @@ Options:
 Change a client's registration; what is not given keeps its value.
 
 ```text
-auth-service client update [OPTIONS] <ID>
+auth-service client update [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -585,6 +595,7 @@ Options:
 - `--no-require-par`: Accept authorization requests sent through the browser again.
 - `--backchannel-logout-uri <BACKCHANNEL_LOGOUT_URI>`: Post logout tokens to this URI instead.
 - `--no-backchannel-logout-uri`: Stop posting logout tokens to the client.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client disable`
@@ -592,7 +603,7 @@ Options:
 Stop a client from authorizing, exchanging codes and refreshing tokens.
 
 ```text
-auth-service client disable [OPTIONS] <ID>
+auth-service client disable [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -601,6 +612,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -609,7 +621,7 @@ Options:
 Delete a client: it stops working at once, its refresh tokens, secrets and consents go, and its ID can never be registered again.
 
 ```text
-auth-service client delete [OPTIONS] <ID>
+auth-service client delete [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -618,6 +630,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -626,7 +639,7 @@ Options:
 Let a disabled client work again.
 
 ```text
-auth-service client enable [OPTIONS] <ID>
+auth-service client enable [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -635,6 +648,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client suspend`
@@ -642,7 +656,7 @@ Options:
 Block a client: it is disabled, and its owner cannot enable it again until `unsuspend`.
 
 ```text
-auth-service client suspend [OPTIONS] <ID>
+auth-service client suspend [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -651,6 +665,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -659,7 +674,7 @@ Options:
 Lift a client's suspension. It stays disabled until enabled.
 
 ```text
-auth-service client unsuspend [OPTIONS] <ID>
+auth-service client unsuspend [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -668,6 +683,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client rotate-secret`
@@ -675,7 +691,7 @@ Options:
 Print a new secret for a confidential client. Earlier secrets keep working during the grace period, while the client switches to the new one.
 
 ```text
-auth-service client rotate-secret [OPTIONS] <ID>
+auth-service client rotate-secret [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -685,6 +701,7 @@ Arguments:
 Options:
 
 - `--grace <GRACE>`: How long earlier secrets keep working, e.g. 30m, 24h or 7d; 0 revokes them now, which asks first. Default: `24h`.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -711,7 +728,7 @@ Commands:
 Approve an origin. The client must be trusted and have a redirect URI on it, and approved origins may span at most 5 domains, as browsers honour.
 
 ```text
-auth-service client origin add [OPTIONS] <ID> <ORIGIN>
+auth-service client origin add [OPTIONS] --reason <REASON> <ID> <ORIGIN>
 ```
 
 Arguments:
@@ -721,6 +738,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client origin remove`
@@ -728,7 +746,7 @@ Options:
 Remove an origin: its pages stop signing users in.
 
 ```text
-auth-service client origin remove [OPTIONS] <ID> <ORIGIN>
+auth-service client origin remove [OPTIONS] --reason <REASON> <ID> <ORIGIN>
 ```
 
 Arguments:
@@ -738,6 +756,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service client origin list`
@@ -807,13 +826,14 @@ Options:
 Delete the events through a checkpoint, once the chain verifies through it. The checkpoint becomes the anchor the remaining chain extends. Connects as the schema owner when `AUTH_DATABASE_OWNER_URL` is set: auth's own role may not delete events.
 
 ```text
-auth-service audit prune [OPTIONS] --through <THROUGH>
+auth-service audit prune [OPTIONS] --through <THROUGH> --reason <REASON>
 ```
 
 Options:
 
 - `--through <THROUGH>`: The position of the checkpoint to prune through. Required.
 - `--key <KEY>`: A file of verifier keys, one per line, to use instead of the keys committed to the repository for `AUTH_PUBLIC_BASE_URL`'s host, e.g. a preview's, as `keys audit` prints it.
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -842,7 +862,7 @@ Make an active account an administrator.
 Refuses while a recovery of the account can still be undone: granted during its probation, the rights would go live for whoever used its link once it settles.
 
 ```text
-auth-service admin grant [OPTIONS] <USER>
+auth-service admin grant [OPTIONS] --reason <REASON> <USER>
 ```
 
 Arguments:
@@ -851,6 +871,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service admin revoke`
@@ -858,7 +879,7 @@ Options:
 Remove an account's administrator rights. The last active administrator keeps theirs.
 
 ```text
-auth-service admin revoke [OPTIONS] <USER>
+auth-service admin revoke [OPTIONS] --reason <REASON> <USER>
 ```
 
 Arguments:
@@ -867,6 +888,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -932,7 +954,7 @@ Arguments:
 
 Options:
 
-- `--reason <REASON>`: Why, kept with the event as personal data: 1 to 500 characters. Required.
+- `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--allow-reserved`: Allow a reserved name, or one that looks like it.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -941,7 +963,7 @@ Options:
 Delete a released handle, or a purged account's last one, so anyone may claim it again, e.g. after a trademark dispute. An account's current handle is never released: rename the account first. Asks first.
 
 ```text
-auth-service handle release [OPTIONS] <HANDLE>
+auth-service handle release [OPTIONS] --reason <REASON> <HANDLE>
 ```
 
 Arguments:
@@ -950,6 +972,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
@@ -999,7 +1022,7 @@ Options:
 Remove a handle from the reserved list, so anyone may claim it again.
 
 ```text
-auth-service handle unreserve [OPTIONS] <HANDLE>
+auth-service handle unreserve [OPTIONS] --reason <REASON> <HANDLE>
 ```
 
 Arguments:
@@ -1008,6 +1031,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service deliveries`
@@ -1048,7 +1072,7 @@ Options:
 Attempt a failed delivery, or a cancelled unordered one, again now.
 
 ```text
-auth-service deliveries retry [OPTIONS] <ID>
+auth-service deliveries retry [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -1057,6 +1081,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service deliveries cancel`
@@ -1064,7 +1089,7 @@ Options:
 Cancel a pending or failed delivery, which unblocks the deliveries ordered after it.
 
 ```text
-auth-service deliveries cancel [OPTIONS] <ID>
+auth-service deliveries cancel [OPTIONS] --reason <REASON> <ID>
 ```
 
 Arguments:
@@ -1073,6 +1098,7 @@ Arguments:
 
 Options:
 
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service announcement`
@@ -1234,7 +1260,7 @@ Options:
 Post an update on a current alert, saying where its handling stands. The first acknowledges it: it stops counting as a warning, though it stays current while its condition holds. A new alert is raised if the condition changes, or clears and comes back.
 
 ```text
-auth-service alerts update [OPTIONS] --status <STATUS> <ID>
+auth-service alerts update [OPTIONS] --status <STATUS> --note <NOTE> <ID>
 ```
 
 Arguments:
@@ -1244,7 +1270,7 @@ Arguments:
 Options:
 
 - `--status <STATUS>`: Where its handling stands: investigating, fixing or monitoring. Required.
-- `--note <NOTE>`: What to add, such as who is on it: 1 to 500 characters.
+- `--note <NOTE>`: What to add, such as who is on it, recorded as the update's reason: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account`

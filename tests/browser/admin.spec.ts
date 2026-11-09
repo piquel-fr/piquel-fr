@@ -18,6 +18,7 @@ import {
   cli,
   mailed,
   mailUrl,
+  reason,
   scrollsSideways,
   signedUp,
   signUp,
@@ -27,7 +28,7 @@ import {
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? '';
 // A command that makes the account named by its last argument an administrator,
-// e.g. `just auth admin grant` or
+// for the reason before it, e.g. `just auth admin grant` or
 // `piquelctl app exec … -- auth-service --operator <you> admin grant`.
 const grantAdmin = process.env.E2E_GRANT_ADMIN ?? '';
 
@@ -40,7 +41,7 @@ test.skip(
 /** A browser of its own, signed up as `handle`, an administrator. */
 async function administrator(browser: Browser, handle: string): Promise<Page> {
   const page = await signedUp(browser, handle);
-  cli(grantAdmin, handle);
+  cli(grantAdmin, ...reason, handle);
   return page;
 }
 
@@ -164,6 +165,7 @@ test('an administrator disables a user from the dashboard, and the user is signe
   // The dashboard's script lets a change's form post once: a second click, once
   // the first has posted, is cancelled.
   await admin.getByRole('button', { name: 'Enable', exact: true }).click();
+  await dialog.getByLabel('Reason').fill('Browser test');
   const again = await dialog
     .getByRole('button', { name: 'Enable', exact: true })
     .evaluate((button: HTMLButtonElement) => {
@@ -241,6 +243,7 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
     .click();
   const grant = admin.getByRole('dialog', { name: 'Grant administrator rights' });
   await expect(grant.getByText(`@grantee-${suffix}`)).toBeVisible();
+  await grant.getByLabel('Reason').fill('Browser test');
   await grant.getByRole('button', { name: 'Grant', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/administrators`);
   const row = (handle: string) =>
@@ -257,6 +260,7 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   await admin.goto(`${adminUrl}/administrators`);
   await row(`grantee-${suffix}`).getByRole('button', { name: 'Revoke', exact: true }).click();
   const revoke = admin.getByRole('dialog', { name: 'Revoke administrator rights' });
+  await revoke.getByLabel('Reason').fill('Browser test');
   await revoke.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/administrators`);
   await expect(row(`grantee-${suffix}`)).toHaveCount(0);
@@ -277,6 +281,7 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
     await admin.goto(`${adminUrl}/invitations`);
     await admin.getByRole('link', { name: 'Invite someone', exact: true }).click();
     await admin.getByLabel('Valid for').fill('1d');
+    await admin.getByLabel('Reason').fill('Browser test');
     await admin.getByRole('button', { name: 'Create link', exact: true }).click();
     await expect(admin.getByRole('heading', { name: 'Invitation created' })).toBeVisible();
     return admin.getByLabel('Signup link').inputValue();
@@ -310,10 +315,9 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
   await admin.getByRole('link', { name: 'Done', exact: true }).click();
   // Invitations list newest first.
   await admin.getByRole('row').nth(1).getByRole('button', { name: 'Revoke', exact: true }).click();
-  await admin
-    .getByRole('dialog', { name: 'Revoke this invitation' })
-    .getByRole('button', { name: 'Revoke', exact: true })
-    .click();
+  const revokeInvitation = admin.getByRole('dialog', { name: 'Revoke this invitation' });
+  await revokeInvitation.getByLabel('Reason').fill('Browser test');
+  await revokeInvitation.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/invitations`);
   await expect(admin.getByRole('row').nth(1)).toContainText('Revoked');
   await refused(second, `revoked-${suffix}`);

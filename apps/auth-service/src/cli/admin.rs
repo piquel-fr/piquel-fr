@@ -1,7 +1,7 @@
 //! Granting, revoking and listing administrators.
 
 use super::{CliError, Confirm, Console, Output};
-use crate::UserRef;
+use crate::{Reason, UserRef};
 use clap::Subcommand;
 
 /// Changes to the administrator list. The CLI may act on any account, and is how
@@ -16,12 +16,20 @@ pub(super) enum AdminCommand {
     Grant {
         /// The account: its handle, ID or verified email.
         user: UserRef,
+        /// Why, recorded with the change and shown to the owner in their history:
+        /// 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
     /// Remove an account's administrator rights. The last active administrator
     /// keeps theirs.
     Revoke {
         /// The account: its handle, ID or verified email.
         user: UserRef,
+        /// Why, recorded with the change and shown to the owner in their history:
+        /// 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
         /// Confirmation.
         #[command(flatten)]
         confirm: Confirm,
@@ -41,14 +49,18 @@ impl AdminCommand {
             service, operator, ..
         } = console;
         match self {
-            Self::Grant { user } => {
+            Self::Grant { user, reason } => {
                 let user = console.user(&user).await?;
-                service.grant_administrator(operator, user).await?;
+                service.grant_administrator(operator, user, reason).await?;
             }
-            Self::Revoke { user, confirm } => {
+            Self::Revoke {
+                user,
+                reason,
+                confirm,
+            } => {
                 let id = console.user(&user).await?;
                 confirm.ask(&format!("Remove the administrator rights of {user} ({id})"))?;
-                service.revoke_administrator(operator, id).await?;
+                service.revoke_administrator(operator, id, reason).await?;
             }
             Self::List { output } => {
                 output.print(

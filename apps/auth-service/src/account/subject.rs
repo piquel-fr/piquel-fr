@@ -204,10 +204,7 @@ impl Subject {
     pub(crate) fn context(&self) -> EventContext {
         match &self.by {
             ActingAs::Owner(owner) => owner.context(),
-            ActingAs::Operator { operator, reason } => EventContext {
-                reason: Some(reason.clone().into_inner()),
-                ..operator.context()
-            },
+            ActingAs::Operator { operator, reason } => operator.context(reason),
         }
     }
 

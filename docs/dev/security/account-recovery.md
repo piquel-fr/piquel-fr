@@ -402,7 +402,7 @@ cannot shadow `account_recoveries`
   undo-recovery` against the same schema.
 - Start recoveries only once a rollout is over. A replica of the previous release
   can't decode the new recovery emails, and marks them failed; resend them with
-  `auth-service deliveries retry <id>`.
+  `auth-service deliveries retry <id> --reason "…"`.
 
 ## Threat model
 

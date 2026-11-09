@@ -217,7 +217,10 @@ target = "/run/secrets/database-password"
 [[spec.jobs]]
 name = "signing-key-import"
 service = "auth"
-command = ["auth-service", "keys", "import", "file:///run/secrets/signing-key"]
+command = [
+  "auth-service", "keys", "import", "file:///run/secrets/signing-key",
+  "--reason", "Deployment's first signing key",
+]
 run = "before-rollout"
 
 # The import is recorded as the deployment's, which sets no $USER.

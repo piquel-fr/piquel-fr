@@ -13,7 +13,7 @@ use crate::{
     security::{BrowserCookie, RequestContext},
     tests::{
         AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, operator, parameter,
-        policy, redirect, until_blocked,
+        policy, reason, redirect, until_blocked,
     },
 };
 use axum::{
@@ -38,6 +38,8 @@ use url::{Position, Url};
 
 /// The dashboard's origin in these scenarios.
 const DASHBOARD: &str = "https://admin.sourceorigin.dev";
+/// The reason field every change's form posts.
+const REASON: (&str, &str) = ("reason", "Asked by email");
 
 /// Auth, with a dashboard on its admin listener.
 struct Harness {
@@ -101,7 +103,7 @@ impl Harness {
     /// Makes `user_id` an administrator, from the CLI.
     async fn grant(&self, user_id: UserId) {
         AdminService::new(self.database.clone(), true)
-            .grant_administrator(&operator(), user_id)
+            .grant_administrator(&operator(), user_id, reason())
             .await
             .expect("grant");
     }
@@ -348,7 +350,7 @@ async fn the_dashboard_ends_with_the_auth_session_and_the_rights() {
     // Another administrator, so the rights revoked are not the last.
     harness.admin().await;
     AdminService::new(harness.database.clone(), true)
-        .revoke_administrator(&operator(), revoked.user_id)
+        .revoke_administrator(&operator(), revoked.user_id, reason())
         .await
         .expect("revoke");
     let ended = DomainEvent::DashboardSignedOut {
@@ -394,15 +396,18 @@ async fn a_sign_in_racing_a_revocation_never_outlives_it() {
         .await;
     assert!(held.expect("rights"));
     let cli = operator();
-    let (revoked, ()) = tokio::join!(service.revoke_administrator(&cli, admin.user_id), async {
-        until_blocked(&mut redeeming, 1).await;
-        let expires_at = Utc::now() + chrono::Duration::hours(1);
-        (redeeming.dashboard())
-            .insert_session(b"in flight", admin.session_id, Utc::now(), expires_at)
-            .await
-            .expect("session");
-        redeeming.commit().await.expect("commit");
-    });
+    let (revoked, ()) = tokio::join!(
+        service.revoke_administrator(&cli, admin.user_id, reason()),
+        async {
+            until_blocked(&mut redeeming, 1).await;
+            let expires_at = Utc::now() + chrono::Duration::hours(1);
+            (redeeming.dashboard())
+                .insert_session(b"in flight", admin.session_id, Utc::now(), expires_at)
+                .await
+                .expect("session");
+            redeeming.commit().await.expect("commit");
+        }
+    );
     revoked.expect("revoke");
     assert!(
         in_use(admin.user_id).await.is_empty(),
@@ -1163,7 +1168,7 @@ async fn rights_are_granted_from_a_search() {
         .submit(
             &harness.dashboard,
             &format!("{DASHBOARD}/administrators/grant"),
-            &[("user_id", other.user_id.to_string().as_str())],
+            &[("user_id", other.user_id.to_string().as_str()), REASON],
             OWN_PAGE,
         )
         .await;
@@ -1268,10 +1273,10 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
             .await
     };
 
-    let refused = html(post(&approve, &[("origin", "notes.example")]).await).await;
+    let refused = html(post(&approve, &[("origin", "notes.example"), REASON]).await).await;
     assert!(refused.contains("role=\"alert\""), "{refused}");
     let elsewhere = format!("https://elsewhere-{}.auth.sourceorigin.dev", UserId::new());
-    let refused = html(post(&approve, &[("origin", &elsewhere)]).await).await;
+    let refused = html(post(&approve, &[("origin", &elsewhere), REASON]).await).await;
     assert!(
         refused.contains("is not the origin of any redirect URI"),
         "{refused}"
@@ -1282,7 +1287,7 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
     );
 
     assert_eq!(
-        redirect(&post(&approve, &[("origin", &origin)]).await),
+        redirect(&post(&approve, &[("origin", &origin), REASON]).await),
         client_page
     );
     let page = html(harness.visit(&dashboard, &client_page).await).await;
@@ -1292,7 +1297,7 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
         url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
     );
     assert!(page.contains(&remove), "listed: {page}");
-    assert_eq!(redirect(&post(&remove, &[]).await), client_page);
+    assert_eq!(redirect(&post(&remove, &[REASON]).await), client_page);
     let listed = AdminService::new(harness.database.clone(), true)
         .list_related_origins(&operator())
         .await
@@ -1335,6 +1340,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     let registration = |redirect: &'static str| {
         [
             ("id", id.as_str()),
+            REASON,
             ("display_name", "Ops app"),
             ("kind", "confidential"),
             ("redirect_uris", redirect),
@@ -1378,6 +1384,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
             ("openid", "on"),
             ("other_scopes", "notes.read"),
             ("backchannel_logout_uri", ""),
+            REASON,
         ],
     )
     .await;
@@ -1388,7 +1395,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     assert_eq!(stored.allowed_scopes, ["openid", "notes.read"]);
 
     assert_eq!(
-        redirect(&post(&format!("{client}/suspend"), &[]).await),
+        redirect(&post(&format!("{client}/suspend"), &[REASON]).await),
         page
     );
     assert!(
@@ -1399,10 +1406,10 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     );
     let shown = html(harness.visit(&dashboard, &page).await).await;
     assert!(shown.contains("Lift the suspension first."), "{shown}");
-    let enable = html(post(&format!("{client}/enable"), &[]).await).await;
+    let enable = html(post(&format!("{client}/enable"), &[REASON]).await).await;
     assert!(enable.contains("lift the suspension"), "{enable}");
 
-    let rotated = post(&format!("{client}/secret"), &[("action", "rotate")]).await;
+    let rotated = post(&format!("{client}/secret"), &[("action", "rotate"), REASON]).await;
     assert_eq!(redirect(&rotated), format!("{client}/secret"));
     harness
         .shown_once(&dashboard, &rotated, "socs_", &page)
@@ -1417,7 +1424,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     assert!(secrets[0].expires_at.is_some(), "the first one is expiring");
 
     assert_eq!(
-        redirect(&post(&format!("{client}/delete"), &[]).await),
+        redirect(&post(&format!("{client}/delete"), &[REASON]).await),
         "/clients"
     );
     let shown = html(harness.visit(&dashboard, &page).await).await;
@@ -1452,6 +1459,7 @@ async fn pages_that_could_only_fail_refuse_at_once() {
     let id = format!("spa-{}", UserId::new());
     let registration = [
         ("id", id.as_str()),
+        REASON,
         ("display_name", "Single-page app"),
         ("kind", "public"),
         ("redirect_uris", "https://spa.example/cb"),
@@ -1466,7 +1474,7 @@ async fn pages_that_could_only_fail_refuse_at_once() {
     let secret = format!("{client}/secret");
     refused(&secret, StatusCode::BAD_REQUEST, "is public").await;
     assert_eq!(
-        redirect(&post(&format!("{client}/delete"), &[]).await),
+        redirect(&post(&format!("{client}/delete"), &[REASON]).await),
         "/clients"
     );
     for change in [
@@ -1504,7 +1512,7 @@ async fn an_invitations_link_shows_once() {
         .submit(
             &harness.dashboard,
             &format!("{DASHBOARD}/invitations/new"),
-            &[("expires_in", "1d")],
+            &[("expires_in", "1d"), REASON],
             OWN_PAGE,
         )
         .await;
@@ -1636,7 +1644,7 @@ async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
     let post = async |path: &str| {
         let url = format!("{DASHBOARD}{path}");
         dashboard
-            .submit(&harness.dashboard, &url, &[], OWN_PAGE)
+            .submit(&harness.dashboard, &url, &[REASON], OWN_PAGE)
             .await
     };
     assert_eq!(redirect(&post(&cancel).await), "/deliveries");
@@ -1680,7 +1688,7 @@ async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
     let post = async |path: &str| {
         let url = format!("{DASHBOARD}{path}");
         dashboard
-            .submit(&harness.dashboard, &url, &[], OWN_PAGE)
+            .submit(&harness.dashboard, &url, &[REASON], OWN_PAGE)
             .await
     };
     assert_eq!(redirect(&post("/keys/rotate").await), "/keys");
@@ -1775,10 +1783,10 @@ async fn handles_are_reserved_given_released_and_unreserved() {
         page.contains(&format!(r#"action="{release}""#)),
         "released: {page}"
     );
-    assert_eq!(redirect(&post(&release, &[]).await), "/handles");
-    let refused = html(post(&release, &[]).await).await;
+    assert_eq!(redirect(&post(&release, &[REASON]).await), "/handles");
+    let refused = html(post(&release, &[REASON]).await).await;
     assert!(refused.contains("This handle is not released"), "{refused}");
-    assert_eq!(redirect(&post(&unreserve, &[]).await), "/handles");
+    assert_eq!(redirect(&post(&unreserve, &[REASON]).await), "/handles");
     let page = html(harness.visit(&dashboard, "/handles").await).await;
     assert!(
         !page.contains(&release) && !page.contains(&unreserve),
@@ -2087,7 +2095,7 @@ async fn a_session_is_revoked_only_from_its_own_account() {
         .submit(
             &harness.dashboard,
             &format!("{DASHBOARD}{revoke}"),
-            &[],
+            &[REASON],
             OWN_PAGE,
         )
         .await;

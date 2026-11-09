@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     ClientRegistry,
-    tests::{operator, replace},
+    tests::{operator, reason, replace},
 };
 use sourceorigin_common::clients::RedirectUris;
 
@@ -17,7 +17,7 @@ async fn suspending_an_app_during_an_exchange_issues_nothing() {
     let code = flow.code(Scope::OpenId.as_str()).await;
     let database = flow.app.database.clone();
     let mut suspension = database.begin().await.expect("transaction");
-    ClientRegistry::new(&mut suspension, operator().context())
+    ClientRegistry::new(&mut suspension, operator().context(&reason()))
         .set_suspended(&flow.client.id, true)
         .await
         .expect("suspended");

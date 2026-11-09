@@ -4,7 +4,7 @@
 use super::AdminService;
 use crate::{
     account::AccountService,
-    admin::{AdminError, DashboardSignIn, InviteExpiry, Operator},
+    admin::{AdminError, DashboardSignIn, InviteExpiry, Operator, Reason},
     routes,
 };
 use chrono::Utc;
@@ -28,7 +28,8 @@ impl AdminService {
     }
 
     /// Creates a single-use signup link to the registration page on `origin`, auth's
-    /// own. Only the secret's digest is stored, so the link cannot be shown again.
+    /// own, for `reason`. Only the secret's digest is stored, so the link cannot be
+    /// shown again.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, or secret generation or
@@ -38,6 +39,7 @@ impl AdminService {
         operator: &Operator,
         origin: &Origin,
         expires_in: InviteExpiry,
+        reason: Reason,
     ) -> Result<CreatedInvitation, AdminError> {
         let secret = Secret::generate()?;
         let id = TokenId::new();
@@ -47,7 +49,7 @@ impl AdminService {
             .create_invitation(id, secret.digest().as_bytes(), expires_at)
             .await?;
         let created = DomainEvent::InvitationCreated { expires_at };
-        Self::finish(tx, operator, None, vec![created]).await?;
+        Self::finish(tx, operator, &reason, None, vec![created]).await?;
         let url = LoginQuery {
             invitation: Some(secret.encoded()),
             ..LoginQuery::default()
@@ -60,18 +62,19 @@ impl AdminService {
         })
     }
 
-    /// Revokes an unredeemed invitation.
+    /// Revokes an unredeemed invitation, for `reason`.
     pub(crate) async fn revoke_invitation(
         &self,
         operator: &Operator,
         invitation_id: TokenId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         if !tx.security().revoke_invitation(invitation_id).await? {
             return Err(AdminError::InvitationNotFound);
         }
         let revoked = DomainEvent::InvitationRevoked { invitation_id };
-        Self::finish(tx, operator, None, vec![revoked]).await
+        Self::finish(tx, operator, &reason, None, vec![revoked]).await
     }
 
     /// Lists every administrator, oldest grant first.
@@ -86,7 +89,8 @@ impl AdminService {
         Ok(self.database.administrators().list().await?)
     }
 
-    /// Makes the active account `user_id` an administrator. Administrators cannot
+    /// Makes the active account `user_id` an administrator, for `reason`, which
+    /// its owner sees in their history. Administrators cannot
     /// grant themselves rights: one whose rights were revoked while the request
     /// waited would otherwise restore them. While a recovery of the account can
     /// still be undone, it is refused, by the CLI too: granted during a probation,
@@ -102,6 +106,7 @@ impl AdminService {
         &self,
         operator: &Operator,
         user_id: UserId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         operator.refuse_own_rights(user_id)?;
         let mut tx = self.database.begin().await?;
@@ -121,14 +126,14 @@ impl AdminService {
             return Err(AdminError::AlreadyAdministrator);
         }
         let granted = DomainEvent::AdministratorGranted {};
-        Self::finish(tx, operator, Some(user_id), vec![granted]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![granted]).await
     }
 
-    /// Removes the administrator rights of `user_id`, and ends its dashboard
-    /// sessions with them, and the handoffs that would start one: rights granted
-    /// again later revive none. Administrators cannot remove their own, and
-    /// nobody can remove the last active administrator's: someone must be left
-    /// to administer.
+    /// Removes the administrator rights of `user_id`, for `reason`, which its owner
+    /// sees in their history, and ends its dashboard sessions with them, and the
+    /// handoffs that would start one: rights granted again later revive none.
+    /// Administrators cannot remove their own, and nobody can remove the last
+    /// active administrator's: someone must be left to administer.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, the account is not an
@@ -137,6 +142,7 @@ impl AdminService {
         &self,
         operator: &Operator,
         user_id: UserId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         operator.refuse_own_rights(user_id)?;
         let mut tx = self.database.begin().await?;
@@ -157,6 +163,6 @@ impl AdminService {
         let events = std::iter::once(DomainEvent::AdministratorRevoked {})
             .chain(signed_out)
             .collect();
-        Self::finish(tx, operator, Some(user_id), events).await
+        Self::finish(tx, operator, &reason, Some(user_id), events).await
     }
 }

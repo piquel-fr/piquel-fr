@@ -536,7 +536,9 @@ pub async fn app_settings<'a>(
 
 /// A confidential app's secrets on `page`: the one a rotation just made, once,
 /// then the lifetimes of its `secrets` as of `now`, and rotating, with the grace
-/// `state` chose, which needs a passkey confirmation unless `confirmed`.
+/// `state` chose, which needs a passkey confirmation unless `confirmed`. An
+/// administrator's rotation asks why, holding the `reason` typed; an owner's
+/// asks nothing.
 #[component]
 pub async fn app_secrets<'a>(
     page: &'a str,
@@ -544,6 +546,9 @@ pub async fn app_secrets<'a>(
     now: DateTime<Utc>,
     state: &'a SecretsState,
     confirmed: bool,
+    #[into]
+    #[default]
+    reason: Option<&'a str>,
 ) -> Result<impl View> {
     let chosen = state.grace.unwrap_or_default();
     Ok(view! {
@@ -576,6 +581,9 @@ pub async fn app_secrets<'a>(
                             }
                         </select>
                     </label>
+                    if let Some(reason) = reason {
+                        crate::admin::reason_input(label: crate::admin::REASON, value: reason)
+                    }
                 )
             </div>
         </section>

@@ -5,7 +5,7 @@ use crate::admin::{AdminError, Operator, Reason};
 use sourceorigin_common::{
     AlertId,
     alerts::{AlertDetail, AlertStatus, AlertUpdate, AlertsShown, StoredAlert},
-    events::{DomainEvent, EventContext},
+    events::DomainEvent,
 };
 use sourceorigin_repository::{DatabaseError, DatabaseTransaction};
 use std::collections::HashMap;
@@ -27,7 +27,7 @@ impl AdminService {
     }
 
     /// Posts an update on the current alert `id`, saying where its handling
-    /// stands, with an optional `note`. The first acknowledges it: it stops
+    /// stands, with a `note`, which is its reason. The first acknowledges it: it stops
     /// counting as a warning, though it stays current while its condition holds.
     /// If the condition changes, or clears and comes back, a new alert is raised.
     pub(crate) async fn update_alert(
@@ -35,14 +35,11 @@ impl AdminService {
         operator: &Operator,
         id: AlertId,
         status: AlertStatus,
-        note: Option<Reason>,
+        note: Reason,
     ) -> Result<(), AdminError> {
         // The note is the event's reason, so it is deleted with the event's
         // personal data.
-        let context = EventContext {
-            reason: note.map(Reason::into_inner),
-            ..operator.context()
-        };
+        let context = operator.context(&note);
         let mut tx = self.database.begin().await?;
         // Holding the operator's rights before the event's personal data locks
         // their account: a purge of them, which takes the rights first, waits
@@ -64,7 +61,7 @@ impl AdminService {
         tx.alerts()
             .add_update(id, event, status, &context.actor)
             .await?;
-        Self::finish(tx, operator, None, vec![]).await
+        Self::finish(tx, operator, &note, None, vec![]).await
     }
 
     /// `alerts`, each with the updates posted on it, oldest first, read in the

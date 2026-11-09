@@ -3,7 +3,7 @@
 //! developer console's pieces: its settings form, with the inputs only
 //! operators fill in added, its status badges, and its secrets.
 
-use super::{Action, Change, confirm, moment, refused_action};
+use super::{Action, Change, REASON, confirm, moment, reason_input, refused_action};
 use crate::{
     clients::{
         ClientDraft, ClientRow, ClientStatus, Revealed, SecretRow, choice, client_form,
@@ -43,6 +43,9 @@ pub struct OperatorDraft {
     /// Whether it skips the consent screen.
     #[serde(default)]
     pub trusted: Checkbox,
+    /// Why it is registered or changed, as typed.
+    #[serde(default)]
+    pub reason: String,
 }
 
 impl OperatorDraft {
@@ -59,6 +62,7 @@ impl OperatorDraft {
                 .cloned()
                 .collect(),
             trusted: Checkbox(trusted),
+            reason: String::new(),
         }
     }
 
@@ -192,6 +196,7 @@ pub async fn client_registration<'a>(
                     "Skips the consent screen, and its pages may sign users in with their passkeys on approved origins. Only for SourceOrigin's own apps."
                 },
             )
+            reason_input(label: REASON, value: settings.reason.as_str())
         )
     })
 }
@@ -383,8 +388,8 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
 
 /// A confidential client's secrets on `page`, the client named `name`: the
 /// developer console's, the one a rotation just made, once, then the lifetimes
-/// of its `secrets` as of `now`, and rotating, with the grace `state` chose.
-/// `refusal` says why the last rotation was refused.
+/// of its `secrets` as of `now`, and rotating, with the grace `state` chose and
+/// the `reason` typed. `refusal` says why the last rotation was refused.
 #[component]
 pub async fn client_secrets<'a>(
     page: &'a str,
@@ -392,6 +397,7 @@ pub async fn client_secrets<'a>(
     secrets: &'a [SecretRow],
     now: DateTime<Utc>,
     state: &'a SecretsState,
+    reason: &'a str,
     #[into]
     #[default]
     refusal: Option<&'a str>,
@@ -401,7 +407,7 @@ pub async fn client_secrets<'a>(
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>
         }
-        app_secrets(page: page, secrets: secrets, now: now, state: state, confirmed: true)
+        app_secrets(page: page, secrets: secrets, now: now, state: state, confirmed: true, reason: reason)
     })
 }
 

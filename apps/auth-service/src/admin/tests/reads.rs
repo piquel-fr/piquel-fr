@@ -107,7 +107,7 @@ impl AdminOperation {
             // Pruning checks its operator before anything else too.
             Self::PruneAuditChain => vec![
                 service
-                    .prune_audit_chain(operator, &committed_keys(), 1)
+                    .prune_audit_chain(operator, &committed_keys(), 1, reason("Asked by email"))
                     .await
                     .map(drop),
             ],
@@ -161,7 +161,7 @@ impl Harness {
             .grant(self.signed_in(AuthenticationMethod::Federation).await)
             .await;
         self.service()
-            .revoke_administrator(&cli(), revoked.user_id)
+            .revoke_administrator(&cli(), revoked.user_id, reason("Asked by email"))
             .await
             .expect("revoke");
         let mut tx = self.database.begin().await.expect("transaction");

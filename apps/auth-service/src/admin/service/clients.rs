@@ -4,7 +4,7 @@
 use super::AdminService;
 use crate::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
-    admin::{AdminError, Operator},
+    admin::{AdminError, Operator, Reason},
 };
 use sourceorigin_common::{
     ClientId,
@@ -43,16 +43,18 @@ impl AdminService {
     }
 
     /// Runs `change` on the client registry in one transaction, attributed to
-    /// `operator`, and commits once the operator is authorized again. The
-    /// registry records each change's event itself.
+    /// `operator` with their `reason`, and commits once the operator is
+    /// authorized again. The registry records each change's event itself.
     async fn change_clients<T, E: From<AdminError>>(
         &self,
         operator: &Operator,
+        reason: Reason,
         change: impl AsyncFnOnce(&mut ClientRegistry<'_, '_>) -> Result<T, E>,
     ) -> Result<T, E> {
         let mut tx = self.database.begin().await.map_err(AdminError::from)?;
-        let value = change(&mut ClientRegistry::new(&mut tx, operator.context())).await?;
-        Self::finish(tx, operator, None, Vec::new()).await?;
+        let context = operator.context(&reason);
+        let value = change(&mut ClientRegistry::new(&mut tx, context)).await?;
+        Self::finish(tx, operator, &reason, None, Vec::new()).await?;
         Ok(value)
     }
 
@@ -62,8 +64,9 @@ impl AdminService {
         &self,
         operator: &Operator,
         registration: &ClientRegistration,
+        reason: Reason,
     ) -> Result<Option<ClientSecret>, AdminError> {
-        self.change_clients(operator, async |clients| {
+        self.change_clients(operator, reason, async |clients| {
             Ok(clients
                 .create(ClientOwner::Operator, registration, None)
                 .await?)
@@ -79,8 +82,9 @@ impl AdminService {
         registration: &ClientRegistration,
         secret: Option<ClientSecret>,
         grace: GracePeriod,
+        reason: Reason,
     ) -> Result<Applied, AdminError> {
-        self.change_clients(operator, async |clients| {
+        self.change_clients(operator, reason, async |clients| {
             Ok(clients.apply(registration, secret, grace).await?)
         })
         .await
@@ -92,13 +96,16 @@ impl AdminService {
         &self,
         operator: &Operator,
         id: &ClientId,
+        reason: Reason,
         edit: impl FnOnce(&StoredOidcClient) -> Result<ClientRegistration, E>,
     ) -> Result<Vec<ClientField>, E>
     where
         E: From<AdminError> + From<ClientRegistryError>,
     {
-        self.change_clients(operator, async |clients| clients.update(id, edit).await)
-            .await
+        self.change_clients(operator, reason, async |clients| {
+            clients.update(id, edit).await
+        })
+        .await
     }
 
     /// Enables or disables client `id`. A suspended client cannot be enabled.
@@ -107,8 +114,9 @@ impl AdminService {
         operator: &Operator,
         id: &ClientId,
         enabled: bool,
+        reason: Reason,
     ) -> Result<(), AdminError> {
-        self.change_clients(operator, async |clients| {
+        self.change_clients(operator, reason, async |clients| {
             Ok(clients.set_enabled(id, enabled).await?)
         })
         .await
@@ -121,8 +129,9 @@ impl AdminService {
         operator: &Operator,
         id: &ClientId,
         suspended: bool,
+        reason: Reason,
     ) -> Result<(), AdminError> {
-        self.change_clients(operator, async |clients| {
+        self.change_clients(operator, reason, async |clients| {
             Ok(clients.set_suspended(id, suspended).await?)
         })
         .await
@@ -133,9 +142,12 @@ impl AdminService {
         &self,
         operator: &Operator,
         id: &ClientId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
-        self.change_clients(operator, async |clients| Ok(clients.delete(id).await?))
-            .await
+        self.change_clients(operator, reason, async |clients| {
+            Ok(clients.delete(id).await?)
+        })
+        .await
     }
 
     /// Gives confidential client `id` a new secret, shown only this once. Earlier
@@ -145,8 +157,9 @@ impl AdminService {
         operator: &Operator,
         id: &ClientId,
         grace: GracePeriod,
+        reason: Reason,
     ) -> Result<ClientSecret, AdminError> {
-        self.change_clients(operator, async |clients| {
+        self.change_clients(operator, reason, async |clients| {
             Ok(clients.rotate_secret(id, grace).await?)
         })
         .await
@@ -169,8 +182,9 @@ impl AdminService {
         id: &ClientId,
         origin: &RelatedOrigin,
         rp_id: &str,
+        reason: Reason,
     ) -> Result<(), AdminError> {
-        self.change_clients(operator, async |clients| {
+        self.change_clients(operator, reason, async |clients| {
             Ok(clients.approve_origin(id, origin, rp_id).await?)
         })
         .await
@@ -182,8 +196,9 @@ impl AdminService {
         operator: &Operator,
         id: &ClientId,
         origin: &RelatedOrigin,
+        reason: Reason,
     ) -> Result<(), AdminError> {
-        self.change_clients(operator, async |clients| {
+        self.change_clients(operator, reason, async |clients| {
             Ok(clients.remove_origin(id, origin).await?)
         })
         .await

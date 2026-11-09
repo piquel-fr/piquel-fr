@@ -93,7 +93,8 @@ impl DomainEvent {
                 | GrantRevocation::PolicyRejected => return None,
             },
             Self::CodeReplayed { .. } => HistoryEntry::TokenReused,
-            // The reason is written for administrators and may name other people.
+            // Its reason shows as every administrator change's does, from the
+            // event's context.
             Self::AccountDisabled { .. } => HistoryEntry::AccountDisabled,
             Self::AccountEnabled {} => HistoryEntry::AccountEnabled,
             Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,

@@ -104,12 +104,16 @@ pub async fn signing_key_rotation<'a>(
     #[default]
     refused: Option<&'a str>,
     now: bool,
+    #[into]
+    #[default]
+    reason: Option<&'a str>,
 ) -> Result<impl View> {
     Ok(view! {
         dashboard_change(
             change: Change::RotateSigningKey,
             back: back,
             refusal: refused,
+            reason: reason,
             choice(
                 name: "now",
                 checked: now,

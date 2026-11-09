@@ -30,10 +30,10 @@ rotation.
 
 To replace the active key before its 90 days are up:
 
-- **At the terminal**, run `auth-service keys rotate`. It prints the new key's
-  ID.
-- **On the dashboard**, select **Rotate** on the **Signing keys** page, and
-  confirm.
+- **At the terminal**, run `auth-service keys rotate --reason "…"`. It prints
+  the new key's ID.
+- **On the dashboard**, select **Rotate** on the **Signing keys** page, give a
+  reason, and confirm.
 
 Either publishes a `next` key, which starts signing in 24 hours, so every
 verifier has fetched it first. A key already waiting is kept.
@@ -43,7 +43,7 @@ verifier has fetched it first. A key already waiting is kept.
 Only the terminal rotates at once:
 
 ```sh
-auth-service keys rotate --now
+auth-service keys rotate --now --reason "…"
 ```
 
 The new key signs straight away. Verifiers with a cached key set reject its
@@ -56,9 +56,9 @@ active key must stop signing now; for a compromised key, revoke it instead.
 
 > **Warning:** revoking deletes the key at once, and can't be undone.
 
-- **At the terminal**, run `auth-service keys revoke <id>`.
+- **At the terminal**, run `auth-service keys revoke <id> --reason "…"`.
 - **On the dashboard**, select **Revoke** next to the key on the **Signing
-  keys** page, and confirm.
+  keys** page, give a reason, and confirm.
 
 When the revoked key was signing, the `next` and `retiring` keys go with it,
 since their private keys were stored beside it, and a new key signs at once.
@@ -75,7 +75,7 @@ which the promotion checks. Otherwise the active key keeps signing, and every
 rotation attempt logs the failure.
 
 1. Find the key in `auth-service keys list`, and the failure in auth's logs.
-2. Revoke it with `auth-service keys revoke <id>`, so rotation can publish
+2. Revoke it with `auth-service keys revoke <id> --reason "…"`, so rotation can publish
    another.
 
 Revoking works even when the active key can't be opened, which is how to
@@ -88,7 +88,7 @@ it again with the right one.
 ## Import a key
 
 ```sh
-auth-service keys import file:///path/key.pem
+auth-service keys import file:///path/key.pem --reason "First deploy"
 ```
 
 The command imports a PEM RSA key as the active key, named `primary` unless

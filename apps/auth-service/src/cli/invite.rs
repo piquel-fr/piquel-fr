@@ -1,7 +1,7 @@
 //! Signup invitations.
 
 use super::{CliError, Console, Output};
-use crate::{InviteExpiry, PUBLIC_BASE_URL};
+use crate::{InviteExpiry, PUBLIC_BASE_URL, Reason};
 use clap::Subcommand;
 use sourceorigin_common::TokenId;
 
@@ -14,6 +14,9 @@ pub(super) enum InviteCommand {
         /// How long the link stays valid, e.g. 24h or 7d.
         #[arg(long, default_value = "7d")]
         expires_in: InviteExpiry,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
     /// List invitations, newest first, without their links.
     List {
@@ -25,6 +28,9 @@ pub(super) enum InviteCommand {
     Revoke {
         /// The invitation's ID, as `invite list` shows it.
         id: TokenId,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
 }
 
@@ -35,9 +41,9 @@ impl InviteCommand {
             service, operator, ..
         } = console;
         match self {
-            Self::Create { expires_in } => {
+            Self::Create { expires_in, reason } => {
                 let invitation = service
-                    .create_invitation(operator, &PUBLIC_BASE_URL.parse()?, expires_in)
+                    .create_invitation(operator, &PUBLIC_BASE_URL.parse()?, expires_in, reason)
                     .await?;
                 println!("{}", invitation.url);
             }
@@ -59,7 +65,7 @@ impl InviteCommand {
                     }
                 })?;
             }
-            Self::Revoke { id } => service.revoke_invitation(operator, id).await?,
+            Self::Revoke { id, reason } => service.revoke_invitation(operator, id, reason).await?,
         }
         Ok(())
     }

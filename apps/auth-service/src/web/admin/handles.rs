@@ -1,9 +1,9 @@
 //! Handles: the reserved list, the accounts holding a reserved handle, and the
 //! released handles, with reserving, unreserving and releasing one.
 
-use super::{AdminApplication as App, settings, users::Account};
+use super::{AdminApplication as App, ReasonForm, Refused, settings, users::Account};
 use crate::{Reason, handles::HandlesError};
-use serde::{Deserialize, Serialize, de::IgnoredAny};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{Handle, handle::RESERVED};
 use sourceorigin_ui::{
     Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder, Target,
@@ -131,14 +131,14 @@ pub(super) async fn reserve(cx: &Cx, form: Option<Form<Reservation>>) -> Result<
 
 /// `/handles/unreserve?handle=…`: removes a handle from the reserved list.
 #[route([GET, POST] "/handles/unreserve")]
-pub(super) async fn unreserve(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn unreserve(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     App::handle_change(cx, form, Change::UnreserveHandle).await
 }
 
 /// `/handles/release?handle=…`: deletes a released handle, or a purged account's
 /// last one, so anyone may claim it again.
 #[route([GET, POST] "/handles/release")]
-pub(super) async fn release(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn release(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     App::handle_change(cx, form, Change::ReleaseHandle).await
 }
 
@@ -147,7 +147,7 @@ impl App {
     /// which goes back to the handles page once made.
     async fn handle_change(
         cx: &Cx,
-        form: Option<Form<IgnoredAny>>,
+        form: Option<Form<ReasonForm>>,
         change: Change,
     ) -> Result<Response> {
         let admin = Self::admin(cx).await?;
@@ -160,20 +160,27 @@ impl App {
             name: &shown,
             id: None,
         };
-        let refusal = Self::submit(cx, form, back.clone(), |_| async move {
+        let refusal = Self::submit_reason(cx, form, back.clone(), async |reason| {
             if change == Change::ReleaseHandle {
-                service.release_handle(&admin.operator, handle).await
+                service
+                    .release_handle(&admin.operator, handle, reason)
+                    .await
             } else {
-                service.unreserve_handle(&admin.operator, handle).await
+                service
+                    .unreserve_handle(&admin.operator, handle, reason)
+                    .await
             }
         })
         .await?;
+        let reason = refusal.as_ref().map(Refused::reason);
+        let refusal = refusal.as_deref();
         let page = view! { cx =>
             sourceorigin_ui::dashboard_change(
                 change: change,
                 target: target,
                 back: back.as_str(),
-                refusal: refusal.as_deref(),
+                refusal: refusal,
+                reason: reason,
             )
         };
         Self::render(cx, StatusCode::OK, change.title(), page).await

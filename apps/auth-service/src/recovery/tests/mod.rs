@@ -9,7 +9,7 @@ use crate::{
     passkey::tests::Fixture,
     security::{BrowserCookie, Credential, Session},
     tests::{
-        Browser, recovery_links, recovery_reason, recovery_token, refresh_grant, register,
+        Browser, reason, recovery_links, recovery_reason, recovery_token, refresh_grant, register,
         registration, verified_address,
     },
 };

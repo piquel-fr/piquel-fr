@@ -1,8 +1,8 @@
 //! Who administers Origin Auth: the list, granting rights and revoking them.
 
-use super::AdminApplication as App;
-use crate::AdminError;
-use serde::{Deserialize, de::IgnoredAny};
+use super::{AdminApplication as App, ReasonForm, Refused};
+use crate::{AdminError, Reason};
+use serde::Deserialize;
 use sourceorigin_common::{UserId, admin::UserSearch};
 use sourceorigin_ui::{Action, AdministratorRow, Change, Pager, Query};
 use topcoat::{
@@ -49,8 +49,8 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 }
 
 /// What [`grant`] takes: by `GET`, the search for the account, from its query;
-/// by `POST`, the account to grant, from its form. One type, since the extractor
-/// reads a `GET`'s query as its form.
+/// by `POST`, the account to grant and why, from its form. One type, since the
+/// extractor reads a `GET`'s query as its form.
 #[derive(Clone, Deserialize)]
 pub(super) struct GrantForm {
     /// The account to grant rights, which the button posts.
@@ -60,6 +60,9 @@ pub(super) struct GrantForm {
     q: String,
     /// The page wanted, counting from 1.
     page: Option<u32>,
+    /// Why, which the button's dialog asks for.
+    #[serde(default)]
+    reason: String,
 }
 
 /// `/administrators/grant`: finds the account, by handle, name, email or ID, then
@@ -76,7 +79,10 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
         .unwrap_or_default();
     let refusal = App::submit(cx, form, back, |input: GrantForm| async move {
         let user_id = input.user_id.ok_or(AdminError::UserNotFound)?;
-        service.grant_administrator(&admin.operator, user_id).await
+        let reason = Reason::parse(input.reason)?;
+        service
+            .grant_administrator(&admin.operator, user_id, reason)
+            .await
     })
     .await?;
     let found = service.search_users(&admin.operator, &q, page).await?;
@@ -111,23 +117,28 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
 /// `/administrators/{administrator}/revoke`: removes another administrator's
 /// rights.
 #[route([GET, POST] "/administrators/{administrator}/revoke")]
-pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn revoke(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
     let id = *path_param::<Administrator>(cx)?;
     let back = href!(list).resolve(cx);
-    let refusal = App::submit(cx, form, back.clone(), |_| {
-        service.revoke_administrator(&admin.operator, id)
+    let refusal = App::submit_reason(cx, form, back.clone(), async |reason| {
+        service
+            .revoke_administrator(&admin.operator, id, reason)
+            .await
     })
     .await?;
     let target = App::target(cx).await;
+    let reason = refusal.as_ref().map(Refused::reason);
+    let refusal = refusal.as_deref();
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::RevokeAdministrator,
             target: target,
             back: back.as_str(),
-            refusal: refusal.as_deref(),
+            refusal: refusal,
+            reason: reason,
         )
     };
     App::render(cx, StatusCode::OK, "Revoke rights", page).await

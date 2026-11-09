@@ -178,8 +178,8 @@ account's announcement deliveries, which would find no recipient left.
 
 ```sh
 auth-service deliveries list [--status failed] [--channel email] [--limit 100]
-auth-service deliveries retry <id>    # a failed, or cancelled unordered, delivery
-auth-service deliveries cancel <id>   # a pending or failed delivery
+auth-service deliveries retry <id> --reason "…"    # a failed, or cancelled unordered, delivery
+auth-service deliveries cancel <id> --reason "…"   # a pending or failed delivery
 ```
 
 `just auth deliveries …` runs them with the caller's configuration. Retrying a

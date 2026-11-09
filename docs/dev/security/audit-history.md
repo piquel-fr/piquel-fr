@@ -245,7 +245,7 @@ elsewhere; see [Limits](#limits).
 Without pruning, history is kept indefinitely. To prune:
 
 ```sh
-auth-service audit prune --through <checkpoint position>
+auth-service audit prune --through <checkpoint position> --reason "Retention policy"
 ```
 
 This deletes every event up to that checkpoint, with their personal data, and

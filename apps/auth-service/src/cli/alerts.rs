@@ -32,9 +32,10 @@ pub(super) enum AlertsCommand {
         /// Where its handling stands: investigating, fixing or monitoring.
         #[arg(long)]
         status: AlertStatus,
-        /// What to add, such as who is on it: 1 to 500 characters.
+        /// What to add, such as who is on it, recorded as the update's reason: 1
+        /// to 500 characters.
         #[arg(long)]
-        note: Option<Reason>,
+        note: Reason,
     },
 }
 

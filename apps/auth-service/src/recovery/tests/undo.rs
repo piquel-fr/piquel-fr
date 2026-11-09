@@ -368,7 +368,7 @@ async fn the_owner_undoes_a_disabled_accounts_recovery() {
 
     scenario
         .admin()
-        .enable_user(&cli(), scenario.user())
+        .enable_user(&cli(), scenario.user(), reason())
         .await
         .expect("enable");
     let response = scenario.login("").await;

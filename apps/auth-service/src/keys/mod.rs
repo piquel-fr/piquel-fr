@@ -13,7 +13,7 @@
 //! [`STALE_AFTER`], since it may still trust a revoked key.
 
 use crate::{
-    AdminError, Operator, jobs::Shutdown, oidc::ACCESS_TOKEN_SECONDS, oidc::PublicDocument,
+    AdminError, Operator, Reason, jobs::Shutdown, oidc::ACCESS_TOKEN_SECONDS, oidc::PublicDocument,
     security::SESSION_LIFETIME_DAYS,
 };
 use chrono::{DateTime, TimeDelta, Utc};
@@ -199,8 +199,13 @@ impl KeyStore {
     /// # Errors
     /// Returns database and key generation failures, and refuses to make a `next`
     /// key sign if its private key cannot be opened or does not match it.
-    pub async fn rotate(&self, operator: &Operator, immediately: bool) -> Result<KeyId, KeyError> {
-        self.change(Some(operator), None, async |change| {
+    pub async fn rotate(
+        &self,
+        operator: &Operator,
+        reason: &Reason,
+        immediately: bool,
+    ) -> Result<KeyId, KeyError> {
+        self.change(Some((operator, reason)), None, async |change| {
             change.rotate(immediately).await
         })
         .await
@@ -216,8 +221,13 @@ impl KeyStore {
     /// # Errors
     /// Returns [`KeyError::Unknown`] for an unknown key, or the database or key
     /// generation failure.
-    pub async fn revoke(&self, operator: &Operator, id: &KeyId) -> Result<Option<KeyId>, KeyError> {
-        self.change(Some(operator), Some(id), async |change| {
+    pub async fn revoke(
+        &self,
+        operator: &Operator,
+        reason: &Reason,
+        id: &KeyId,
+    ) -> Result<Option<KeyId>, KeyError> {
+        self.change(Some((operator, reason)), Some(id), async |change| {
             change.revoke(id).await
         })
         .await
@@ -229,8 +239,13 @@ impl KeyStore {
     ///
     /// # Errors
     /// Returns database and sealing failures.
-    pub async fn import(&self, operator: &Operator, key: Rs256Key) -> Result<bool, KeyError> {
-        self.change(Some(operator), None, async |change| {
+    pub async fn import(
+        &self,
+        operator: &Operator,
+        reason: &Reason,
+        key: Rs256Key,
+    ) -> Result<bool, KeyError> {
+        self.change(Some((operator, reason)), None, async |change| {
             change.import(key).await
         })
         .await
@@ -326,20 +341,21 @@ impl KeyStore {
 
     /// Runs `apply` in a transaction holding the signing key lock, then commits
     /// once `operator`, if any, is authorized again after the last write, as
-    /// `AdminService` authorizes every change. `revoking` names the key the
+    /// `AdminService` authorizes every change. An operator's change is recorded
+    /// with their reason; auth's own rotation has none. `revoking` names the key the
     /// change revokes, if any (see [`Self::check`]).
     async fn change<T>(
         &self,
-        operator: Option<&Operator>,
+        operator: Option<(&Operator, &Reason)>,
         revoking: Option<&KeyId>,
         apply: impl AsyncFnOnce(&mut Change<'_, '_>) -> Result<T, KeyError>,
     ) -> Result<T, KeyError> {
         let mut tx = self.database.begin().await?;
         tx.signing_keys().lock().await?;
         self.check(&mut tx, revoking).await?;
-        let context = operator.map(Operator::context);
+        let context = operator.map(|(operator, reason)| operator.context(reason));
         let value = apply(&mut Change::new(&mut tx, self, Utc::now(), context)).await?;
-        if let Some(operator) = operator {
+        if let Some((operator, _)) = operator {
             operator
                 .authorize(&mut tx)
                 .await

@@ -169,8 +169,8 @@ pub async fn alert_update_fields<'a>(
             </select>
         </label>
         <label>
-            "Note, such as who is on it (optional)"
-            <input name="note" maxlength="500" value=(note)>
+            "Note, such as who is on it"
+            <input name="note" required="" maxlength="500" value=(note)>
         </label>
     })
 }

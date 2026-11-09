@@ -1,8 +1,9 @@
 //! Signing keys: listing, rotating and revoking them. Importing the
 //! deployment's PEM key stays at the terminal.
 
-use super::AdminApplication as App;
-use serde::{Deserialize, de::IgnoredAny};
+use super::{AdminApplication as App, ReasonForm, Refused};
+use crate::Reason;
+use serde::Deserialize;
 use sourceorigin_common::protocol::jwt::KeyId;
 use sourceorigin_ui::{Action, Change, Checkbox, SigningKeyRow, Target};
 use topcoat::{
@@ -20,6 +21,9 @@ struct Rotation {
     /// Whether the new key signs at once, skipping its day of waiting.
     #[serde(default)]
     now: Checkbox,
+    /// Why.
+    #[serde(default)]
+    reason: String,
 }
 
 /// `/keys`: every signing key, oldest first, each with the change revoking it.
@@ -55,16 +59,18 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Resp
     let app = App::of(cx);
     let back = href!(list).resolve(cx);
     let refused = App::submit(cx, form, back.clone(), |input: Rotation| async move {
+        let reason = Reason::parse(input.reason)?;
         app.service
-            .rotate_signing_key(&admin.operator, &app.keys, input.now.0)
+            .rotate_signing_key(&admin.operator, &app.keys, input.now.0, reason)
             .await
             .map(drop)
     })
     .await?;
     let now = refused.as_ref().is_some_and(|refused| refused.form.now.0);
+    let reason = refused.as_ref().map(|refused| refused.form.reason.as_str());
     let (back, refused) = (&back, refused.as_deref());
     let page = view! { cx =>
-        sourceorigin_ui::signing_key_rotation(back: back.as_str(), refused: refused, now: now)
+        sourceorigin_ui::signing_key_rotation(back: back.as_str(), refused: refused, now: now, reason: reason)
     };
     App::render(cx, StatusCode::OK, Change::RotateSigningKey.title(), page).await
 }
@@ -72,15 +78,15 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Resp
 /// `/keys/{key}/revoke`: deletes the key at once, and when it signs, the keys
 /// stored beside it, a new key signing instead.
 #[route([GET, POST] "/keys/{key}/revoke")]
-pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn revoke(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let app = App::of(cx);
     let id = path_param::<Key>(cx)?.clone();
     let back = href!(list).resolve(cx);
-    let refused = App::submit(cx, form, back.clone(), |_| async {
+    let refused = App::submit_reason(cx, form, back.clone(), async |reason| {
         app.service
-            .revoke_signing_key(&admin.operator, &app.keys, &id)
+            .revoke_signing_key(&admin.operator, &app.keys, &id, reason)
             .await
             .map(drop)
     })
@@ -89,12 +95,15 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         name: "Signing key",
         id: Some(id.as_str()),
     };
+    let reason = refused.as_ref().map(Refused::reason);
+    let refused = refused.as_deref();
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::RevokeSigningKey,
             target: target,
             back: back.as_str(),
-            refusal: refused.as_deref(),
+            refusal: refused,
+            reason: reason,
         )
     };
     App::render(cx, StatusCode::OK, Change::RevokeSigningKey.title(), page).await

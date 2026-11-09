@@ -3,11 +3,11 @@
 //! client's page lists its own.
 
 use super::{
-    AdminApplication as App, Refusal,
+    AdminApplication as App, ReasonForm, Refusal, Refused,
     clients::{self, Client},
 };
-use crate::{clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
-use serde::{Serialize, de::IgnoredAny};
+use crate::{Reason, clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
+use serde::Serialize;
 use sourceorigin_common::{admin::ApproveOrigin, clients::RelatedOrigin};
 use sourceorigin_ui::{Change, Query, Target};
 use topcoat::{
@@ -44,13 +44,20 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
             .trim()
             .parse()
             .map_err(|error| Refusal::Form(ApiError::bad_request(format!("{error}"))))?;
+        let reason = Reason::parse(input.reason)?;
         app.service
-            .approve_related_origin(&admin.operator, &id, &origin, app.auth.host())
+            .approve_related_origin(&admin.operator, &id, &origin, app.auth.host(), reason)
             .await
             .map_err(Refusal::from)
     })
     .await?;
-    let typed = refusal.as_ref().map(|refused| refused.form.origin.clone());
+    let (typed, reason) = refusal.as_ref().map_or((None, None), |refused| {
+        (
+            Some(refused.form.origin.as_str()),
+            Some(refused.form.reason.as_str()),
+        )
+    });
+    let refusal = refusal.as_deref();
     let client = format!("Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
     let target = App::target(cx).await;
     let page = view! { cx =>
@@ -58,7 +65,8 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
             change: Change::ApproveOrigin,
             target: target,
             back: back.as_str(),
-            refusal: refusal.as_deref(),
+            refusal: refusal,
+            reason: reason,
             <p class="help">(client.as_str())</p>
             <label>
                 "Origin"
@@ -73,15 +81,17 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
 /// origin from signing users in. Auth refuses their sign-ins at once; browsers
 /// drop the origin from their copy of the list within five minutes.
 #[route([GET, POST] "/clients/{client}/origins/remove")]
-pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn remove(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
     let id = path_param::<Client>(cx)?.clone();
     let origin = query_params::<OriginQuery>(cx)?.origin.clone();
     let back = href!(clients::detail, Client(id.clone())).resolve(cx);
-    let refusal = App::submit(cx, form, back.clone(), |_| {
-        service.remove_related_origin(&admin.operator, &id, &origin)
+    let refusal = App::submit_reason(cx, form, back.clone(), async |reason| {
+        service
+            .remove_related_origin(&admin.operator, &id, &origin, reason)
+            .await
     })
     .await?;
     let shown = origin.to_string();
@@ -90,12 +100,15 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         name: &shown,
         id: Some(&client),
     };
+    let reason = refusal.as_ref().map(Refused::reason);
+    let refusal = refusal.as_deref();
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::RemoveOrigin,
             target: target,
             back: back.as_str(),
-            refusal: refusal.as_deref(),
+            refusal: refusal,
+            reason: reason,
         )
     };
     App::render(cx, StatusCode::OK, Change::RemoveOrigin.title(), page).await

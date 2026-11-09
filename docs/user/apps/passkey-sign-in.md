@@ -24,9 +24,9 @@ On the admin dashboard:
 **Remove** next to an origin stops its sign-ins at once. With the CLI:
 
 ```sh
-just auth client origin add blog https://blog.example
+just auth client origin add blog https://blog.example --reason "Blog sign-in"
 just auth client origin list         # --output json for scripts
-just auth client origin remove blog https://blog.example
+just auth client origin remove blog https://blog.example --reason "Blog moved"
 ```
 
 Deleting an app removes its origins.

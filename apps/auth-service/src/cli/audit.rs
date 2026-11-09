@@ -3,7 +3,7 @@
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{
-    AuditError, AuditKeys, PUBLIC_BASE_URL, UserRef,
+    AuditError, AuditKeys, PUBLIC_BASE_URL, Reason, UserRef,
     audit::{AuditVerification, ChainPoint},
 };
 use clap::{Args, Subcommand};
@@ -40,6 +40,9 @@ pub(super) enum AuditCommand {
         /// The keys to check checkpoints against.
         #[command(flatten)]
         keys: AuditKeyArgs,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
         /// Confirmation.
         #[command(flatten)]
         confirm: Confirm,
@@ -87,6 +90,7 @@ impl AuditCommand {
             Self::Prune {
                 through,
                 keys,
+                reason,
                 confirm,
             } => {
                 confirm.ask(&format!(
@@ -94,7 +98,7 @@ impl AuditCommand {
                 ))?;
                 let deleted = console
                     .service
-                    .prune_audit_chain(&console.operator, &keys.keys()?, through)
+                    .prune_audit_chain(&console.operator, &keys.keys()?, through, reason)
                     .await?;
                 eprintln!("Pruned {deleted} events through position {through}.");
                 Ok(())

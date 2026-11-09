@@ -1,6 +1,7 @@
 //! The break-glass view of the outbound delivery queue.
 
 use super::{CliError, Console};
+use crate::Reason;
 use clap::Subcommand;
 use sourceorigin_common::DeliveryId;
 use sourceorigin_repository::DeliveryStatus;
@@ -24,11 +25,17 @@ pub(super) enum DeliveriesCommand {
     Retry {
         /// The delivery's ID.
         id: DeliveryId,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
     /// Cancel a pending or failed delivery, which unblocks the deliveries ordered after it.
     Cancel {
         /// The delivery's ID.
         id: DeliveryId,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
 }
 
@@ -69,8 +76,8 @@ impl DeliveriesCommand {
                     );
                 }
             }
-            Self::Retry { id } => admin.retry_delivery(operator, id).await?,
-            Self::Cancel { id } => admin.cancel_delivery(operator, id).await?,
+            Self::Retry { id, reason } => admin.retry_delivery(operator, id, reason).await?,
+            Self::Cancel { id, reason } => admin.cancel_delivery(operator, id, reason).await?,
         }
         Ok(())
     }

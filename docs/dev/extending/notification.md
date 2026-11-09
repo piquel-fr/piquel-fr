@@ -149,5 +149,5 @@ surface needs a change.
   link needs its email and its page both.
 - **During a deploy.** The previous release's email workers may claim the email
   of a kind they don't know. They can't decode it, so they mark the delivery
-  failed. An operator retries it with `auth-service deliveries retry <id>` once
+  failed. An operator retries it with `auth-service deliveries retry <id> --reason "…"` once
   the new release serves; see [the delivery queue](../architecture/delivery-queue.md#operations).

@@ -4,7 +4,7 @@
 use super::AdminService;
 use crate::{
     AuditKeys,
-    admin::{AdminError, Operator},
+    admin::{AdminError, Operator, Reason},
     audit::{AuditChain, AuditPage, AuditVerification},
 };
 use sourceorigin_common::{
@@ -65,7 +65,7 @@ impl AdminService {
         let verification = AuditChain::new(self.database.clone()).verify(keys).await?;
         let mut tx = self.database.begin().await?;
         operator.hold_rights(&mut tx).await?;
-        AuditChain::record(tx, &operator.context(), &verification).await?;
+        AuditChain::record(tx, &operator.reading(), &verification).await?;
         Ok(verification)
     }
 
@@ -92,6 +92,7 @@ impl AdminService {
         operator: &Operator,
         keys: &AuditKeys,
         through: u64,
+        reason: Reason,
     ) -> Result<u64, AdminError> {
         operator.authorize_read(&self.database).await?;
         AuditChain::new(self.database.clone())
@@ -100,7 +101,7 @@ impl AdminService {
         let mut tx = self.database.begin().await?;
         let deleted = tx.prune_audit_chain(through).await?;
         let pruned = DomainEvent::AuditHistoryPruned { through, deleted };
-        Self::finish(tx, operator, None, vec![pruned]).await?;
+        Self::finish(tx, operator, &reason, None, vec![pruned]).await?;
         Ok(deleted)
     }
 
@@ -121,11 +122,13 @@ impl AdminService {
             .await?)
     }
 
-    /// Attempts a failed delivery, or a cancelled unordered one, again now.
+    /// Attempts a failed delivery, or a cancelled unordered one, again now, for
+    /// `reason`.
     pub(crate) async fn retry_delivery(
         &self,
         operator: &Operator,
         id: DeliveryId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         tx.deliveries()
@@ -133,15 +136,16 @@ impl AdminService {
             .await
             .map_err(AdminError::delivery(id, "failed or cancelled unordered"))?;
         let retried = DomainEvent::DeliveryRetried { delivery_id: id };
-        Self::finish(tx, operator, None, vec![retried]).await
+        Self::finish(tx, operator, &reason, None, vec![retried]).await
     }
 
-    /// Cancels a pending or failed delivery, which unblocks the deliveries ordered
-    /// after it.
+    /// Cancels a pending or failed delivery, for `reason`, which unblocks the
+    /// deliveries ordered after it.
     pub(crate) async fn cancel_delivery(
         &self,
         operator: &Operator,
         id: DeliveryId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         tx.deliveries()
@@ -149,6 +153,6 @@ impl AdminService {
             .await
             .map_err(AdminError::delivery(id, "pending or failed"))?;
         let cancelled = DomainEvent::DeliveryCancelled { delivery_id: id };
-        Self::finish(tx, operator, None, vec![cancelled]).await
+        Self::finish(tx, operator, &reason, None, vec![cancelled]).await
     }
 }

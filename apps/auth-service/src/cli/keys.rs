@@ -5,7 +5,7 @@
 
 use super::{CliError, Confirm, Console};
 use crate::{
-    AuditConfig, AuthConfig, KeyStore, PUBLIC_BASE_URL, TokenDigestKeys,
+    AuditConfig, AuthConfig, KeyStore, PUBLIC_BASE_URL, Reason, TokenDigestKeys,
     admin::{AdminOperation, OperatorName},
 };
 use chrono::{DateTime, Utc};
@@ -32,6 +32,9 @@ pub(super) enum KeysCommand {
         /// Asks first.
         #[arg(long)]
         now: bool,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
         /// Confirmation, which `--now` needs.
         #[command(flatten)]
         confirm: Confirm,
@@ -43,6 +46,9 @@ pub(super) enum KeysCommand {
     Revoke {
         /// The key's ID.
         id: KeyId,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
         /// Confirmation.
         #[command(flatten)]
         confirm: Confirm,
@@ -59,6 +65,9 @@ pub(super) enum KeysCommand {
         /// The key's ID, as tokens it signed name it.
         #[arg(long, default_value = DEFAULT_IMPORTED_KEY_ID)]
         id: KeyId,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
     /// Print the verifier key of the audit key `AUTH_AUDIT_KEY_PROVIDER` names,
     /// for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/dev/security/audit-key.pub.
@@ -66,6 +75,25 @@ pub(super) enum KeysCommand {
 }
 
 impl KeysCommand {
+    /// Prints one signing key per line, oldest first.
+    fn print_list(keys: &[SigningKey]) {
+        let format =
+            |at: Option<DateTime<Utc>>| at.map_or_else(|| "-".to_owned(), |at| at.to_rfc3339());
+        println!("ID\tTYPE\tSTATE\tCREATED\tACTIVATED\tDEACTIVATED\tRETIRED");
+        for key in keys {
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                key.id,
+                key.key_type,
+                key.state,
+                key.created_at.to_rfc3339(),
+                format(key.activated_at),
+                format(key.deactivated_at),
+                format(key.retired_at),
+            );
+        }
+    }
+
     /// What revoking the key `id`, among `keys`, does, for its confirmation. It
     /// names the key's state as read now, and says what revoking an active key
     /// does whatever that state, since a waiting key may start signing before the
@@ -114,24 +142,13 @@ impl KeysCommand {
                 let Console {
                     service, operator, ..
                 } = &console()?;
-                let format = |at: Option<DateTime<Utc>>| {
-                    at.map_or_else(|| "-".to_owned(), |at| at.to_rfc3339())
-                };
-                println!("ID\tTYPE\tSTATE\tCREATED\tACTIVATED\tDEACTIVATED\tRETIRED");
-                for key in service.list_signing_keys(operator).await? {
-                    println!(
-                        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                        key.id,
-                        key.key_type,
-                        key.state,
-                        key.created_at.to_rfc3339(),
-                        format(key.activated_at),
-                        format(key.deactivated_at),
-                        format(key.retired_at),
-                    );
-                }
+                Self::print_list(&service.list_signing_keys(operator).await?);
             }
-            Self::Rotate { now, confirm } => {
+            Self::Rotate {
+                now,
+                reason,
+                confirm,
+            } => {
                 let Console {
                     service, operator, ..
                 } = &console()?;
@@ -140,16 +157,25 @@ impl KeysCommand {
                         "Make a new signing key sign at once: verifiers that cached the key set reject its tokens until they fetch it again, for up to an hour",
                     )?;
                 }
-                let id = service.rotate_signing_key(operator, &store()?, now).await?;
+                let id = service
+                    .rotate_signing_key(operator, &store()?, now, reason)
+                    .await?;
                 println!("{id}");
             }
-            Self::Revoke { id, confirm } => {
+            Self::Revoke {
+                id,
+                reason,
+                confirm,
+            } => {
                 let Console {
                     service, operator, ..
                 } = &console()?;
                 let keys = service.list_signing_keys(operator).await?;
                 confirm.ask(&Self::revoking(&id, &keys))?;
-                match service.revoke_signing_key(operator, &store()?, &id).await? {
+                match service
+                    .revoke_signing_key(operator, &store()?, &id, reason)
+                    .await?
+                {
                     Some(replacement) => {
                         eprintln!("Key {id} revoked; key {replacement} signs from now on.");
                     }
@@ -173,14 +199,17 @@ impl KeysCommand {
                 let config = AuditConfig::from_environment(&PUBLIC_BASE_URL.parse()?)?;
                 println!("{}", config.verifier());
             }
-            Self::Import { pem, id } => {
+            Self::Import { pem, id, reason } => {
                 let Console {
                     service, operator, ..
                 } = &console()?;
                 let pem = pem.resolve().map_err(CliError::PemUnreadable)?;
                 let key =
                     Rs256Key::from_pem(id.as_str(), pem.utf8()?).map_err(CliError::InvalidPem)?;
-                if service.import_signing_key(operator, &store()?, key).await? {
+                if service
+                    .import_signing_key(operator, &store()?, key, reason)
+                    .await?
+                {
                     eprintln!("Key {id} imported; it signs from now on.");
                 } else {
                     eprintln!("Signing keys already exist; nothing was imported.");

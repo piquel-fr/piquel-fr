@@ -114,7 +114,7 @@ impl Harness {
     /// Makes `account` an administrator, from the CLI.
     pub(crate) async fn grant(&self, account: Account) -> Account {
         self.service()
-            .grant_administrator(&cli(), account.user_id)
+            .grant_administrator(&cli(), account.user_id, reason("Asked by email"))
             .await
             .expect("grant");
         account
