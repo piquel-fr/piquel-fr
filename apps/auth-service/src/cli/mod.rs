@@ -301,10 +301,11 @@ impl Administration {
 
 impl Cli {
     /// Installs telemetry, runs the selected command, then flushes telemetry, and
-    /// prints any failure with its causes. Telemetry never stops a command other
-    /// than `serve`: when OTLP export cannot start, it logs to stderr only, and a
+    /// prints any failure with its causes. OTLP export never stops a command other
+    /// than `serve`: when it cannot start, the command logs to stderr only, and a
     /// failed flush, such as an unreachable collector, is only reported, so a
-    /// deploy's migration job and break-glass repairs still run.
+    /// deploy's migration job and break-glass repairs still run. An unparseable
+    /// `RUST_LOG` stops every command.
     pub async fn run(self) -> ExitCode {
         let result = async {
             let command = self.command.unwrap_or(Command::Serve);

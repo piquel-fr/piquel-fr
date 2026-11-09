@@ -89,7 +89,7 @@ Once, after `infra/telemetry.toml` is on `main`:
 An unreachable collector never blocks a deployment of sourceorigin. Until the
 collector is deployed and linked, export fails, the services log a warning on
 stderr, and serve normally. A malformed endpoint, timeout or
-`OTEL_SDK_DISABLED`, by contrast, stops `serve`, while `migrate` and the
+`OTEL_SDK_DISABLED`, by contrast, stops `serve` and the web app, while `migrate` and the
 administrative commands warn and log to stderr only.
 
 ## Run the dashboards locally

@@ -65,14 +65,13 @@ pub struct DecodeFailure(Box<Decode>);
 #[derive(Debug, Error)]
 enum Decode {
     /// A JSON column that does not parse, or does not match its type.
-    #[error("{category} at line {line} column {column}")]
+    #[error("{category}{}", position.map_or_else(String::new, |(line, column)| format!(" at line {line} column {column}")))]
     Json {
         /// What went wrong, such as a missing field or a wrong type.
         category: &'static str,
-        /// Where, in the column's JSON.
-        line: usize,
-        /// Where, on that line.
-        column: usize,
+        /// Where, in the column's JSON, as line and column; `None` for a value
+        /// decoded with `from_value`, which has no text to point into.
+        position: Option<(usize, usize)>,
     },
     /// A value that decodes but breaks a rule, such as an alert update whose
     /// author is neither an administrator nor an operator. The rule is a
@@ -102,8 +101,7 @@ impl From<serde_json::Error> for DecodeFailure {
         };
         Self(Box::new(Decode::Json {
             category,
-            line: error.line(),
-            column: error.column(),
+            position: (error.line() > 0).then(|| (error.line(), error.column())),
         }))
     }
 }
