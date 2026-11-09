@@ -3,11 +3,11 @@
 //! client's page lists its own.
 
 use super::{
-    AdminApplication as App, NoInput, Refusal,
+    AdminApplication as App, Refusal,
     clients::{self, Client},
 };
 use crate::{clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
-use serde::Serialize;
+use serde::{Serialize, de::IgnoredAny};
 use sourceorigin_common::{admin::ApproveOrigin, clients::RelatedOrigin};
 use sourceorigin_ui::{Change, Query, Target};
 use topcoat::{
@@ -73,7 +73,7 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
 /// origin from signing users in. Auth refuses their sign-ins at once; browsers
 /// drop the origin from their copy of the list within five minutes.
 #[route([GET, POST] "/clients/{client}/origins/remove")]
-pub(super) async fn remove(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;

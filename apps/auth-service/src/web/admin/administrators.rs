@@ -1,8 +1,8 @@
 //! Who administers Origin Auth: the list, granting rights and revoking them.
 
-use super::{AdminApplication as App, NoInput};
+use super::AdminApplication as App;
 use crate::AdminError;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, de::IgnoredAny};
 use sourceorigin_common::{UserId, admin::UserSearch};
 use sourceorigin_ui::{Action, AdministratorRow, Change, Pager, Query};
 use topcoat::{
@@ -51,7 +51,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 /// What [`grant`] takes: by `GET`, the search for the account, from its query;
 /// by `POST`, the account to grant, from its form. One type, since the extractor
 /// reads a `GET`'s query as its form.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct GrantForm {
     /// The account to grant rights, which the button posts.
     user_id: Option<UserId>,
@@ -111,7 +111,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
 /// `/administrators/{administrator}/revoke`: removes another administrator's
 /// rights.
 #[route([GET, POST] "/administrators/{administrator}/revoke")]
-pub(super) async fn revoke(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;

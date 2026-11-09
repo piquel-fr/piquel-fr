@@ -24,7 +24,6 @@ use axum::{
 use chrono::{DateTime, Utc};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, PictureId, UserId,
-    admin::CreateInvitation,
     events::{Actor, DomainEvent},
 };
 use sourceorigin_repository::{
@@ -1460,7 +1459,6 @@ async fn pages_that_could_only_fail_refuse_at_once() {
     let client = format!("/clients/{id}");
     let page = format!("{client}/overview");
     assert_eq!(redirect(&post("/clients/new", &registration).await), page);
-    harness.forget_submissions(admin.user_id).await;
     let taken = html(post("/clients/new", &registration).await).await;
     assert!(taken.contains("is taken"), "{taken}");
 
@@ -1576,15 +1574,6 @@ impl Channel for Unsent {
 }
 
 impl Harness {
-    /// Lets `user_id` post the same forms again at once, as if the seconds in
-    /// which a repeat is taken for a double click had passed.
-    async fn forget_submissions(&self, user_id: UserId) {
-        (self.database.dashboard())
-            .forget_submissions(user_id)
-            .await
-            .expect("forget");
-    }
-
     /// The actor of the newest event of `kind` that `found` picks, if any.
     async fn actor_of(&self, kind: &str, found: impl Fn(&DomainEvent) -> bool) -> Option<Actor> {
         let filter = EventFilter {
@@ -1653,9 +1642,7 @@ async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
     let page = html(harness.visit(&dashboard, &listed).await).await;
     assert!(page.contains(&format!(r#"action="{retry}""#)), "{page}");
     assert!(page.contains("Cancelled"), "{page}");
-    // Cancelled already, it is refused, saying why, once past the seconds in
-    // which posting it again is taken for a double click.
-    harness.forget_submissions(admin.user_id).await;
+    // Cancelled already, it is refused, saying why.
     let refused = html(post(&cancel).await).await;
     assert!(
         refused.contains("No pending or failed delivery"),
@@ -1712,7 +1699,6 @@ async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
     assert_eq!(redirect(&post(&revoke).await), "/keys");
     let keys = harness.database.signing_keys().list().await.expect("keys");
     assert!(keys.iter().all(|key| key.id != next), "revoked");
-    harness.forget_submissions(admin.user_id).await;
     let unknown = html(post(&revoke).await).await;
     assert!(unknown.contains("No signing key has ID"), "{unknown}");
 }
@@ -1749,7 +1735,6 @@ async fn handles_are_reserved_given_released_and_unreserved() {
         redirect(&post("/handles/reserve", &reserve).await),
         "/handles"
     );
-    harness.forget_submissions(admin.user_id).await;
     let refused = html(post("/handles/reserve", &reserve).await).await;
     assert!(
         refused.contains("This handle, or one that looks like it, is reserved already"),
@@ -1790,7 +1775,6 @@ async fn handles_are_reserved_given_released_and_unreserved() {
         "released: {page}"
     );
     assert_eq!(redirect(&post(&release, &[]).await), "/handles");
-    harness.forget_submissions(admin.user_id).await;
     let refused = html(post(&release, &[]).await).await;
     assert!(refused.contains("This handle is not released"), "{refused}");
     assert_eq!(redirect(&post(&unreserve, &[]).await), "/handles");
@@ -1939,8 +1923,6 @@ async fn the_draft_form_finds_accounts_and_sends_from_the_editor() {
         confirming.contains("Yes: emailed whatever the recipient"),
         "{confirming}"
     );
-    // The same form, posted again at once, would be taken for a double click.
-    harness.forget_submissions(admin.user_id).await;
     let sent = post(&confirmed, &to).await;
     let shown = html(harness.visit(&confirmed, redirect(&sent)).await).await;
     assert!(shown.contains("Sent"), "{shown}");
@@ -2116,113 +2098,6 @@ async fn a_session_is_revoked_only_from_its_own_account() {
         .await
         .expect("lookup");
     assert!(session.is_some(), "still signed in");
-}
-
-/// The same form posted again within seconds, such as by a double click, makes
-/// its change once: while the first is being made, the repeat shows its form
-/// again, saying so; once it is made, the repeat goes where it is listed. A
-/// request whose claim expired cannot give up the claim a repeat took since.
-/// Another invitation form shown, or the same form to another target, is
-/// another change, and a refused one can be posted again at once.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn a_change_posted_twice_is_made_once() {
-    let origin = AUTH_ORIGIN.parse().expect("auth origin");
-    let mut config = AuthConfig::test(&origin);
-    config.passkey.invite_required = true;
-    let harness = Harness::of(config).await;
-    let admin = harness.admin().await;
-    let new = "/invitations/new";
-    let dashboard = harness.confirmed(&admin, new, Utc::now()).await;
-    let url = format!("{DASHBOARD}{new}");
-    let fields = [("shown", "first"), ("expires_in", "2d")];
-    let post = || dashboard.submit(&harness.dashboard, &url, &fields, OWN_PAGE);
-    let forms = super::submissions::Submissions::new(harness.database.clone());
-    let posted = super::invitations::InvitationForm {
-        invitation: CreateInvitation {
-            expires_in: Some("2d".into()),
-        },
-        shown: "first".into(),
-    };
-    let claim = async || match forms.claim(admin.user_id, new, &posted).await {
-        Ok(super::submissions::Claimed::New(claim)) => claim,
-        _ => panic!("claimed"),
-    };
-    let created = async || {
-        let filter = EventFilter {
-            kind: Some("invitation_created".into()),
-            ..EventFilter::default()
-        };
-        let events = harness.database.events().list(&filter, 1000).await;
-        events
-            .expect("events")
-            .iter()
-            .filter(|event| matches!(event.actor, Actor::Admin { user_id, .. } if user_id == admin.user_id))
-            .count()
-    };
-
-    // The first still being made: the repeat keeps what was typed.
-    let first = claim().await;
-    let repeat = post().await;
-    assert_eq!(repeat.status(), StatusCode::CONFLICT);
-    let page = html(repeat).await;
-    assert!(page.contains("already being made"), "{page}");
-    assert!(page.contains(r#"value="2d""#), "{page}");
-    first.release().await.expect("release");
-
-    // Made: the repeat changes nothing, and goes to the invitations.
-    assert_eq!(redirect(&post().await), new);
-    assert_eq!(redirect(&post().await), "/invitations");
-    assert_eq!(created().await, 1, "made once");
-
-    // A request whose claim expired, and was taken by a repeat that made the
-    // change, leaves the repeat's claim alone.
-    harness.forget_submissions(admin.user_id).await;
-    let stale = claim().await;
-    harness.forget_submissions(admin.user_id).await;
-    assert_eq!(redirect(&post().await), new);
-    stale.release().await.expect("release");
-    assert_eq!(redirect(&post().await), "/invitations");
-    assert_eq!(created().await, 2);
-
-    // Another form shown, with the same validity, is another invitation.
-    let another = [("shown", "second"), ("expires_in", "2d")];
-    let posted = dashboard
-        .submit(&harness.dashboard, &url, &another, OWN_PAGE)
-        .await;
-    assert_eq!(redirect(&posted), new);
-    assert_eq!(created().await, 3);
-
-    // The same empty form, to two handles the query names, is two changes.
-    let suffix = &admin.user_id.to_string()[24..];
-    for handle in [format!("one-{suffix}"), format!("two-{suffix}")] {
-        let reserve = [("handle", handle.as_str()), ("reason", "Kept")];
-        let url = format!("{DASHBOARD}/handles/reserve");
-        let reserved = dashboard
-            .submit(&harness.dashboard, &url, &reserve, OWN_PAGE)
-            .await;
-        assert_eq!(redirect(&reserved), "/handles");
-    }
-    for handle in [format!("one-{suffix}"), format!("two-{suffix}")] {
-        let url = format!("{DASHBOARD}/handles/unreserve?handle={handle}");
-        let unreserved = dashboard
-            .submit(&harness.dashboard, &url, &[], OWN_PAGE)
-            .await;
-        assert_eq!(redirect(&unreserved), "/handles", "{handle}");
-    }
-
-    // Refused, the change can be posted again at once, and is refused again.
-    let user = Browser::new_account(&harness.database).await;
-    let url = format!("{DASHBOARD}/users/{}/disable", user.user_id);
-    let long = "x".repeat(501);
-    let fields = [("reason", long.as_str())];
-    for _ in 0..2 {
-        let refused = dashboard
-            .submit(&harness.dashboard, &url, &fields, OWN_PAGE)
-            .await;
-        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
-        assert!(html(refused).await.contains(&format!(r#"value="{long}""#)));
-    }
 }
 
 /// The invitations pages find who is signed in before whether signup needs

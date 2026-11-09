@@ -1,8 +1,8 @@
 //! Signing keys: listing, rotating and revoking them. Importing the
 //! deployment's PEM key stays at the terminal.
 
-use super::{AdminApplication as App, NoInput};
-use serde::{Deserialize, Serialize};
+use super::AdminApplication as App;
+use serde::{Deserialize, de::IgnoredAny};
 use sourceorigin_common::protocol::jwt::KeyId;
 use sourceorigin_ui::{Action, Change, Checkbox, SigningKeyRow, Target};
 use topcoat::{
@@ -15,7 +15,7 @@ use topcoat::{
 path_param!(pub key: KeyId, error = not_found);
 
 /// The form rotating the signing key.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Rotation {
     /// Whether the new key signs at once, skipping its day of waiting.
     #[serde(default)]
@@ -72,7 +72,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Resp
 /// `/keys/{key}/revoke`: deletes the key at once, and when it signs, the keys
 /// stored beside it, a new key signing instead.
 #[route([GET, POST] "/keys/{key}/revoke")]
-pub(super) async fn revoke(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let app = App::of(cx);

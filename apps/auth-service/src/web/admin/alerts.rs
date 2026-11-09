@@ -3,7 +3,7 @@
 
 use super::AdminApplication as App;
 use crate::{AdminError, Reason, admin::ALERTS_SHOWN};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sourceorigin_common::{
     AlertId,
     alerts::{AlertStatus, AlertsShown},
@@ -19,7 +19,7 @@ use topcoat::{
 path_param!(pub alert: AlertId, error = not_found);
 
 /// The form of [`update`].
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct UpdateForm {
     /// Where the alert's handling stands.
     status: AlertStatus,

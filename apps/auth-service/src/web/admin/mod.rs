@@ -52,8 +52,6 @@ mod overview;
 mod reveal;
 /// An account's settings, which administrators change on its owner's behalf.
 mod settings;
-/// The claims on the changes the dashboard's forms post.
-mod submissions;
 #[cfg(test)]
 mod tests;
 /// Account search, one account, and the changes made to it.
@@ -73,7 +71,7 @@ use crate::{
 };
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sourceorigin_common::{ClientId, ErrorChain, UserId, config::Origin};
 use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
 use sourceorigin_repository::Database;
@@ -87,7 +85,6 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration as StdDuration, Instant},
 };
-use submissions::Claimed;
 use topcoat::{
     Error, Result,
     context::{Cx, app_context, memoize},
@@ -205,8 +202,6 @@ pub(crate) struct AdminApplication {
     service: AdminService,
     /// The settings administrators share with owners.
     account: AccountService,
-    /// The claims on changes, so none is made twice.
-    submissions: submissions::Submissions,
     /// Who is signed in, and signing in through auth.
     sign_in: DashboardSignIn,
     /// The passkey ceremonies that confirm the dashboard on its own pages.
@@ -327,7 +322,6 @@ impl AdminApplication {
         Ok(Self {
             service: AdminService::new(database.clone(), config.email.smtp.is_some()),
             account: AccountService::new(database.clone()),
-            submissions: submissions::Submissions::new(database.clone()),
             keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             passkeys,
@@ -548,11 +542,7 @@ impl AdminApplication {
         }
     }
 
-    /// Makes the change a posted `form` asks for, with `call`, once: the same form
-    /// posted again to the same page and query within seconds, such as by a
-    /// double click or a reload, changes nothing. It goes to `again` once this
-    /// one is made, or shows its form again, saying this one is being made, until
-    /// then. A refused change can be posted again at once. Every change the
+    /// Makes the change a posted `form` asks for, with `call`. Every change the
     /// dashboard makes comes through here.
     ///
     /// A `GET` only shows the form, so it returns nothing: a link, even with a
@@ -564,51 +554,23 @@ impl AdminApplication {
     async fn change<I, T, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
-        again: String,
         call: F,
     ) -> Result<Option<Result<T, Refused<I>>>>
     where
-        I: Clone + Serialize,
+        I: Clone,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        let app = Self::of(cx);
-        let admin = Self::admin(cx).await?;
-        // The page and its query, which may name what the change acts on, such
-        // as `/handles/release?handle=alice`.
-        let page = uri(cx).path_and_query().map_or("/", |page| page.as_str());
         let Some(Form(input)) = form.filter(|_| method(cx) == Method::POST) else {
             return Ok(None);
         };
-        let claim = match app.submissions.claim(admin.user_id, page, &input).await? {
-            Claimed::New(claim) => claim,
-            Claimed::Made => return Err(see_other(again).into()),
-            Claimed::Pending => {
-                Self::refused_with(cx, StatusCode::CONFLICT).await;
-                return Ok(Some(Err(Refused {
-                    message: BEING_MADE.to_owned(),
-                    form: input,
-                })));
-            }
-        };
         let refused = match call(input.clone()).await {
-            Ok(value) => {
-                // The change is made: a claim not kept only lets a repeat be
-                // refused by the service, or made again.
-                if let Err(error) = claim.keep().await {
-                    tracing::warn!(error = %ErrorChain(&error), "a dashboard change's claim was not kept");
-                }
-                return Ok(Some(Ok(value)));
-            }
+            Ok(value) => return Ok(Some(Ok(value))),
             Err(refused) => refused.into(),
         };
-        // The refusal is answered whatever happens to the claim, which expires.
-        if let Err(error) = claim.release().await {
-            tracing::warn!(error = %ErrorChain(&error), "a dashboard change's claim was not released");
-        }
         match refused {
-            Refusal::HandOff => Err(app.hand_off(cx)),
+            Refusal::HandOff => Err(Self::of(cx).hand_off(cx)),
             Refusal::Page(error) => Err(error.into()),
             Refusal::Form(refusal) => match refusal.public() {
                 (status, _) if status.is_server_error() => {
@@ -662,8 +624,7 @@ impl AdminApplication {
             .map(Body::new)
     }
 
-    /// Like [`Self::change`], then goes to `done` once the change is made, where
-    /// the same form posted again meanwhile goes too.
+    /// Like [`Self::change`], then goes to `done` once the change is made.
     async fn submit<I, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
@@ -671,23 +632,18 @@ impl AdminApplication {
         call: F,
     ) -> Result<Option<Refused<I>>>
     where
-        I: Clone + Serialize,
+        I: Clone,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<(), E>>,
     {
-        match Self::change(cx, form, done.clone(), call).await? {
+        match Self::change(cx, form, call).await? {
             Some(Ok(())) => Err(see_other(done).into()),
             Some(Err(refused)) => Ok(Some(refused)),
             None => Ok(None),
         }
     }
 }
-
-/// What a change's page says over a form posted again while the same change,
-/// posted moments before, is still being made: nothing was changed by this one.
-const BEING_MADE: &str =
-    "This change is already being made. Check its result before you send it again.";
 
 /// The page a change's page is under: the account or client it changes.
 #[derive(Clone)]
@@ -715,10 +671,6 @@ impl Parent {
         }
     }
 }
-
-/// The form of a change that takes no input, which its button alone posts.
-#[derive(Clone, Default, Serialize, Deserialize)]
-struct NoInput {}
 
 /// A change the service refused: why, and the form as it was posted, which the
 /// page shows again so nothing typed is lost. It reads as its message.

@@ -1,7 +1,8 @@
 //! Account search, one account's page, and the changes made to an account.
 
-use super::{AdminApplication as App, NoInput, invitations, lists, settings};
+use super::{AdminApplication as App, invitations, lists, settings};
 use crate::{Reason, routes};
+use serde::de::IgnoredAny;
 use sourceorigin_common::{
     AccountStatus, PictureId, SessionId, UserId,
     admin::{DisableUser, EventSearch, User, UserSearch},
@@ -211,7 +212,7 @@ pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<
 
 /// `/users/{account}/enable`: reactivates a disabled account.
 #[route([GET, POST] "/users/{account}/enable")]
-pub(super) async fn enable(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -296,7 +297,7 @@ pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
 
 /// `/users/{account}/sessions/revoke`: ends every session of the account.
 #[route([GET, POST] "/users/{account}/sessions/revoke")]
-pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -321,7 +322,7 @@ pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<NoInput>>) -> Res
 /// `/users/{account}/sessions/{session}/revoke`: ends one session of the account;
 /// another account's is not found.
 #[route([GET, POST] "/users/{account}/sessions/{session}/revoke")]
-pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
@@ -352,7 +353,7 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<NoInput>>) -> Resu
 
 /// The form of a change whose reason the owner sees in their history: starting
 /// or undoing a recovery, scheduling a deletion or restoring the account.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub(super) struct ReasonForm {
     /// Why, recorded with the change and shown to the owner in their history.
     reason: String,

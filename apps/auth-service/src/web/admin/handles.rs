@@ -1,9 +1,9 @@
 //! Handles: the reserved list, the accounts holding a reserved handle, and the
 //! released handles, with reserving, unreserving and releasing one.
 
-use super::{AdminApplication as App, NoInput, settings, users::Account};
+use super::{AdminApplication as App, settings, users::Account};
 use crate::{Reason, handles::HandlesError};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
 use sourceorigin_common::{Handle, handle::RESERVED};
 use sourceorigin_ui::{
     Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder, Target,
@@ -26,7 +26,7 @@ struct HandleQuery {
 impl Query for HandleQuery {}
 
 /// The form reserving a handle.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Reservation {
     /// The handle to reserve.
     handle: String,
@@ -131,14 +131,14 @@ pub(super) async fn reserve(cx: &Cx, form: Option<Form<Reservation>>) -> Result<
 
 /// `/handles/unreserve?handle=…`: removes a handle from the reserved list.
 #[route([GET, POST] "/handles/unreserve")]
-pub(super) async fn unreserve(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn unreserve(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     App::handle_change(cx, form, Change::UnreserveHandle).await
 }
 
 /// `/handles/release?handle=…`: deletes a released handle, or a purged account's
 /// last one, so anyone may claim it again.
 #[route([GET, POST] "/handles/release")]
-pub(super) async fn release(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn release(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     App::handle_change(cx, form, Change::ReleaseHandle).await
 }
 
@@ -147,7 +147,7 @@ impl App {
     /// which goes back to the handles page once made.
     async fn handle_change(
         cx: &Cx,
-        form: Option<Form<NoInput>>,
+        form: Option<Form<IgnoredAny>>,
         change: Change,
     ) -> Result<Response> {
         let admin = Self::admin(cx).await?;

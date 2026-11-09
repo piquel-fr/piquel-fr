@@ -5,7 +5,6 @@ use super::{DashboardRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use sourceorigin_common::{Handle, PictureId, SessionId, UserId, admin::DashboardSession};
-use uuid::Uuid;
 
 /// A handoff code, which redeems once, before `expires_at`, in the browser
 /// holding the state its digest names. Every handoff needs a passkey's proof.
@@ -61,22 +60,6 @@ pub struct EndedDashboardSession {
     pub session_id: SessionId,
     /// The account that was signed in.
     pub user_id: UserId,
-}
-
-/// A claim's own token, which only the request that took it holds: only
-/// [`DashboardRepository::claim_submission`] makes one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SubmissionToken(Uuid);
-
-/// What claiming a change the dashboard posted found.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Submission {
-    /// The change is claimed now, by this token, to be made.
-    Claimed(SubmissionToken),
-    /// The same change was made moments ago.
-    Made,
-    /// The same change is being made still.
-    Pending,
 }
 
 impl DashboardRepository<'_> {
@@ -350,118 +333,6 @@ impl DashboardRepository<'_> {
                 idle_since,
             )
         )
-    }
-
-    /// Claims the change `user_id` posted, whose administrator, page and form
-    /// have the digest `digest`, as being made, until `expires_at`: the claim's
-    /// own token, or, if the change is claimed already and its claim has not
-    /// expired, whether it was made, or is being made still.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if a query fails.
-    pub async fn claim_submission(
-        &mut self,
-        digest: &[u8],
-        user_id: UserId,
-        expires_at: DateTime<Utc>,
-    ) -> Result<Submission, DatabaseError> {
-        let claimed = run!(
-            self,
-            fetch_optional,
-            sqlx::query_scalar!(
-                "INSERT INTO dashboard_submissions (digest, user_id, token, expires_at)
-                VALUES ($1, $2, gen_random_uuid(), $3)
-                ON CONFLICT (digest) DO UPDATE
-                SET token = EXCLUDED.token, made = FALSE, expires_at = EXCLUDED.expires_at
-                WHERE dashboard_submissions.expires_at <= now()
-                RETURNING token",
-                digest,
-                user_id.as_uuid(),
-                expires_at,
-            )
-        )?;
-        if let Some(token) = claimed {
-            return Ok(Submission::Claimed(SubmissionToken(token)));
-        }
-        let made = run!(
-            self,
-            fetch_optional,
-            sqlx::query_scalar!(
-                "SELECT made FROM dashboard_submissions WHERE digest = $1",
-                digest,
-            )
-        )?;
-        // One released since, a refused change, is taken as still being made:
-        // posting again, once told, tries again.
-        Ok(if made == Some(true) {
-            Submission::Made
-        } else {
-            Submission::Pending
-        })
-    }
-
-    /// Records that the change claimed with `token` was made, and keeps its
-    /// claim until `expires_at`, unless another request took it since.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the update fails.
-    pub async fn made_submission(
-        &mut self,
-        token: SubmissionToken,
-        expires_at: DateTime<Utc>,
-    ) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "UPDATE dashboard_submissions SET made = TRUE, expires_at = $2 WHERE token = $1",
-                token.0,
-                expires_at,
-            )
-        )?;
-        Ok(())
-    }
-
-    /// Releases the claim `token` of a change that made nothing, so posting it
-    /// again tries again, unless another request took it since.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the delete fails.
-    pub async fn release_submission(
-        &mut self,
-        token: SubmissionToken,
-    ) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "DELETE FROM dashboard_submissions WHERE token = $1",
-                token.0,
-            )
-        )?;
-        Ok(())
-    }
-
-    /// Ends `user_id`'s claims on changes, as if their window had passed: a
-    /// fixture for posting the same form again.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the delete fails.
-    #[cfg(any(test, feature = "test-util"))]
-    pub async fn forget_submissions(&mut self, user_id: UserId) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "DELETE FROM dashboard_submissions WHERE user_id = $1",
-                user_id.as_uuid(),
-            )
-        )?;
-        Ok(())
     }
 
     /// Moves the last use of the dashboard sessions of the auth session

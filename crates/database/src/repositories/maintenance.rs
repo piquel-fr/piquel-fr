@@ -175,14 +175,6 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
-            "DELETE FROM dashboard_submissions
-            WHERE ctid IN (
-                SELECT ctid
-                FROM dashboard_submissions
-                WHERE expires_at < now()
-                LIMIT $1
-                FOR UPDATE SKIP LOCKED
-            )",
             "DELETE FROM authorization_requests
             WHERE ctid IN (
                 SELECT ctid

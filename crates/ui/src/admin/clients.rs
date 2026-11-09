@@ -14,7 +14,7 @@ use crate::{
     layout::page_head,
 };
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sourceorigin_common::{UserId, admin::Client, clients::ClientKind, protocol::oauth::Scope};
 use topcoat::{
     Result,
@@ -32,7 +32,7 @@ pub struct AdminClientRow<'a> {
 
 /// A client's settings as an operator's form sends them: an owner's, then the
 /// scopes beyond the standard ones and its trust, which only operators choose.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct OperatorDraft {
     /// What an owner chooses too.
     #[serde(flatten)]
@@ -72,7 +72,7 @@ impl OperatorDraft {
 }
 
 /// A client an operator registers: the ID they choose, its kind and settings.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct NewClientForm {
     /// Its ID, as typed.
     pub id: String,

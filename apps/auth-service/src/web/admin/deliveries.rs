@@ -1,6 +1,7 @@
 //! The outbound delivery queue: listing deliveries, retrying and cancelling one.
 
-use super::{AdminApplication as App, NoInput};
+use super::AdminApplication as App;
+use serde::de::IgnoredAny;
 use sourceorigin_common::{DeliveryId, admin::DeliveryStatus};
 use sourceorigin_ui::{Action, Change, DeliveryRow, Target};
 use topcoat::{
@@ -82,14 +83,14 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 /// `/deliveries/{delivery}/retry`: attempts a failed delivery, or a cancelled
 /// unordered one, again now.
 #[route([GET, POST] "/deliveries/{delivery}/retry")]
-pub(super) async fn retry(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn retry(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::RetryDelivery).await
 }
 
 /// `/deliveries/{delivery}/cancel`: cancels a pending or failed delivery, which
 /// unblocks the deliveries ordered after it.
 #[route([GET, POST] "/deliveries/{delivery}/cancel")]
-pub(super) async fn cancel(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn cancel(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::CancelDelivery).await
 }
 
@@ -98,7 +99,7 @@ impl App {
     /// which goes back to the list once made.
     async fn delivery_change(
         cx: &Cx,
-        form: Option<Form<NoInput>>,
+        form: Option<Form<IgnoredAny>>,
         change: Change,
     ) -> Result<Response> {
         let admin = Self::admin(cx).await?;

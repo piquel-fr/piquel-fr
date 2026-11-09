@@ -1,7 +1,8 @@
 //! The audit chain's state, and the checkpoints it may be pruned through.
 
-use super::{AdminApplication as App, NoInput};
+use super::AdminApplication as App;
 use crate::{AdminError, AuditKeys};
+use serde::de::IgnoredAny;
 use topcoat::{
     Result,
     context::Cx,
@@ -23,7 +24,7 @@ struct AuditQuery {
 /// to the page, which then shows that verification. Pruning itself needs the
 /// database owner, so the page never prunes.
 #[route([GET, POST] "/audit")]
-pub(super) async fn verify(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn verify(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let app = App::of(cx);
     let query = query_params::<AuditQuery>(cx)?;

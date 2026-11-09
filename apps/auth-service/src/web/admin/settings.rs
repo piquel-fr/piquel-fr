@@ -21,7 +21,7 @@ use crate::{
         settings::{Addresses, ConnectedApps, SignInMethods},
     },
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, de::DeserializeOwned};
 use sourceorigin_common::{EventId, Handle, UserId};
 use sourceorigin_ui::{
     Audience, Change, Checkbox, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow,
@@ -43,7 +43,7 @@ use topcoat::{
 };
 
 /// A settings change an administrator posts: the owner's change, and why.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Administered<C> {
     /// The change, as the owner's form names it.
     #[serde(flatten)]
@@ -53,7 +53,7 @@ struct Administered<C> {
 }
 
 /// The form giving an account a new handle.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 struct NewHandle {
     /// The handle.
     handle: String,
@@ -65,7 +65,7 @@ struct NewHandle {
 }
 
 /// The form giving an account a new display name.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 struct NewDisplayName {
     /// The name.
     display_name: String,

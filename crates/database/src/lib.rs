@@ -31,10 +31,7 @@ pub use repositories::{
     administrators::AdministratorsLocked,
     announcements::{DraftedAnnouncement, Recipients, SentAnnouncement},
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
-    dashboard::{
-        EndedDashboardSession, InsertHandoff, RedeemedHandoff, StoredDashboardSession, Submission,
-        SubmissionToken,
-    },
+    dashboard::{EndedDashboardSession, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},
     deliveries::{
         Announcement, AnnouncementEmail, BackchannelLogout, Channel, Delivery, DeliveryBacklog,

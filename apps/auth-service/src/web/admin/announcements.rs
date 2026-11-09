@@ -5,9 +5,10 @@
 //! nothing lost. Drafting, editing and discarding need no confirmation; sending
 //! does.
 
-use super::{AdminApplication as App, NoInput};
+use super::AdminApplication as App;
 use crate::{AdminError, AnnouncementDraft, admin::SignedInAdmin, deliveries::AnnouncementSender};
 use chrono::Duration;
+use serde::de::IgnoredAny;
 use sourceorigin_common::{
     AnnouncementId,
     admin::{
@@ -192,7 +193,7 @@ pub(super) async fn send(cx: &Cx, form: Option<Form<SendAnnouncement>>) -> Resul
 
 /// `/announcements/{announcement}/discard`: deletes a draft.
 #[route([GET, POST] "/announcements/{announcement}/discard")]
-pub(super) async fn discard(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Response> {
+pub(super) async fn discard(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let service = &App::of(cx).service;
     let id = *path_param::<Announcement>(cx)?;
@@ -241,53 +242,48 @@ impl App {
             }
             form => form,
         };
-        let saved = Self::change(
-            cx,
-            form,
-            back.clone(),
-            |input: DraftAnnouncement| async move {
-                let checked = AnnouncementDraft::try_from(&input)?;
-                let (id, revision) = match id {
-                    Some(id) => (
-                        id,
-                        service
-                            .edit_announcement(&admin.operator, id, &checked)
-                            .await?,
-                    ),
-                    None => (
-                        service
-                            .draft_announcement(&admin.operator, &checked)
-                            .await?,
-                        1,
-                    ),
-                };
-                if input.intent != DraftIntent::Send {
-                    return Ok::<_, AdminError>(Saved::Page(id));
+        let saved = Self::change(cx, form, |input: DraftAnnouncement| async move {
+            let checked = AnnouncementDraft::try_from(&input)?;
+            let (id, revision) = match id {
+                Some(id) => (
+                    id,
+                    service
+                        .edit_announcement(&admin.operator, id, &checked)
+                        .await?,
+                ),
+                None => (
+                    service
+                        .draft_announcement(&admin.operator, &checked)
+                        .await?,
+                    1,
+                ),
+            };
+            if input.intent != DraftIntent::Send {
+                return Ok::<_, AdminError>(Saved::Page(id));
+            }
+            if !admin.operator.is_confirmed(Duration::zero()) {
+                return Ok(Saved::Send(id, revision));
+            }
+            // The draft is saved: a send refused because it changed or was sent
+            // meanwhile, or because the dashboard must confirm first, goes on to
+            // the send page, rather than leave the form to save it again.
+            match service
+                .send_announcement(&admin.operator, id, revision)
+                .await
+            {
+                Ok(_) => Ok(Saved::Page(id)),
+                Err(
+                    refused @ (AdminError::AnnouncementChanged
+                    | AdminError::AnnouncementSent
+                    | AdminError::StepUpRequired(_)
+                    | AdminError::SessionEnded),
+                ) => {
+                    refused.log_refusal();
+                    Ok(Saved::Send(id, revision))
                 }
-                if !admin.operator.is_confirmed(Duration::zero()) {
-                    return Ok(Saved::Send(id, revision));
-                }
-                // The draft is saved: a send refused because it changed or was sent
-                // meanwhile, or because the dashboard must confirm first, goes on to
-                // the send page, rather than leave the form to save it again.
-                match service
-                    .send_announcement(&admin.operator, id, revision)
-                    .await
-                {
-                    Ok(_) => Ok(Saved::Page(id)),
-                    Err(
-                        refused @ (AdminError::AnnouncementChanged
-                        | AdminError::AnnouncementSent
-                        | AdminError::StepUpRequired(_)
-                        | AdminError::SessionEnded),
-                    ) => {
-                        refused.log_refusal();
-                        Ok(Saved::Send(id, revision))
-                    }
-                    Err(error) => Err(error),
-                }
-            },
-        )
+                Err(error) => Err(error),
+            }
+        })
         .await?;
         let (typed, refused) = match saved {
             Some(Ok(Saved::Page(id))) => {
