@@ -43,8 +43,11 @@ html[data-sidebar='collapsed'] .shell {
   color: var(--fg);
   text-decoration: none;
 }
-/* The name stays on one line beside the area's badge. */
+/* The name stays on one line beside the area's badge, and shortens rather than
+   run under the collapse button when text renders larger. */
 .sidebar .brand .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .mark {
