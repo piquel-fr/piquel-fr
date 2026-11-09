@@ -2,12 +2,12 @@
 
 use super::{announcements::announcement, *};
 use crate::AuditKeys;
-use piquel_common::protocol::claims::Acr;
-use piquel_common::{AnnouncementId, alerts::AlertsShown};
+use sourceorigin_common::protocol::claims::Acr;
+use sourceorigin_common::{AnnouncementId, alerts::AlertsShown};
 
 /// Production's committed audit keys.
 fn committed_keys() -> AuditKeys {
-    AuditKeys::committed(&"https://auth.piquel.fr".parse().expect("origin")).expect("keys")
+    AuditKeys::committed(&"https://auth.sourceorigin.dev".parse().expect("origin")).expect("keys")
 }
 
 impl AdminOperation {

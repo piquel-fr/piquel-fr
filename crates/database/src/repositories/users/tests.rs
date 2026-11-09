@@ -7,7 +7,7 @@ use crate::repositories::{
     users::InsertUser,
 };
 use chrono::Utc;
-use piquel_common::{
+use sourceorigin_common::{
     SessionId, UserId,
     events::{Browser, Platform, UserAgentFamily},
 };

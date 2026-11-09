@@ -1,9 +1,9 @@
-//! Who administers Piquel: the list, granting rights and revoking them.
+//! Who administers Origin Auth: the list, granting rights and revoking them.
 
 use super::AdminApplication as App;
 use crate::AdminError;
-use piquel_common::{UserId, admin::UserSearch};
-use piquel_ui::{Action, AdministratorRow, Change, Pager, Query};
+use sourceorigin_common::{UserId, admin::UserSearch};
+use sourceorigin_ui::{Action, AdministratorRow, Change, Pager, Query};
 use serde::{Deserialize, de::IgnoredAny};
 use topcoat::{
     Result,
@@ -14,7 +14,7 @@ use topcoat::{
 
 path_param!(pub administrator: UserId else not_found);
 
-/// `/administrators`: who administers Piquel.
+/// `/administrators`: who administers Origin Auth.
 #[route(GET "/administrators")]
 pub(super) async fn list(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
@@ -43,7 +43,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         .collect();
     let (granting, rows) = (&href!(grant).resolve(cx), &rows);
     let page = view! {
-        piquel_ui::administrator_list(rows: rows, grant: granting.as_str())
+        sourceorigin_ui::administrator_list(rows: rows, grant: granting.as_str())
     };
     App::render(cx, StatusCode::OK, "Administrators", page).await
 }
@@ -97,7 +97,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
     })?;
     let (q, rows, pager, refusal) = (&q, &rows, &pager, refusal.as_deref());
     let page = view! {
-        piquel_ui::grant_search(
+        sourceorigin_ui::grant_search(
             action: action.as_str(),
             q: q.as_str(),
             rows: rows,
@@ -122,7 +122,7 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     })
     .await?;
     let page = view! {
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::RevokeAdministrator,
             back: back.as_str(),
             refusal: refusal.as_deref(),

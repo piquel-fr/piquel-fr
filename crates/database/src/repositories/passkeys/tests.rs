@@ -1,6 +1,6 @@
 use super::{InsertPasskey, PasskeyRepository};
 use crate::{Database, DatabaseError, InsertUser, repositories::UserRepository};
-use piquel_common::PasskeyId;
+use sourceorigin_common::PasskeyId;
 
 /// A disabled account and an account whose only passkey is revoked list no
 /// credentials, like a handle nobody holds.

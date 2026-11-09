@@ -29,7 +29,7 @@ Each file is one case:
   time-dependent cases.
 - `expected` is either `{ "ok": value }` or
   `{ "error": { "code": "...", "reason": "..." } }`. `code` is an error category and
-  `reason` the check that failed, from `piquel_common::protocol::sdk`. `reason` is
+  `reason` the check that failed, from `sourceorigin_common::protocol::sdk`. `reason` is
   omitted for categories without one.
 
 ## Categories

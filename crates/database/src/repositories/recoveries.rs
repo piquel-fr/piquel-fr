@@ -4,7 +4,7 @@
 use super::{RecoveryRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{PasskeyId, RecoveryId, UserId};
+use sourceorigin_common::{PasskeyId, RecoveryId, UserId};
 
 /// A new recovery, whose link works until `expires_at`.
 pub struct InsertRecovery<'a> {

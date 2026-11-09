@@ -5,7 +5,7 @@ use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRedemption, RefreshR
 use crate::repositories::{OidcRepository, SessionRepository, TokenRepository};
 use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication, SessionScope};
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, SessionId, TokenId, UserId,
     protocol::claims::{Acr, Amr},
 };

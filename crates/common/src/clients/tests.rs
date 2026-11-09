@@ -140,10 +140,10 @@ fn related_origins_are_bare_https_domain_origins() {
 #[test]
 fn reserved_brands_are_refused_inside_names() {
     for (name, brand) in [
-        ("Piquel", Some("piquel")),
-        ("Piquel Settings", Some("piquel")),
-        ("my-PIQUEL.fr app", Some("piquel")),
-        ("P1quel", Some("piquel")),
+        ("SourceOrigin", Some("sourceorigin")),
+        ("SourceOrigin Settings", Some("sourceorigin")),
+        ("my-SOURCEORIGIN.fr app", Some("sourceorigin")),
+        ("S0urce0r1gin", Some("sourceorigin")),
         ("Sign in with G00gle", Some("google")),
         ("GitHub Desktop", Some("github")),
         ("Notes", None),

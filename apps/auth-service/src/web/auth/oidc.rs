@@ -6,8 +6,8 @@ use crate::{
     oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
     routes,
 };
-use piquel_common::Handle;
-use piquel_ui::{LoginQuery, Query, Title};
+use sourceorigin_common::Handle;
+use sourceorigin_ui::{LoginQuery, Query, Title};
 use std::slice;
 use topcoat::{
     Error,
@@ -33,7 +33,7 @@ impl WebApplication {
         let host = redirect.host_str().unwrap_or_default().to_owned();
         let sign_in = LoginQuery::continuing(&transaction).on(routes::page::LOGIN)?;
         let page = view! {
-            piquel_ui::consent(
+            sourceorigin_ui::consent(
                 client: &consent.request.client_display_name,
                 host: &host,
                 registered_by: consent.registered_by.as_ref().map(Handle::as_str),
@@ -78,7 +78,7 @@ impl WebApplication {
         let (destination, _) = web.oidc.logout_destination(&request).await?;
         let fields: Vec<_> = request.fields().collect();
         let page = view! {
-            piquel_ui::logout(action: routes::page::LOGOUT, fields: &fields, keep: routes::page::LOGIN)
+            sourceorigin_ui::logout(action: routes::page::LOGOUT, fields: &fields, keep: routes::page::LOGIN)
         };
         Ok(web
             .render(

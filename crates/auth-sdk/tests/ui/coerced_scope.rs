@@ -1,14 +1,14 @@
-use piquel_auth::AccessToken;
+use sourceorigin_auth::AccessToken;
 use std::marker::PhantomData;
 
 /// Two scope sets told apart only by a lifetime.
 struct Policy<T>(PhantomData<T>);
 
-impl piquel_auth::__private::Declared for Policy<fn(&str)> {
+impl sourceorigin_auth::__private::Declared for Policy<fn(&str)> {
     const NAMES: &'static [&'static str] = &["notes:read"];
 }
 
-impl piquel_auth::__private::Declared for Policy<fn(&'static str)> {
+impl sourceorigin_auth::__private::Declared for Policy<fn(&'static str)> {
     const NAMES: &'static [&'static str] = &["notes:write"];
 }
 

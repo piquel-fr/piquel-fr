@@ -4,14 +4,14 @@ use super::*;
 /// Origins reject every insecure or ambiguous component.
 #[test]
 fn urls_validate_once() {
-    assert!("https://auth.piquel.fr".parse::<Origin>().is_ok());
+    assert!("https://auth.sourceorigin.dev".parse::<Origin>().is_ok());
     for value in [
         "http://localhost",
-        "https://user@auth.piquel.fr",
-        "https://auth.piquel.fr?query",
-        "https://auth.piquel.fr#fragment",
+        "https://user@auth.sourceorigin.dev",
+        "https://auth.sourceorigin.dev?query",
+        "https://auth.sourceorigin.dev#fragment",
         "/relative",
-        "https://auth.piquel.fr/path",
+        "https://auth.sourceorigin.dev/path",
     ] {
         assert!(value.parse::<Origin>().is_err(), "accepted {value}");
     }
@@ -36,7 +36,7 @@ fn secrets_are_redacted() {
     assert_eq!(secret.utf8().expect("UTF-8"), "private");
     assert!(!format!("{secret:?}").contains("private"));
     assert!(SecretBytes(vec![255]).utf8().is_err());
-    let missing = SecretReference::parse("file:///nonexistent/piquel-secret-test")
+    let missing = SecretReference::parse("file:///nonexistent/sourceorigin-secret-test")
         .expect("reference")
         .resolve()
         .expect_err("missing file");
@@ -46,7 +46,7 @@ fn secrets_are_redacted() {
 /// Missing variables and parse failures name the setting without exposing its value.
 #[test]
 fn variable_errors_name_the_setting() {
-    let variable = Variable::new("PIQUEL_COMMON_TEST_ABSENT_5A3C");
+    let variable = Variable::new("SOURCEORIGIN_COMMON_TEST_ABSENT_5A3C");
     assert_eq!(variable.optional().expect("optional"), None);
     assert!(!variable.flag(false).expect("default"));
     assert_eq!(variable.parse_or::<u32>("42").expect("default"), 42);

@@ -17,7 +17,7 @@ use crate::{
     DatabaseError, DatabaseTransaction, Notified,
     repositories::{EmailRepository, RepositoryExecutor},
 };
-use piquel_common::{
+use sourceorigin_common::{
     EmailId, Handle, NotificationId, RecoveryId, UserId,
     events::DomainEvent,
     notifications::{Addressees, Notification},

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::Database;
-use piquel_common::protocol::jwt::KeyType;
+use sourceorigin_common::protocol::jwt::KeyType;
 
 /// A key `id` in `state`, with placeholder key material the table does not check.
 fn key(id: &str, state: SigningKeyState) -> InsertSigningKey {
@@ -46,7 +46,7 @@ async fn the_lock_excludes_and_one_key_per_type_signs() {
     for existing in keys.list().await.expect("list") {
         keys.delete(&existing.id).await.expect("delete");
     }
-    let suffix = piquel_common::UserId::new();
+    let suffix = sourceorigin_common::UserId::new();
     let first = key(&format!("first-{suffix}"), SigningKeyState::Active);
     keys.insert(&first).await.expect("first active key");
     keys.insert(&key(&format!("next-{suffix}"), SigningKeyState::Next))

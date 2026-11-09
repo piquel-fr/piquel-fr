@@ -254,12 +254,12 @@ dependencies = [
  "ipnet",
  "lettre",
  "percent-encoding",
- "piquel-auth",
- "piquel-common",
- "piquel-crypto",
- "piquel-repository",
- "piquel-telemetry",
- "piquel-ui",
+ "sourceorigin-auth",
+ "sourceorigin-common",
+ "sourceorigin-crypto",
+ "sourceorigin-repository",
+ "sourceorigin-telemetry",
+ "sourceorigin-ui",
  "psl",
  "rcgen",
  "reqwest",
@@ -2196,7 +2196,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
-name = "piquel-auth"
+name = "sourceorigin-auth"
 version = "0.1.0"
 dependencies = [
  "aws-lc-rs",
@@ -2204,7 +2204,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "jsonwebtoken",
- "piquel-common",
+ "sourceorigin-common",
  "rand 0.8.7",
  "reqwest",
  "secrecy",
@@ -2220,13 +2220,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-common"
+name = "sourceorigin-common"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "openssl",
- "piquel-crypto",
+ "sourceorigin-crypto",
  "reqwest",
  "serde",
  "serde_json",
@@ -2240,13 +2240,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-crypto"
+name = "sourceorigin-crypto"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "openssl",
- "piquel-common",
+ "sourceorigin-common",
  "rand 0.8.7",
  "serde",
  "serde_json",
@@ -2255,13 +2255,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-repository"
+name = "sourceorigin-repository"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "piquel-common",
- "piquel-crypto",
- "piquel-telemetry",
+ "sourceorigin-common",
+ "sourceorigin-crypto",
+ "sourceorigin-telemetry",
  "serde",
  "serde_json",
  "sqlx",
@@ -2273,7 +2273,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-telemetry"
+name = "sourceorigin-telemetry"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -2285,7 +2285,7 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "piquel-common",
+ "sourceorigin-common",
  "reqwest",
  "thiserror 2.0.18",
  "tokio",
@@ -2297,11 +2297,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-ui"
+name = "sourceorigin-ui"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "piquel-common",
+ "sourceorigin-common",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -2311,13 +2311,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-web"
+name = "sourceorigin-web"
 version = "0.1.0"
 dependencies = [
  "axum",
- "piquel-common",
- "piquel-telemetry",
- "piquel-ui",
+ "sourceorigin-common",
+ "sourceorigin-telemetry",
+ "sourceorigin-ui",
  "thiserror 2.0.18",
  "tokio",
  "topcoat",

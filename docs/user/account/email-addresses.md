@@ -1,7 +1,7 @@
 # Email addresses
 
 The **Email addresses** tab of your settings, at
-`auth.piquel.fr/settings/emails`, lists your addresses. Piquel sends security
+`auth.sourceorigin.dev/settings/emails`, lists your addresses. Origin Auth sends security
 notices to your primary address, and apps you allow to see your email address
 receive it.
 
@@ -27,13 +27,13 @@ An account can have up to 10 addresses.
 
 ## Confirm an address
 
-1. Open the email from Piquel, titled **Confirm your email address for
-   Piquel**, and open its link.
+1. Open the email from SourceOrigin, titled **Confirm your email address for
+   SourceOrigin**, and open its link.
 2. On **Confirm your email address**, select **Confirm this address**.
 
 The page says **Address confirmed**. The link works once, for 24 hours, on any
 device: you don't need to be signed in. If you are signed in to a different
-Piquel account in that browser, the page refuses, so you never confirm an
+Origin Account in that browser, the page refuses, so you never confirm an
 address for someone else's account. The email names the account the address
 joins: confirm only if it is yours.
 
@@ -47,7 +47,7 @@ If the link expired, select **Resend link** beside the address.
 2. Confirm with your passkey if your browser asks.
 
 The page says **Your primary address changed. We told your previous one.**
-Piquel sends security notices to the new address from then on.
+Origin Auth sends security notices to the new address from then on.
 
 ## Remove an address
 
@@ -55,7 +55,7 @@ Piquel sends security notices to the new address from then on.
 2. Select **Confirm removal**, and confirm with your passkey if your browser
    asks.
 
-Piquel tells a confirmed address that it was removed. You can't remove your
+SourceOrigin tells a confirmed address that it was removed. You can't remove your
 primary address while another confirmed address could replace it: make that
 one primary first.
 
@@ -70,14 +70,14 @@ Without a confirmed address, apps receive none.
 
 ## Troubleshooting
 
-- **"This address is already used by another Piquel account."** Another
+- **"This address is already used by another Origin Account."** Another
   account confirmed it first. An address belongs to one account at a time.
 - **"Too many verification emails were sent recently. Please try again
-  later."** Piquel limits how many confirmation emails it sends in an hour.
+  later."** SourceOrigin limits how many confirmation emails it sends in an hour.
   Wait, then select **Resend link**.
 - **"This verification link is invalid, has expired or was already used."**
   Select **Resend link** beside the address for a new one.
-- **"This link adds the address to a Piquel account other than the one you
+- **"This link adds the address to an Origin Account other than the one you
   are signed in to."** Sign out first if the address is meant for the other
   account.
 - **"Make another address your primary address before removing this one."**

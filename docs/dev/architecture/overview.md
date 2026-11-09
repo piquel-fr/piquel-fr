@@ -1,6 +1,6 @@
 # Overview
 
-This page is the map of piquel.fr: the processes that run it, what each crate
+This page is the map of sourceorigin.dev: the processes that run it, what each crate
 owns, and which page to read next. Start here before changing anything that
 crosses a crate or a process.
 
@@ -10,32 +10,32 @@ crosses a crate or a process.
  browsers ──HTTPS──┐               apps ──OIDC over HTTPS──┐
                    ▼                                       ▼
  ┌──────────────────────── piqueld gateway ─────────────────────────┐
- │ piquel.fr    auth.piquel.fr    admin.piquel.fr*    docs.piquel.fr│
+ │ sourceorigin.dev    auth.sourceorigin.dev    admin.sourceorigin.dev*    docs.sourceorigin.dev│
  └─────┬───────────────┬─────────────────┬───────────────────┬──────┘
        ▼               ▼                 ▼                   ▼
-   piquel-web     auth-service:     auth-service:          docs
+   sourceorigin-web     auth-service:     auth-service:          docs
                   public listener   admin listener
                           └────────┬───────┘
                                    ├──▶ PostgreSQL
                                    ├──▶ apps' back-channel logout URIs
                                    └──▶ SMTP relay
 
- auth-service, piquel-web ──OTLP──▶ collector ──▶ Prometheus, Tempo, Loki ──▶ Grafana
+ auth-service, sourceorigin-web ──OTLP──▶ collector ──▶ Prometheus, Tempo, Loki ──▶ Grafana
 
  * a private route: reachable on the tailnet only
 ```
 
 - **`auth-service`** (`apps/auth-service`) is one executable. `serve` runs a public
-  listener (`AUTH_PUBLIC_LISTENER`) for auth.piquel.fr and, when the dashboard is
-  configured, an admin listener (`AUTH_ADMIN_LISTENER`) for admin.piquel.fr, which
+  listener (`AUTH_PUBLIC_LISTENER`) for auth.sourceorigin.dev and, when the dashboard is
+  configured, an admin listener (`AUTH_ADMIN_LISTENER`) for admin.sourceorigin.dev, which
   only a private route reaches. Each listener has its own router and security
   layer (`AuthConfig::router` and `AuthConfig::admin_router` in `src/lib.rs`).
   Both stop together: when one ends, `Command::listen` in `src/cli/serve.rs` stops
   the other, then background jobs get a grace period to finish. The same
   executable is the operator CLI: migrations, invitations, administrators, keys
   and every admin operation.
-- **`piquel-web`** (`apps/web`) is piquel.fr's own server: the homepage and
-  Piquel's policies, and a redirect of every other path to auth. It relies on
+- **`sourceorigin-web`** (`apps/web`) is sourceorigin.dev's own server: the homepage and
+  SourceOrigin's policies, and a redirect of every other path to auth. It relies on
   auth only to sign people in, and never shares its database, keys or process.
 - **PostgreSQL** holds all of auth's state. Auth needs no separate cache, RPC
   service, event bus or key-management service, so it runs as several replicas
@@ -45,7 +45,7 @@ crosses a crate or a process.
   `X-Forwarded-For`, which auth trusts only from the gateway's ranges
   ([deploying](../operations/deploying.md)).
 - **The telemetry stack** (`infra/telemetry.toml`) receives OTLP from auth and
-  piquel-web and stores traces, metrics and logs
+  sourceorigin-web and stores traces, metrics and logs
   ([telemetry](telemetry.md), [telemetry stack](../operations/telemetry.md)).
 - **Apps** sign in through standard OIDC, with any OIDC library or the SDKs
   ([SDK design](sdk.md)). Auth calls them back only through the
@@ -53,7 +53,7 @@ crosses a crate or a process.
   account holders through an SMTP relay.
 
 Auth renders every page itself, sign-in included, and the account settings at
-`/settings`; piquel.fr redirects there every path it doesn't serve.
+`/settings`; sourceorigin.dev redirects there every path it doesn't serve.
 [Surfaces](surfaces.md) sets out what each host serves.
 
 ## Repository
@@ -61,15 +61,15 @@ Auth renders every page itself, sign-in included, and the account settings at
 | Location | Responsibility |
 | --- | --- |
 | `apps/auth-service` | The auth authority: browser ceremonies, social sign-in, OIDC, the server-rendered pages, the settings API, the admin dashboard and the CLI. `assets/passkey.js` runs the WebAuthn ceremonies and the form hooks that start them, and `assets/picture.js` lets the picture form choose its crop |
-| `apps/web` | `piquel-web`, piquel.fr's own web server, with Piquel's policies in `assets/policies/` |
-| `packages/auth` | `@piquel/auth`, the TypeScript SDK, not yet published: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `piquel_common::protocol` |
+| `apps/web` | `sourceorigin-web`, sourceorigin.dev's own web server, with Origin Auth's policies in `assets/policies/` |
+| `packages/auth` | `@sourceorigin/auth`, the TypeScript SDK, not yet published: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `sourceorigin_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [SDK design](sdk.md#test-vectors) |
 | `tests/browser` | Playwright tests, and the documentation's screenshots |
 | `infra/` | Dockerfiles and the piqueld manifests |
 
 Inside auth-service, each HTTP feature is a module whose `XApplication` serves
 its routes, and `src/routes.rs` declares every path. Pages live in `src/web`, grouped by area:
-`auth`, the sign-in flows on auth.piquel.fr (signing in and up, consent, logout,
+`auth`, the sign-in flows on auth.sourceorigin.dev (signing in and up, consent, logout,
 the recovery pages and the admin dashboard's handoff), `settings`, `developers`,
 and `admin`, the admin dashboard, whose views are in `crates/ui/src/admin`.
 `src/admin` is not a page module: it holds `AdminService` and the operator rules
@@ -80,23 +80,23 @@ explains how applications, routes and services fit together.
 
 | Crate | Owns |
 | --- | --- |
-| `piquel-common` (`crates/common`) | Shared types: IDs, handles, vocabularies, domain events, notifications, and under `protocol` the wire types auth and the SDKs share. Its server-only parts sit behind the `admin`, `config`, `email` and `events` features, so the Rust SDK compiles none of them |
-| `piquel-crypto` (`crates/crypto`) | Every cryptographic primitive: secrets, digests, HMAC, PKCE, RS256 signing and key sets, AES-256-GCM sealing, Ed25519 signed notes and SCRAM verifiers |
-| `piquel-repository` (`crates/database`) | The only crate that runs SQL: connections, migrations, repositories, transactions, events and the delivery queue's storage |
-| `piquel-telemetry` (`crates/telemetry`) | Logs, traces and metrics, and the HTTP layer every router uses |
-| `piquel-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, which know nothing of the database or HTTP |
-| `piquel-auth` (`crates/auth-sdk`) | The Rust SDK, which depends only on `piquel-common` |
+| `sourceorigin-common` (`crates/common`) | Shared types: IDs, handles, vocabularies, domain events, notifications, and under `protocol` the wire types auth and the SDKs share. Its server-only parts sit behind the `admin`, `config`, `email` and `events` features, so the Rust SDK compiles none of them |
+| `sourceorigin-crypto` (`crates/crypto`) | Every cryptographic primitive: secrets, digests, HMAC, PKCE, RS256 signing and key sets, AES-256-GCM sealing, Ed25519 signed notes and SCRAM verifiers |
+| `sourceorigin-repository` (`crates/database`) | The only crate that runs SQL: connections, migrations, repositories, transactions, events and the delivery queue's storage |
+| `sourceorigin-telemetry` (`crates/telemetry`) | Logs, traces and metrics, and the HTTP layer every router uses |
+| `sourceorigin-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, which know nothing of the database or HTTP |
+| `sourceorigin-auth` (`crates/auth-sdk`) | The Rust SDK, which depends only on `sourceorigin-common` |
 
 [Rust conventions](../rust-conventions.md#crates) describes each crate in full.
-Shared types go in `piquel-common`. Add a crate only for an independently
-auditable primitive, or, as `piquel-ui`, to compile slow view code beside the
+Shared types go in `sourceorigin-common`. Add a crate only for an independently
+auditable primitive, or, as `sourceorigin-ui`, to compile slow view code beside the
 database crate instead of after it.
 
-`piquel-common`'s optional `sqlx` feature, enabled only by the database crate,
+`sourceorigin-common`'s optional `sqlx` feature, enabled only by the database crate,
 lets its IDs and vocabularies decode from columns. Auth-service owns
 authentication policy: frontends never receive database credentials or provider
 secrets. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
-piquel.fr subdomains.
+sourceorigin.dev subdomains.
 
 ## Tooling
 

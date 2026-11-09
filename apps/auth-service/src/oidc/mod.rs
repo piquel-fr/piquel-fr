@@ -25,7 +25,7 @@ pub use error::OidcConfigError;
 pub(crate) use error::{OAuthCode, OAuthError, Reject};
 pub(crate) use inline::{InlineClaim, InlineResponse};
 pub(crate) use logout::LogoutQuery;
-use piquel_crypto::{ClientSecret, CryptoError, Digest, Secret};
+use sourceorigin_crypto::{ClientSecret, CryptoError, Digest, Secret};
 
 use axum::{
     Router,
@@ -36,7 +36,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine;
-use piquel_common::{
+use sourceorigin_common::{
     TokenId,
     clients::ClientKind,
     config::Origin,
@@ -50,8 +50,8 @@ use piquel_common::{
         },
     },
 };
-use piquel_repository::{Database, StoredOidcClient};
-use piquel_ui::Query;
+use sourceorigin_repository::{Database, StoredOidcClient};
+use sourceorigin_ui::Query;
 use serde::Serialize;
 use std::sync::Arc;
 use url::Url;
@@ -73,7 +73,7 @@ const PUSHED_REQUEST_SECONDS: i64 = 60;
 /// How long an authorization code stays redeemable.
 const AUTHORIZATION_CODE_MINUTES: i64 = 2;
 /// Developer documentation advertised in the metadata.
-const SERVICE_DOCUMENTATION: &str = "https://docs.piquel.fr/user/reference/oidc.html";
+const SERVICE_DOCUMENTATION: &str = "https://docs.sourceorigin.dev/user/reference/oidc.html";
 
 /// The OAuth 2.0 and `OpenID` Connect provider.
 #[derive(Clone)]
@@ -92,7 +92,7 @@ pub struct OidcApplication {
     metadata: PublicDocument,
 }
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// HTTP authentication schemes accepted by the protocol endpoints.
     enum AuthScheme {
         /// Client ID and secret, used by confidential clients at the token endpoint.
@@ -113,7 +113,7 @@ impl AuthScheme {
     }
 }
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// Opaque token prefixes; each binds a token to one purpose so it cannot be used for another.
     enum TokenPrefix {
         /// Pending login and consent transaction, or a pushed request not yet claimed.

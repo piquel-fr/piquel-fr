@@ -12,7 +12,7 @@ use crate::{
     DatabaseError, DatabaseTransaction, Notified,
     repositories::{EmailRepository, RepositoryExecutor},
 };
-use piquel_common::{AnnouncementId, UserId, events::DomainEvent};
+use sourceorigin_common::{AnnouncementId, UserId, events::DomainEvent};
 
 /// Announcements' emails, sent over SMTP by auth-service.
 pub struct Announcement;

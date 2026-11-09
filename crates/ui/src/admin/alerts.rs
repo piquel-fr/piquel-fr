@@ -2,7 +2,7 @@
 
 use super::{Action, Change, confirm, moment};
 use crate::layout::page_head;
-use piquel_common::alerts::{
+use sourceorigin_common::alerts::{
     Alert, AlertAuthor, AlertDetail, AlertState, AlertStatus, AlertUpdate,
 };
 use topcoat::{

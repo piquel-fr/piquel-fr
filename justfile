@@ -1,7 +1,7 @@
 # Validate by default; database and browser tests remain explicit.
 default: validate
 
-# Rust formatting, linting, checks, audits and the auth-service and piquel-web builds.
+# Rust formatting, linting, checks, audits and the auth-service and sourceorigin-web builds.
 mod rust 'just/rust.just'
 
 # Web formatting, linting, type checks, the TypeScript SDK's tests and the browser tests.
@@ -89,11 +89,11 @@ coverage *ARGS:
 
 # Regenerate tests/sdk-vectors; `just test` fails while the committed files are stale.
 sdk-vectors:
-    @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p piquel-common --test sdk_vectors
+    @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p sourceorigin-common --test sdk_vectors
 
 # Regenerate the TypeScript SDK's wire types, packages/auth/src/protocol.ts, from
-# piquel_common::protocol; `just test` fails while the committed file is stale.
+# sourceorigin_common::protocol; `just test` fails while the committed file is stale.
 sdk-types:
-    @UPDATE_SDK_TYPES=1 cargo nextest run --locked -p piquel-common --lib protocol::typescript
+    @UPDATE_SDK_TYPES=1 cargo nextest run --locked -p sourceorigin-common --lib protocol::typescript
 
 audit: rust::audit web::audit

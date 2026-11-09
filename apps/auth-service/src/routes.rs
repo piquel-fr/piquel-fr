@@ -43,9 +43,9 @@ pub(crate) mod passkey {
 
     /// The ceremonies auth's pages run, which their router keeps in every page's
     /// context.
-    pub(crate) const CEREMONIES: piquel_ui::PasskeyRoutes = {
-        use piquel_ui::CeremonyRoutes as Routes;
-        piquel_ui::PasskeyRoutes {
+    pub(crate) const CEREMONIES: sourceorigin_ui::PasskeyRoutes = {
+        use sourceorigin_ui::CeremonyRoutes as Routes;
+        sourceorigin_ui::PasskeyRoutes {
             sign_in: Routes {
                 start: AUTHENTICATE_START,
                 finish: AUTHENTICATE_FINISH,
@@ -113,7 +113,7 @@ pub(crate) mod recovery {
 
 /// Profile pictures.
 pub(crate) mod pictures {
-    use piquel_common::{PictureId, config::Origin};
+    use sourceorigin_common::{PictureId, config::Origin};
 
     /// A picture, by the ID of its upload. No file extension, so the edge, which
     /// caches static files by extension, keeps no copy past its removal.
@@ -195,7 +195,7 @@ pub(crate) mod audit {
 
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
-    use piquel_common::protocol::metadata;
+    use sourceorigin_common::protocol::metadata;
 
     /// `OpenID` Provider metadata.
     pub(crate) const DISCOVERY: &str = metadata::OPENID_CONFIGURATION_PATH;
@@ -258,7 +258,7 @@ pub(crate) mod dashboard {
 /// Pages browsers visit. Each server-rendered page answers `GET` with the page and
 /// `POST` with its form's result, and is listed in [`ALL`](page::ALL).
 pub(crate) mod page {
-    /// Auth's root, which redirects to the account's settings, so that piquel.fr's
+    /// Auth's root, which redirects to the account's settings, so that sourceorigin.dev's
     /// root, which redirects here, still lands on them.
     pub(crate) const ROOT: &str = "/";
     /// Sign-in, social signup and link confirmation.
@@ -282,7 +282,7 @@ pub(crate) mod page {
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
     pub(crate) const PREFERENCES: &str = "/preferences";
 
-    /// The account's settings, at the paths piquel.fr served them on, so its redirect
+    /// The account's settings, at the paths sourceorigin.dev served them on, so its redirect
     /// keeps old links and sent emails working.
     pub(crate) mod settings {
         /// The account at a glance.
@@ -312,7 +312,7 @@ pub(crate) mod page {
     /// The developer console: the account's apps, and each app's pages, whose
     /// `{id}` is its client ID.
     pub(crate) mod developers {
-        use piquel_common::ClientId;
+        use sourceorigin_common::ClientId;
 
         /// The account's apps.
         pub(crate) const HOME: &str = "/developers";

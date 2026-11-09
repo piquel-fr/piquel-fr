@@ -11,8 +11,8 @@ use crate::{
 };
 use axum::http::HeaderMap;
 use chrono::{Duration, Utc};
-use piquel_common::{Handle, UserId, events::DomainEvent};
-use piquel_repository::{
+use sourceorigin_common::{Handle, UserId, events::DomainEvent};
+use sourceorigin_repository::{
     DatabaseTransaction, InsertAuthorizationCode, SessionAuthentication,
     StoredAuthorizationRequest, StoredSession,
 };

@@ -3,7 +3,7 @@
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, PasskeyId, SessionId, UserId,
     admin::Session,
     events::{DomainEvent, EventContext, RevocationReason, UserAgentFamily},

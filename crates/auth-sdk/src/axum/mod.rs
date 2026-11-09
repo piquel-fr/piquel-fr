@@ -6,10 +6,10 @@
 //!
 //! ```no_run
 //! use axum::{Json, Router, routing::get};
-//! use piquel_auth::axum::{BearerLayer, Scoped};
-//! # use piquel_auth::{Issuer, Resource};
+//! use sourceorigin_auth::axum::{BearerLayer, Scoped};
+//! # use sourceorigin_auth::{Issuer, Resource};
 //!
-//! piquel_auth::scopes! {
+//! sourceorigin_auth::scopes! {
 //!     /// Scopes of the notes API.
 //!     pub mod notes {
 //!         Read = "notes:read",
@@ -22,7 +22,7 @@
 //! }
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-//! let issuer = Issuer::discover("https://auth.piquel.fr").await?;
+//! let issuer = Issuer::discover("https://auth.sourceorigin.dev").await?;
 //! let app: Router = Router::new()
 //!     .route("/notes", get(list))
 //!     .layer(BearerLayer::new(issuer.resource(Resource::new("notes-api")?)));
@@ -39,19 +39,19 @@
 //!
 //! ```no_run
 //! use axum::{Router, routing::get};
-//! use piquel_auth::axum::{CookieKey, LoginRoutes, SignedIn};
-//! # use piquel_auth::{ClientConfig, Credentials, Issuer};
+//! use sourceorigin_auth::axum::{CookieKey, LoginRoutes, SignedIn};
+//! # use sourceorigin_auth::{ClientConfig, Credentials, Issuer};
 //!
 //! async fn home(user: SignedIn) -> String {
 //!     format!("Hello {}", user.name())
 //! }
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-//! # let issuer = Issuer::discover("https://auth.piquel.fr").await?;
+//! # let issuer = Issuer::discover("https://auth.sourceorigin.dev").await?;
 //! # let config = ClientConfig {
 //! #     client_id: "notes-web".parse()?,
 //! #     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
-//! #     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
+//! #     redirect_uri: "https://notes.sourceorigin.dev/auth/callback".parse()?,
 //! # };
 //! // The same key on every replica: `openssl rand -base64 32`.
 //! let key = CookieKey::from_base64(&std::env::var("NOTES_COOKIE_KEY")?)?;

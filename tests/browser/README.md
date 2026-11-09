@@ -7,7 +7,7 @@ Nothing is mocked. Each spec says at its top what it covers.
 Run it against a deployment you can throw away: the tests create accounts,
 passkeys and sessions in it. CI runs it on every pull request that can affect
 it, against the debug binary behind Caddy; see the `e2e` job in
-[ci.yml](https://github.com/piquel-fr/piquel-fr/blob/main/.github/workflows/ci.yml).
+[ci.yml](https://github.com/sourceorigin-dev/sourceorigin/blob/main/.github/workflows/ci.yml).
 
 ## Run it against a preview
 
@@ -23,11 +23,11 @@ it, against the debug binary behind Caddy; see the `e2e` job in
 
    ```console
    branch=$(git branch --show-current)
-   export E2E_AUTH_URL=$(piquelctl preview url piquel-fr "$branch" --route auth)
-   export E2E_ADMIN_URL=$(piquelctl preview url piquel-fr "$branch" --route admin)
-   export E2E_WEB_URL=$(piquelctl preview url piquel-fr "$branch" --route web)
-   export E2E_GRANT_ADMIN="piquelctl preview exec piquel-fr $branch auth -- auth-service admin grant"
-   export E2E_RECOVER="piquelctl preview exec piquel-fr $branch auth -- auth-service user recover"
+   export E2E_AUTH_URL=$(piquelctl preview url sourceorigin "$branch" --route auth)
+   export E2E_ADMIN_URL=$(piquelctl preview url sourceorigin "$branch" --route admin)
+   export E2E_WEB_URL=$(piquelctl preview url sourceorigin "$branch" --route web)
+   export E2E_GRANT_ADMIN="piquelctl preview exec sourceorigin $branch auth -- auth-service admin grant"
+   export E2E_RECOVER="piquelctl preview exec sourceorigin $branch auth -- auth-service user recover"
    export E2E_SERVER_CLIENT_SECRET=<secret>   # printed when you registered browser-e2e-server
    just web test-browser
    ```
@@ -49,7 +49,7 @@ skipped there.
 | `E2E_INVITE` | A command that prints a new signup link, for a deployment whose signup needs an invitation, as CI's does. Every signup runs it. | Signups go to `/register`, and the dashboard's invitation test is skipped. |
 | `E2E_MAIL_URL` | The API origin of a [Mailpit](https://mailpit.axllent.org) that receives the deployment's email. `just auth mailpit` runs one on `http://localhost:8025`. | The tests that read email are skipped. |
 | `E2E_RECOVER` | A command that runs `auth-service user recover` on the deployment. The test appends the handle, a reason and `--yes`. | The recovery test is skipped. |
-| `E2E_WEB_URL` | The origin of piquel.fr's web server, `apps/web`. | The web test is skipped. |
+| `E2E_WEB_URL` | The origin of sourceorigin.dev's web server, `apps/web`. | The web test is skipped. |
 | `E2E_SERVER_CLIENT_SECRET` | The secret of the `browser-e2e-server` client. | The server SDK test is skipped. |
 | `CHROMIUM_EXECUTABLE` | A Chromium to use instead of Playwright's. | Playwright's Chromium |
 | `E2E_ALLOW_SELF_SIGNED_TLS` | Any value, such as `1`, accepts certificates no browser trusts, such as Caddy's local CA in CI. Only for test deployments. | Certificates must be valid. |
@@ -81,7 +81,7 @@ unpadded base64url.
 Previews don't register them. Register them on the preview through its CLI:
 
 ```console
-cli() { piquelctl preview exec piquel-fr "$(git branch --show-current)" auth -- auth-service "$@"; }
+cli() { piquelctl preview exec sourceorigin "$(git branch --show-current)" auth -- auth-service "$@"; }
 cli client create browser-e2e --name 'Browser E2E' \
     --redirect-uri https://browser-e2e.test/callback
 cli client create browser-e2e-sdk --name 'Browser E2E SDK' --trusted --require-par \

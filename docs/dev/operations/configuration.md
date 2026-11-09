@@ -1,6 +1,6 @@
 # Configuration
 
-This page helps you change how auth-service and piquel-web are configured, in a
+This page helps you change how auth-service and sourceorigin-web are configured, in a
 deployed environment or on your machine, and lists every variable they read.
 
 Both read their configuration from environment variables at startup, and refuse
@@ -61,16 +61,16 @@ Both services read the standard OpenTelemetry variables, such as
 `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_RESOURCE_ATTRIBUTES`, and `RUST_LOG`:
 see [telemetry](../architecture/telemetry.md#configuration).
 
-## piquel-web
+## sourceorigin-web
 
-`piquel-web` serves piquel.fr: the homepage, the privacy policy at `/privacy`
+`sourceorigin-web` serves sourceorigin.dev: the homepage, the privacy policy at `/privacy`
 and the terms of service at `/terms`. It keeps no state, and needs no database
 or secret. It relies on auth only to sign people in: it links auth's pages, and
 redirects every other path, with its query, to the same one on auth (see
-[piquel.fr](deploying.md#piquelfr)). Its `/health` answers `204` for piqueld's
-probe, and its telemetry's `service.name` is `piquel-web`.
+[sourceorigin.dev](deploying.md#sourceorigindev)). Its `/health` answers `204` for piqueld's
+probe, and its telemetry's `service.name` is `sourceorigin-web`.
 
-{{#include variables/piquel-web.md}}
+{{#include variables/sourceorigin-web.md}}
 
 The policies are HTML in `apps/web/assets/policies/`. Keep them true to what the
 code does: a change to what auth stores, keeps or shares changes them too.

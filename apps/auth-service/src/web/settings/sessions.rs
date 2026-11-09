@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use chrono::Utc;
-use piquel_ui::{DeviceChange, DeviceRow, Messages, Notice, Section, Tab};
+use sourceorigin_ui::{DeviceChange, DeviceRow, Messages, Notice, Section, Tab};
 use topcoat::{
     context::Cx,
     router::{StatusCode, response::Response},
@@ -63,7 +63,7 @@ impl AccountPage for Devices {
         let sessions = web.account.sessions(&reader.viewer()).await?;
         let rows: Vec<_> = sessions.iter().map(DeviceRow::from).collect();
         let page = Child::new(view! {
-            piquel_ui::devices(page: settings::SESSIONS, rows: &rows, now: Utc::now())
+            sourceorigin_ui::devices(page: settings::SESSIONS, rows: &rows, now: Utc::now())
         });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await

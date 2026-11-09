@@ -2,18 +2,18 @@
 //! auth itself, its first-party apps and the SDKs. Auth issues tokens and documents by
 //! serializing these types, and the SDKs read them back with the same types.
 //!
-//! Most applications use these types through the `piquel-auth` SDK, which validates
+//! Most applications use these types through the `sourceorigin-auth` SDK, which validates
 //! tokens before decoding them. Used directly, they describe the wire format:
 //!
 //! ```
-//! use piquel_common::protocol::{
+//! use sourceorigin_common::protocol::{
 //!     challenge::{BearerChallenge, BearerError},
 //!     claims::{AccessTokenClaims, Amr},
 //! };
 //!
 //! // The claims of a token, once its signature has been checked.
 //! let claims: AccessTokenClaims = serde_json::from_str(r#"{
-//!     "iss": "https://auth.piquel.fr",
+//!     "iss": "https://auth.sourceorigin.dev",
 //!     "sub": "01936f3e-8c00-7000-8000-000000000001",
 //!     "aud": "notes-api",
 //!     "client_id": "notes-web",

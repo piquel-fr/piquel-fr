@@ -2,8 +2,8 @@
 //! deployment's PEM key stays at the terminal.
 
 use super::AdminApplication as App;
-use piquel_common::protocol::jwt::KeyId;
-use piquel_ui::{Action, Change, Checkbox, SigningKeyRow};
+use sourceorigin_common::protocol::jwt::KeyId;
+use sourceorigin_ui::{Action, Change, Checkbox, SigningKeyRow};
 use serde::{Deserialize, de::IgnoredAny};
 use topcoat::{
     Result,
@@ -42,7 +42,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let (rows, rotating) = (&rows, &href!(rotate).resolve(cx));
-    let page = view! { piquel_ui::signing_key_list(rows: rows, rotate: rotating.as_str()) };
+    let page = view! { sourceorigin_ui::signing_key_list(rows: rows, rotate: rotating.as_str()) };
     App::render(cx, StatusCode::OK, "Signing keys", page).await
 }
 
@@ -63,7 +63,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Resp
     let now = refused.as_ref().is_some_and(|refused| refused.form.now.0);
     let (back, refused) = (&back, refused.as_deref());
     let page = view! {
-        piquel_ui::signing_key_rotation(back: back.as_str(), refused: refused, now: now)
+        sourceorigin_ui::signing_key_rotation(back: back.as_str(), refused: refused, now: now)
     };
     App::render(cx, StatusCode::OK, Change::RotateSigningKey.title(), page).await
 }
@@ -85,7 +85,7 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     })
     .await?;
     let page = view! {
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::RevokeSigningKey,
             back: back.as_str(),
             refusal: refused.as_deref(),

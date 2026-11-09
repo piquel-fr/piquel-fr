@@ -1,7 +1,7 @@
 //! External identity providers: each one's OAuth credentials, read through its
 //! own environment variables.
 
-use piquel_common::{
+use sourceorigin_common::{
     Provider,
     config::{ConfigurationError, Origin, SecretReference, Variable},
 };
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 /// Maximum provider-assigned client ID length.
 const MAX_PROVIDER_CLIENT_ID_LENGTH: usize = 512;
 
-piquel_common::variables! {
+sourceorigin_common::variables! {
     /// The sign-in providers' variables, in the configuration reference's order.
     #[cfg(test)]
     pub(crate) const VARIABLES;

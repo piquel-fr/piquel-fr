@@ -7,7 +7,7 @@ use crate::{
     browser::Browser,
     icons::{Icon, icon},
 };
-use piquel_common::admin::{Announcement, Paging};
+use sourceorigin_common::admin::{Announcement, Paging};
 use topcoat::{
     Result,
     context::Cx,

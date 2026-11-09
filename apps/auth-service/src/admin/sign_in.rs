@@ -34,10 +34,10 @@ use crate::{
 };
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{Duration, Utc};
-use piquel_common::{Handle, PictureId, SessionId, UserId, config::Origin};
-use piquel_crypto::Secret;
-use piquel_repository::{Database, InsertHandoff};
-use piquel_ui::{Checkbox, HandoffQuery, Query};
+use sourceorigin_common::{Handle, PictureId, SessionId, UserId, config::Origin};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{Database, InsertHandoff};
+use sourceorigin_ui::{Checkbox, HandoffQuery, Query};
 use url::Url;
 
 /// How long a handoff code works: the redirect from auth to the dashboard.

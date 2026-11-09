@@ -14,10 +14,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ipnet::IpNet;
-use piquel_common::{config::Origin, protocol::same_origin::BrowserRequest};
-use piquel_crypto::Digest;
-use piquel_repository::{Database, DatabaseError};
-use piquel_telemetry::{Counter, HttpTelemetry, Label};
+use sourceorigin_common::{config::Origin, protocol::same_origin::BrowserRequest};
+use sourceorigin_crypto::Digest;
+use sourceorigin_repository::{Database, DatabaseError};
+use sourceorigin_telemetry::{Counter, HttpTelemetry, Label};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -31,7 +31,7 @@ pub(crate) const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 pub(super) const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 /// Requests refused because their client's budget was exhausted, by category.
 static THROTTLED: Counter<[Label; 1]> = Counter::new(
-    "piquel.auth.throttled",
+    "sourceorigin.auth.throttled",
     "{request}",
     "Requests refused by rate limits, by rate category.",
 );
@@ -49,7 +49,7 @@ pub(super) enum CorsGrant {
     /// being same-origin.
     Client(HeaderValue),
     /// An approved related origin, whose page signs users in with passkeys,
-    /// without cookies but with Piquel's CSRF header.
+    /// without cookies but with Origin Auth's CSRF header.
     Related(HeaderValue),
 }
 
@@ -173,7 +173,7 @@ impl From<HttpSecurityError> for ApiError {
                 Self::forbidden("This endpoint does not accept requests from this origin.")
             }
             HttpSecurityError::MissingOrigin => {
-                Self::forbidden("This request must come from a Piquel page, with an Origin header.")
+                Self::forbidden("This request must come from an Origin Auth page, with an Origin header.")
             }
             HttpSecurityError::ForeignForm => {
                 Self::forbidden("Submit this form from its page on this site.")
@@ -183,7 +183,7 @@ impl From<HttpSecurityError> for ApiError {
                 "This host is not served here.",
             ),
             HttpSecurityError::MissingCsrf => Self::forbidden(format!(
-                "This request must come from a Piquel page, with the {CSRF_HEADER} header."
+                "This request must come from an Origin Auth page, with the {CSRF_HEADER} header."
             )),
             HttpSecurityError::MissingForwardedAddress => {
                 Self::bad_request("The proxy must send the client address in X-Forwarded-For.")
@@ -527,7 +527,7 @@ impl HttpSecurity {
                 (origin, "content-type, authorization", "GET, POST, OPTIONS")
             }
             Some(CorsGrant::Related(origin)) => {
-                (origin, "content-type, x-piquel-csrf", "POST, OPTIONS")
+                (origin, "content-type, x-sourceorigin-csrf", "POST, OPTIONS")
             }
         };
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);

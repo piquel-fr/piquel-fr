@@ -7,7 +7,7 @@ use crate::{
     form::{Checkbox, Fields, Lines, Precision, change_form, time},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId,
     clients::{ClientField, ClientKind},
     protocol::oauth::Scope,
@@ -95,7 +95,7 @@ pub struct SecretRow {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-/// Where a client's `OpenID` Connect library finds Piquel.
+/// Where a client's `OpenID` Connect library finds SourceOrigin.
 #[derive(Clone, Copy, Debug)]
 pub struct Connection<'a> {
     /// The issuer.
@@ -104,7 +104,7 @@ pub struct Connection<'a> {
     pub discovery: &'a str,
 }
 
-/// A secret Piquel just generated, shown only in the response to the change that
+/// A secret SourceOrigin just generated, shown only in the response to the change that
 /// made it. It never serializes and its `Debug` is redacted, so no query, link or
 /// log can hold it.
 pub struct Revealed(String);
@@ -129,7 +129,7 @@ impl fmt::Debug for Revealed {
     }
 }
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// How long a client's earlier secrets keep working once it gets a new one, as
     /// the rotation form offers it, written as auth reads grace periods.
     pub enum Grace {
@@ -663,7 +663,7 @@ pub(crate) async fn client_form<'a>(
                 </label>
                 help(
                     of: &redirects,
-                    "One per line, matched exactly: where Piquel sends users back after signing in. HTTPS, or HTTP on a loopback IP for native apps."
+                    "One per line, matched exactly: where Origin Auth sends users back after signing in. HTTPS, or HTTP on a loopback IP for native apps."
                 )
                 refusal(of: &redirects)
                 <label>
@@ -685,7 +685,7 @@ pub(crate) async fn client_form<'a>(
                     checked: draft.allow_refresh.0,
                     label: view! { "Allow refresh tokens" },
                     detail: view! {
-                        "When your app requests " <code>"offline_access"</code> ", it can stay signed in without sending users back to Piquel."
+                        "When your app requests " <code>"offline_access"</code> ", it can stay signed in without sending users back to Origin Auth."
                     },
                 )
                 choice(
@@ -722,7 +722,7 @@ async fn backchannel_input<'a>(cx: &Cx, uri: &'a str, of: &'a Described<'a>) -> 
         </label>
         help(
             of: of,
-            "Optional: where Piquel posts a logout token when a user's session ends, so your app can end its own. The Piquel SDKs serve it beside their login routes, e.g. at " <code>"/auth/backchannel-logout"</code> ". Piquel posts only to HTTPS URIs with public addresses."
+            "Optional: where Origin Auth posts a logout token when a user's session ends, so your app can end its own. The SourceOrigin SDKs serve it beside their login routes, e.g. at " <code>"/auth/backchannel-logout"</code> ". Origin Auth posts only to HTTPS URIs with public addresses."
         )
         refusal(of: of)
     })
@@ -763,7 +763,7 @@ pub(crate) async fn secrets_list<'a>(
     })
 }
 
-/// A client `secret` Piquel just made, shown once, with a button copying it, on
+/// A client `secret` SourceOrigin just made, shown once, with a button copying it, on
 /// `page`, whose address the browser puts back so that reloading it gets the page
 /// without the secret; saving it leads on to `next`.
 #[component]
@@ -785,7 +785,7 @@ pub(crate) async fn secret_panel<'a>(
             <header><h2 id="secret-heading" tabindex="-1" autofocus="">"Your client secret"</h2></header>
             <div class="body">
                 <p class="notice warning" role="alert">
-                    "This is the only time this secret is shown. Store it in your app's secret manager or environment now; Piquel keeps only a digest of it."
+                    "This is the only time this secret is shown. Store it in your app's secret manager or environment now; Origin Auth keeps only a digest of it."
                 </p>
                 copyable(id: "client-secret", label: "client secret", value: secret.expose())
                 <div class="row"><a class="button" href=(next)>"I saved it"</a></div>

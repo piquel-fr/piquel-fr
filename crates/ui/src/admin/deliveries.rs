@@ -2,7 +2,7 @@
 
 use super::{Action, Change, confirm, moment};
 use crate::layout::page_head;
-use piquel_common::admin::{DeliveryStatus, DeliverySummary};
+use sourceorigin_common::admin::{DeliveryStatus, DeliverySummary};
 use topcoat::{
     Result,
     context::Cx,

@@ -1,7 +1,7 @@
 ---
-name: piquel-docs
+name: sourceorigin-docs
 description: >
-  Write or change piquel.fr's documentation: any page under `docs/`, the root
+  Write or change SourceOrigin's documentation: any page under `docs/`, the root
   README, SECURITY.md or CONTRIBUTING.md, a README beside the code, or a
   screenshot in `docs/images/`. Use
   before writing or reviewing documentation, when a change needs its docs

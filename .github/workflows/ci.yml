@@ -1,4 +1,4 @@
-# Continuous integration for piquel.fr. Every job runs the same `just` recipes
+# Continuous integration for SourceOrigin. Every job runs the same `just` recipes
 # as local validation:
 #
 #   checks -> Rust formatting, unused Rust dependencies and the Rust dependency
@@ -10,10 +10,10 @@
 #             coverage, doc tests, and the SQLx query cache checked to match
 #             the migrated schema exactly
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
-#             with the admin dashboard on its own listener and host, piquel.fr's
+#             with the admin dashboard on its own listener and host, sourceorigin.dev's
 #             web server on its own host, Mailpit receiving auth's email, and
 #             the binary's CLI granting administrators and recovering accounts
-#   docker -> the deployment images: auth, piquel.fr's web server and the docs
+#   docker -> the deployment images: auth, sourceorigin.dev's web server and the docs
 #   docs   -> the documentation book, built with warnings denied, with every
 #             link and heading anchor in it and in the repository's Markdown
 #             checked offline
@@ -215,7 +215,7 @@ jobs:
       # migrate connects as the superuser and provisions the restricted role
       # that everything else connects as, as in deployments.
       AUTH_DATABASE_OWNER_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
-      AUTH_DATABASE_URL: postgres://piquel_auth@localhost:5432/postgres?sslmode=disable
+      AUTH_DATABASE_URL: postgres://sourceorigin_auth@localhost:5432/postgres?sslmode=disable
       AUTH_DATABASE_PASSWORD: env://E2E_DATABASE_PASSWORD
       E2E_DATABASE_PASSWORD: runtime
       AUTH_PUBLIC_BASE_URL: https://localhost:3443
@@ -226,7 +226,7 @@ jobs:
       E2E_INVITE: target/debug/auth-service invite create
       AUTH_SMTP_URL: smtp://127.0.0.1:1025
       E2E_MAIL_URL: http://127.0.0.1:8025
-      # piquel.fr on its own host, whose policies auth's pages link.
+      # sourceorigin.dev on its own host, whose policies auth's pages link.
       AUTH_WEB_ORIGIN: https://web.localhost:3443
       E2E_WEB_URL: https://web.localhost:3443
       WEB_LISTENER: 127.0.0.1:3002
@@ -234,9 +234,9 @@ jobs:
       # The suite runs serially from one address, and spends in a minute what a
       # person would in an hour.
       AUTH_REQUESTS_PER_MINUTE: '1000'
-      # The dashboard on an origin of its own, as admin.piquel.fr is, on another
+      # The dashboard on an origin of its own, as admin.sourceorigin.dev is, on another
       # port of auth's host: its passkey dialog may use auth's RP ID there, which
-      # admin.piquel.fr does through auth's related origins. Browsers fetch those
+      # admin.sourceorigin.dev does through auth's related origins. Browsers fetch those
       # from the RP ID on port 443, which CI does not serve. Cookies ignore the
       # port, so here the dashboard and auth share them; previews keep them apart.
       AUTH_ADMIN_LISTENER: 127.0.0.1:3001
@@ -245,7 +245,7 @@ jobs:
       E2E_GRANT_ADMIN: target/debug/auth-service admin grant
       E2E_RECOVER: target/debug/auth-service user recover
       # The secret `just web browser-client` registers for the example app of
-      # @piquel/auth/server, which server.spec.ts starts. It guards nothing.
+      # @sourceorigin/auth/server, which server.spec.ts starts. It guards nothing.
       E2E_SERVER_CLIENT_SECRET: YnJvd3Nlci1lMmUtc2VydmVyIHNlY3JldCBmb3IgY2k
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -274,7 +274,7 @@ jobs:
       # terminates TLS with its local CA, which the suite is told to accept.
       # The suite signs in through the public OIDC client from
       # tests/browser/README.md, whose origin has no server.
-      - name: Start the auth service and piquel.fr
+      - name: Start the auth service and sourceorigin.dev
         run: |
           cat > "$RUNNER_TEMP/Caddyfile" <<'EOF'
           {
@@ -295,7 +295,7 @@ jobs:
           target/debug/auth-service migrate
           just web browser-client
           target/debug/auth-service serve > "$RUNNER_TEMP/auth.log" 2>&1 &
-          target/debug/piquel-web > "$RUNNER_TEMP/web.log" 2>&1 &
+          target/debug/sourceorigin-web > "$RUNNER_TEMP/web.log" 2>&1 &
           curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_AUTH_URL/health/ready"
           curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_WEB_URL/health"
       # The headless build matching the pinned Playwright, so runner image

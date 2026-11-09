@@ -15,8 +15,8 @@ use crate::{
     },
 };
 use chrono::Utc;
-use piquel_common::clients::ClientKind;
-use piquel_ui::{
+use sourceorigin_common::clients::ClientKind;
+use sourceorigin_ui::{
     AppChange, AppSettingsState, AppTab, Checkbox, ClientRow, Connection, Messages, Notice,
     Revealed, SecretRow, SecretsChange, SecretsState, Section, Title,
 };
@@ -68,7 +68,7 @@ impl AccountPage for Overview {
         };
         let row = ClientRow::from(client);
         let page = view! {
-            piquel_ui::overview(client: row, connection: connection, secrets: secrets.as_deref())
+            sourceorigin_ui::overview(client: row, connection: connection, secrets: secrets.as_deref())
         };
         web.app_page(
             cx,
@@ -152,7 +152,7 @@ impl AccountPage for AppSettings {
         let page = developers::of(APP_SETTINGS, &client.id);
         let row = ClientRow::from(client);
         let view = view! {
-            piquel_ui::app_settings(
+            sourceorigin_ui::app_settings(
                 page: &page,
                 client: row,
                 state: &state,
@@ -228,7 +228,7 @@ impl AccountPage for AppSecrets {
             .collect();
         let page = developers::of(APP_SECRETS, &client.id);
         let view = view! {
-            piquel_ui::app_secrets(
+            sourceorigin_ui::app_secrets(
                 page: &page,
                 secrets: &rows,
                 now: Utc::now(),

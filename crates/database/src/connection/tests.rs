@@ -13,52 +13,52 @@ use uuid::Uuid;
 fn transport_is_verified_tls_a_local_socket_or_explicit_plaintext() {
     use DatabaseConnectionError::{AmbiguousTransport, InsecureTransport, InvalidSocket};
     for (url, expected) in [
-        ("postgres://db.example/piquel?sslmode=verify-full", None),
-        ("postgres://db.example/piquel?ssl-mode=verify-full", None),
-        ("postgres://db.example/piquel?sslmode=disable", None),
-        ("postgres://[::1]/piquel?sslmode=disable", None),
-        ("postgres://localhost/piquel?host=/run/postgresql", None),
-        ("postgres://db.example/piquel", Some(InsecureTransport)),
-        ("postgres://localhost/piquel", Some(InsecureTransport)),
-        ("postgres://127.0.0.1/piquel", Some(InsecureTransport)),
+        ("postgres://db.example/sourceorigin?sslmode=verify-full", None),
+        ("postgres://db.example/sourceorigin?ssl-mode=verify-full", None),
+        ("postgres://db.example/sourceorigin?sslmode=disable", None),
+        ("postgres://[::1]/sourceorigin?sslmode=disable", None),
+        ("postgres://localhost/sourceorigin?host=/run/postgresql", None),
+        ("postgres://db.example/sourceorigin", Some(InsecureTransport)),
+        ("postgres://localhost/sourceorigin", Some(InsecureTransport)),
+        ("postgres://127.0.0.1/sourceorigin", Some(InsecureTransport)),
         (
-            "postgres://db.example/piquel?sslmode=prefer",
+            "postgres://db.example/sourceorigin?sslmode=prefer",
             Some(InsecureTransport),
         ),
         (
-            "postgres://db.example/piquel?sslmode=require",
+            "postgres://db.example/sourceorigin?sslmode=require",
             Some(InsecureTransport),
         ),
         (
-            "postgres://db.example/piquel?sslmode=verify-ca",
+            "postgres://db.example/sourceorigin?sslmode=verify-ca",
             Some(InsecureTransport),
         ),
         (
-            "postgres://db.example/piquel?host=/run/postgresql",
+            "postgres://db.example/sourceorigin?host=/run/postgresql",
             Some(InvalidSocket),
         ),
         (
-            "postgres://localhost/piquel?host=relative/path",
+            "postgres://localhost/sourceorigin?host=relative/path",
             Some(InvalidSocket),
         ),
         (
-            "postgres://db.example/piquel?sslmode=verify-full&host=elsewhere.example",
+            "postgres://db.example/sourceorigin?sslmode=verify-full&host=elsewhere.example",
             Some(InvalidSocket),
         ),
         (
-            "postgres://db.example/piquel?sslmode=verify-full&sslmode=disable",
+            "postgres://db.example/sourceorigin?sslmode=verify-full&sslmode=disable",
             Some(AmbiguousTransport),
         ),
         (
-            "postgres://db.example/piquel?sslmode=disable&ssl-mode=verify-full",
+            "postgres://db.example/sourceorigin?sslmode=disable&ssl-mode=verify-full",
             Some(AmbiguousTransport),
         ),
         (
-            "postgres://db.example/piquel?sslmode=verify-full&hostaddr=127.0.0.1",
+            "postgres://db.example/sourceorigin?sslmode=verify-full&hostaddr=127.0.0.1",
             Some(AmbiguousTransport),
         ),
         (
-            "postgres://localhost/piquel?host=/run/postgresql&host=db.example",
+            "postgres://localhost/sourceorigin?host=/run/postgresql&host=db.example",
             Some(AmbiguousTransport),
         ),
     ] {
@@ -76,11 +76,11 @@ fn transport_is_verified_tls_a_local_socket_or_explicit_plaintext() {
             .options
     };
     assert!(matches!(
-        options("postgres://db.example/piquel?sslmode=disable").get_ssl_mode(),
+        options("postgres://db.example/sourceorigin?sslmode=disable").get_ssl_mode(),
         sqlx::postgres::PgSslMode::Disable
     ));
     assert_eq!(
-        options("postgres://localhost/piquel?host=/run/postgresql")
+        options("postgres://localhost/sourceorigin?host=/run/postgresql")
             .get_socket()
             .map(std::path::PathBuf::as_path),
         Some(std::path::Path::new("/run/postgresql"))
@@ -240,16 +240,16 @@ fn migration_versions_are_unique_and_contiguous() {
 #[test]
 fn runtime_roles_need_plain_names() {
     let role = |user: &str| {
-        let url = format!("postgres://{user}@localhost/piquel?host=/run/postgresql");
+        let url = format!("postgres://{user}@localhost/sourceorigin?host=/run/postgresql");
         RuntimeRole::new(
             &DatabaseConfig::new(&url, 1, Duration::from_secs(1)).expect("config"),
             "password",
         )
     };
-    assert!(role("piquel_auth").is_ok());
+    assert!(role("sourceorigin_auth").is_ok());
     assert!(role(&"a".repeat(63)).is_ok());
     for user in [
-        "Piquel",
+        "SourceOrigin",
         "1auth",
         "auth-service",
         "a%24%24b",
@@ -273,7 +273,7 @@ async fn runtime_role_has_only_row_privileges() {
     let owner = Database {
         pool: Database::test_pool().await,
     };
-    let name = format!("piquel_auth_{}", uuid::Uuid::now_v7().simple());
+    let name = format!("sourceorigin_auth_{}", uuid::Uuid::now_v7().simple());
     let config = config_for(&name);
     let role = RuntimeRole::new(&config, "runtime password").expect("role");
     // Overlapping runs, as two `migrate` jobs: one creates the role, the other
@@ -394,7 +394,7 @@ async fn provisioning_resets_what_it_does_not_grant() {
     let owner = Database {
         pool: Database::test_pool().await,
     };
-    let name = format!("piquel_auth_{}", uuid::Uuid::now_v7().simple());
+    let name = format!("sourceorigin_auth_{}", uuid::Uuid::now_v7().simple());
     let role = RuntimeRole::new(&config_for(&name), "password").expect("role");
     owner.provision(&role).await.expect("create");
     let database: String = sqlx::query_scalar("SELECT current_database()::text")
@@ -449,7 +449,7 @@ async fn provisioning_refuses_roles_that_could_do_more() {
         .expect_err("the owner is refused");
     assert!(format!("{error:?}").contains("must not be the schema owner"));
 
-    let name = format!("piquel_auth_{}", uuid::Uuid::now_v7().simple());
+    let name = format!("sourceorigin_auth_{}", uuid::Uuid::now_v7().simple());
     let role = RuntimeRole::new(&config_for(&name), "password").expect("role");
     for (setup, undo, refusal) in [
         (

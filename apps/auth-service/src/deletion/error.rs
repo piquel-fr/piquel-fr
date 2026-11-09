@@ -2,8 +2,8 @@
 //! conversion to responses.
 
 use crate::{ClientRegistryError, security::ApiError};
-use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::DatabaseError;
 
 /// Why an account could not be deleted, restored or purged, from settings, the
 /// sign-in page, `AdminService`, the CLI or the purge job.

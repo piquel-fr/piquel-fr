@@ -14,7 +14,7 @@ use crate::{
     layout::Dismissal,
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{PasskeyId, RecoveryId, SessionId};
+use sourceorigin_common::{PasskeyId, RecoveryId, SessionId};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
@@ -33,7 +33,7 @@ const NEEDS_SCRIPTS: &str = "Opening this link needs scripts allowed.";
 pub struct Recovery {
     /// The recovery, which undoing it names.
     pub id: RecoveryId,
-    /// When Piquel support started it.
+    /// When SourceOrigin support started it.
     pub started_at: DateTime<Utc>,
     /// Where it stands.
     pub stage: RecoveryStage,
@@ -95,7 +95,7 @@ impl Recovery {
         } else {
             "unconfirmed"
         };
-        format!("piquel-recovery:{session}:{stage}:{by}")
+        format!("sourceorigin-recovery:{session}:{stage}:{by}")
     }
 
     /// The passkey it added, while in probation and the account still has it.
@@ -125,7 +125,7 @@ impl Recovery {
     fn question(&self) -> String {
         match self.stage {
             RecoveryStage::Open { .. } => format!(
-                "Piquel support started a recovery of your account on {}. Was this you?",
+                "SourceOrigin support started a recovery of your account on {}. Was this you?",
                 Precision::Day.write(self.started_at)
             ),
             RecoveryStage::Probation { completed_at, .. } => format!(
@@ -339,7 +339,7 @@ pub async fn undo_recovery<'a>(
             UndoStep::Done => {
                 <div class="card"><div class="body">
                     <p role="status">(Notice::RecoveryUndone.message())</p>
-                    <p class="help">"Your account is disabled, so you're not signed in. Contact Piquel support to enable it."</p>
+                    <p class="help">"Your account is disabled, so you're not signed in. Contact SourceOrigin support to enable it."</p>
                 </div></div>
             }
         }
@@ -366,7 +366,7 @@ async fn undoing<'a>(
         match recovery.stage {
             RecoveryStage::Open { expires_at } => {
                 <p>
-                    (format!("Piquel support started a recovery of {account} on "))
+                    (format!("SourceOrigin support started a recovery of {account} on "))
                     time(at: recovery.started_at, precision: Precision::Minute)
                     ". Its link works until "
                     time(at: expires_at, precision: Precision::Minute)
@@ -408,7 +408,7 @@ async fn undoing<'a>(
                 class: "full",
             )
         } else {
-            <p class="notice info">"You have no passkey from before this recovery, so only Piquel support can undo it."</p>
+            <p class="notice info">"You have no passkey from before this recovery, so only SourceOrigin support can undo it."</p>
         }
     })
 }
@@ -418,7 +418,7 @@ async fn undoing<'a>(
 async fn incomplete(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <h2>"This link is incomplete"</h2>
-        <p>"Open it again from the email, or ask Piquel support for a new one."</p>
+        <p>"Open it again from the email, or ask SourceOrigin support for a new one."</p>
     })
 }
 
@@ -454,7 +454,7 @@ pub async fn recovery_banner<'a>(
                 if recovery.undoable {
                     "To make them now, confirm with a passkey you had before."
                 } else {
-                    "Only Piquel support can undo the recovery."
+                    "Only SourceOrigin support can undo the recovery."
                 }
             </p>
         }

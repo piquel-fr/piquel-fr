@@ -1,9 +1,9 @@
-//! The server-rendered pages, grouped by area: auth.piquel.fr's sign-in flows
+//! The server-rendered pages, grouped by area: auth.sourceorigin.dev's sign-in flows
 //! (`auth`), account settings (`settings`) and developer console (`developers`),
-//! and the admin dashboard at admin.piquel.fr ([`admin`]), which has a router and
+//! and the admin dashboard at admin.sourceorigin.dev ([`admin`]), which has a router and
 //! a security layer of its own. Each handler resolves who acts, calls the
-//! service in-process and renders `piquel-ui` components. The rest of this
-//! module is auth.piquel.fr's router.
+//! service in-process and renders `sourceorigin-ui` components. The rest of this
+//! module is auth.sourceorigin.dev's router.
 //!
 //! A page answers `GET` with itself and `POST` with its form's result, at the route
 //! [`routes::page`] declares. Axum mounts the Topcoat router on exactly those routes
@@ -31,9 +31,9 @@ macro_rules! page {
 /// The signed-in account's pages: their frame, and how each shows itself and makes
 /// its changes.
 mod account;
-/// The admin dashboard at admin.piquel.fr, served on the admin listener.
+/// The admin dashboard at admin.sourceorigin.dev, served on the admin listener.
 mod admin;
-/// auth.piquel.fr's sign-in flows.
+/// auth.sourceorigin.dev's sign-in flows.
 mod auth;
 /// The developer console.
 mod developers;
@@ -57,10 +57,10 @@ use crate::{
 };
 pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
-use piquel_common::config::Origin;
-use piquel_repository::Database;
-use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{Onward, PreferenceChange, QueryError, Title};
+use sourceorigin_common::config::Origin;
+use sourceorigin_repository::Database;
+use sourceorigin_telemetry::HttpTelemetry;
+use sourceorigin_ui::{Onward, PreferenceChange, QueryError, Title};
 use serde::de::DeserializeOwned;
 use std::{fmt, sync::Arc};
 use topcoat::{
@@ -101,7 +101,7 @@ pub(crate) struct WebApplication {
     email: EmailConfig,
     /// The `OpenID` Connect issuer, which the console tells apps to discover.
     issuer: Origin,
-    /// Piquel's policies on piquel.fr, which every page's footer links.
+    /// SourceOrigin's policies on sourceorigin.dev, which every page's footer links.
     policies: PolicyLinks,
     /// Every page's Content-Security-Policy but its `form-action`.
     policy: Arc<str>,
@@ -323,7 +323,7 @@ impl WebApplication {
             .fold(axum::Router::new(), |router, (path, ..)| {
                 router
                     .route_service(path, service.clone())
-                    // Links ending in a slash, which piquel.fr's settings accepted, go on
+                    // Links ending in a slash, which sourceorigin.dev's settings accepted, go on
                     // to the page: Topcoat answers them with a `308` to its own path,
                     // the query kept.
                     .route_service(&format!("{path}/"), service.clone())
@@ -428,7 +428,7 @@ impl WebApplication {
     /// The page titled `title` linking to `target`, which leads `to` there. Following
     /// a link submits no form, so no `form-action` governs where it redirects.
     async fn link(&self, cx: &Cx, title: &str, target: &Url, to: Onward) -> Result<Response> {
-        let page = view! { piquel_ui::onward(href: target.as_str(), to: to) };
+        let page = view! { sourceorigin_ui::onward(href: target.as_str(), to: to) };
         self.render(cx, StatusCode::OK, title, &[], page).await
     }
 
@@ -480,7 +480,7 @@ impl WebApplication {
     ) -> Result<Response> {
         let page = Child::new(page);
         let framed = view! {
-            piquel_ui::auth_shell(
+            sourceorigin_ui::auth_shell(
                 home: routes::page::settings::HOME,
                 reference: HttpTelemetry::trace_id(status),
                 admin: admin,
@@ -510,7 +510,7 @@ impl WebApplication {
         let stylesheet = EmbeddedAssets::STYLESHEET.path();
         let preferences = BrowserCookie::read_preferences(headers(cx));
         let html = view! {
-            piquel_ui::document(
+            sourceorigin_ui::document(
                 title: title,
                 stylesheet: &stylesheet,
                 runtime: true,
@@ -557,7 +557,7 @@ impl WebApplication {
     ) -> Result<Response> {
         let (status, code, description) = error.public();
         let description = status.is_client_error().then_some(description);
-        let page = view! { piquel_ui::failure(code: &code, description: description, link: link) };
+        let page = view! { sourceorigin_ui::failure(code: &code, description: description, link: link) };
         self.render(cx, status, title, &[], page).await
     }
 }

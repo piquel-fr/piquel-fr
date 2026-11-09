@@ -5,7 +5,7 @@ use crate::{
     ClientRegistry,
     tests::{change, operator, register, until_blocked},
 };
-use piquel_common::clients::RelatedOrigin;
+use sourceorigin_common::clients::RelatedOrigin;
 
 /// PKCE verifier of the pushed requests related pages complete.
 const PAGE_VERIFIER: &str = "related-page-verifier-0123456789-abcdefghijklmnop";
@@ -13,29 +13,29 @@ const PAGE_VERIFIER: &str = "related-page-verifier-0123456789-abcdefghijklmnop";
 /// A trusted client whose page, on its approved origin, signs the fixture's account in.
 struct RelatedPage {
     /// The page's client.
-    client: piquel_common::clients::ClientRegistration,
+    client: sourceorigin_common::clients::ClientRegistration,
     /// The page's approved origin.
     origin: RelatedOrigin,
 }
 
 impl RelatedPage {
     /// Registers a trusted public client on a fresh subdomain of auth's own domain,
-    /// which counts only as `piquel`, as every such origin does, and approves its origin.
+    /// which counts only as `sourceorigin`, as every such origin does, and approves its origin.
     async fn approved(database: &Database) -> Self {
-        let origin: RelatedOrigin = format!("https://{}.auth.piquel.fr", TokenId::new())
+        let origin: RelatedOrigin = format!("https://{}.auth.sourceorigin.dev", TokenId::new())
             .parse()
             .expect("origin");
-        let client = piquel_common::clients::ClientRegistration {
+        let client = sourceorigin_common::clients::ClientRegistration {
             trusted: true,
             ..crate::tests::registration(
-                piquel_common::clients::ClientKind::Public,
+                sourceorigin_common::clients::ClientKind::Public,
                 origin.as_str(),
             )
         };
         register(database, &client).await.expect("client");
         change(database, async |registry| {
             registry
-                .approve_origin(&client.id, &origin, "auth.piquel.fr")
+                .approve_origin(&client.id, &origin, "auth.sourceorigin.dev")
                 .await
         })
         .await
@@ -48,7 +48,7 @@ impl Fixture {
     /// Pushes `page`'s authorization request, with `extra` parameters, and returns
     /// its `request_uri`.
     async fn push(&self, page: &RelatedPage, extra: &[(&str, &str)]) -> String {
-        let challenge = piquel_crypto::Pkce::challenge(PAGE_VERIFIER).expect("PKCE");
+        let challenge = sourceorigin_crypto::Pkce::challenge(PAGE_VERIFIER).expect("PKCE");
         let form = url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs([
                 ("client_id", page.client.id.as_str()),
@@ -386,10 +386,10 @@ async fn a_probation_passkey_signs_in_on_auths_pages_only() {
     let replicas = Replicas::new().await;
     fixture.on(&replicas.a);
     let page = RelatedPage::approved(fixture.database()).await;
-    let recovery = piquel_common::RecoveryId::new();
+    let recovery = sourceorigin_common::RecoveryId::new();
     let mut recoveries = fixture.database().recoveries();
     recoveries
-        .insert(&piquel_repository::InsertRecovery {
+        .insert(&sourceorigin_repository::InsertRecovery {
             id: recovery,
             user_id: fixture.user_id,
             secret_digest: &recovery.as_uuid().as_bytes().repeat(2),

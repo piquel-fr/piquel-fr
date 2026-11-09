@@ -1,12 +1,12 @@
 //! Domain events.
 
 use super::AdminApplication as App;
-use piquel_common::{
+use sourceorigin_common::{
     UserId,
     admin::{Event, EventSearch},
     events::Actor,
 };
-use piquel_ui::{Checkbox, EventRow, Pager, Query};
+use sourceorigin_ui::{Checkbox, EventRow, Pager, Query};
 use topcoat::{
     Result,
     context::Cx,
@@ -66,7 +66,7 @@ pub(super) async fn events(cx: &Cx) -> Result<Response> {
         &pager,
     );
     let page = view! {
-        piquel_ui::event_list(
+        sourceorigin_ui::event_list(
             action: action.as_str(),
             user: user,
             kind: kind,

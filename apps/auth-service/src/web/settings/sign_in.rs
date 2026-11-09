@@ -9,7 +9,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{Audience, Messages, Notice, Section, SignInChange, SignInState, Tab};
+use sourceorigin_ui::{Audience, Messages, Notice, Section, SignInChange, SignInState, Tab};
 use topcoat::{
     Error,
     context::Cx,
@@ -109,7 +109,7 @@ impl AccountPage for SignInMethods {
             .map_err(Error::from)?;
         let android = PasskeyApplication::offers_google_password_manager(headers(cx));
         let page = Child::new(view! {
-            piquel_ui::sign_in_methods(
+            sourceorigin_ui::sign_in_methods(
                 page: settings::SIGN_IN,
                 passkeys: &passkeys,
                 providers: &providers,

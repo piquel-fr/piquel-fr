@@ -4,8 +4,8 @@
 use super::{PasskeyApplication, PasskeyError};
 use crate::recovery::ProbationPasskey;
 use crate::security::{Credential, RequestContext};
-use piquel_common::{AccountStatus, AuthenticationMethod, PasskeyId, UserId, events::Actor};
-use piquel_repository::{DatabaseError, DatabaseTransaction};
+use sourceorigin_common::{AccountStatus, AuthenticationMethod, PasskeyId, UserId, events::Actor};
+use sourceorigin_repository::{DatabaseError, DatabaseTransaction};
 use serde_json::Value;
 use webauthn_rs::prelude::*;
 
@@ -119,7 +119,7 @@ impl PasskeyApplication {
             && let Err(rollback) = tx.rollback().await
         {
             tracing::error!(
-                error = %piquel_common::ErrorChain(&rollback),
+                error = %sourceorigin_common::ErrorChain(&rollback),
                 "passkey authentication rollback failed"
             );
         }

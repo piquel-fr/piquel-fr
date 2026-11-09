@@ -7,7 +7,7 @@ use crate::{
     layout::page_head,
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, EmailId, EventId, PasskeyId, Provider,
     events::{FollowUp, HistoryActor, HistoryEntry, RevocationReason, UserAgentFamily},
     protocol::api::Passkey,
@@ -204,7 +204,7 @@ impl HistoryRow<'_> {
             HistoryEntry::PictureChanged => "Profile picture changed".to_owned(),
             HistoryEntry::PictureRemoved => "Profile picture removed".to_owned(),
             HistoryEntry::RecoveryStarted => {
-                "Account recovery started by Piquel support".to_owned()
+                "Account recovery started by SourceOrigin support".to_owned()
             }
             HistoryEntry::Recovered { .. } => "Account recovered: a passkey was added".to_owned(),
             HistoryEntry::RecoveryUndone => "Account recovery undone".to_owned(),
@@ -296,10 +296,10 @@ impl HistoryRow<'_> {
     /// Who did it, if not the account itself, and why, if they said.
     pub(crate) fn by(&self) -> Option<String> {
         let actor = match self.actor {
-            HistoryActor::Admin => "By a Piquel administrator",
-            HistoryActor::Operator => "By a Piquel operator",
+            HistoryActor::Admin => "By a SourceOrigin administrator",
+            HistoryActor::Operator => "By a SourceOrigin operator",
             HistoryActor::Client => "By an app",
-            HistoryActor::System => "Automatically by Piquel",
+            HistoryActor::System => "Automatically by SourceOrigin",
             HistoryActor::Account | HistoryActor::Anonymous | HistoryActor::Unrecorded => {
                 return None;
             }
@@ -509,7 +509,7 @@ pub(crate) async fn report_form<'a>(
         <div class="notice stack warning">
             <strong tabindex="-1" autofocus="">"Secure your account?"</strong>
             <p>
-                "This signs out every device but this one, and every app you use with Piquel must sign in again, including on this device. Your passkeys keep working."
+                "This signs out every device but this one, and every app you use with Origin Auth must sign in again, including on this device. Your passkeys keep working."
             </p>
             if row.entry.follow_up().is_some() {
                 <p>"Afterwards, you can confirm with your passkey to undo this change."</p>

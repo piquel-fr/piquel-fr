@@ -1,8 +1,8 @@
 //! Drafting, editing and sending announcements.
 
 use super::*;
-use piquel_common::{AnnouncementId, EmailId};
-use piquel_repository::{EventFilter, InsertVerifiedEmail};
+use sourceorigin_common::{AnnouncementId, EmailId};
+use sourceorigin_repository::{EventFilter, InsertVerifiedEmail};
 
 /// An announcement's draft to `recipients`.
 pub(super) fn announcement(recipients: AnnouncementRecipients) -> AnnouncementDraft {

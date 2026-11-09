@@ -40,7 +40,7 @@ pub(super) async fn verify(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     let page = &app.service.audit_page(&admin.operator, query.after).await?;
     let later = page.next.map(|after| format!("{here}?after={after}"));
     let view = view! {
-        piquel_ui::audit_page(
+        sourceorigin_ui::audit_page(
             page: page,
             keys: keys.source,
             refusal: refusal.as_deref(),

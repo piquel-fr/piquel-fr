@@ -9,7 +9,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{
+use sourceorigin_ui::{
     Audience, CROP_SIZE, CROP_X, CROP_Y, Messages, Notice, PICTURE_FIELD, ProfileChange,
     ProfileDialog, ProfileState, Section, Tab, Who,
 };
@@ -197,7 +197,7 @@ impl AccountPage for Profile {
         };
         let state = &state;
         let page = Child::new(view! {
-            piquel_ui::profile_settings(
+            sourceorigin_ui::profile_settings(
                 page: settings::PROFILE,
                 who: who,
                 // The owner's account is active, so it shows what it stored.

@@ -57,7 +57,7 @@ handle *ARGS:
 # Point auth at the server with AUTH_SMTP_URL=smtp://localhost:1025. Stops with Ctrl-C.
 # A local Mailpit SMTP server, with its mail at http://localhost:8025.
 mailpit:
-    @docker run --rm --name piquel-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
+    @docker run --rm --name sourceorigin-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
 
 # Inspect, rotate, revoke and import signing keys, e.g. `just auth keys list`.
 [positional-arguments]

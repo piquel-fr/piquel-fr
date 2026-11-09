@@ -5,11 +5,11 @@ use crate::account::{AccountError, AccountService, Subject, Viewer};
 use crate::security::{BrowserCookie, RequestContext, Session, SessionError};
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, SessionId,
     events::{RevocationReason, UserAgentFamily},
 };
-use piquel_repository::{SessionScope, StoredSession};
+use sourceorigin_repository::{SessionScope, StoredSession};
 use serde::Serialize;
 use std::net::IpAddr;
 

@@ -1,7 +1,7 @@
 //! Built-in health routes.
 use crate::{SigningKeys, routes, security::ApiError};
 use axum::{Router, extract::State, http::StatusCode, routing::get};
-use piquel_repository::Database;
+use sourceorigin_repository::Database;
 
 /// Service-wide endpoints with the same construction pattern as feature applications.
 #[derive(Clone)]

@@ -4,11 +4,11 @@
 
 use super::{FederationApplication, FederationConfigError, Provider};
 use axum::http::{StatusCode, header};
-use piquel_common::{
+use sourceorigin_common::{
     config::ConfigurationError, email::NormalizedEmail, events::SignInFailure,
     protocol::oauth::GrantType,
 };
-use piquel_telemetry::SendTraced;
+use sourceorigin_telemetry::SendTraced;
 use serde::{Deserialize, de::DeserializeOwned};
 use thiserror::Error;
 use url::Url;

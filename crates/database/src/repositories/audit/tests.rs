@@ -50,7 +50,7 @@ async fn sealing_needs_committed_data() {
 }
 
 /// Sealing an unsealed event works only right after the position before, and a
-/// sealed one is never updated; only a transaction that set `piquel.audit_prune`
+/// sealed one is never updated; only a transaction that set `sourceorigin.audit_prune`
 /// deletes it or sets the anchor, which never moves back. A checkpoint is added
 /// only if it is of a sealed event's hash and dated at a finite time not in the
 /// future, and is never changed. The chain starts in a schema of its own, and
@@ -118,7 +118,7 @@ async fn sealed_history_is_guarded() {
         refused,
         "only pruning anchors"
     );
-    sqlx::query("SELECT set_config('piquel.audit_prune', 'on', true)")
+    sqlx::query("SELECT set_config('sourceorigin.audit_prune', 'on', true)")
         .execute(&mut *tx)
         .await
         .expect("prune setting");

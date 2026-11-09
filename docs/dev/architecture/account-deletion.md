@@ -63,7 +63,7 @@ again. Its response clears the session cookie.
 A passkey sign-in to an account scheduled for deletion signs nothing in
 (`passkey/login.rs`). `Deletions::offer_restore` stores the digest of a
 single-use token, valid five minutes, with the passkey that signed in, and the
-browser keeps the token in the `__Host-piquel_restore` cookie. A recovery's
+browser keeps the token in the `__Host-sourceorigin_restore` cookie. A recovery's
 passkey in probation gets no offer.
 
 `AccountService::restore` reads the offer again under the account lock, so it
@@ -107,7 +107,7 @@ A purge that fails is recorded on its `account_deletions` row and retried after
 5 minutes, then twice as long after each failure, up to a day, so an account
 that keeps failing never holds back the others. The account's dashboard page and
 `user show` give its failures and last error, and the
-`piquel.auth.account_purge.failing` gauge counts the accounts that failed 3
+`sourceorigin.auth.account_purge.failing` gauge counts the accounts that failed 3
 times in a row. While any do, the purge raises the `purges_failing` alert (see
 [respond to an alert](../operations/administration.md#respond-to-an-alert)).
 
@@ -117,7 +117,7 @@ times in a row. While any do, the purge raises the `purges_failing` alert (see
 ## Export
 
 `AccountService::export` builds the owner's download, one JSON document
-(`AccountExport` in `src/deletion/export`, `"format": "piquel.account-export"`,
+(`AccountExport` in `src/deletion/export`, `"format": "sourceorigin.account-export"`,
 versioned). It needs the owner's passkey confirmation from the last five minutes,
 checked under the account lock, where `AccountExported` is recorded before
 anything is read. The document is then read from one snapshot
@@ -135,6 +135,6 @@ A table that stores data about an account must be added to the export, and to
 ## Limits
 
 Apps are not told to erase their own records of a purged account: that comes
-with [#66](https://github.com/piquel-fr/piquel-fr/issues/66) and
-[#97](https://github.com/piquel-fr/piquel-fr/issues/97). They hear of the
+with [#66](https://github.com/sourceorigin-dev/sourceorigin/issues/66) and
+[#97](https://github.com/sourceorigin-dev/sourceorigin/issues/97). They hear of the
 deletion only through back-channel logout, when its sessions end.

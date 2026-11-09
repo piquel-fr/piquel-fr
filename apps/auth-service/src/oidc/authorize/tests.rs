@@ -3,8 +3,8 @@
 use super::*;
 use crate::oidc::Interaction;
 use chrono::{Duration, Utc};
-use piquel_common::{AuthenticationMethod, SessionId, UserId};
-use piquel_repository::StoredSession;
+use sourceorigin_common::{AuthenticationMethod, SessionId, UserId};
+use sourceorigin_repository::StoredSession;
 
 /// Duplicates are allowed, unknown values are rejected, and `none` stands alone.
 #[test]

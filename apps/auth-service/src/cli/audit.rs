@@ -7,7 +7,7 @@ use crate::{
     audit::{AuditVerification, ChainPoint},
 };
 use clap::{Args, Subcommand};
-use piquel_common::{
+use sourceorigin_common::{
     admin::{EventPage, EventSearch},
     events::Actor,
 };

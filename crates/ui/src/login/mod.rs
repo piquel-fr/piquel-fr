@@ -13,7 +13,7 @@ use crate::{
     },
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{Provider, RecoveryId, TokenId, protocol::claims::Acr};
+use sourceorigin_common::{Provider, RecoveryId, TokenId, protocol::claims::Acr};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
@@ -21,7 +21,7 @@ use topcoat::{
     view::{View, component, view},
 };
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// Why a provider's sign-in failed, which its callback sends to the sign-in page.
     pub enum CallbackError {
         /// The provider declined or cancelled authorization.
@@ -50,7 +50,7 @@ impl CallbackError {
     }
 }
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// What the sign-in page asks of a browser holding a provider's pending sign-in.
     pub enum PendingDestination {
         /// A passkey must confirm the matching account.
@@ -302,7 +302,7 @@ impl<'a> Step<'a> {
 /// page with `query`, which keeps where the browser goes on to, and its links open
 /// the sign-in page, `login`, and the page creating an account, `register`, with
 /// it. `alert` says why the change just posted failed, or the provider sign-in
-/// that brought the browser here. Creating an account links Piquel's `policies`,
+/// that brought the browser here. Creating an account links SourceOrigin's `policies`,
 /// which it agrees to.
 #[component]
 pub async fn sign_in<'a>(
@@ -319,7 +319,7 @@ pub async fn sign_in<'a>(
     let (title, lead) = step.wording();
     let footer = match step {
         Step::SignIn { .. } => Some((
-            "New to Piquel? ",
+            "New to SourceOrigin? ",
             "Create an account",
             LoginQuery {
                 invitation: query.invitation.clone(),

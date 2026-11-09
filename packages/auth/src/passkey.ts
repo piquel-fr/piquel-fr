@@ -167,7 +167,7 @@ export class PasskeyCeremony {
       reply = await this.#issuer.http.send(url, {
         method: 'POST',
         credentials: 'omit',
-        headers: { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
+        headers: { 'content-type': 'application/json', 'x-sourceorigin-csrf': '1' },
         body: JSON.stringify(body)
       });
     } catch (error) {

@@ -32,7 +32,7 @@ mod capture;
 pub use capture::Capture;
 pub use http::HttpTelemetry;
 pub use metrics::{Counter, Gauge, Histogram, Label, Labels};
-pub use piquel_common::SendTraced;
+pub use sourceorigin_common::SendTraced;
 
 use export::Exporters;
 use opentelemetry::{KeyValue, trace::TraceContextExt};
@@ -42,7 +42,7 @@ use opentelemetry_sdk::{
     Resource, error::OTelSdkError, logs::SdkLoggerProvider, metrics::SdkMeterProvider,
     trace::SdkTracerProvider,
 };
-use piquel_common::{
+use sourceorigin_common::{
     TraceId,
     config::{ConfigurationError, Variable},
 };
@@ -61,10 +61,10 @@ use tracing_subscriber::{
 use uuid::Uuid;
 
 /// Instrumentation scope of every tracer and meter.
-const SCOPE: &str = "piquel";
+const SCOPE: &str = "sourceorigin";
 /// Added to every filter: this crate's spans and access logs, the client spans of
 /// [`SendTraced`], and the SDK's own warnings, such as failed exports.
-const OWN_DIRECTIVES: &str = "piquel_telemetry=info,piquel_common=info,opentelemetry=warn";
+const OWN_DIRECTIVES: &str = "sourceorigin_telemetry=info,sourceorigin_common=info,opentelemetry=warn";
 /// Targets never exported as logs: the SDK, which logs its own failures, and the
 /// HTTP stack export requests run on, outside the SDK's suppression of its own
 /// telemetry. Exporting either would feed the exporter its own traffic. They still
@@ -337,7 +337,7 @@ mod tests {
     /// after `log::log_enabled!` in a dependency, which `LogTracer` forwards.
     #[test]
     fn a_span_after_a_refused_check_is_exported() {
-        let capture = Telemetry::capture("piquel_telemetry=info");
+        let capture = Telemetry::capture("sourceorigin_telemetry=info");
         let refused = tracing::callsite!(
             name: "refused",
             kind: Kind::EVENT,

@@ -25,7 +25,7 @@ use axum::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use layer::RequestSession;
-use piquel_common::protocol::same_origin::BrowserRequest;
+use sourceorigin_common::protocol::same_origin::BrowserRequest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fmt, future::Future, str::FromStr, sync::Arc};
@@ -69,7 +69,7 @@ impl CookieNames {
     /// The names for `client`, whose IDs are letters, digits, `.`, `_` and `-`, all
     /// valid in a cookie name.
     fn new(client: &ClientId) -> Self {
-        let prefix = format!("__Host-piquel-{client}");
+        let prefix = format!("__Host-sourceorigin-{client}");
         Self {
             session: format!("{prefix}-session"),
             step_up: format!("{prefix}-step-up"),
@@ -90,7 +90,7 @@ impl CookieNames {
 /// `/\`), and has no `\`, `#` or control characters.
 ///
 /// ```
-/// use piquel_auth::axum::ReturnTo;
+/// use sourceorigin_auth::axum::ReturnTo;
 ///
 /// assert!("/notes?page=2".parse::<ReturnTo>().is_ok());
 /// // Another site, protocol-relative or not, is refused.
@@ -212,10 +212,10 @@ pub(super) struct Login {
 /// [`Self::layer`] around every route that uses [`SignedIn`] or [`MaybeSignedIn`].
 ///
 /// ```no_run
-/// # async fn run(issuer: piquel_auth::Issuer) -> Result<(), Box<dyn std::error::Error>> {
+/// # async fn run(issuer: sourceorigin_auth::Issuer) -> Result<(), Box<dyn std::error::Error>> {
 /// use axum::{Router, routing::get};
 /// use chrono::TimeDelta;
-/// use piquel_auth::{
+/// use sourceorigin_auth::{
 ///     ClientConfig, Credentials,
 ///     axum::{CookieKey, LoginRoutes, SignedIn},
 /// };
@@ -228,14 +228,14 @@ pub(super) struct Login {
 ///     client_id: "notes-web".parse()?,
 ///     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
 ///     // The callback route below, as registered with auth.
-///     redirect_uri: "https://notes.piquel.fr/account/callback".parse()?,
+///     redirect_uri: "https://notes.sourceorigin.dev/account/callback".parse()?,
 /// });
 /// // The same key on every replica, kept like the client secret.
 /// let key = CookieKey::from_base64(&std::env::var("NOTES_COOKIE_KEY")?)?;
 /// let auth = LoginRoutes::new(client, key)?
 ///     .scopes("profile".parse()?)
 ///     .after_login("/notes".parse()?)
-///     .after_logout("https://notes.piquel.fr/".parse()?)
+///     .after_logout("https://notes.sourceorigin.dev/".parse()?)
 ///     .mounted_at("/account")
 ///     .session_lifetime(TimeDelta::days(7));
 /// let app: Router = Router::new()
@@ -339,8 +339,8 @@ impl LoginRoutes {
     /// and 503 when auth's keys cannot be fetched.
     ///
     /// ```no_run
-    /// # fn run(auth: piquel_auth::axum::LoginRoutes) {
-    /// use piquel_auth::{LogoutScope, SessionId};
+    /// # fn run(auth: sourceorigin_auth::axum::LoginRoutes) {
+    /// use sourceorigin_auth::{LogoutScope, SessionId};
     /// use std::{collections::HashSet, convert::Infallible, sync::{Arc, Mutex}};
     ///
     /// // Kept in the app's database in practice, so every replica sees it.

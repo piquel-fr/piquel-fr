@@ -4,7 +4,7 @@
 use super::{EmailRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{EmailId, UserId, admin::Email};
+use sourceorigin_common::{EmailId, UserId, admin::Email};
 
 /// An email address attached to an account.
 #[derive(Clone, Debug, PartialEq, Eq)]

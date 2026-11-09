@@ -3,7 +3,7 @@
 
 use super::{Action, Change, confirm, moment};
 use crate::{clients::choice, layout::page_head};
-use piquel_common::admin::{ReleasedHandle, ReservedHandle};
+use sourceorigin_common::admin::{ReleasedHandle, ReservedHandle};
 use topcoat::{
     Result,
     context::Cx,

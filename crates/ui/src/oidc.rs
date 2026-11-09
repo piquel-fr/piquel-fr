@@ -6,7 +6,7 @@ use crate::{
     icons::{Icon, icon},
     login::switch_account,
 };
-use piquel_common::{
+use sourceorigin_common::{
     Provider,
     protocol::oauth::{ErrorCode, Scope},
 };
@@ -46,7 +46,7 @@ pub async fn consent<'a>(
                 icon(kind: Icon::Warning)
                 <span class="text">
                     (format!("Unverified app, registered by @{owner}"))
-                    <small>"Piquel hasn’t checked who runs it. Continue only if you trust it."</small>
+                    <small>"SourceOrigin hasn’t checked who runs it. Continue only if you trust it."</small>
                 </span>
             </p>
         }
@@ -75,7 +75,7 @@ pub async fn consent<'a>(
 }
 
 /// What a scope gives the application, in the user’s words, on the consent page
-/// and among the connected apps. A scope Piquel does not describe, such as an
+/// and among the connected apps. A scope SourceOrigin does not describe, such as an
 /// application's own, is shown as it is.
 pub(crate) fn scope_label(scope: &str) -> &str {
     match scope.parse() {
@@ -99,7 +99,7 @@ pub async fn logout<'a>(
     Ok(view! {
         <div>
             <h1>"Ready to sign out?"</h1>
-            <p class="lead">"This will end your Piquel sign-in session in this browser."</p>
+            <p class="lead">"This will end your SourceOrigin sign-in session in this browser."</p>
         </div>
         <form method="post" action=(action)>
             #[key(position)]

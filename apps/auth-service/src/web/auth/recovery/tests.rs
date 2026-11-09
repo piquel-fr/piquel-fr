@@ -20,13 +20,13 @@ use crate::{
 };
 use axum::http::StatusCode;
 use chrono::{DateTime, SecondsFormat, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     EventId, RecoveryId, UserId,
     clients::{ClientKind, ClientRegistration},
     events::{Actor, DomainEvent},
 };
-use piquel_repository::{Database, InsertPasskey, StoredPasskey};
-use piquel_ui::{
+use sourceorigin_repository::{Database, InsertPasskey, StoredPasskey};
+use sourceorigin_ui::{
     Checkbox, HistoryChange, LoginChange, LoginQuery, Query, RecoverChange, SignInState, UndoChange,
 };
 use url::Position;
@@ -314,7 +314,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
     let unaided = Recovering::new(&database, false).await;
     let unaided = open(Some(unaided.id));
     let page = html(browser.post(&replicas, RECOVER_UNDO, &unaided).await).await;
-    assert!(page.contains("only Piquel support can undo it"), "{page}");
+    assert!(page.contains("only SourceOrigin support can undo it"), "{page}");
     assert_eq!(ceremonies(&page, routes::recovery::UNDO_START), 0, "{page}");
 
     let undone = |signed_in| UndoChange::Undone { signed_in };
@@ -352,7 +352,7 @@ async fn settings_show_the_recovery() {
     let recovering = Recovering::new(&database, true).await;
     let browser = recovering.signed_in().await;
     // The passkey sign-in confirmed the session.
-    let key = |stage| format!("piquel-recovery:{}:{stage}:confirmed", browser.session_id);
+    let key = |stage| format!("sourceorigin-recovery:{}:{stage}:confirmed", browser.session_id);
     let asks = |page: &str, stage, refusal| {
         let key = key(stage);
         let banner = r#"<section class="notice warning stack" "#;

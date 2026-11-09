@@ -1,27 +1,27 @@
 # SDK design
 
-This page sets out how piquel.fr's SDKs behave, from discovery to sessions, so
+This page sets out how SourceOrigin's SDKs behave, from discovery to sessions, so
 that every SDK accepts and rejects the same things.
 
-Applications integrate with auth.piquel.fr through its Rust SDK, `piquel-auth`, its
-TypeScript SDK, `@piquel/auth`, or any OpenID Connect library. Both SDKs follow this
+Applications integrate with auth.sourceorigin.dev through its Rust SDK, `sourceorigin-auth`, its
+TypeScript SDK, `@sourceorigin/auth`, or any OpenID Connect library. Both SDKs follow this
 document and pass the shared vectors in
-[`tests/sdk-vectors`](https://github.com/piquel-fr/piquel-fr/blob/main/tests/sdk-vectors/README.md); an SDK in another language
+[`tests/sdk-vectors`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/sdk-vectors/README.md); an SDK in another language
 would do the same, so every SDK accepts and rejects the same tokens and challenges.
 The Rust SDK is the reference implementation, and the TypeScript SDK mirrors its
 behavior and names.
 
 | Path | Package | Published | Role |
 | --- | --- | --- | --- |
-| `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
-| `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
-| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Bun and Workers; `@piquel/auth/server` is its server-side login over standard `Request` and `Response`, and `@piquel/auth/browser` its public client for apps without a server, passkey sign-in on the app's page included |
+| `crates/common` | `sourceorigin-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
+| `crates/auth-sdk` | `sourceorigin-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
+| `packages/auth` | `@sourceorigin/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Bun and Workers; `@sourceorigin/auth/server` is its server-side login over standard `Request` and `Response`, and `@sourceorigin/auth/browser` its public client for apps without a server, passkey sign-in on the app's page included |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types
 
-The wire format is defined by types in `piquel_common::protocol`, not by prose.
-The Rust SDK re-exports them by name as `piquel_auth::protocol`, so that list is
+The wire format is defined by types in `sourceorigin_common::protocol`, not by prose.
+The Rust SDK re-exports them by name as `sourceorigin_auth::protocol`, so that list is
 its contract:
 
 - `claims`: `AccessTokenClaims`, `IdTokenClaims`, `LogoutTokenClaims`, `UserInfo`,
@@ -39,7 +39,7 @@ its contract:
 Auth issues tokens and documents by serializing these types, and the Rust SDK
 deserializes them, so the two cannot disagree. An SDK in another language mirrors
 them and is held to them by the vectors. The TypeScript SDK's mirror is generated:
-`piquel-common`'s tests write `packages/auth/src/protocol.ts` from these types with
+`sourceorigin-common`'s tests write `packages/auth/src/protocol.ts` from these types with
 ts-rs, vocabularies as unions of their spellings, and `just test` fails while it is
 stale (`just sdk-types` rewrites it).
 
@@ -170,7 +170,7 @@ from separate values checks each one, so one value never holds two scopes.
 ## Errors
 
 Every SDK error has a category and, for most categories, a reason. Every SDK exposes
-the same values, listed in `piquel_common::protocol::sdk`.
+the same values, listed in `sourceorigin_common::protocol::sdk`.
 
 | Category | Meaning | Reasons |
 | --- | --- | --- |
@@ -264,15 +264,15 @@ return.
 ## Sessions
 
 Server-side apps keep each session in the browser, sealed, as the Rust SDK's axum
-login routes and `@piquel/auth/server` do. The app stores nothing and implements
+login routes and `@sourceorigin/auth/server` do. The app stores nothing and implements
 nothing: it holds a 32-byte cookie key, the same on every replica.
 
 - **Cookies.** Each name carries the client ID, so apps sharing a host keep their
-  own: `__Host-piquel-<client_id>-session`, `-step-up`, and `-login-<state>` for
+  own: `__Host-sourceorigin-<client_id>-session`, `-step-up`, and `-login-<state>` for
   each pending login's slot. All are `Secure`, `HttpOnly`, `SameSite=Lax` and host-only.
 - **Sealing.** AES-256-GCM, under a key HKDF-SHA256 derives from the cookie key with
-  no salt and the `info` `piquel-auth session v1` for sessions, or
-  `piquel-auth pending login v1` for pending logins. The associated data is the
+  no salt and the `info` `sourceorigin-auth session v1` for sessions, or
+  `sourceorigin-auth pending login v1` for pending logins. The associated data is the
   client ID and the cookie name, joined by NUL, so a value opens only as the cookie
   it was sealed as, for its own client. A sealed value is the base64url of the
   12-byte random nonce, the ciphertext and the tag. A cookie that does not open is
@@ -289,7 +289,7 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
   refresh whose session would not fit serves its request and leaves the cookie as
   it was, for the next request to refresh again. A typical session takes some
   2.5 KB; a long profile, many scopes, or access tokens that copy the profile
-  ([#279](https://github.com/piquel-fr/piquel-fr/issues/279)) make it larger.
+  ([#279](https://github.com/sourceorigin-dev/sourceorigin/issues/279)) make it larger.
 - **Refresh.** The login routes take only confidential clients, whose refresh
   tokens auth does not rotate, and every login requests `offline_access`, which the
   client's registration must allow. A request
@@ -356,7 +356,7 @@ rotate-secret <id> --grace 0`, or "at once" on the app's Secrets tab in the
 developer console.
 
 `SameSite=Lax` keeps the session cookie off other sites' posts, but not off a
-sibling site's under the same domain: any `*.piquel.fr` page could post to an app as
+sibling site's under the same domain: any `*.sourceorigin.dev` page could post to an app as
 its signed-in user. So logout, and every request that is not `GET`, `HEAD`, `OPTIONS`
 or `TRACE` to a handler reading the session, are accepted only from the app's own
 pages: `Sec-Fetch-Site: same-origin` when the browser sends it, and otherwise an
@@ -399,11 +399,11 @@ both. Auth checks its own account APIs and authorization requests with the same
 type's `check`, and the SDK checks tokens with it too:
 
 - `acr` classes are ordered: `phr` meets every class, and
-  `urn:piquel:acr:social` meets only itself. A token without `acr`, or with one the
+  `urn:sourceorigin:acr:social` meets only itself. A token without `acr`, or with one the
   SDK does not know, meets no `acr` requirement.
 - Gate on `acr`, never on `amr`. `amr` lists the methods a session used, not the
   assurance it reached: a recovered passkey signs in with `amr` `pop mfa user`
-  but reports `acr` `urn:piquel:acr:social` until its recovery settles (see
+  but reports `acr` `urn:sourceorigin:acr:social` until its recovery settles (see
   [account recovery](../security/account-recovery.md)).
 - `max_age` needs `auth_time`, and holds while `now - 30 <= auth_time + max_age`,
   with the same leeway as the other time checks.

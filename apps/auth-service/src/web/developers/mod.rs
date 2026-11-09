@@ -24,8 +24,8 @@ use crate::{
     clients::{ClientSettings, NewClient, OwnedClient, OwnedClientView},
     routes::page::developers::{self, APP, APP_SECRETS, APP_SETTINGS, HOME, NEW},
 };
-use piquel_common::clients::ClientKind;
-use piquel_ui::{
+use sourceorigin_common::clients::ClientKind;
+use sourceorigin_ui::{
     AppLink, AppTab, ClientDraft, ClientRow, ClientStatus, Crumb, Messages, NewAppChange,
     NewAppState, Notice, Registered, Revealed, Section, Title,
 };
@@ -85,7 +85,7 @@ impl AccountPage for Apps {
             })
             .collect();
         let page = view! {
-            piquel_ui::apps(links: &links, limit: MAX_OWNED_CLIENTS, new: NEW)
+            sourceorigin_ui::apps(links: &links, limit: MAX_OWNED_CLIENTS, new: NEW)
         };
         let head = Child::default();
         web.console_page(cx, Self::TITLE, reader, outcome, head, Child::new(page))
@@ -152,7 +152,7 @@ impl AccountPage for NewApp {
             ..ClientDraft::default()
         });
         let page = view! {
-            piquel_ui::new_app(
+            sourceorigin_ui::new_app(
                 page: NEW,
                 home: HOME,
                 state: &state,
@@ -266,7 +266,7 @@ impl WebApplication {
             }
         };
         let head = view! {
-            piquel_ui::app_header(home: HOME, client: row, tabs: &tabs, current: tab)
+            sourceorigin_ui::app_header(home: HOME, client: row, tabs: &tabs, current: tab)
         };
         let framed = Framed {
             section: Section::Developers,

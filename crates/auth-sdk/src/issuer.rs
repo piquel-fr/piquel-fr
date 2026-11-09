@@ -5,7 +5,7 @@ use crate::{
     http::{Authorization, Http, NetworkError},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::protocol::{
+use sourceorigin_common::protocol::{
     metadata::{OPENID_CONFIGURATION_PATH, ServerMetadata},
     oauth::CodeChallengeMethod,
     sdk::{ErrorCategory, ErrorReason, SdkError},
@@ -17,7 +17,7 @@ use url::Url;
 /// The issuer's metadata could not be fetched or used.
 ///
 /// ```
-/// use piquel_auth::{
+/// use sourceorigin_auth::{
 ///     DiscoveryError,
 ///     protocol::sdk::{ErrorCategory, ErrorReason, SdkError},
 /// };
@@ -93,10 +93,10 @@ struct IssuerInner {
 ///
 /// ```no_run
 /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-/// use piquel_auth::{Issuer, Resource};
+/// use sourceorigin_auth::{Issuer, Resource};
 ///
-/// let issuer = Issuer::discover("https://auth.piquel.fr").await?;
-/// assert_eq!(issuer.issuer(), "https://auth.piquel.fr");
+/// let issuer = Issuer::discover("https://auth.sourceorigin.dev").await?;
+/// assert_eq!(issuer.issuer(), "https://auth.sourceorigin.dev");
 /// println!("signs in at {}", issuer.metadata().authorization_endpoint);
 /// // Validators and clients share the handle and its key cache.
 /// let notes = issuer.resource(Resource::new("notes-api")?);
@@ -119,9 +119,9 @@ impl fmt::Debug for Issuer {
 ///
 /// ```no_run
 /// # async fn run(proxy: reqwest::Proxy) -> Result<(), Box<dyn std::error::Error>> {
-/// let issuer = piquel_auth::Issuer::builder()
+/// let issuer = sourceorigin_auth::Issuer::builder()
 ///     .http_client(reqwest::Client::builder().proxy(proxy))
-///     .discover("https://auth.piquel.fr")
+///     .discover("https://auth.sourceorigin.dev")
 ///     .await?;
 /// # Ok(()) }
 /// ```

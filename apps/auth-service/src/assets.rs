@@ -7,8 +7,8 @@ use axum::{
     http::header,
     response::{IntoResponse, Response},
 };
-use piquel_common::config::Origin;
-use piquel_ui::Asset;
+use sourceorigin_common::config::Origin;
+use sourceorigin_ui::Asset;
 
 /// Failures of embedded browser asset lookup.
 #[derive(Debug, thiserror::Error)]
@@ -30,19 +30,19 @@ impl From<AssetError> for ApiError {
 /// serves them too, on its own origin.
 pub(crate) struct EmbeddedAssets;
 impl EmbeddedAssets {
-    /// The stylesheet of auth's pages, `piquel-ui`'s.
-    pub(crate) const STYLESHEET: Asset = piquel_ui::STYLESHEET;
+    /// The stylesheet of auth's pages, `sourceorigin-ui`'s.
+    pub(crate) const STYLESHEET: Asset = sourceorigin_ui::STYLESHEET;
 
     /// Every file: the stylesheet, the typefaces it links, and the scripts, Topcoat's
     /// runtime and the expressions it runs.
     pub(crate) fn all() -> [Asset; 6] {
         [
             Self::STYLESHEET,
-            piquel_ui::FONTS[0],
-            piquel_ui::FONTS[1],
-            piquel_ui::FONTS[2],
-            piquel_ui::RUNTIME,
-            *piquel_ui::EXPRESSIONS,
+            sourceorigin_ui::FONTS[0],
+            sourceorigin_ui::FONTS[1],
+            sourceorigin_ui::FONTS[2],
+            sourceorigin_ui::RUNTIME,
+            *sourceorigin_ui::EXPRESSIONS,
         ]
     }
 
@@ -51,8 +51,8 @@ impl EmbeddedAssets {
     pub(crate) fn script_src(origin: &Origin) -> String {
         format!(
             "{} {}",
-            origin.join(&piquel_ui::RUNTIME.path()),
-            origin.join(&piquel_ui::EXPRESSIONS.path()),
+            origin.join(&sourceorigin_ui::RUNTIME.path()),
+            origin.join(&sourceorigin_ui::EXPRESSIONS.path()),
         )
     }
 
@@ -80,9 +80,9 @@ mod tests {
     fn the_pages_files_are_immutable() {
         for (asset, content_type) in [
             (EmbeddedAssets::STYLESHEET, "text/css; charset=utf-8"),
-            (piquel_ui::RUNTIME, "text/javascript; charset=utf-8"),
-            (*piquel_ui::EXPRESSIONS, "text/javascript; charset=utf-8"),
-            (piquel_ui::FONTS[0], "font/woff2"),
+            (sourceorigin_ui::RUNTIME, "text/javascript; charset=utf-8"),
+            (*sourceorigin_ui::EXPRESSIONS, "text/javascript; charset=utf-8"),
+            (sourceorigin_ui::FONTS[0], "font/woff2"),
         ] {
             let response = EmbeddedAssets::serve(&asset.path()).expect("found");
             assert_eq!(response.headers()[header::CONTENT_TYPE], content_type);

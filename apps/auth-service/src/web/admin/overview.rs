@@ -3,8 +3,8 @@
 
 use super::{AdminApplication as App, alerts, deliveries, lists, users};
 use crate::admin::{Kinds, Problem};
-use piquel_common::admin::EventSearch;
-use piquel_ui::{AdminOverview, Measure, Query};
+use sourceorigin_common::admin::EventSearch;
+use sourceorigin_ui::{AdminOverview, Measure, Query};
 use topcoat::{
     Result,
     context::Cx,
@@ -38,17 +38,17 @@ pub(super) async fn overview(cx: &Cx) -> Result<Response> {
         .problems()
         .into_iter()
         .map(|problem| match problem {
-            Problem::OpenAlerts(count) => piquel_ui::Problem::OpenAlerts {
+            Problem::OpenAlerts(count) => sourceorigin_ui::Problem::OpenAlerts {
                 count,
                 alerts: &alerts,
             },
-            Problem::FailedSignIns(rate) => piquel_ui::Problem::FailedSignIns {
+            Problem::FailedSignIns(rate) => sourceorigin_ui::Problem::FailedSignIns {
                 count: rate.last_hour,
                 usual: rate.usual,
                 events: &failures,
             },
             Problem::DeliveriesWaiting { pending, oldest } => {
-                piquel_ui::Problem::DeliveriesWaiting {
+                sourceorigin_ui::Problem::DeliveriesWaiting {
                     pending,
                     oldest,
                     deliveries: &queue,
@@ -84,6 +84,6 @@ pub(super) async fn overview(cx: &Cx) -> Result<Response> {
         all_events: &events_page,
         all_users: &all_users,
     };
-    let view = view! { piquel_ui::admin_overview(overview: page) };
+    let view = view! { sourceorigin_ui::admin_overview(overview: page) };
     App::render(cx, StatusCode::OK, "Overview", view).await
 }

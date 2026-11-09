@@ -14,14 +14,14 @@ use crate::{
     web::tests::value_after,
 };
 use axum::http::{StatusCode, header};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, EmailId, EventId, Provider, TokenId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
     notifications::EmailCategory,
 };
-use piquel_crypto::Secret;
-use piquel_repository::InsertExternalIdentity;
-use piquel_ui::{
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::InsertExternalIdentity;
+use sourceorigin_ui::{
     Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
     HistoryChange, HistoryState, InboxChange, InboxState, NotificationState, PICTURE_FIELD,
     ProfileChange, ProfileDialog, ProfileState, Query, SignInChange,
@@ -102,7 +102,7 @@ async fn connected_apps_are_listed_and_removed() {
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
     let client = crate::tests::registration(
-        piquel_common::clients::ClientKind::Public,
+        sourceorigin_common::clients::ClientKind::Public,
         "https://client.example",
     );
     crate::tests::register(&database, &client)
@@ -491,7 +491,7 @@ async fn notifications_are_read_by_opening_them() {
     let foreign = [("sec-fetch-site", "cross-site")];
     let page = html(browser.visit_from(&replicas.a, &item, &foreign).await).await;
     assert!(
-        page.contains("Piquel no longer sends anything to that address."),
+        page.contains("Origin Auth no longer sends anything to that address."),
         "{page}"
     );
     assert_eq!(unread().await, 1, "a link from another site marks nothing");
@@ -811,14 +811,14 @@ async fn data_page_downloads_the_data_and_deletes_the_account() {
         .to_str()
         .expect("disposition");
     assert!(
-        disposition.starts_with(&format!("attachment; filename=\"piquel-account-{handle}-")),
+        disposition.starts_with(&format!("attachment; filename=\"sourceorigin-account-{handle}-")),
         "{disposition}"
     );
     let body = axum::body::to_bytes(download.into_body(), MAX_RESPONSE_BYTES)
         .await
         .expect("body");
     let export: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
-    assert_eq!(export["format"], "piquel.account-export");
+    assert_eq!(export["format"], "sourceorigin.account-export");
 
     let opened = format!("{}?delete=true", settings::DATA);
     let page = html(browser.visit(&replicas.a, &opened).await).await;

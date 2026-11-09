@@ -1,11 +1,11 @@
 # Account recovery
 
 Recovery binds a new passkey to an existing account: the same `UserId` and the
-same `sub`. It never moves data or changes identity. Piquel has one recovery
+same `sub`. It never moves data or changes identity. SourceOrigin has one recovery
 path today, run by support: an operator at the terminal, or an administrator
 from the dashboard. This document states its policy as built, as testable
 invariants, each naming the test that pins it. Self-service recovery is
-designed in [#85](https://github.com/piquel-fr/piquel-fr/issues/85) but not
+designed in [#85](https://github.com/sourceorigin-dev/sourceorigin/issues/85) but not
 built; [limits](#limits) lists what is missing.
 
 Recovery is the weakest link of a passkey-first system. Phishing-resistant
@@ -185,7 +185,7 @@ link is only mailed, so `--revoke` stays at the terminal.
   recovery's ID, on a disabled account too
   (`pages_read_an_undoable_recovery_by_session_or_id`). Every settings and
   developer console page asks "Your account was recovered on … Was this you?"
-  ("Piquel support started a recovery of your account on …" while its link is
+  ("SourceOrigin support started a recovery of your account on …" while its link is
   unused), and its "No" links to the undo page. "Yes, it was me" hides the
   question in that browser only, for that session and stage, and until a passkey
   first confirms the session: a "Yes" while the link is unused still asks once
@@ -406,7 +406,7 @@ cannot shadow `account_recoveries`
 
 ## Threat model
 
-The operator path, against the threats [#85](https://github.com/piquel-fr/piquel-fr/issues/85) lists.
+The operator path, against the threats [#85](https://github.com/sourceorigin-dev/sourceorigin/issues/85) lists.
 
 | Threat | What the operator path does |
 | --- | --- |
@@ -416,7 +416,7 @@ The operator path, against the threats [#85](https://github.com/piquel-fr/piquel
 | Stolen older passkey | It grants everything with or without a recovery (X1). Support recovers with `--revoke` (S5). |
 | Insider or database access | Database access is the root of trust (see [NIST](#nist-sp-800-63b-4)): an operator can do anything. CLI changes record `Actor::Cli` with `$USER` and the host, and the reason; the owner sees that an operator acted, and the [audit history](audit-history.md) makes the record tamper-evident. |
 | Close-proximity attacker | As for a mailbox: a probation sign-in, notices to every address, the sign-in prompt, and undo by an older passkey. |
-| Harassment | Only support starts recoveries, and each mails one link to one address. Dedicated recovery rate limits ([#86](https://github.com/piquel-fr/piquel-fr/issues/86)) are not built yet. |
+| Harassment | Only support starts recoveries, and each mails one link to one address. Dedicated recovery rate limits ([#86](https://github.com/sourceorigin-dev/sourceorigin/issues/86)) are not built yet. |
 | Lockout | The path exists for it. With only the recovered passkey, the owner can't change security settings or add a second passkey for 15 days; if they lose the recovered passkey meanwhile, support undoes the recovery and starts another (U5, S2). |
 
 ## Design choices
@@ -442,13 +442,13 @@ The operator path, against the threats [#85](https://github.com/piquel-fr/piquel
 
 ## NIST SP 800-63B-4
 
-Passkeys with user verification make Piquel accounts AAL2. NIST's recovery rules
+Passkeys with user verification make Origin Accounts AAL2. NIST's recovery rules
 at AAL2 ([§4.2.2.2](https://pages.nist.gov/800-63-4/sp800-63b.html#recovery-aal2))
 require two recovery codes obtained by different methods, one code plus a bound
 single-factor authenticator, or repeated identity proofing.
 
 The operator path meets none of them. It is a **documented departure**: its only
-code is the issued link, to one address, and Piquel does no identity proofing, so
+code is the issued link, to one address, and SourceOrigin does no identity proofing, so
 the second piece of evidence is support's judgment under the evidence policy,
 outside the system. Database access is the root of trust: whoever holds it can
 bind any passkey to any account, recovery or not. The compensating controls are
@@ -539,12 +539,12 @@ link. If the owner is confirmed, undo the recovery and start again with
 
 ## Limits
 
-Not built yet, from [#85](https://github.com/piquel-fr/piquel-fr/issues/85):
+Not built yet, from [#85](https://github.com/sourceorigin-dev/sourceorigin/issues/85):
 
 - Self-service recovery: a saved recovery key plus an issued email code, the
   NIST-compliant path, with its pages. It would create the same
   `account_recoveries` row with other evidence, and get the same probation.
 - Passkey backup-state warnings and prompts for a second passkey, in settings
   and the security center: prevention first.
-- Dedicated rate limits on recovery endpoints ([#86](https://github.com/piquel-fr/piquel-fr/issues/86)); only the general per-IP
+- Dedicated rate limits on recovery endpoints ([#86](https://github.com/sourceorigin-dev/sourceorigin/issues/86)); only the general per-IP
   request budget covers them today.

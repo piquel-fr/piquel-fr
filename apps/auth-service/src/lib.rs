@@ -60,7 +60,7 @@ mod sessions;
 /// Fixtures shared by the applications' tests.
 #[cfg(test)]
 mod tests;
-/// auth.piquel.fr's server-rendered pages.
+/// auth.sourceorigin.dev's server-rendered pages.
 mod web;
 
 pub use admin::{
@@ -92,15 +92,15 @@ use web::{AdminApplication, WebApplication};
 use account::AccountApplication;
 use assets::EmbeddedAssets;
 use axum::{Router, extract::DefaultBodyLimit, http::Uri, middleware, routing::get};
-use piquel_repository::Database;
-use piquel_telemetry::HttpTelemetry;
+use sourceorigin_repository::Database;
+use sourceorigin_telemetry::HttpTelemetry;
 use thiserror::Error;
 
 /// The default `service.name` of exported telemetry.
 pub const SERVICE_NAME: &str = "auth-service";
 /// What is traced, and logged unless `RUST_LOG` says otherwise: auth's own
 /// operations, and its database queries and committed events.
-pub const TELEMETRY_FILTER: &str = "auth_service=info,piquel_repository=info";
+pub const TELEMETRY_FILTER: &str = "auth_service=info,sourceorigin_repository=info";
 
 /// Bound on browser ceremony and API JSON bodies.
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
@@ -210,7 +210,7 @@ impl AuthConfig {
     /// only, under that listener's own security layer: the dashboard's host and
     /// origin only, the same-origin rule for its forms, its own request budget,
     /// and the public listener's body limit and deadline. Its telemetry is
-    /// labelled `piquel.listener = "admin"`. Its passkey confirmations sign
+    /// labelled `sourceorigin.listener = "admin"`. Its passkey confirmations sign
     /// nothing, but auth's passkey ceremonies, which they run, are built with
     /// `keys`.
     ///

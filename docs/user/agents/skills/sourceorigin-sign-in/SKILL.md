@@ -1,38 +1,38 @@
 ---
-name: piquel-sign-in
+name: sourceorigin-sign-in
 description: >
-  Add sign-in with a piquel.fr account to a web app with a backend, using the
-  Rust SDK (piquel-auth, with axum) or the TypeScript SDK (@piquel/auth). Use
-  when the person wants their app's users to sign in with piquel.fr, or asks
-  to integrate auth.piquel.fr, its OpenID Connect provider or its SDKs.
+  Add sign-in with an Origin Account to a web app with a backend, using the
+  Rust SDK (sourceorigin-auth, with axum) or the TypeScript SDK (@sourceorigin/auth). Use
+  when the person wants their app's users to sign in with sourceorigin.dev, or asks
+  to integrate auth.sourceorigin.dev, its OpenID Connect provider or its SDKs.
 ---
 
-# Add piquel.fr sign-in
+# Add sourceorigin.dev sign-in
 
-auth.piquel.fr is an OpenID Connect provider. Both SDKs have server-side login
+auth.sourceorigin.dev is an OpenID Connect provider. Both SDKs have server-side login
 routes that run the whole sign-in: `GET /auth/login`, `GET /auth/callback` and
 `POST /auth/logout`. The session lives in the browser, in a cookie sealed with
 the app's cookie key, so the app stores nothing.
 
 The guides behind this skill:
 
-- Registering an app: https://docs.piquel.fr/user/apps/register-an-app.html
-- OpenID Connect reference: https://docs.piquel.fr/user/reference/oidc.html
-- Rust SDK: https://github.com/piquel-fr/piquel-fr/tree/main/crates/auth-sdk
-- TypeScript SDK: https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/README.md
+- Registering an app: https://docs.sourceorigin.dev/user/apps/register-an-app.html
+- OpenID Connect reference: https://docs.sourceorigin.dev/user/reference/oidc.html
+- Rust SDK: https://github.com/sourceorigin-dev/sourceorigin/tree/main/crates/auth-sdk
+- TypeScript SDK: https://github.com/sourceorigin-dev/sourceorigin/blob/main/packages/auth/README.md
 
 ## 1. Ask the person to register the app
 
 You can't register it: the developer console asks for a passkey confirmation,
 which only the person can give. Ask them to open
-https://auth.piquel.fr/developers/new and fill in:
+https://auth.sourceorigin.dev/developers/new and fill in:
 
 - **App name**: the name users see when they sign in.
 - **Does your app have a backend that can keep a secret?**: **Yes, a web app
   with a backend**. The login routes need a client secret.
 - **Redirect URIs**: the callback, `https://<app host>/auth/callback`. Auth
   compares it with the app's as a whole string, so it must match exactly. For
-  local development, use the piquel-dev-setup skill.
+  local development, use the sourceorigin-dev-setup skill.
 - **Post-logout URIs**: `https://<app host>/`, if users should come back to the
   app after signing out.
 - **Scopes**: `openid`, `profile` for the user's handle, name and picture,
@@ -51,15 +51,15 @@ the conversation. It never goes in the repository. They then give you the
 
 | Variable | Value |
 | --- | --- |
-| `PIQUEL_ISSUER` | `https://auth.piquel.fr`, with no trailing slash. Optional |
-| `PIQUEL_CLIENT_ID` | The client ID |
-| `PIQUEL_CLIENT_SECRET` | The client secret |
-| `PIQUEL_REDIRECT_URI` | The registered callback, exactly |
-| `PIQUEL_COOKIE_KEY` | 32 random bytes in standard base64, from `openssl rand -base64 32` |
+| `SOURCEORIGIN_ISSUER` | `https://auth.sourceorigin.dev`, with no trailing slash. Optional |
+| `SOURCEORIGIN_CLIENT_ID` | The client ID |
+| `SOURCEORIGIN_CLIENT_SECRET` | The client secret |
+| `SOURCEORIGIN_REDIRECT_URI` | The registered callback, exactly |
+| `SOURCEORIGIN_COOKIE_KEY` | 32 random bytes in standard base64, from `openssl rand -base64 32` |
 
 The cookie key must be the same on every replica, and changing it signs every
 user out. Read both secrets from a file when `<NAME>_FILE` is set, such as
-`PIQUEL_CLIENT_SECRET_FILE`, since some hosts, piqueld among them, mount
+`SOURCEORIGIN_CLIENT_SECRET_FILE`, since some hosts, piqueld among them, mount
 secrets as files. If the project keeps local settings in a file such as
 `.env`, check that the file is in `.gitignore` before anything is written to
 it.
@@ -70,7 +70,7 @@ Add the SDK, with axum at the version it uses:
 
 ```toml
 [dependencies]
-piquel-auth = { git = "https://github.com/piquel-fr/piquel-fr", features = ["axum"] }
+sourceorigin-auth = { git = "https://github.com/sourceorigin-dev/sourceorigin", features = ["axum"] }
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 ```
@@ -79,7 +79,7 @@ Then mount the login routes and their layer:
 
 ```rust
 use axum::{Router, routing::get};
-use piquel_auth::{
+use sourceorigin_auth::{
     ClientConfig, Credentials, Issuer,
     axum::{CookieKey, LoginRoutes, MaybeSignedIn, SignedIn},
 };
@@ -109,14 +109,14 @@ async fn notes(user: SignedIn) -> String {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let issuer = env::var("PIQUEL_ISSUER").unwrap_or_else(|_| "https://auth.piquel.fr".into());
+    let issuer = env::var("SOURCEORIGIN_ISSUER").unwrap_or_else(|_| "https://auth.sourceorigin.dev".into());
     let issuer = Issuer::discover(&issuer).await?;
     let config = ClientConfig {
-        client_id: env::var("PIQUEL_CLIENT_ID")?.parse()?,
-        credentials: Credentials::Secret(secret("PIQUEL_CLIENT_SECRET")?.into()),
-        redirect_uri: env::var("PIQUEL_REDIRECT_URI")?.parse()?,
+        client_id: env::var("SOURCEORIGIN_CLIENT_ID")?.parse()?,
+        credentials: Credentials::Secret(secret("SOURCEORIGIN_CLIENT_SECRET")?.into()),
+        redirect_uri: env::var("SOURCEORIGIN_REDIRECT_URI")?.parse()?,
     };
-    let key = CookieKey::from_base64(&secret("PIQUEL_COOKIE_KEY")?)?;
+    let key = CookieKey::from_base64(&secret("SOURCEORIGIN_COOKIE_KEY")?)?;
     // Scopes besides `openid` and `offline_access`, which every sign-in requests.
     let auth = LoginRoutes::new(issuer.client(config), key)?.scopes("profile".parse()?);
     let app = Router::new()
@@ -141,24 +141,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 ## 3b. TypeScript
 
-`@piquel/auth` runs on Node 22 or later, Bun and Cloudflare Workers.
-`@piquel/auth/server` takes a standard `Request` and returns a `Response`, so
+`@sourceorigin/auth` runs on Node 22 or later, Bun and Cloudflare Workers.
+`@sourceorigin/auth/server` takes a standard `Request` and returns a `Response`, so
 it fits Node, Bun, Workers, Hono and SvelteKit. The package isn't published to
 npm yet: ask the person how the project should get it before you add it.
 
 ```ts
-import { Issuer } from '@piquel/auth';
-import { CookieKey, Login } from '@piquel/auth/server';
+import { Issuer } from '@sourceorigin/auth';
+import { CookieKey, Login } from '@sourceorigin/auth/server';
 
-const issuer = await Issuer.discover(process.env.PIQUEL_ISSUER ?? 'https://auth.piquel.fr');
+const issuer = await Issuer.discover(process.env.SOURCEORIGIN_ISSUER ?? 'https://auth.sourceorigin.dev');
 const login = new Login(
   issuer.client({
-    clientId: process.env.PIQUEL_CLIENT_ID ?? '',
-    clientSecret: process.env.PIQUEL_CLIENT_SECRET,
-    redirectUri: process.env.PIQUEL_REDIRECT_URI ?? ''
+    clientId: process.env.SOURCEORIGIN_CLIENT_ID ?? '',
+    clientSecret: process.env.SOURCEORIGIN_CLIENT_SECRET,
+    redirectUri: process.env.SOURCEORIGIN_REDIRECT_URI ?? ''
   }),
   // Scopes besides `openid` and `offline_access`, which every sign-in requests.
-  { cookieKey: CookieKey.fromBase64(process.env.PIQUEL_COOKIE_KEY ?? ''), scopes: ['profile'] }
+  { cookieKey: CookieKey.fromBase64(process.env.SOURCEORIGIN_COOKIE_KEY ?? ''), scopes: ['profile'] }
 );
 
 export async function handle(request: Request): Promise<Response> {
@@ -178,14 +178,14 @@ Read the secrets from `<NAME>_FILE` too, as for Rust.
 
 ## 4. Check that it works
 
-Run the app as the piquel-dev-setup skill describes. Then ask the person to
+Run the app as the sourceorigin-dev-setup skill describes. Then ask the person to
 open the app, sign in with their passkey and approve the consent page. They
 should land back on the app, signed in.
 
 ## Going further
 
-- An action that needs a fresh passkey: https://docs.piquel.fr/user/apps/step-up.html
-- Ending the app's sessions when the user signs out of piquel.fr:
-  https://docs.piquel.fr/user/apps/back-channel-logout.html
+- An action that needs a fresh passkey: https://docs.sourceorigin.dev/user/apps/step-up.html
+- Ending the app's sessions when the user signs out of sourceorigin.dev:
+  https://docs.sourceorigin.dev/user/apps/back-channel-logout.html
 
-If the sign-in fails, use the piquel-debug-sign-in skill.
+If the sign-in fails, use the sourceorigin-debug-sign-in skill.

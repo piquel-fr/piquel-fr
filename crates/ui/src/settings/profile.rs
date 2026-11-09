@@ -157,7 +157,7 @@ pub async fn profile_settings<'a>(
         if audience.owns() {
             page_head(
                 title: "Profile",
-                lead: "What apps you sign in to with Piquel see of you.".to_owned(),
+                lead: "What apps you sign in to with Origin Auth see of you.".to_owned(),
             )
         }
         if let Some(alert) = alert.filter(|_| shown.is_none()) {

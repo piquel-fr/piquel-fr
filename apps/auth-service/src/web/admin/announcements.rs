@@ -8,13 +8,13 @@
 use super::AdminApplication as App;
 use crate::{AdminError, AnnouncementDraft, admin::SignedInAdmin, deliveries::AnnouncementSender};
 use chrono::Duration;
-use piquel_common::{
+use sourceorigin_common::{
     AnnouncementId,
     admin::{
         AnnouncementAudience, AnnouncementDetail, DraftAnnouncement, DraftIntent, SendAnnouncement,
     },
 };
-use piquel_ui::{
+use sourceorigin_ui::{
     Action, AdminAnnouncementRow, Change, Checkbox, Crumb, DraftActions, FoundAccount, Query,
 };
 use serde::de::IgnoredAny;
@@ -52,7 +52,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         .collect();
     let create = &href!(draft).resolve(cx);
     let page = view! {
-        piquel_ui::announcement_list(rows: &rows, create: create.as_str())
+        sourceorigin_ui::announcement_list(rows: &rows, create: create.as_str())
     };
     App::render(cx, StatusCode::OK, "Announcements", page).await
 }
@@ -94,7 +94,7 @@ pub(super) async fn show(cx: &Cx) -> Result<Response> {
         }),
     };
     let page = view! {
-        piquel_ui::announcement_page(
+        sourceorigin_ui::announcement_page(
             detail: detail,
             accounts: &accounts,
             preview: preview.as_str(),
@@ -168,7 +168,7 @@ pub(super) async fn send(cx: &Cx, form: Option<Form<SendAnnouncement>>) -> Resul
     let mailed = &format!("{} {}", detail.mailed, announcement.emailed());
     let revision = &checked.revision.to_string();
     let page = view! {
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::SendAnnouncement,
             back: back.as_str(),
             refusal: refusal.as_deref(),
@@ -196,7 +196,7 @@ pub(super) async fn discard(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<R
     .await?;
     let back = &href!(show, Announcement(id)).resolve(cx);
     let page = view! {
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::DiscardAnnouncement,
             back: back.as_str(),
             refusal: refusal.as_deref(),
@@ -329,7 +329,7 @@ impl App {
             None => (Change::DraftAnnouncement, "New announcement"),
         };
         let page = view! {
-            piquel_ui::announcement_form(
+            sourceorigin_ui::announcement_form(
                 change: change,
                 back: back,
                 form: typed,

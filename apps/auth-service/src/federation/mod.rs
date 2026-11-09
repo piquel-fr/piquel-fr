@@ -14,19 +14,19 @@ use axum::{
     routing::get,
 };
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, ErrorChain, Provider, SessionId, TokenId, UserId,
     config::{ConfigurationError, Origin, SecretBytes},
     events::{Actor, SignInFailure},
     protocol::oauth::{CodeChallengeMethod, ResponseType},
 };
-use piquel_crypto::Pkce;
-use piquel_crypto::Secret;
-use piquel_repository::{
+use sourceorigin_crypto::Pkce;
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{
     Database, DatabaseTransaction, InsertFederationTransaction, PendingFederation,
     StoredExternalIdentity, StoredSession,
 };
-use piquel_ui::{CallbackError, LoginQuery, PendingDestination, Query as _};
+use sourceorigin_ui::{CallbackError, LoginQuery, PendingDestination, Query as _};
 use serde::Deserialize;
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};
 use url::Url;
@@ -55,7 +55,7 @@ const HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(8);
 /// Maximum duration of a provider connection attempt.
 const HTTP_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(3);
 /// Identifies this service to provider APIs.
-const HTTP_USER_AGENT: &str = "piquel-auth";
+const HTTP_USER_AGENT: &str = "sourceorigin-auth";
 /// Where the browser goes after sign-in when no `return_to` is given: the account's
 /// settings.
 const DEFAULT_RETURN_TO: &str = routes::page::settings::HOME;

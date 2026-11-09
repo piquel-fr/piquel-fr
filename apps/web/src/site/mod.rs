@@ -1,4 +1,4 @@
-//! The router: piquel.fr's pages, the shared stylesheet and typefaces, and a
+//! The router: sourceorigin.dev's pages, the shared stylesheet and typefaces, and a
 //! redirect of every other path to auth.
 
 use crate::pages::{HomeLinks, Page, page_body};
@@ -9,9 +9,9 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     routing::get,
 };
-use piquel_common::config::Origin;
-use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{Asset, FONTS, Policies, STYLESHEET};
+use sourceorigin_common::config::Origin;
+use sourceorigin_telemetry::HttpTelemetry;
+use sourceorigin_ui::{Asset, FONTS, Policies, STYLESHEET};
 use topcoat::{
     context::Cx,
     view::{ViewExt, view},
@@ -21,7 +21,7 @@ use topcoat::{
 pub(crate) const HEALTH: &str = "/health";
 
 /// Every page's Content-Security-Policy: the stylesheet and its typefaces, on
-/// piquel.fr itself, and nothing else. No page has a script or a form.
+/// SourceOrigin itself, and nothing else. No page has a script or a form.
 const POLICY: &str = "default-src 'none'; style-src 'self'; font-src 'self'; \
                       frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
@@ -32,7 +32,7 @@ const ASSETS: [Asset; 4] = [STYLESHEET, FONTS[0], FONTS[1], FONTS[2]];
 /// release.
 const PAGE_CACHE: &str = "public, max-age=300";
 
-/// piquel.fr, which relies on auth at `auth` only to sign people in.
+/// sourceorigin.dev, which relies on auth at `auth` only to sign people in.
 #[derive(Clone)]
 pub(crate) struct Site {
     /// Auth's origin, which the homepage links and every other path redirects to.
@@ -49,7 +49,7 @@ impl Site {
     /// probe, then a temporary redirect of every other path, with its query, to
     /// the same one on auth, so links sent before the settings moved, such as
     /// security notices', still open their page; browsers keep the fragment.
-    /// Temporary, so browsers cache nothing should piquel.fr serve that path
+    /// Temporary, so browsers cache nothing should sourceorigin.dev serve that path
     /// later. Every answer carries the security headers, inside the request
     /// telemetry.
     pub(crate) fn router(self) -> Router {
@@ -92,7 +92,7 @@ impl Site {
             .into_response()
     }
 
-    /// Answers with `page` in Piquel's document and the site's frame, whose
+    /// Answers with `page` in SourceOrigin's document and the site's frame, whose
     /// status bar links the policies here.
     async fn render(&self, page: Page) -> Response {
         let cx = &Cx::default();
@@ -114,11 +114,11 @@ impl Site {
             ("Create an account", register.as_str()),
         ];
         let html = view! {
-            piquel_ui::document(
+            sourceorigin_ui::document(
                 title: page.title(),
                 stylesheet: &stylesheet,
                 indexable: true,
-                piquel_ui::site_shell(
+                sourceorigin_ui::site_shell(
                     home: Page::Home.path(),
                     links: &header,
                     policies: Policies::PATHS,
@@ -158,7 +158,7 @@ impl Site {
         for (name, value) in [
             // No MIME sniffing.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-            // Links to apps carry no path of piquel.fr.
+            // Links to apps carry no path of sourceorigin.dev.
             (header::REFERRER_POLICY, "strict-origin-when-cross-origin"),
             // No page may be framed.
             (header::X_FRAME_OPTIONS, "DENY"),

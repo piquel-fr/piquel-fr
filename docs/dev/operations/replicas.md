@@ -23,7 +23,7 @@ adds no capacity.
 3. [Promote](deploying.md#promote-to-production) staging to apply it to
    production.
 
-Change it in the file: piquel-fr reads its manifest from the repository.
+Change it in the file: sourceorigin reads its manifest from the repository.
 
 ## What replicas share
 
