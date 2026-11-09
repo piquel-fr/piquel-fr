@@ -7,14 +7,10 @@
 //!   within [`SUBMISSION_WINDOW`] is skipped; one of a change still being made
 //!   gets its form back, saying so; a refused change gives up its claim, so
 //!   posting it again tries again. No transaction is held while a change is made:
-//!   the claim is written, then marked made or deleted;
-//! - a draft of a change that needed a newer passkey confirmation, or a new
-//!   sign-in, which sends the browser through auth's handoff page: the page shows
-//!   the form again once, the next time it opens, so what was typed is not lost,
-//!   even where the dashboard's script could not confirm on the page.
+//!   the claim is written, then marked made or deleted.
 
 use chrono::{Duration, Utc};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 use sourceorigin_common::UserId;
 use sourceorigin_crypto::Digest;
 use sourceorigin_repository::{Database, DatabaseError, Submission, SubmissionToken};
@@ -22,11 +18,6 @@ use sourceorigin_repository::{Database, DatabaseError, Submission, SubmissionTok
 /// How long a change blocks the same form posted again: a double click, or a
 /// slow first answer, but rarely a real repeat.
 const SUBMISSION_WINDOW: Duration = Duration::seconds(10);
-/// How long a draft waits for the administrator to come back from auth's handoff
-/// page, signing in there first if they must. It holds what they typed, which
-/// may name people.
-const DRAFT_LIFETIME: Duration = Duration::minutes(10);
-
 /// Why the dashboard could not keep or read a form.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum FormsError {
@@ -38,10 +29,10 @@ pub(super) enum FormsError {
     Json(#[from] serde_json::Error),
 }
 
-/// The dashboard's claims on changes and its drafts, over the database.
+/// The dashboard's claims on changes, over the database.
 #[derive(Clone)]
 pub(super) struct DashboardForms {
-    /// The claims and drafts.
+    /// The claims.
     database: Database,
 }
 
@@ -115,35 +106,5 @@ impl DashboardForms {
             Submission::Made => Claimed::Made,
             Submission::Pending => Claimed::Pending,
         })
-    }
-
-    /// Keeps `form`, which `user_id` posted to the page `path`, as that page's
-    /// draft for [`DRAFT_LIFETIME`].
-    pub(super) async fn keep(
-        &self,
-        user_id: UserId,
-        path: &str,
-        form: &impl Serialize,
-    ) -> Result<(), FormsError> {
-        let form = serde_json::to_string(form)?;
-        let expires_at = Utc::now() + DRAFT_LIFETIME;
-        (self.database.dashboard())
-            .keep_draft(user_id, path, &form, expires_at)
-            .await?;
-        Ok(())
-    }
-
-    /// Takes the draft `user_id` posted to the page `path`, if it has not
-    /// expired: its form, shown once. One that no longer decodes as `I`, such as
-    /// after a release changed the form, is dropped.
-    pub(super) async fn take<I: DeserializeOwned>(
-        &self,
-        user_id: UserId,
-        path: &str,
-    ) -> Result<Option<I>, FormsError> {
-        let draft = (self.database.dashboard())
-            .take_draft(user_id, path)
-            .await?;
-        Ok(draft.and_then(|form| serde_json::from_str(&form).ok()))
     }
 }

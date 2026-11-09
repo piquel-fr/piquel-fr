@@ -2084,68 +2084,6 @@ async fn a_change_page_names_its_target() {
     );
 }
 
-/// A change posted once the dashboard's confirmation ended, such as without its
-/// script, goes through auth's handoff page, and its page then shows the form as
-/// it was posted, once, saying nothing changed yet: to its administrator alone,
-/// on its page alone.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn a_form_posted_without_a_confirmation_comes_back_after_it() {
-    let harness = Harness::new().await;
-    let admin = harness.admin().await;
-    let user = Browser::new_account(&harness.database).await;
-    let disable = format!("/users/{}/disable", user.user_id);
-    let dashboard = harness.sign_in(&admin, "/users").await;
-    let posted = dashboard
-        .submit(
-            &harness.dashboard,
-            &format!("{DASHBOARD}{disable}"),
-            &[("reason", "Typed before it ended")],
-            OWN_PAGE,
-        )
-        .await;
-    let handoff = location(&posted);
-    assert_eq!(handoff.path(), routes::page::ADMIN);
-    let back = parameter(&handoff, "return_to");
-    assert_eq!(back, disable);
-    let (state, _) = cookie(&posted, BrowserCookie::DashboardState);
-    let query = HandoffQuery {
-        state: state.to_owned(),
-        return_to: back.clone(),
-    };
-    let proof = AdminProof::unverified(admin.session_id, Utc::now());
-    let code_url = harness
-        .sign_in_service()
-        .hand_off(&admin.owner(&harness.database).await, &query, proof)
-        .await
-        .expect("handed off");
-    let browser = dashboard.with_cookie(BrowserCookie::DashboardState, state);
-    let confirmed = harness.redeem(&browser, &code_url, &back).await;
-
-    // Neither another administrator, nor this one on another page, sees it.
-    let other = harness.admin().await;
-    let elsewhere = harness.confirmed(&other, &back, Utc::now()).await;
-    let page = html(harness.visit(&elsewhere, &back).await).await;
-    assert!(!page.contains("Typed before it ended"), "{page}");
-    let enable = format!("/users/{}/enable", user.user_id);
-    let page = html(harness.visit(&confirmed, &enable).await).await;
-    assert!(!page.contains("Nothing has changed yet"), "{page}");
-
-    let shown = harness.visit(&confirmed, &back).await;
-    assert_eq!(shown.status(), StatusCode::OK);
-    let page = html(shown).await;
-    assert!(page.contains(r#"value="Typed before it ended""#), "{page}");
-    assert!(page.contains("Nothing has changed yet"), "{page}");
-    let again = html(harness.visit(&confirmed, &back).await).await;
-    assert!(
-        !again.contains("Typed before it ended"),
-        "shown once: {again}"
-    );
-    let stored = harness.database.users().find_by_id(user.user_id).await;
-    let stored = stored.expect("lookup").expect("user");
-    assert_eq!(stored.status, AccountStatus::Active, "nothing changed");
-}
-
 /// An account's page revokes only its own sessions: another account's session
 /// in the path is not found, and stays signed in.
 #[tokio::test]

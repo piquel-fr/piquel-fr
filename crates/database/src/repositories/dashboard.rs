@@ -352,61 +352,6 @@ impl DashboardRepository<'_> {
         )
     }
 
-    /// Keeps `form`, as JSON, which `user_id` posted to the dashboard page `path`,
-    /// until `expires_at`, as the draft of that page, replacing one already
-    /// kept.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the insert fails, e.g. for an unknown account.
-    pub async fn keep_draft(
-        &mut self,
-        user_id: UserId,
-        path: &str,
-        form: &str,
-        expires_at: DateTime<Utc>,
-    ) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "INSERT INTO dashboard_drafts (user_id, path, form, expires_at)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (user_id, path)
-                DO UPDATE SET form = EXCLUDED.form, expires_at = EXCLUDED.expires_at",
-                user_id.as_uuid(),
-                path,
-                form,
-                expires_at,
-            )
-        )?;
-        Ok(())
-    }
-
-    /// Takes the unexpired draft `user_id` posted to the page `path`, if any: its
-    /// form, as JSON, shown once.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn take_draft(
-        &mut self,
-        user_id: UserId,
-        path: &str,
-    ) -> Result<Option<String>, DatabaseError> {
-        run!(
-            self,
-            fetch_optional,
-            sqlx::query_scalar!(
-                "DELETE FROM dashboard_drafts
-                WHERE user_id = $1 AND path = $2 AND expires_at > now()
-                RETURNING form",
-                user_id.as_uuid(),
-                path,
-            )
-        )
-    }
-
     /// Claims the change `user_id` posted, whose administrator, page and form
     /// have the digest `digest`, as being made, until `expires_at`: the claim's
     /// own token, or, if the change is claimed already and its claim has not

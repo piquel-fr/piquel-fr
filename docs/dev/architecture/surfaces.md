@@ -135,17 +135,12 @@ what it acts on. Without the script, or in a browser without related origins, th
 browser goes to the handoff page and back as before.
 
 Every change goes through `AdminApplication::change`, which keeps a change from
-being misread, lost or made twice:
+being misread or made twice:
 
 - **Its target.** A change's page names what it acts on beside its button, such
   as the account's handle and ID, so two pages left open cannot be told apart
   only by their address. The account or client comes from the crumb's parent.
   The passkey dialog names it too, from the account's own page as well.
-- **A form kept across the handoff.** A change posted once the confirmation
-  ended, or the session, is refused by the service. The dashboard keeps the
-  form as a draft, for its administrator, page and query, for ten minutes. It goes to
-  the handoff page and back, and the page shows the draft once, saying nothing
-  has changed yet.
 - **Made once.** The dashboard claims each change by the digest of its
   administrator, page, query and form, such as `/handles/release?handle=alice`,
   while it is made and for ten seconds after. The same form posted again

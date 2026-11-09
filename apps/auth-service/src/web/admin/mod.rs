@@ -74,7 +74,7 @@ use crate::{
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
 use forms::Claimed;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{ClientId, ErrorChain, UserId, config::Origin};
 use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
 use sourceorigin_repository::Database;
@@ -205,7 +205,7 @@ pub(crate) struct AdminApplication {
     service: AdminService,
     /// The settings administrators share with owners.
     account: AccountService,
-    /// The claims on changes, and the drafts kept across auth's handoff page.
+    /// The claims on changes, so none is made twice.
     forms: forms::DashboardForms,
     /// Who is signed in, and signing in through auth.
     sign_in: DashboardSignIn,
@@ -512,13 +512,17 @@ impl AdminApplication {
         }
     }
 
-    /// Requires the dashboard's passkey confirmation to last [`FORM_TIME`] more
-    /// when a page shows its form, so it can still be submitted. Without one, the
-    /// browser confirms on auth's handoff page, and comes back to the page. A
-    /// posted form goes on: the service refuses its change without a confirmation
-    /// recent enough, and [`Self::change`] keeps the form across the same trip.
+    /// Requires the dashboard's passkey confirmation recent enough for a change:
+    /// still for [`FORM_TIME`] when a page shows its form, and now when it takes
+    /// the form posted. Without one, the browser confirms on auth's handoff page,
+    /// and comes back to the page, where the administrator submits again.
     fn confirm(cx: &Cx, admin: &SignedInAdmin) -> Result<()> {
-        if method(cx) == Method::POST || admin.operator.is_confirmed(FORM_TIME) {
+        let ahead = if method(cx) == Method::POST {
+            Duration::zero()
+        } else {
+            FORM_TIME
+        };
+        if admin.operator.is_confirmed(ahead) {
             Ok(())
         } else {
             Err(Self::of(cx).hand_off(cx))
@@ -552,13 +556,11 @@ impl AdminApplication {
     /// dashboard makes comes through here.
     ///
     /// A `GET` only shows the form, so it returns nothing: a link, even with a
-    /// query, never changes anything. It shows the page's draft, if the
-    /// administrator left one, once, as [`DRAFT_KEPT`] says. A refusal comes back with the message the
+    /// query, never changes anything. A refusal comes back with the message the
     /// form shows and the form as posted, so the page keeps what was typed, and
     /// the page answers with the refusal's status. When the change needs a newer
-    /// confirmation, or the session ended meanwhile, the form is kept as a draft,
-    /// and the browser goes through auth's handoff page and back to the form's
-    /// page, which shows it.
+    /// confirmation, or the session ended meanwhile, the browser goes through
+    /// auth's handoff page and back to the form's page.
     async fn change<I, T, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
@@ -566,7 +568,7 @@ impl AdminApplication {
         call: F,
     ) -> Result<Option<Result<T, Refused<I>>>>
     where
-        I: Clone + Serialize + DeserializeOwned,
+        I: Clone + Serialize,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<T, E>>,
@@ -577,13 +579,7 @@ impl AdminApplication {
         // as `/handles/release?handle=alice`.
         let page = uri(cx).path_and_query().map_or("/", |page| page.as_str());
         let Some(Form(input)) = form.filter(|_| method(cx) == Method::POST) else {
-            let kept = app.forms.take(admin.user_id, page).await?;
-            return Ok(kept.map(|form| {
-                Err(Refused {
-                    message: DRAFT_KEPT.to_owned(),
-                    form,
-                })
-            }));
+            return Ok(None);
         };
         let claim = match app.forms.claim(admin.user_id, page, &input).await? {
             Claimed::New(claim) => claim,
@@ -612,10 +608,7 @@ impl AdminApplication {
             tracing::warn!(error = %ErrorChain(&error), "a dashboard change's claim was not released");
         }
         match refused {
-            Refusal::HandOff => {
-                app.forms.keep(admin.user_id, page, &input).await?;
-                Err(app.hand_off(cx))
-            }
+            Refusal::HandOff => Err(app.hand_off(cx)),
             Refusal::Page(error) => Err(error.into()),
             Refusal::Form(refusal) => match refusal.public() {
                 (status, _) if status.is_server_error() => {
@@ -678,7 +671,7 @@ impl AdminApplication {
         call: F,
     ) -> Result<Option<Refused<I>>>
     where
-        I: Clone + Serialize + DeserializeOwned,
+        I: Clone + Serialize,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<(), E>>,
@@ -695,10 +688,6 @@ impl AdminApplication {
 /// posted moments before, is still being made: nothing was changed by this one.
 const BEING_MADE: &str =
     "This change is already being made. Check its result before you send it again.";
-
-/// What a change's page says over the form a confirmation's trip through auth
-/// kept: nothing was changed yet.
-const DRAFT_KEPT: &str = "Nothing has changed yet: check the form, then submit it again.";
 
 /// The page a change's page is under: the account or client it changes.
 #[derive(Clone)]
@@ -732,8 +721,7 @@ impl Parent {
 struct NoInput {}
 
 /// A change the service refused: why, and the form as it was posted, which the
-/// page shows again so nothing typed is lost. It reads as its message. A form
-/// kept across auth's handoff page comes back as one too, saying so.
+/// page shows again so nothing typed is lost. It reads as its message.
 struct Refused<I> {
     /// Why, as the form says it.
     message: String,
