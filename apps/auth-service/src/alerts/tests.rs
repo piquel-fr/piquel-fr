@@ -57,6 +57,33 @@ async fn recorded(database: &Database) -> Vec<DomainEvent> {
         .collect()
 }
 
+/// Marking an alert seen once it cleared changes nothing, raises nothing and
+/// records nothing, and says so, so a streak that raised it counts afresh.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_alert_that_cleared_is_not_seen_again() {
+    let database = Harness::isolated().await.database;
+    let seen = async || {
+        let context = EventContext::system(JobName::AuditVerification);
+        let mut tx = database.begin().await.expect("transaction");
+        let seen = Alerts::new(&mut tx, &context)
+            .seen(&broken(5))
+            .await
+            .expect("seen");
+        tx.commit().await.expect("commit");
+        seen
+    };
+    found(&database, Some(broken(5))).await;
+    assert!(seen().await, "current");
+    found(&database, None).await;
+    let before = recorded(&database).await;
+    assert!(!seen().await, "cleared");
+    assert_eq!(recorded(&database).await, before, "nothing recorded");
+    let mut tx = database.begin().await.expect("transaction");
+    let current = tx.alerts().current(AlertKind::AuditChainBroken).await;
+    assert_eq!(current.expect("current"), None, "nothing raised");
+}
+
 /// Raising what the current alert says only marks it seen again; raising
 /// something else clears it first; clearing clears it, and clearing nothing
 /// records nothing.

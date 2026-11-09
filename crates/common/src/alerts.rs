@@ -20,6 +20,8 @@ crate::str_enum! {
         CheckpointRefused = "checkpoint_refused",
         /// See [`Alert::PurgesFailing`].
         PurgesFailing = "purges_failing",
+        /// See [`Alert::CleanupBehind`].
+        CleanupBehind = "cleanup_behind",
     }
 }
 
@@ -41,6 +43,9 @@ pub enum Alert {
     /// How many is left out, so a count that changes raises nothing new: the
     /// `piquel.auth.account_purge.failing` gauge counts them.
     PurgesFailing {},
+    /// Cleanup passes keep running out of time with expired state, personal
+    /// data past retention or finished deliveries left to delete.
+    CleanupBehind {},
 }
 
 impl Alert {
@@ -54,18 +59,21 @@ impl Alert {
             Self::AuditChainBroken(_) => AlertKind::AuditChainBroken,
             Self::CheckpointRefused(_) => AlertKind::CheckpointRefused,
             Self::PurgesFailing {} => AlertKind::PurgesFailing,
+            Self::CleanupBehind {} => AlertKind::CleanupBehind,
         }
     }
 
     /// Its payload version inside a recorded event. A new kind, or a new
     /// [`ChainProblem`], is one older releases cannot decode, so it fails to
     /// compile here until it is given the next version: [`Self::CheckpointRefused`]
-    /// came in the second, [`Self::PurgesFailing`] in the third.
+    /// came in the second, [`Self::PurgesFailing`] in the third and
+    /// [`Self::CleanupBehind`] in the fourth.
     #[must_use]
     pub const fn version(&self) -> i16 {
         match self {
             Self::CheckpointRefused(_) => 2,
             Self::PurgesFailing {} => 3,
+            Self::CleanupBehind {} => 4,
             Self::AuditChainBroken(ChainBreak { problem, .. }) => match problem {
                 ChainProblem::MissingEvent
                 | ChainProblem::EventBeforeAnchor
@@ -86,6 +94,7 @@ impl Alert {
             Self::AuditChainBroken(_) => "The audit chain is broken",
             Self::CheckpointRefused(_) => "The audit chain's checkpoints stopped",
             Self::PurgesFailing {} => "Accounts keep failing to be purged",
+            Self::CleanupBehind {} => "Cleanup is falling behind",
         }
     }
 
@@ -116,6 +125,12 @@ impl Alert {
                 each account that failed (could not purge account), and its dashboard page \
                 and auth-service user show give its failures and last error. It clears \
                 once no account has failed 3 times in a row."
+                .to_owned(),
+            Self::CleanupBehind {} => "Cleanup passes keep running out of time with expired \
+                sign-in state, personal data past its retention, or finished deliveries left \
+                to delete, so personal data is kept longer than it should be. The \
+                piquel.auth.cleanup metrics show how much each pass deletes. It clears once \
+                a pass deletes everything due."
                 .to_owned(),
         }
     }

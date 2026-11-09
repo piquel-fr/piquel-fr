@@ -43,6 +43,21 @@ impl<'t, 'c> Alerts<'t, 'c> {
         Ok(())
     }
 
+    /// Says `alert`, which was raised, still holds, without raising it again:
+    /// when the current alert of its kind says the same, it was seen again, and
+    /// this says `true`. Otherwise nothing changes and this says `false`: it
+    /// cleared meanwhile, such as by another replica's run or an operator's
+    /// verification, so the caller counts afresh before raising it again.
+    pub(crate) async fn seen(&mut self, alert: &Alert) -> Result<bool, DatabaseError> {
+        match self.tx.alerts().current(alert.kind()).await? {
+            Some(current) if current.alert.as_ref() == Some(alert) => {
+                self.tx.alerts().seen(current.id).await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     /// Says no alert of `kind` holds: its current one, if any, clears.
     pub(crate) async fn clear(&mut self, kind: AlertKind) -> Result<(), DatabaseError> {
         match self.tx.alerts().current(kind).await? {
