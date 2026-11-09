@@ -489,8 +489,9 @@ test('an announcement is drafted, sent to a group found on its form, and read', 
 
 /**
  * A message's journey: written on the account's page, previewed as the email it
- * becomes, which carries its text through hidden fields, sent after the
- * dashboard's passkey dialog, and read in the owner's inbox, its paragraphs kept.
+ * becomes, which carries its text through hidden fields, sent with the
+ * dashboard's passkey confirmation, and read in the owner's inbox, its
+ * paragraphs kept.
  */
 test('a message is previewed, sent, and read in its owner inbox', async ({ browser }) => {
   const suffix = Date.now().toString(36);
@@ -508,11 +509,17 @@ test('a message is previewed, sent, and read in its owner inbox', async ({ brows
   await admin.getByRole('button', { name: 'Preview the email', exact: true }).click();
   await expect(admin.locator('pre.email')).toContainText('Support needs a word with you.');
 
-  await admin.getByRole('button', { name: 'Send', exact: true }).click();
+  // A dashboard confirmed in the last minutes, as signing in to it is, sends at
+  // once; otherwise its dialog asks for the passkey first.
+  const sent = /\/users\/[0-9a-f-]+$/;
   const dialog = admin.getByRole('dialog', { name: "Confirm it's you" });
-  await dialog.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  await admin.getByRole('button', { name: 'Send', exact: true }).click();
+  await Promise.race([admin.waitForURL(sent), dialog.waitFor()]);
+  if (await dialog.isVisible()) {
+    await dialog.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  }
   // Sent, it goes back to the account's page.
-  await expect(admin).toHaveURL(/\/users\/[0-9a-f-]+$/);
+  await expect(admin).toHaveURL(sent);
 
   await owner.goto('/settings/notifications');
   await owner.getByRole('link', { name: subject, exact: true }).click();
