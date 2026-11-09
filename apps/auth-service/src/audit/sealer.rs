@@ -8,6 +8,7 @@ use crate::{
 };
 use chrono::{SubsecRound, TimeDelta, Utc};
 use sourceorigin_common::{
+    ErrorChain,
     alerts::{Alert, AlertKind},
     events::{EventContext, JobName},
 };
@@ -259,7 +260,7 @@ impl Sealer {
                 Ok(sealed) => sealed,
                 Err(error) => {
                     if let Some(failed) = failed {
-                        tracing::error!(error = ?failed, "could not sign an audit checkpoint");
+                        tracing::error!(error = %ErrorChain(&failed), "could not sign an audit checkpoint");
                     }
                     return Err(error);
                 }

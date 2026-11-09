@@ -15,7 +15,7 @@
 //!   label a metric.
 //!
 //! Everything a span, log line or label holds may be exported. Never record a
-//! secret, a query string or a request header.
+//! secret, a request path or query string, or a request header.
 
 /// OTLP export through the workspace's `reqwest`.
 mod export;
@@ -30,6 +30,7 @@ mod capture;
 
 #[cfg(any(test, feature = "test-util"))]
 pub use capture::Capture;
+pub use export::{Export, ExportError};
 pub use http::HttpTelemetry;
 pub use metrics::{Counter, Gauge, Histogram, Label, Labels};
 pub use sourceorigin_common::SendTraced;
@@ -37,13 +38,12 @@ pub use sourceorigin_common::SendTraced;
 use export::Exporters;
 use opentelemetry::{KeyValue, trace::TraceContextExt};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::ExporterBuildError;
 use opentelemetry_sdk::{
     Resource, error::OTelSdkError, logs::SdkLoggerProvider, metrics::SdkMeterProvider,
     trace::SdkTracerProvider,
 };
 use sourceorigin_common::{
-    TraceId,
+    ErrorChain, TraceId,
     config::{ConfigurationError, Variable},
 };
 use std::{io::IsTerminal, time::Duration};
@@ -71,10 +71,8 @@ const OWN_DIRECTIVES: &str =
 /// telemetry. Exporting either would feed the exporter its own traffic. They still
 /// log to stderr.
 const UNEXPORTED_TARGETS: [&str; 5] = ["opentelemetry", "reqwest", "hyper", "h2", "rustls"];
-/// `true` keeps telemetry on stderr only, as the SDK specification says.
-const SDK_DISABLED: Variable = Variable::new("OTEL_SDK_DISABLED");
-/// Where OTLP is sent; unset or empty means nothing is exported.
-const ENDPOINT: Variable = Variable::new("OTEL_EXPORTER_OTLP_ENDPOINT");
+/// What is logged; an unparseable value fails `init` rather than being ignored.
+const LOG_FILTER: Variable = Variable::new("RUST_LOG");
 /// Resource attribute naming the service.
 const SERVICE_NAME: &str = "service.name";
 /// Resource attribute naming this process, so replicas and command-line runs of
@@ -87,18 +85,12 @@ pub enum TelemetryError {
     /// The service's default log filter does not parse.
     #[error("invalid default log filter")]
     Filter(#[from] ParseError),
-    /// `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_SDK_DISABLED` is invalid.
+    /// `RUST_LOG` is not a valid filter.
     #[error(transparent)]
-    Configuration(#[from] ConfigurationError),
-    /// `init` was called outside a tokio runtime, which sends OTLP.
-    #[error("telemetry export needs a tokio runtime")]
-    Runtime(#[from] tokio::runtime::TryCurrentError),
-    /// An `OTEL_EXPORTER_OTLP_*` variable is invalid, e.g. a gRPC protocol.
-    #[error("could not configure OTLP export")]
-    Exporter(#[from] ExporterBuildError),
-    /// The HTTP client sending OTLP could not be built.
-    #[error("could not build the OTLP HTTP client")]
-    Client(#[from] reqwest::Error),
+    LogFilter(#[from] ConfigurationError),
+    /// OTLP export could not start, and [`Export::Required`] was asked.
+    #[error(transparent)]
+    Export(#[from] ExportError),
     /// Another subscriber is already installed.
     #[error("a tracing subscriber is already installed")]
     Installed(#[from] tracing_subscriber::util::TryInitError),
@@ -114,11 +106,9 @@ pub enum TelemetryError {
 }
 
 /// A service's installed telemetry. Spans always get trace IDs; exporters exist
-/// only while `OTEL_EXPORTER_OTLP_ENDPOINT` is set and `OTEL_SDK_DISABLED` is not
-/// `true` (it must be `true` or `false`). `OTEL_EXPORTER_OTLP_TIMEOUT` bounds each
-/// export request. The SDK reads the others: `OTEL_SERVICE_NAME`,
-/// `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and its `_ARG`, and
-/// `OTEL_EXPORTER_OTLP_HEADERS`.
+/// only while OTLP export is configured (see [`Export`]). The SDK reads the other
+/// variables: `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`,
+/// `OTEL_TRACES_SAMPLER` and its `_ARG`, and `OTEL_EXPORTER_OTLP_HEADERS`.
 ///
 /// Incoming `traceparent` headers are ignored: a public caller must not choose the
 /// trace IDs that recorded events keep.
@@ -135,13 +125,25 @@ pub struct Telemetry {
 impl Telemetry {
     /// Installs telemetry for `service`, the default `service.name`. Logs are
     /// filtered by `RUST_LOG`, or else `default_filter`; spans always by
-    /// `default_filter`, so quieter logs never lose traces. Call it first, inside
-    /// the tokio runtime: instruments used before bind to no provider.
+    /// `default_filter`, so quieter logs never lose traces. When OTLP export cannot
+    /// start, `export` says whether that fails or only logs to stderr, with a
+    /// warning. Call it first, inside the tokio runtime: instruments used before
+    /// bind to no provider.
     ///
     /// # Errors
-    /// Fails on an invalid filter or `OTEL_*` variable, outside a tokio runtime, or
-    /// when a subscriber is already installed.
-    pub fn init(service: &'static str, default_filter: &str) -> Result<Self, TelemetryError> {
+    /// Fails on an invalid filter, when a subscriber is already installed, and when
+    /// [`Export::Required`] export cannot start.
+    pub fn init(
+        service: &'static str,
+        default_filter: &str,
+        export: Export,
+    ) -> Result<Self, TelemetryError> {
+        let logs = LOG_FILTER.parse_optional::<EnvFilter>()?;
+        let (exporters, unavailable) = match Exporters::from_environment() {
+            Ok(exporters) => (exporters, None),
+            Err(error) if export == Export::Optional => (None, Some(error)),
+            Err(error) => return Err(error.into()),
+        };
         let resource = Self::resource(service);
         let mut tracer = SdkTracerProvider::builder().with_resource(resource.clone());
         let mut telemetry = Self {
@@ -149,7 +151,7 @@ impl Telemetry {
             meter: None,
             logger: None,
         };
-        if let Some(exporters) = Self::exporting()?.then(Exporters::new).transpose()? {
+        if let Some(exporters) = exporters {
             tracer = tracer.with_batch_exporter(exporters.spans);
             let meter = SdkMeterProvider::builder()
                 .with_resource(resource.clone())
@@ -169,9 +171,15 @@ impl Telemetry {
             &telemetry.tracer,
             telemetry.logger.as_ref(),
             default_filter,
-            EnvFilter::try_from_default_env().ok(),
+            logs,
         )?
         .try_init()?;
+        if let Some(error) = unavailable {
+            tracing::warn!(
+                error = %ErrorChain(&error),
+                "OTLP export could not start; logging to stderr only"
+            );
+        }
         Ok(telemetry)
     }
 
@@ -215,14 +223,6 @@ impl Telemetry {
         span.is_valid()
             .then(|| TraceId::from_bytes(span.trace_id().to_bytes()))
             .flatten()
-    }
-
-    /// Whether OTLP export is configured and not disabled.
-    fn exporting() -> Result<bool, TelemetryError> {
-        let endpoint = ENDPOINT
-            .optional()?
-            .is_some_and(|endpoint| !endpoint.trim().is_empty());
-        Ok(endpoint && !SDK_DISABLED.flag(false)?)
     }
 
     /// The SDK's resource from `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES`,

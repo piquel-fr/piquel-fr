@@ -20,6 +20,7 @@ processors:
     trace_statements:
       - context: resource
         statements: &redact
+          - delete_key(attributes, "url.path")
           - delete_key(attributes, "url.query")
           - delete_key(attributes, "url.full")
           - delete_key(attributes, "client.address")

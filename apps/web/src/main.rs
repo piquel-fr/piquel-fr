@@ -9,7 +9,7 @@ mod site;
 
 use site::Site;
 use sourceorigin_common::config::{ConfigurationError, Origin};
-use sourceorigin_telemetry::{Telemetry, TelemetryError};
+use sourceorigin_telemetry::{Export, Telemetry, TelemetryError};
 use std::{net::SocketAddr, process::ExitCode, time::Duration};
 use tokio::{net::TcpListener, signal::unix::SignalKind};
 
@@ -86,7 +86,7 @@ impl Web {
     /// Installs telemetry, serves, then flushes telemetry for up to
     /// [`TELEMETRY_FLUSH`]. A failed flush is only reported.
     async fn run() -> Result<(), WebError> {
-        let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
+        let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER, Export::Required)?;
         let result = async { Self::from_environment()?.serve().await }.await;
         if let Err(error) = telemetry.shutdown(TELEMETRY_FLUSH).await {
             eprintln!("warning: {}", Self::chain(&error));

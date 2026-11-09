@@ -78,6 +78,8 @@ thiserror = "2.0"
 # defaults add a browser runtime, `asset!` and discovery, which auth's pages avoid.
 topcoat = { version = "0.10", default-features = false }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time"] }
+# The receiver stream a data export's body reads; already in the tree through sqlx.
+tokio-stream = { version = "0.1", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.34", default-features = false }

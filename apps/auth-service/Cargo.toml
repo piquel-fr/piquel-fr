@@ -31,6 +31,7 @@ serde_json.workspace = true
 serde_json_canonicalizer.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 topcoat = { workspace = true, features = ["router", "view", "tower", "multipart"] }
 tower.workspace = true
 tracing.workspace = true

@@ -19,8 +19,8 @@ use sourceorigin_common::{
     },
 };
 use sourceorigin_repository::{
-    Database, DatabaseError, DatabaseTransaction, EventFilter, EventRepository, OidcRepository,
-    SessionScope, StoredEvent,
+    Database, DatabaseError, EventFilter, EventRepository, OidcRepository, SessionScope,
+    StoredEvent, StoredOidcClient,
 };
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -30,8 +30,6 @@ pub(crate) use error::HistoryError;
 
 /// Entries per page.
 const PAGE_SIZE: u16 = 50;
-/// Events a data export reads per query.
-const EXPORT_BATCH: u16 = 500;
 /// Batches of [`PAGE_SIZE`] events one page reads at most, visible or not, so a
 /// long run of hidden events cannot hold a request.
 const MAX_BATCHES: usize = 10;
@@ -61,16 +59,17 @@ pub(crate) struct HistoryPage {
 }
 
 /// One entry of the account's history, which the account may report as not
-/// theirs when [`HistoryItem::reportable`] says so.
+/// theirs when [`HistoryItem::reportable`] says so. Its data export shows every
+/// event as stored instead, as a `HistoryItem<&RecordedEvent>`.
 #[derive(Serialize)]
-pub(crate) struct HistoryItem {
+pub(crate) struct HistoryItem<E = HistoryEntry> {
     /// Event ID, to report the entry.
     pub(crate) id: EventId,
     /// When it happened.
     pub(crate) occurred_at: DateTime<Utc>,
     /// What happened: its `kind` and details.
     #[serde(flatten)]
-    pub(crate) entry: HistoryEntry,
+    pub(crate) entry: E,
     /// Who did it.
     pub(crate) actor: HistoryActor,
     /// Why, as the administrator or operator who did it wrote it, while kept.
@@ -102,6 +101,39 @@ struct Report {
     follow_up: Option<FollowUp>,
 }
 
+impl<E> HistoryItem<E> {
+    /// `stored`, saying what happened with `entry`. `clients` maps client IDs to
+    /// their names.
+    pub(crate) fn with(
+        stored: &StoredEvent,
+        clients: &BTreeMap<ClientId, String>,
+        entry: E,
+    ) -> Self {
+        let client = (stored.event.known())
+            .and_then(DomainEvent::client_id)
+            .or(stored.actor.client_id())
+            .map(|id| ClientView {
+                name: clients.get(id).cloned(),
+                id: id.clone(),
+            });
+        let (origin, erased) = match &stored.origin {
+            Personal::Value(origin) => (*origin, false),
+            Personal::Erased => (RequestOrigin::default(), true),
+        };
+        Self {
+            id: stored.id,
+            occurred_at: stored.occurred_at,
+            entry,
+            actor: HistoryActor::from(&stored.actor),
+            reason: stored.reason.clone(),
+            client,
+            ip: origin.client_ip,
+            device: origin.user_agent_family,
+            erased,
+        }
+    }
+}
+
 impl HistoryItem {
     /// Whether the account may report it as not theirs: what its own sessions did,
     /// of the kinds [`HistoryEntry::reportable`] allows.
@@ -112,44 +144,24 @@ impl HistoryItem {
     /// The entry `stored` shows its subject, or `None` if it shows none, as for an
     /// event a newer release wrote. `clients` maps client IDs to their names.
     fn new(stored: &StoredEvent, clients: &BTreeMap<ClientId, String>) -> Option<Self> {
-        let event = stored.event.known()?;
-        let entry = event.history_entry()?;
-        let client = event
-            .client_id()
-            .or(stored.actor.client_id())
-            .map(|id| ClientView {
-                name: clients.get(id).cloned(),
-                id: id.clone(),
-            });
-        let (origin, erased) = match &stored.origin {
-            Personal::Value(origin) => (*origin, false),
-            Personal::Erased => (RequestOrigin::default(), true),
-        };
-        Some(Self {
-            id: stored.id,
-            occurred_at: stored.occurred_at,
-            entry,
-            actor: HistoryActor::from(&stored.actor),
-            reason: stored.reason.clone(),
-            client,
-            ip: origin.client_ip,
-            device: origin.user_agent_family,
-            erased,
-        })
+        let entry = stored.event.known()?.history_entry()?;
+        Some(Self::with(stored, clients, entry))
     }
 
-    /// The names of the registered clients, by ID, for [`Self::new`]. A deleted
-    /// client's name was erased with it, so its entries name no client.
+    /// The names of the registered clients, by ID, for [`Self::with`].
     async fn client_names(
         mut oidc: OidcRepository<'_>,
     ) -> Result<BTreeMap<ClientId, String>, DatabaseError> {
-        Ok(oidc
-            .list_clients()
-            .await?
-            .into_iter()
+        Ok(Self::names(&oidc.list_clients().await?))
+    }
+
+    /// The names of `clients`, by ID, for [`Self::with`]. A deleted client's name
+    /// was erased with it, so its entries name no client.
+    pub(crate) fn names(clients: &[StoredOidcClient]) -> BTreeMap<ClientId, String> {
+        (clients.iter())
             .filter(|client| client.deleted_at.is_none())
-            .map(|client| (client.id, client.display_name))
-            .collect())
+            .map(|client| (client.id.clone(), client.display_name.clone()))
+            .collect()
     }
 
     /// The entry the event `event_id` of `user`'s shows, if their history shows
@@ -170,31 +182,6 @@ impl HistoryItem {
         };
         let clients = Self::client_names(database.oidc()).await?;
         Ok(Self::new(&stored, &clients))
-    }
-
-    /// Every entry of the account's history, newest first, read in `tx`, for its
-    /// data export.
-    pub(crate) async fn all(
-        tx: &mut DatabaseTransaction<'_>,
-        user_id: UserId,
-    ) -> Result<Vec<Self>, DatabaseError> {
-        let clients = Self::client_names(tx.oidc()).await?;
-        let mut filter = EventFilter {
-            subject: Some(user_id),
-            ..EventFilter::default()
-        };
-        let mut items = Vec::new();
-        loop {
-            let batch = tx.events().list(&filter, u32::from(EXPORT_BATCH)).await?;
-            let exhausted = batch.len() < usize::from(EXPORT_BATCH);
-            for stored in batch {
-                filter.before = Some(stored.id);
-                items.extend(Self::new(&stored, &clients));
-            }
-            if exhausted {
-                return Ok(items);
-            }
-        }
     }
 }
 

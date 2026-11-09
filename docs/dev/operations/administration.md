@@ -308,8 +308,8 @@ auth-service handle release old-name
   `rename --allow-reserved`, or unreserve it. An account already holding it
   keeps it.
 - **Release** frees a handle no account holds anymore, for cases like a
-  trademark dispute: it is the only way one returns to the pool. To free a
-  current handle, rename its account first.
+  trademark dispute. To free a current handle, rename its account first. A
+  deleted account's handles are freed on their own a year after its purge.
 
 `handle reserved`, `handle released` and `handle check` list the reserved
 handles, the released ones, and the accounts whose handle is reserved. The

@@ -18,6 +18,7 @@ use hyper_util::{
     server::graceful::GracefulShutdown,
     service::TowerToHyperService,
 };
+use sourceorigin_common::ErrorChain;
 use sourceorigin_repository::Database;
 use std::{
     io,
@@ -94,7 +95,7 @@ impl Command {
         use tokio::signal::unix::{SignalKind, signal};
         let ctrl_c = async {
             if let Err(error) = tokio::signal::ctrl_c().await {
-                tracing::error!(?error, "Ctrl+C handler unavailable");
+                tracing::error!(error = %ErrorChain(&error), "Ctrl+C handler unavailable");
                 std::future::pending::<()>().await;
             }
         };
@@ -104,7 +105,7 @@ impl Command {
                     terminate.recv().await;
                 }
                 Err(error) => {
-                    tracing::error!(?error, "SIGTERM handler unavailable");
+                    tracing::error!(error = %ErrorChain(&error), "SIGTERM handler unavailable");
                     std::future::pending::<()>().await;
                 }
             }
@@ -152,7 +153,7 @@ impl Command {
             let connection = graceful.watch(connection);
             connections.spawn(async move {
                 if let Err(error) = connection.await {
-                    tracing::debug!(%error, %peer, "connection closed on an error");
+                    tracing::debug!(error = %ErrorChain(&error), "connection closed on an error");
                 }
             });
             // Forget the connections that ended.

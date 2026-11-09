@@ -265,11 +265,13 @@ impl Database {
     /// Opens a read-only `REPEATABLE READ` transaction: every query reads one
     /// snapshot, so reads spread over several queries agree with each other. It
     /// writes and locks nothing, so it never fails with a serialization error.
+    /// It owns its connection, so it may outlive this handle, as a streamed data
+    /// export's does.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if no connection is available or `BEGIN` fails.
-    pub async fn begin_snapshot(&self) -> Result<DatabaseTransaction<'_>, DatabaseError> {
+    pub async fn begin_snapshot(&self) -> Result<DatabaseTransaction<'static>, DatabaseError> {
         self.pool
             .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .await

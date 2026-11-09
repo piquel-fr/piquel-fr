@@ -1,6 +1,7 @@
 //! Typed persistence and startup failures, retaining driver causes.
 
-use std::error::Error as StdError;
+use sourceorigin_common::ErrorChain;
+use std::{error::Error as StdError, fmt};
 use thiserror::Error;
 
 /// A boxed underlying error kept as the source for diagnostics.
@@ -12,8 +13,9 @@ const QUERY_CANCELED: &str = "57014";
 /// SQLSTATE of a lock not granted within the lock timeout.
 const LOCK_NOT_AVAILABLE: &str = "55P03";
 
-/// Stable, non-SQL database failure categories.
-#[derive(Debug, Error)]
+/// Stable, non-SQL database failure categories. Its `Debug` is its error chain,
+/// so it is safe to log either way (see the `Debug` impl).
+#[derive(Error)]
 pub enum DatabaseError {
     /// No row matched, or a single-use record is missing, expired or consumed.
     #[error("the requested record was not found")]
@@ -42,13 +44,90 @@ pub enum DatabaseError {
         /// The column that failed to decode, as `SQLx` reports it: its index in
         /// the query's result row.
         column: String,
-        /// Why decoding failed.
+        /// Why decoding failed, without the value.
         #[source]
-        source: Source,
+        source: DecodeFailure,
     },
     /// Any other driver, query, migration or event serialization failure.
     #[error("database operation failed")]
     Operation(#[source] Source),
+}
+
+/// Why a stored value did not decode, without the value: a decoder's message can
+/// quote it, as `serde_json`'s `invalid type: string "alice@example.com"` does.
+/// Only `serde_json`'s category and position are kept; query the column to see
+/// the value itself. Boxed, so [`DatabaseError`] stays small.
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct DecodeFailure(Box<Decode>);
+
+/// What [`DecodeFailure`] keeps.
+#[derive(Debug, Error)]
+enum Decode {
+    /// A JSON column that does not parse, or does not match its type.
+    #[error("{category}{}", position.map_or_else(String::new, |(line, column)| format!(" at line {line} column {column}")))]
+    Json {
+        /// What went wrong, such as a missing field or a wrong type.
+        category: &'static str,
+        /// Where, in the column's JSON, as line and column; `None` for a value
+        /// decoded with `from_value`, which has no text to point into.
+        position: Option<(usize, usize)>,
+    },
+    /// A value that decodes but breaks a rule, such as an alert update whose
+    /// author is neither an administrator nor an operator. The rule is a
+    /// `&'static str`, so it cannot quote the value.
+    #[error("{0}")]
+    Rule(&'static str),
+    /// Any other decoder's failure.
+    #[error("the stored value does not decode")]
+    Other,
+}
+
+impl From<&'static str> for DecodeFailure {
+    /// The rule the value breaks.
+    fn from(rule: &'static str) -> Self {
+        Self(Box::new(Decode::Rule(rule)))
+    }
+}
+
+impl From<serde_json::Error> for DecodeFailure {
+    /// Keeps the category and position, dropping the message.
+    fn from(error: serde_json::Error) -> Self {
+        let category = match error.classify() {
+            serde_json::error::Category::Io => "JSON I/O error",
+            serde_json::error::Category::Syntax => "JSON syntax error",
+            serde_json::error::Category::Data => "JSON that does not match its type",
+            serde_json::error::Category::Eof => "JSON that ends early",
+        };
+        Self(Box::new(Decode::Json {
+            category,
+            position: (error.line() > 0).then(|| (error.line(), error.column())),
+        }))
+    }
+}
+
+impl From<Source> for DecodeFailure {
+    /// Keeps what a `serde_json` error would, and nothing of any other error.
+    fn from(error: Source) -> Self {
+        error.downcast::<serde_json::Error>().map_or_else(
+            |_| Self(Box::new(Decode::Other)),
+            |error| Self::from(*error),
+        )
+    }
+}
+
+impl fmt::Debug for DatabaseError {
+    /// Writes the error chain, as `Display` through [`ErrorChain`] would. The
+    /// driver's own `Debug` would add `PostgreSQL`'s diagnostic fields, whose
+    /// `detail` quotes the rejected values, e.g. `Key (address)=(…) already
+    /// exists`: an address in a log line. Only the messages remain, which name a
+    /// constraint rather than its values, though a failed cast in SQL, such as
+    /// of a text bind to a UUID, quotes its input. Every
+    /// error wrapping this one, and every `?error` log field holding it, is then
+    /// as safe as its `Display`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", ErrorChain(self))
+    }
 }
 
 /// Errors that can occur while constructing the database boundary.
@@ -107,7 +186,7 @@ impl From<sqlx::Error> for DatabaseError {
             sqlx::Error::RowNotFound => Self::NotFound,
             sqlx::Error::ColumnDecode { index, source } => Self::InvalidStoredData {
                 column: index,
-                source,
+                source: source.into(),
             },
             sqlx::Error::Database(error) if error.is_unique_violation() => {
                 Self::Conflict(Box::new(sqlx::Error::Database(error)))
@@ -125,3 +204,6 @@ impl From<sqlx::Error> for DatabaseError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

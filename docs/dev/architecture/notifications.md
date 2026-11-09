@@ -59,7 +59,10 @@ Each notification is a row of `notifications` (`NotificationRepository`):
 | `created_at` | when it was written |
 | `read_at` | when the owner read it, or none while unread |
 
-An account purged while a request was in flight gets no notification.
+An account purged while a request was in flight gets no notification. Cleanup
+deletes a notification a year after it arrives, and an announcement's
+recipients a year after it is sent: the dashboard then says whom it went to was
+deleted, rather than counting none.
 [Notifications](database.md#notifications) in the PostgreSQL page covers the
 ordering of pages and the indexes.
 

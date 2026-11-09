@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM account_recoveries\n            WHERE ctid IN (\n                SELECT ctid\n                FROM account_recoveries\n                WHERE CASE WHEN completed_at IS NULL THEN least(expires_at, cancelled_at)\n                    ELSE least(undone_at, settles_at) END < now() - interval '90 days'\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "467b762803df1cda514948abe73ff992d7a41598c70dccf99d3a22e128d23fc7"
+}

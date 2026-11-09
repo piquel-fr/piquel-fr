@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM handles\n            WHERE ctid IN (\n                SELECT ctid\n                FROM handles\n                WHERE user_id IS NULL AND released_at < now() - interval '1 year'\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7476979003c65646ab74ca2cd9e1e7f77f19b99d521a33372c63b87c153ed519"
+}
