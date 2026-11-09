@@ -69,8 +69,8 @@ Some things stay:
 
 - **Your security events,** without any personal details. What is left of them
   no longer names you: only IDs that point to no account.
-- **Your handles.** Nobody else can take a handle your account held, unless
-  SourceOrigin support releases it.
+- **Your handles,** for a year. Nobody else can take a handle your account
+  held, unless SourceOrigin support releases it. After a year, anyone may.
 - **What apps keep.** Apps you signed in to keep their own records of you. Ask
   each app to delete them.
 

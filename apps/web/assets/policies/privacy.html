@@ -45,8 +45,8 @@
   <li>
     <strong>Your account:</strong> your username, which SourceOrigin calls your handle, and your
     display name. Your handle is public: apps you sign in to see it, and anyone can find out whether
-    a handle is taken. Handles you stop using stay reserved, so nobody can take them to pretend to
-    be you.
+    a handle is taken. Handles you stop using stay reserved for you, so nobody can take them to
+    pretend to be you.
   </li>
   <li>
     <strong>Your profile picture</strong>, if you add one. We keep only a square copy we make of it,
@@ -74,6 +74,11 @@
     such as a passkey added or removed, with the IP address and browser they came from. It lets you
     spot anything you didn't do. If an administrator ever changes something on your account, the
     history says so.
+  </li>
+  <li>
+    <strong>Your inbox:</strong> what Origin Auth tells you about your account, such as an address
+    removed by support, and announcements from SourceOrigin's administrator, with whether you read
+    each.
   </li>
   <li>
     <strong>GitHub and Google</strong>, only if you choose to sign in with them. They tell us your
@@ -210,8 +215,9 @@
   <li>
     <strong>Your account</strong>, with its profile picture, email addresses, passkeys, linked
     accounts and allowed apps: until you delete it. A profile picture you replace or remove is
-    deleted at once. Passkeys and linked accounts you remove stay listed as removed, so your
-    security history still makes sense.
+    deleted at once. Passkeys and linked accounts you remove stay listed as removed for 90 days, so
+    your security history still makes sense, then are deleted. A record of an account recovery is
+    deleted 90 days after it ends.
   </li>
   <li>
     <strong>Signed-in devices</strong>: a device stays signed in for up to 30 days, or until you
@@ -223,6 +229,7 @@
     as an email address you added, for 90 days. After that, only what happened, when, and to which
     account is kept.
   </li>
+  <li><strong>Your inbox</strong>: each notification for a year.</li>
   <li><strong>Our record of emails we sent</strong>: 7 days, or 30 days if sending failed.</li>
   <li><strong>Sign-ins in progress and attack counters</strong>: from a few minutes to a day.</li>
   <li><strong>Service logs</strong>: up to 30 days.</li>
@@ -236,7 +243,7 @@
 <p>You can, at any time:</p>
 <ul>
   <li>
-    <strong>Download your account's data</strong> and its security history, in
+    <strong>Download your account's data</strong>, with everything recorded about it, in
     <strong>Settings → Your data</strong>.
   </li>
   <li>
@@ -247,10 +254,11 @@
     <strong>Delete your account</strong>, in <strong>Settings → Your data</strong>. You are signed
     out of SourceOrigin everywhere at once, and apps you use lose access within minutes. The account
     is erased for good 30 days later; until then, you can sign in with a passkey and choose to
-    restore it. What remains: your old handles, reserved so nobody can impersonate you; a record
-    that events happened, with your account's number but no other personal details; any apps you
-    registered, reduced to their identifier and settings, without their name or web addresses, so
-    their identifiers are never reused; and, until they expire, service logs and database backups.
+    restore it. What remains: your handles, reserved for a year so nobody can impersonate you; a
+    record that events happened, with your account's number but no other personal details; any apps
+    you registered, reduced to their identifier and settings, without their name or web addresses,
+    so their identifiers are never reused; and, until they expire, service logs and database
+    backups.
   </li>
   <li><strong>Object</strong> to how we use your data, or ask us to limit it.</li>
 </ul>

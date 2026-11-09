@@ -4,7 +4,7 @@
 use super::{CliError, Confirm, Console, Output};
 use crate::{AnnouncementDraft, AnnouncementRecipients, UserRef};
 use clap::{Args, Subcommand};
-use sourceorigin_common::AnnouncementId;
+use sourceorigin_common::{AnnouncementId, admin::AnnouncementDetail};
 use std::{io::Read, path::PathBuf};
 
 /// Drafting, sending and reading announcements. A draft goes to nobody until
@@ -109,6 +109,46 @@ impl DraftArgs {
 }
 
 impl AnnouncementCommand {
+    /// Prints `detail` as `announcement show` does: one fact per line, then its
+    /// text. Whom a year-old announcement went to was deleted, so its counts are
+    /// left out.
+    fn print_detail(detail: &AnnouncementDetail) {
+        let announcement = &detail.announcement;
+        let to = if announcement.everyone {
+            "everyone"
+        } else {
+            "chosen accounts"
+        };
+        println!("ID\t{}", announcement.id);
+        println!("SUBJECT\t{}", announcement.subject);
+        println!("REVISION\t{}", announcement.revision);
+        println!("ESSENTIAL\t{}", announcement.essentiality());
+        if announcement.recipients_kept {
+            println!("TO\t{to}: {} accounts", announcement.recipients);
+            println!("EMAILED\t{} {}", detail.mailed, announcement.emailed());
+        } else {
+            println!("TO\t{to}: recipients deleted a year after sending");
+        }
+        match announcement.sent_at {
+            Some(at) => {
+                let emails = detail.emails;
+                println!("SENT\t{}", at.to_rfc3339());
+                if announcement.recipients_kept {
+                    println!("READ\t{} of {}", detail.read, announcement.recipients);
+                }
+                println!(
+                    "EMAILS\t{} pending, {} succeeded, {} failed, {} cancelled",
+                    emails.pending, emails.succeeded, emails.failed, emails.cancelled
+                );
+            }
+            None => println!("SENT\tnot yet: a draft"),
+        }
+        for account in &detail.accounts {
+            println!("ACCOUNT\t{}\t{}", account.handle, account.id);
+        }
+        println!("\n{}", announcement.body);
+    }
+
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
@@ -124,45 +164,21 @@ impl AnnouncementCommand {
                             || "draft".to_owned(),
                             |at| format!("sent {}", at.to_rfc3339()),
                         );
+                        let recipients = if announcement.recipients_kept {
+                            announcement.recipients.to_string()
+                        } else {
+                            "deleted".to_owned()
+                        };
                         println!(
-                            "{}\t{status}\t{}\t{}",
-                            announcement.id, announcement.recipients, announcement.subject
+                            "{}\t{status}\t{recipients}\t{}",
+                            announcement.id, announcement.subject
                         );
                     }
                 })?;
             }
             Self::Show { id, output } => {
                 let detail = service.view_announcement(operator, id).await?;
-                output.print(&detail, |detail| {
-                    let announcement = &detail.announcement;
-                    let to = if announcement.everyone {
-                        "everyone"
-                    } else {
-                        "chosen accounts"
-                    };
-                    println!("ID\t{}", announcement.id);
-                    println!("SUBJECT\t{}", announcement.subject);
-                    println!("REVISION\t{}", announcement.revision);
-                    println!("TO\t{to}: {} accounts", announcement.recipients);
-                    println!("ESSENTIAL\t{}", announcement.essentiality());
-                    println!("EMAILED\t{} {}", detail.mailed, announcement.emailed());
-                    match announcement.sent_at {
-                        Some(at) => {
-                            let emails = detail.emails;
-                            println!("SENT\t{}", at.to_rfc3339());
-                            println!("READ\t{} of {}", detail.read, announcement.recipients);
-                            println!(
-                                "EMAILS\t{} pending, {} succeeded, {} failed, {} cancelled",
-                                emails.pending, emails.succeeded, emails.failed, emails.cancelled
-                            );
-                        }
-                        None => println!("SENT\tnot yet: a draft"),
-                    }
-                    for account in &detail.accounts {
-                        println!("ACCOUNT\t{}\t{}", account.handle, account.id);
-                    }
-                    println!("\n{}", announcement.body);
-                })?;
+                output.print(&detail, Self::print_detail)?;
             }
             Self::Draft(draft) => {
                 let id = service

@@ -14,7 +14,7 @@ use topcoat::{
     Error,
     context::Cx,
     router::{
-        StatusCode,
+        Body, StatusCode,
         header::{self, HeaderValue},
         response::{IntoResponse, Response},
     },
@@ -79,12 +79,12 @@ impl AccountPage for AccountData {
 }
 
 impl WebApplication {
-    /// Answers with `export` as a JSON file the browser saves. It holds personal
-    /// data, and like every page's answer, the security layer marks it
-    /// `no-store, no-transform`.
-    pub(in crate::web) fn download(cx: &Cx, export: &AccountExport) -> Result<Response, Failure> {
-        let body = serde_json::to_string_pretty(export).map_err(Error::from)?;
+    /// Answers with `export` as a JSON file the browser saves, streamed as it
+    /// is read. It holds personal data, and like every page's answer, the
+    /// security layer marks it `no-store, no-transform`.
+    pub(in crate::web) fn download(cx: &Cx, export: AccountExport) -> Result<Response, Failure> {
         let disposition = format!("attachment; filename=\"{}\"", export.file_name());
+        let body = Body::new(axum::body::Body::from_stream(export.stream()));
         Ok((
             StatusCode::OK,
             [

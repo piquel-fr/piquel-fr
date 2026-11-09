@@ -9,6 +9,8 @@ mod connection;
 mod error;
 /// Advisory locks for jobs that run on one replica at a time.
 mod exclusive;
+/// What every table holds about the people behind accounts.
+mod inventory;
 /// Typed repository families with private SQL execution.
 mod repositories;
 /// Committed events and pool connections, reported to telemetry.
@@ -20,14 +22,16 @@ pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub(crate) use connection::{Limit, Scope};
 pub use error::{DatabaseConnectionError, DatabaseError, DecodeFailure};
 pub use exclusive::{ExclusiveConnection, LockKey};
+pub use inventory::{Holds, Table};
 #[cfg(any(test, feature = "test-util"))]
 pub use repositories::audit::Tamper;
 pub use repositories::{
     AccountDeletionRepository, AdministratorRepository, AlertRepository, AnnouncementRepository,
     AuditRepository, DashboardRepository, DeliveryRepository, EmailRepository, EventRepository,
-    FederationRepository, HandleRepository, MaintenanceRepository, NotificationRepository,
-    OidcRepository, PasskeyRepository, PictureRepository, RecoveryRepository, SecurityRepository,
-    SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
+    ExportRepository, FederationRepository, HandleRepository, MaintenanceRepository,
+    NotificationRepository, OidcRepository, PasskeyRepository, PictureRepository,
+    RecoveryRepository, SecurityRepository, SessionRepository, SigningKeyRepository,
+    TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
     announcements::{DraftedAnnouncement, Recipients, SentAnnouncement},
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
@@ -40,6 +44,7 @@ pub use repositories::{
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent, Verifications},
+    exports::{AnnouncementRecord, IdentityRecord, NotificationRecord, SessionRecord},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,

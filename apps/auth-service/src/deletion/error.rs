@@ -4,6 +4,10 @@
 use crate::{ClientRegistryError, security::ApiError};
 use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::DatabaseError;
+use std::time::Duration;
+
+/// How long a refused export asks the browser to wait.
+const EXPORT_RETRY: Duration = Duration::from_secs(60);
 
 /// Why an account could not be deleted, restored or purged, from settings, the
 /// sign-in page, `AdminService`, the CLI or the purge job.
@@ -30,6 +34,9 @@ pub enum DeletionError {
     /// No account has this ID.
     #[error("no account has this ID")]
     NotFound,
+    /// The replica already streams as many data exports as it may.
+    #[error("too many data exports are being downloaded")]
+    ExportsBusy,
     /// A client the account manages could not be deleted.
     #[error(transparent)]
     Client(#[from] ClientRegistryError),
@@ -55,6 +62,10 @@ impl From<DeletionError> for ApiError {
                 "The last administrator's account cannot be deleted. Grant another administrator first.",
             ),
             DeletionError::NotFound => Self::not_found("No account has this ID."),
+            DeletionError::ExportsBusy => Self::too_many_requests(
+                "Other downloads are being prepared. Try again in a minute.",
+                EXPORT_RETRY,
+            ),
             DeletionError::NotActive => {
                 Self::conflict("Only an active account can be scheduled for deletion.")
             }

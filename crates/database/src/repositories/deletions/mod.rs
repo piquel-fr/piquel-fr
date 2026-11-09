@@ -271,8 +271,8 @@ impl AccountDeletionRepository<'_> {
     /// the related origins of its clients, deleted ones included, wherever events
     /// recorded them, since its domain may be among them;
     /// the account, which cascades to its emails, passkeys, identities, ceremonies,
-    /// announcement rows and scheduled deletion, and leaves its handles without an owner, so nobody
-    /// claims them again; then its email and announcement deliveries, including
+    /// announcement rows and scheduled deletion, and leaves its handles without an owner, released,
+    /// so nobody claims them for a year, when cleanup deletes them; then its email and announcement deliveries, including
     /// any an announcement sent or an alert raised meanwhile just queued, the
     /// personal data of every event the account is the subject or actor of, so those events read it as erased, and
     /// any announcement to chosen accounts left without recipients, such as a
