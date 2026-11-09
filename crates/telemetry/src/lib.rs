@@ -186,7 +186,9 @@ impl Telemetry {
         let (flushed, result) = tokio::sync::oneshot::channel();
         // Exporters send on this runtime while the flush blocks its own thread. A
         // detached thread, unlike `spawn_blocking`, is never waited for when the
-        // runtime drops, so a flush that times out does not delay the exit.
+        // runtime drops, so a flush that times out does not delay the exit. Blocking
+        // work the exporters started on the runtime, such as a DNS lookup, still
+        // holds a runtime's drop: a bounded exit also needs `shutdown_background`.
         std::thread::spawn(move || {
             let tracer = self.tracer.shutdown();
             let meter = self.meter.map_or(Ok(()), |meter| meter.shutdown());
