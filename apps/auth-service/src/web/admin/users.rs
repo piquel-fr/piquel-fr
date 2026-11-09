@@ -419,11 +419,13 @@ pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<
             .map(|address| address.address.as_str()),
     });
     let (handle, typed) = (account.user.handle.as_str(), &typed);
+    let target = App::target(cx).await;
     let page = view! { cx =>
         sourceorigin_ui::message_page(
             handle: handle,
             back: back.as_str(),
             form: typed,
+            target: target,
             preview: preview,
             refusal: refusal.as_deref(),
         )

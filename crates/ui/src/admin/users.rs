@@ -1,7 +1,7 @@
 //! Account search and one account's page.
 
 use super::{
-    Action, Change, EventRow, account_status, confirm, event_rows, moment, refused_action,
+    Action, Change, EventRow, Target, account_status, confirm, event_rows, moment, refused_action,
 };
 use crate::layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address};
 use sourceorigin_common::{
@@ -363,19 +363,25 @@ pub async fn message_page<'a>(
     form: &'a MessageUser,
     #[into]
     #[default]
+    target: Option<Target<'a>>,
+    #[into]
+    #[default]
     preview: Option<MessagePreview<'a>>,
     #[into]
     #[default]
     refusal: Option<&'a str>,
 ) -> Result<impl View> {
     let change = Change::Message;
+    // What its Send asks a passkey for: the account, by handle and ID.
+    let named = target.map(Target::text);
+    let confirming = change.confirming(named.as_deref());
     Ok(view! {
         page_head(title: change.title(), lead: format!("To @{handle}. {}", change.description()))
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>
         }
         <section class="card">
-            <form class="stack" method="post" data-submit-once="" data-unconfirmed="">
+            <form class="stack" method="post" data-submit-once="" data-unconfirmed="" data-confirming=(confirming.as_str())>
                 match preview {
                     None => {
                         <label>
@@ -408,6 +414,14 @@ pub async fn message_page<'a>(
                         </dl>
                         <p class="help">"Its plain-text version. The HTML version says the same, with the same line breaks."</p>
                         <pre class="email">(preview.email)</pre>
+                        if let Some(target) = target {
+                            <p class="target">
+                                <strong>(target.name)</strong>
+                                if let Some(id) = target.id {
+                                    " " <code>(id)</code>
+                                }
+                            </p>
+                        }
                         <div class="row actions">
                             <button name="intent" value="send" data-confirms="">(change.button())</button>
                             <button class="secondary" name="intent" value="edit">"Edit"</button>

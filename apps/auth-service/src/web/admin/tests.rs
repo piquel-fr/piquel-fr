@@ -2241,6 +2241,18 @@ async fn messages_are_previewed_then_sent_from_the_dashboard() {
         "{preview}"
     );
     assert!(preview.contains(r#"value="send""#), "{preview}");
+    // Its Send names the account, beside it and to the passkey dialog.
+    let handle = format!("browser-{}", &owner.user_id.to_string()[24..]);
+    let target = format!(
+        r#"<p class="target"><strong>{handle}</strong> <code>{}</code></p>"#,
+        owner.user_id
+    );
+    assert!(preview.contains(&target), "{preview}");
+    let confirming = format!(
+        r#"data-confirming="Send a message: {handle} ({})""#,
+        owner.user_id
+    );
+    assert!(preview.contains(&confirming), "{preview}");
     let inbox = async || {
         let mut notifications = harness.database.notifications();
         let received = notifications.list(owner.user_id, None, 10).await;
