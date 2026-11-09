@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dashboard_sessions\n                    (secret_digest, session_id, confirmed_at, expires_at)\n                VALUES ($1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf902def1bf17f6822b96837cb14ab38dea7cf2771699c5401d9acd4f2847932"
+}

@@ -49,11 +49,15 @@ first.
 1. Open the dashboard. It sends the browser to auth's `/admin` page.
 2. Sign in with a passkey, if the browser isn't already: a session signed in
    with GitHub or Google is asked for a passkey first.
-3. Auth sends the browser back to the dashboard, signed in.
+3. Select **Confirm with a passkey**. Auth asks for your passkey every time you
+   sign in to the dashboard, then sends the browser back, signed in.
 
-A change also asks for a passkey, unless you gave one in the last five
-minutes. The dashboard's session lasts as long as your auth session, so signing
-out of auth signs you out of the dashboard too. See
+Signing in counts as a confirmation for five minutes. A later change asks for a
+passkey again, unless you gave one in the last five minutes. The dashboard signs
+you out after 30 minutes without a request, and 12 hours after you signed in.
+It also signs you out when you sign out of auth, or when your administrator
+rights are revoked. Your security history lists each sign-in to the dashboard,
+and your **Devices** page lists the dashboard under the browser it runs in. See
 [how the dashboard signs administrators in](#how-the-dashboard-signs-administrators-in).
 
 ## Invite someone
@@ -208,13 +212,13 @@ themselves, from the link in the recovery's emails.
 ## End sessions
 
 ```sh
-auth-service session revoke <session-id>   # one session, as `user show` lists it
-auth-service session revoke-all alice      # every session of the account
+auth-service session revoke alice <session-id>  # one of its sessions, as `user show` lists them
+auth-service session revoke-all alice           # every session of the account
 ```
 
-Each also ends the refresh tokens of the apps signed in through the session. On
-the dashboard, open the account and select **Revoke** next to a session, or
-**Revoke all**.
+Each also ends the refresh tokens of the apps signed in through the session. A
+session of another account is not found. On the dashboard, open the account and
+select **Revoke** next to a session, or **Revoke all**.
 
 ## Delete or restore an account
 
@@ -449,12 +453,15 @@ in-process: there is no admin API.
 The dashboard is no OIDC client, so it needs no client or secret. An
 administrator signs in by a handoff from auth: auth's `/admin` page needs a
 session signed in with a passkey, of an account that still holds administrator
-rights, and sends the browser back with a single-use code bound to that session
-and to the dashboard's state cookie. The dashboard stores its own session as a
-digest in PostgreSQL, so it survives restarts and replicas.
+rights, asks for a passkey, and sends the browser back with a single-use code
+bound to that session and to the dashboard's state cookie. The dashboard stores
+its own session as a digest in PostgreSQL, so it survives restarts and replicas.
 
-- Every request checks the administrator's rights again, so revoking their
-  rights, or their auth session, takes effect at once.
+- A dashboard session ends after 30 minutes without a request, and 12 hours
+  after its sign-in.
+- Every request checks the administrator's rights again, and revoking their
+  rights deletes their dashboard sessions, so revoking their rights, or their
+  auth session, takes effect at once.
 - Changes need the dashboard's own passkey confirmation from the last five
   minutes, which a confirmation for auth's pages never gives.
 - Administrators can't grant or revoke their own rights, and nobody can revoke

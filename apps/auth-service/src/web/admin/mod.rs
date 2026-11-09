@@ -12,8 +12,9 @@
 //! only, and forms posting only to the dashboard, whose answer may go on to
 //! auth's handoff page.
 //!
-//! A browser without a dashboard session goes through auth's handoff page and
-//! back. A page that changes something needs the dashboard's own passkey
+//! A browser without a dashboard session, or whose session timed out, goes
+//! through auth's handoff page, which asks for a passkey, and back. A page that
+//! changes something needs the dashboard's own passkey
 //! confirmation, recent enough that the service still accepts it once the form
 //! is submitted; without one, it sends the browser to confirm on auth's handoff
 //! page, and back to the page. The dashboard's script spares the page that trip:
@@ -76,7 +77,8 @@ use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
 use sourceorigin_repository::Database;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{
-    Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search, Who,
+    Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search,
+    Target, Who,
 };
 use std::{
     future::Future,
@@ -247,12 +249,10 @@ impl Answer {
 
 /// What the dashboard does about a change the service refused.
 enum Refusal {
-    /// The change needs a newer confirmation: the browser confirms on auth's
-    /// handoff page, and comes back to the form's page.
-    Confirm,
-    /// The administrator's session ended: the browser signs in again, and comes
-    /// back to the form's page.
-    SignIn,
+    /// The change needs a newer confirmation, or the administrator's session
+    /// ended: the browser proves a passkey on auth's handoff page, and comes back
+    /// to the form's page.
+    HandOff,
     /// The page explains it instead, and logs it: the account administers
     /// nothing.
     Page(AdminError),
@@ -269,8 +269,7 @@ impl From<AdminError> for Refusal {
             ref error => error.log_refusal(),
         }
         match error {
-            AdminError::StepUpRequired(_) => Self::Confirm,
-            AdminError::SessionEnded => Self::SignIn,
+            AdminError::StepUpRequired(_) | AdminError::SessionEnded => Self::HandOff,
             error => Self::Form(error.into()),
         }
     }
@@ -502,7 +501,7 @@ impl AdminApplication {
         let context = RequestContext::of(extensions(cx))?;
         match app.sign_in.signed_in(context, headers(cx)).await {
             Ok(Some(admin)) => Ok(admin),
-            Ok(None) => Err(app.hand_off(cx, false)),
+            Ok(None) => Err(app.hand_off(cx)),
             Err(error) => Err(error.into()),
         }
     }
@@ -520,17 +519,17 @@ impl AdminApplication {
         if admin.operator.is_confirmed(ahead) {
             Ok(())
         } else {
-            Err(Self::of(cx).hand_off(cx, true))
+            Err(Self::of(cx).hand_off(cx))
         }
     }
 
-    /// Sends the browser through auth's handoff page, confirming with a passkey if
-    /// `confirm`, and back to the page.
-    fn hand_off(&self, cx: &Cx, confirm: bool) -> Error {
+    /// Sends the browser through auth's handoff page, which signs it in or
+    /// confirms its session with a passkey, and back to the page.
+    fn hand_off(&self, cx: &Cx) -> Error {
         let page = uri(cx).path_and_query().map_or("/", |page| page.as_str());
         let started = self
             .sign_in
-            .start(page, confirm)
+            .start(page)
             .map_err(Error::from)
             .and_then(|(to, cookie)| {
                 let mut response = see_other(to).into_response(cx)?;
@@ -543,10 +542,13 @@ impl AdminApplication {
         }
     }
 
-    /// Makes the change a posted `form` asks for, with `call`. Returns nothing for
-    /// a `GET`, which only shows the form: a link, even with a query, never changes
-    /// anything. A refusal comes back with the message the form shows and the form
-    /// as posted, so the page keeps what was typed. When the change needs a newer
+    /// Makes the change a posted `form` asks for, with `call`. Every change the
+    /// dashboard makes comes through here.
+    ///
+    /// A `GET` only shows the form, so it returns nothing: a link, even with a
+    /// query, never changes anything. A refusal comes back with the message the
+    /// form shows and the form as posted, so the page keeps what was typed, and
+    /// the page answers with the refusal's status. When the change needs a newer
     /// confirmation, or the session ended meanwhile, the browser goes through
     /// auth's handoff page and back to the form's page.
     async fn change<I, T, E, F, Fut>(
@@ -568,19 +570,50 @@ impl AdminApplication {
             Err(refused) => refused.into(),
         };
         match refused {
-            Refusal::Confirm => Err(Self::of(cx).hand_off(cx, true)),
-            Refusal::SignIn => Err(Self::of(cx).hand_off(cx, false)),
+            Refusal::HandOff => Err(Self::of(cx).hand_off(cx)),
             Refusal::Page(error) => Err(error.into()),
             Refusal::Form(refusal) => match refusal.public() {
                 (status, _) if status.is_server_error() => {
                     Err(Error::msg("an admin change failed"))
                 }
-                (_, message) => Ok(Some(Err(Refused {
-                    message: Self::sentence(message),
-                    form: input,
-                }))),
+                (status, message) => {
+                    Self::refused_with(cx, status).await;
+                    Ok(Some(Err(Refused {
+                        message: Self::sentence(message),
+                        form: input,
+                    })))
+                }
             },
         }
+    }
+
+    /// Records `status` as the refusal's of the change the request posted.
+    async fn refused_with(cx: &Cx, status: StatusCode) {
+        *Self::refused(cx)
+            .await
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(status);
+    }
+
+    /// The status a page at `status` answers with: the refusal's, for a page at
+    /// `200` showing the change the request posted refused.
+    async fn status(cx: &Cx, status: StatusCode) -> StatusCode {
+        let refused = *Self::refused(cx)
+            .await
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        refused
+            .filter(|_| status == StatusCode::OK)
+            .unwrap_or(status)
+    }
+
+    /// The status of the refusal of the change the request posted, if one was
+    /// refused, which the page answers with: one cell per request, which
+    /// [`Self::change`] fills and [`Self::render`] reads.
+    #[memoize]
+    async fn refused(cx: &Cx) -> Arc<Mutex<Option<StatusCode>>> {
+        let _ = cx;
+        Arc::default()
     }
 
     /// The answer of a JSON route the dashboard's script calls: `answered`, or its
@@ -608,6 +641,33 @@ impl AdminApplication {
             Some(Ok(())) => Err(see_other(done).into()),
             Some(Err(refused)) => Ok(Some(refused)),
             None => Ok(None),
+        }
+    }
+}
+
+/// The page a change's page is under: the account or client it changes.
+#[derive(Clone)]
+struct Parent {
+    /// Its name, as the crumb shows it: the account's handle, or the client's
+    /// name.
+    name: String,
+    /// Its page.
+    href: String,
+    /// Its ID.
+    id: String,
+}
+
+impl Parent {
+    /// Its name and page, as the crumb links it.
+    fn crumb(&self) -> (&str, &str) {
+        (&self.name, &self.href)
+    }
+
+    /// It, as a change's page names it beside its button.
+    fn target(&self) -> Target<'_> {
+        Target {
+            name: &self.name,
+            id: Some(&self.id),
         }
     }
 }
@@ -751,20 +811,18 @@ impl AdminApplication {
             .or_else(|| (path == tabs[0].1).then_some(DashboardTab::Overview))
     }
 
-    /// The page the request's page is under, inside `current`, among `tabs`, if
-    /// any, named and linked in the crumb: the account under Users or
-    /// Administrators, or the client under Clients, which a page such as
-    /// `/users/{account}/disable` changes. The account's or client's own page,
-    /// and a tab's other pages, have none. A parent that cannot be read, such as
-    /// on the error page of an account that does not exist, is left out: the
-    /// page itself says what went wrong.
-    async fn parent(
-        cx: &Cx,
-        admin: Option<&SignedInAdmin>,
-        tabs: &[(DashboardTab, String)],
-        current: Option<DashboardTab>,
-    ) -> Option<(String, String)> {
-        let (admin, current) = (admin?, current?);
+    /// The page the request's page is under, inside its tab, if any, named and
+    /// linked in the crumb: the account under Users or Administrators, or the
+    /// client under Clients, which a page such as `/users/{account}/disable`
+    /// changes, and which that page names beside its button. The account's or
+    /// client's own page, and a tab's other pages, have none. A parent that cannot
+    /// be read, such as on the error page of an account that does not exist, is
+    /// left out: the page itself says what went wrong. Read once per request.
+    #[memoize]
+    async fn parent(cx: &Cx) -> Option<Parent> {
+        let admin = Self::admin(cx).await.ok()?;
+        let tabs = Self::tabs(cx);
+        let current = Self::current_tab(cx, &tabs)?;
         let path = uri(cx).path();
         let (_, tab) = tabs.iter().find(|(tab, _)| *tab == current)?;
         // Only a page below the account's or client's has one: `/clients/new`
@@ -777,7 +835,11 @@ impl AdminApplication {
             DashboardTab::Users | DashboardTab::Administrators => {
                 let id: UserId = id.parse().ok()?;
                 let handle = service.user_handle(&admin.operator, id).await.ok()?;
-                Some((handle.to_string(), Self::account(cx, id)))
+                Some(Parent {
+                    name: handle.to_string(),
+                    href: Self::account(cx, id),
+                    id: id.to_string(),
+                })
             }
             DashboardTab::Clients => {
                 let id: ClientId = id.parse().ok()?;
@@ -786,13 +848,25 @@ impl AdminApplication {
                     return None;
                 }
                 let details = service.client_details(&admin.operator, &id).await.ok()?;
-                Some((Self::title(&details.client).to_owned(), href))
+                Some(Parent {
+                    name: Self::title(&details.client).to_owned(),
+                    href,
+                    id: id.to_string(),
+                })
             }
             _ => None,
         }
     }
 
-    /// Answers with the page named `title` and `page`, at `status`, in the shell
+    /// What the request's change page acts on, as [`Self::parent`] finds it: the
+    /// account or client, which its page names beside its button.
+    async fn target(cx: &Cx) -> Option<Target<'_>> {
+        Self::parent(cx).await.as_ref().map(Parent::target)
+    }
+
+    /// Answers with the page named `title` and `page`, at `status`, or, for a page
+    /// at `200`, the status of the refusal of the change the request posted, in
+    /// the shell
     /// every page shares: the sidebar of tabs, the signed-in administrator and
     /// signing out, the account search, the service's health, and the trace ID
     /// of a server error.
@@ -803,12 +877,13 @@ impl AdminApplication {
         page: impl View,
     ) -> Result<Response> {
         let title = title.into();
+        let status = Self::status(cx, status).await;
         // A browser that is not signed in is sent on by the page itself.
         let admin = Self::admin(cx).await.ok();
         let app = Self::of(cx);
         let tabs = Self::tabs(cx);
         let current = Self::current_tab(cx, &tabs);
-        let parent = Self::parent(cx, admin, &tabs, current).await;
+        let parent = Self::parent(cx).await;
         let links: &Vec<_> = &tabs
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
@@ -855,9 +930,7 @@ impl AdminApplication {
             me: &me,
             tabs: links,
             current,
-            parent: parent
-                .as_ref()
-                .map(|(name, href)| (name.as_str(), href.as_str())),
+            parent: parent.as_ref().map(Parent::crumb),
             sign_out: leave,
             preferences: BrowserCookie::read_preferences(headers(cx)),
             preferences_action: prefer,
@@ -878,6 +951,7 @@ impl AdminApplication {
                 finish,
                 left: admin.operator.confirmation_left().num_seconds(),
                 form_time: FORM_TIME.num_seconds(),
+                target: parent.as_ref().map(Parent::target),
             }),
         };
         let page = Child::new(page);
@@ -991,7 +1065,8 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
     let code = parse_query_params::<SignInQuery>(cx)
         .map(|query| query.code)
         .unwrap_or_default();
-    match app.sign_in.finish(headers(cx), &code).await {
+    let context = RequestContext::of(extensions(cx))?;
+    match app.sign_in.finish(context, headers(cx), &code).await {
         Ok((return_to, cookie)) => {
             let mut response = see_other(return_to.as_str()).into_response(cx)?;
             cookie.set_on(&mut response)?;
@@ -1062,7 +1137,8 @@ async fn finish_confirmation(cx: &Cx, Json(input): Json<AuthenticationFinish>) -
 async fn sign_out(cx: &Cx) -> Result<Response> {
     let app = AdminApplication::of(cx);
     if method(cx) == Method::POST {
-        let cookie = app.sign_in.sign_out(headers(cx)).await?;
+        let context = RequestContext::of(extensions(cx))?;
+        let cookie = app.sign_in.sign_out(context, headers(cx)).await?;
         let mut response = see_other(href!(sign_out).resolve(cx)).into_response(cx)?;
         cookie.set_on(&mut response)?;
         return Ok(response);

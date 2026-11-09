@@ -352,20 +352,21 @@ Options:
 
 Commands:
 
-- [`auth-service session revoke`](#auth-service-session-revoke): End one session and its applications' refresh tokens.
+- [`auth-service session revoke`](#auth-service-session-revoke): End one session of an account and its applications' refresh tokens.
 - [`auth-service session revoke-all`](#auth-service-session-revoke-all): End every session of an account and its applications' refresh tokens.
 
 ## `auth-service session revoke`
 
-End one session and its applications' refresh tokens.
+End one session of an account and its applications' refresh tokens.
 
 ```text
-auth-service session revoke [OPTIONS] <SESSION>
+auth-service session revoke [OPTIONS] <USER> <SESSION>
 ```
 
 Arguments:
 
-- `<SESSION>`: The session's ID, as `user show` lists it.
+- `<USER>`: The account: its handle, ID or verified email.
+- `<SESSION>`: The session's ID, as `user show` lists it. Another account's session is not found.
 
 Options:
 

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.session_id AS \"session_id: SessionId\", d.created_at AS signed_in_at,\n                    d.last_used_at, d.expires_at\n                FROM dashboard_sessions d\n                JOIN sessions s ON s.id = d.session_id\n                WHERE s.user_id = $1\n                AND s.revoked_at IS NULL AND s.expires_at > now()\n                AND d.expires_at > now() AND d.last_used_at > $2\n                ORDER BY d.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "signed_in_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_used_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f9b7606ac587bf3526e239cbea1c28197b4285f8b0ee150b5e9eee23702251c5"
+}

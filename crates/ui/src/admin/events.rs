@@ -285,6 +285,12 @@ impl EventRow<'_> {
             DomainEvent::AdministratorRevoked {} => {
                 Description::new("Administrator rights revoked")
             }
+            DomainEvent::DashboardSignedIn { session_id } => {
+                Description::new("Signed in to the admin dashboard").with("session", session_id)
+            }
+            DomainEvent::DashboardSignedOut { session_id } => {
+                Description::new("Signed out of the admin dashboard").with("session", session_id)
+            }
             DomainEvent::HandleChanged { old, new } => Description::new("Handle changed")
                 .personal("from", &old)
                 .personal("to", &new),

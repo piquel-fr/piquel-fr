@@ -59,7 +59,7 @@ pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
 pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
 
 use crate::{
-    Checkbox, Query,
+    Query,
     form::{Precision, time},
     icons::{Icon, icon},
     layout::{
@@ -79,18 +79,15 @@ use topcoat::{
     view::{Child, View, class, component, view},
 };
 
-/// What the dashboard asks auth's handoff page for: the `state` its cookie binds
-/// the handoff to, the dashboard path to go on to, and whether a passkey must
-/// confirm the handoff, for a change.
+/// What the dashboard asks auth's handoff page for, which always asks for a
+/// passkey: the `state` its cookie binds the handoff to, and the dashboard path
+/// to go on to.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandoffQuery {
     /// The state, which only the dashboard's cookie in the asking browser holds.
     pub state: String,
     /// The dashboard path to go on to.
     pub return_to: String,
-    /// Whether a passkey must confirm the handoff.
-    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
-    pub confirm: Checkbox,
 }
 
 impl Query for HandoffQuery {}
@@ -230,7 +227,8 @@ pub struct Dashboard<'a> {
 /// little is left, it asks for a passkey there before it follows a link marked
 /// `data-confirm-first`, to a change's page, or posts a form in the page's
 /// `<main>`, a change, unless the form is marked `data-unconfirmed`, as a draft
-/// announcement's changes are; then it goes on. Without the script, or a browser that
+/// announcement's changes are; then it goes on. The dialog says what the link's
+/// or form's `data-confirming` names: the change, and what it acts on. Without the script, or a browser that
 /// cannot run the ceremony on the dashboard's origin, the browser goes on at
 /// once, and the page confirms on auth's handoff page instead.
 #[derive(Clone, Copy, Debug)]
@@ -246,6 +244,9 @@ pub struct Confirmation<'a> {
     /// The seconds a change's page needs left to show its form: a link to one
     /// followed with less confirms first.
     pub form_time: i64,
+    /// What the page acts on, such as the account it is under, which the dialog
+    /// names when the link or form that opened it names nothing.
+    pub target: Option<Target<'a>>,
 }
 
 /// The document around every dashboard page, in the shell `dashboard` describes:
@@ -323,6 +324,9 @@ pub async fn dashboard_frame<'a>(
                 <span class="dialog-mark">icon(kind: Icon::Key)</span>
                 <h2 id="passkey-confirmation-title">"Confirm it's you"</h2>
                 <p class="help" id="passkey-confirmation-help">"This change needs your passkey. It confirms the dashboard only, for five minutes."</p>
+                // What the change is, and what it acts on, which the dashboard's
+                // script writes from the link or form that opened the dialog.
+                <p data-confirming="" data-default=(confirmation.target.map(Target::text)) hidden=""><strong></strong></p>
                 <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
                 <div class="row actions">
                     <button type="button" data-passkey-confirm="" autofocus="">"Confirm with a passkey"</button>
@@ -615,6 +619,15 @@ impl Change {
         }
     }
 
+    /// What it is, acting on `target` if it names one, as the passkey dialog
+    /// says it: "Disable this account: alice (0193…)".
+    pub(crate) fn confirming(self, target: Option<&str>) -> String {
+        match target {
+            Some(target) => format!("{}: {target}", self.title()),
+            None => self.title().to_owned(),
+        }
+    }
+
     /// Whether it needs the dashboard's recent passkey confirmation, which the
     /// dashboard's script asks for in a dialog before its link or form goes on. A
     /// draft announcement's own changes don't: a long text never outlasts one.
@@ -715,14 +728,40 @@ impl Action {
     }
 }
 
+/// What a change acts on, which its page names beside its button and the
+/// passkey dialog names too, so two pages left open cannot be told apart only by
+/// their address: its `name`, such as an account's handle, and its `id`, if it
+/// has one beside the name.
+#[derive(Clone, Copy, Debug)]
+pub struct Target<'a> {
+    /// What people call it, such as `@alice`.
+    pub name: &'a str,
+    /// Its ID, which tells apart two of the same name.
+    pub id: Option<&'a str>,
+}
+
+impl Target<'_> {
+    /// Its name, then its ID in brackets.
+    fn text(self) -> String {
+        match self.id {
+            Some(id) => format!("{} ({id})", self.name),
+            None => self.name.to_owned(),
+        }
+    }
+}
+
 /// The page of one change: what it does, its inputs as `child`, why the last
-/// attempt was refused, if it was, and its button, beside a link back to `back`.
-/// A change that asks why shows its reason input, holding the `reason` last
-/// typed. The handler confirms a recent passkey before showing it.
+/// attempt was refused, if it was, and its button, beside a link back to `back`,
+/// and the `target` it acts on above them. A change that asks why shows its
+/// reason input, holding the `reason` last typed. The handler confirms a recent
+/// passkey before showing it.
 #[component]
 pub async fn dashboard_change<'a>(
     change: Change,
     back: &'a str,
+    #[into]
+    #[default]
+    target: Option<Target<'a>>,
     #[into]
     #[default]
     refusal: Option<&'a str>,
@@ -731,15 +770,25 @@ pub async fn dashboard_change<'a>(
     reason: Option<&'a str>,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
+    let named = target.map(Target::text);
+    let confirming = change.confirming(named.as_deref());
     Ok(view! {
         page_head(title: change.title(), lead: change.description().to_owned())
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>
         }
         <section class="card">
-            <form class="stack" method="post" data-submit-once="" data-unconfirmed=(!change.confirms())>
+            <form class="stack" method="post" data-submit-once="" data-unconfirmed=(!change.confirms()) data-confirming=(confirming.as_str())>
                 (child)
                 reason_field(change: change, value: reason)
+                if let Some(target) = target {
+                    <p class="target">
+                        <strong>(target.name)</strong>
+                        if let Some(id) = target.id {
+                            " " <code>(id)</code>
+                        }
+                    </p>
+                }
                 <div class="row actions">
                     <button class=(class!("danger" if change.danger()))>(change.button())</button>
                     <a class="button secondary" href=(back)>"Cancel"</a>
@@ -772,7 +821,8 @@ async fn reason_field<'a>(
 /// confirmed a passkey, which the browser opens and closes with no script; a
 /// link to the change's page otherwise. When several rows of a page make the
 /// same change to different things, each names its `subject`, which its dialog
-/// shows and its button is named by.
+/// shows and its button is named by. The passkey dialog names the `subject`, or
+/// else the `target` the page acts on, such as its account.
 #[component]
 pub(crate) async fn confirm<'a>(
     action: &'a Action,
@@ -780,6 +830,9 @@ pub(crate) async fn confirm<'a>(
     #[into]
     #[default]
     subject: Option<&'a str>,
+    #[into]
+    #[default]
+    target: Option<&'a str>,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
     let class = if change.danger() {
@@ -788,7 +841,8 @@ pub(crate) async fn confirm<'a>(
         "button secondary small"
     };
     let dialog = action.dialog(subject);
-    let name = subject.map(|subject| format!("{}: {subject}", change.title()));
+    let name = subject.map(|subject| change.confirming(Some(subject)));
+    let confirming = change.confirming(subject.or(target));
     Ok(view! {
         if action.inline {
             <button type="button" class=(class) popovertarget=(dialog.as_str()) aria-label=(name.as_deref())>(change.label())</button>
@@ -800,7 +854,7 @@ pub(crate) async fn confirm<'a>(
                     <p><strong>(subject)</strong></p>
                 }
                 <p class="help">(change.description())</p>
-                <form method="post" action=(action.href.as_str()) data-submit-once="" data-unconfirmed=(!change.confirms())>
+                <form method="post" action=(action.href.as_str()) data-submit-once="" data-unconfirmed=(!change.confirms()) data-confirming=(confirming.as_str())>
                     (child)
                     reason_field(change: change)
                     <div class="row actions">
@@ -810,7 +864,7 @@ pub(crate) async fn confirm<'a>(
                 </form>
             </div>
         } else {
-            <a data-confirm-first=(change.confirms()) class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
+            <a data-confirm-first=(change.confirms()) data-confirming=(confirming.as_str()) class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
         }
     })
 }
@@ -914,7 +968,7 @@ pub async fn dashboard_signed_out<'a>(
 }
 
 /// Auth's page asking an administrator to prove a passkey before going on to the
-/// dashboard to make a change: its form posts to `action` once the
+/// dashboard, to sign in or make a change: its form posts to `action` once the
 /// passkey script ran the ceremony `proof` starts, for this handoff only. It
 /// posts the handoff `query` asked for, and says why the last proof was refused,
 /// as `alert`, if it was.
@@ -930,7 +984,7 @@ pub async fn handoff_proof<'a>(
     Ok(view! {
         <div>
             <h1>"Confirm it's you"</h1>
-            <p class="lead">"The admin dashboard needs your passkey before it makes a change. It counts for the dashboard only, for five minutes."</p>
+            <p class="lead">"The admin dashboard needs your passkey to sign you in or make a change. It counts for the dashboard only."</p>
         </div>
         if let Some(alert) = alert {
             <p class="notice error" role="alert">(alert)</p>

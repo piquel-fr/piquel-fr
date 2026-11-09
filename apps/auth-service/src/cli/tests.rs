@@ -39,7 +39,7 @@ impl AdminOperation {
                 "Spam account",
             ],
             Self::RevokeUserSessions => &["session", "revoke-all", "alice"],
-            Self::RevokeSession => &["session", "revoke", AN_ID],
+            Self::RevokeSession => &["session", "revoke", "alice", AN_ID],
             Self::ListInvitations => &["invite", "list"],
             Self::CreateInvitation => &["invite", "create"],
             Self::RevokeInvitation => &["invite", "revoke", AN_ID],
