@@ -576,13 +576,7 @@ async fn a_raised_alert_notifies_active_administrators() {
         problem: ChainProblem::EventChanged,
     });
     let alert_id = AlertId::new();
-    let context = EventContext {
-        actor: Actor::System {
-            job: JobName::AuditVerification,
-        },
-        origin: RequestOrigin::default(),
-        reason: None,
-    };
+    let context = EventContext::system(JobName::AuditVerification);
     let raised = DomainEvent::AlertRaised {
         alert_id,
         alert: alert.clone(),

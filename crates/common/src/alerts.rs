@@ -16,6 +16,8 @@ crate::str_enum! {
     pub enum AlertKind {
         /// See [`Alert::AuditChainBroken`].
         AuditChainBroken = "audit_chain_broken",
+        /// See [`Alert::CheckpointRefused`].
+        CheckpointRefused = "checkpoint_refused",
     }
 }
 
@@ -30,6 +32,9 @@ pub enum Alert {
     /// The newest verification of the audit chain, other than one with keys given
     /// with `--key`, found it broken.
     AuditChainBroken(ChainBreak),
+    /// The sealer refuses to sign a checkpoint: the events sealed since the
+    /// latest one no longer match their hashes.
+    CheckpointRefused(ChainBreak),
 }
 
 impl Alert {
@@ -41,15 +46,18 @@ impl Alert {
     pub const fn kind(&self) -> AlertKind {
         match self {
             Self::AuditChainBroken(_) => AlertKind::AuditChainBroken,
+            Self::CheckpointRefused(_) => AlertKind::CheckpointRefused,
         }
     }
 
     /// Its payload version inside a recorded event. A new kind, or a new
     /// [`ChainProblem`], is one older releases cannot decode, so it fails to
-    /// compile here until it is given the next version.
+    /// compile here until it is given the next version: [`Self::CheckpointRefused`]
+    /// came in the second.
     #[must_use]
     pub const fn version(&self) -> i16 {
         match self {
+            Self::CheckpointRefused(_) => 2,
             Self::AuditChainBroken(ChainBreak { problem, .. }) => match problem {
                 ChainProblem::MissingEvent
                 | ChainProblem::EventBeforeAnchor
@@ -68,6 +76,7 @@ impl Alert {
     pub const fn subject(&self) -> &'static str {
         match self {
             Self::AuditChainBroken(_) => "The audit chain is broken",
+            Self::CheckpointRefused(_) => "The audit chain's checkpoints stopped",
         }
     }
 
@@ -82,6 +91,14 @@ impl Alert {
                  and the audit history documentation says what each problem means. It \
                  clears once a verification, other than one with keys given with --key, \
                  finds the chain intact.",
+                broken.position, broken.problem
+            ),
+            Self::CheckpointRefused(broken) => format!(
+                "The sealer refuses to sign a checkpoint: at position {}, {}. Events sealed \
+                 since the latest checkpoint were changed or deleted, so nothing newer is \
+                 signed until it is fixed. Find out what changed: the dashboard's Audit tab \
+                 shows the chain, and the audit history documentation says what each \
+                 problem means. It clears once the sealer signs a checkpoint again.",
                 broken.position, broken.problem
             ),
         }

@@ -446,7 +446,7 @@ impl EventRow<'_> {
         let description =
             Description::new(format!("{what}: {}", alert.subject())).with("alert", id);
         match alert {
-            Alert::AuditChainBroken(broken) => description
+            Alert::AuditChainBroken(broken) | Alert::CheckpointRefused(broken) => description
                 .with("position", broken.position)
                 .with("problem", broken.problem),
         }

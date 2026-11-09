@@ -10,7 +10,7 @@ use chrono::Utc;
 use piquel_common::{
     admin::{ChainBreak, ChainProblem},
     alerts::{AlertAuthor, AlertState, AlertStatus, AlertsShown},
-    events::{Actor, JobName, RequestOrigin},
+    events::{Actor, JobName},
 };
 use piquel_repository::{Database, EventFilter, RecordedEvent};
 
@@ -25,13 +25,7 @@ fn broken(position: u64) -> Alert {
 /// Raises `alert` if `Some`, or clears the chain's alert, in a transaction of its
 /// own.
 async fn found(database: &Database, alert: Option<Alert>) {
-    let context = EventContext {
-        actor: Actor::System {
-            job: JobName::AuditVerification,
-        },
-        origin: RequestOrigin::default(),
-        reason: None,
-    };
+    let context = EventContext::system(JobName::AuditVerification);
     let mut tx = database.begin().await.expect("transaction");
     let mut alerts = Alerts::new(&mut tx, &context);
     match alert {
@@ -126,13 +120,7 @@ async fn the_current_alert_changes_only_with_its_condition() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn concurrent_raises_leave_one_alert() {
     let database = Harness::isolated().await.database;
-    let context = EventContext {
-        actor: Actor::System {
-            job: JobName::AuditVerification,
-        },
-        origin: RequestOrigin::default(),
-        reason: None,
-    };
+    let context = EventContext::system(JobName::AuditVerification);
     let mut first = database.begin().await.expect("transaction");
     Alerts::new(&mut first, &context)
         .raise(broken(5))

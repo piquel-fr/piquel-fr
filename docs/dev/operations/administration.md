@@ -398,6 +398,7 @@ Each alert says what to look at. Auth raises these:
 | Alert | Raised when | Clears when |
 | --- | --- | --- |
 | **The audit chain is broken** | a verification, other than one with `--key`, finds the chain broken | such a verification finds it intact |
+| **The audit chain's checkpoints stopped** | the sealer refuses to sign a checkpoint over events that no longer match | the sealer signs a checkpoint again |
 
 ## The command line
 
