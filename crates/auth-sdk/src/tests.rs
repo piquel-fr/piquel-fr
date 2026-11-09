@@ -8,7 +8,7 @@ use ::axum::{
     routing::{get, post},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use piquel_common::protocol::{
+use sourceorigin_common::protocol::{
     challenge::BearerChallenge, claims::AccessTokenClaims, jwt::TokenType, metadata::ServerMetadata,
 };
 use serde_json::Value;

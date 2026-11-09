@@ -1,6 +1,6 @@
 # OIDC clients
 
-This page helps you register the apps that sign in with Piquel, change them,
+This page helps you register the apps that sign in with Origin Auth, change them,
 rotate their secrets, and stop one that misbehaves.
 
 Clients live in the database. A change applies to the next request on every
@@ -22,7 +22,7 @@ At the terminal, a first-party app running in the browser:
 
 ```sh
 auth-service client create blog --name Blog --trusted \
-    --redirect-uri https://blog.piquel.fr/callback --post-logout-uri https://blog.piquel.fr/
+    --redirect-uri https://blog.sourceorigin.dev/callback --post-logout-uri https://blog.sourceorigin.dev/
 ```
 
 An app with a server, which keeps a secret and may refresh tokens:
@@ -48,7 +48,7 @@ On the dashboard:
 
 ```sh
 auth-service client show notes     # its registration and its secrets' lifetimes, as JSON
-auth-service client update blog --add-redirect-uri https://blog.piquel.fr/auth/callback
+auth-service client update blog --add-redirect-uri https://blog.sourceorigin.dev/auth/callback
 auth-service client update notes --backchannel-logout-uri https://notes.example/auth/backchannel-logout
 ```
 
@@ -105,7 +105,7 @@ same options as `create`, from a deployment job:
 
 ```sh
 auth-service client apply blog --name Blog --confidential \
-    --redirect-uri https://blog.piquel.fr/callback --secret file:///run/secrets/blog-client-secret
+    --redirect-uri https://blog.sourceorigin.dev/callback --secret file:///run/secrets/blog-client-secret
 ```
 
 It registers the client, or updates what differs, and records nothing when
@@ -116,7 +116,7 @@ for `--grace` at most, 1 hour by default, while the deployment rolls out;
 `--grace 0` revokes them. Only the terminal applies clients, since only it takes
 a secret.
 
-No deployment of piquel.fr needs a client: the admin dashboard signs
+No deployment of sourceorigin.dev needs a client: the admin dashboard signs
 administrators in itself (see [the admin dashboard](administration.md#how-the-dashboard-signs-administrators-in)).
 
 ## Approve an origin for passkey sign-in
@@ -125,9 +125,9 @@ A trusted client's own pages may sign users in with their passkeys, without
 sending them to auth's pages, from origins you approve:
 
 ```sh
-auth-service client origin add blog https://blog.piquel.fr
+auth-service client origin add blog https://blog.sourceorigin.dev
 auth-service client origin list
-auth-service client origin remove blog https://blog.piquel.fr
+auth-service client origin remove blog https://blog.sourceorigin.dev
 ```
 
 The client must be trusted, with a redirect URI on the origin. Approved origins
@@ -160,15 +160,15 @@ sign-in**. See [passkey sign-in on your own pages](../../user/apps/passkey-sign-
 ## Secrets
 
 `create` and `rotate-secret` print a secret once, and auth stores only its
-SHA-256 digest. Secrets start with `pqcs_`, so secret scanners can recognize
+SHA-256 digest. Secrets start with `socs_`, so secret scanners can recognize
 them.
 
 ## Clients accounts register
 
 Auth generates the IDs of the clients accounts register in the developer
 console, and limits their scopes to `openid`, `profile`, `email` and
-`offline_access`. They are never trusted. Their names can't contain Piquel's or
-another well-known brand (`RESERVED_BRANDS` in `piquel_common::clients`). An
+`offline_access`. They are never trusted. Their names can't contain SourceOrigin's or
+another well-known brand (`RESERVED_BRANDS` in `sourceorigin_common::clients`). An
 account can have 10, and register 20 a day.
 
 They never appear in other accounts' consoles, while `client list` and the

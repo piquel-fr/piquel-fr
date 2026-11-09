@@ -1,4 +1,4 @@
-//! The vocabulary shared across Piquel: identifiers, string vocabularies, the auth
+//! The vocabulary shared across SourceOrigin: identifiers, string vocabularies, the auth
 //! protocol's wire types and, behind features, what only servers need.
 //!
 //! With no features, this crate is what the SDKs build on: identifiers such as
@@ -133,7 +133,7 @@ macro_rules! __str_enum_sqlx {
 /// labels a newer release may extend that older ones can show coarsely.
 ///
 /// ```
-/// piquel_common::str_enum! {
+/// sourceorigin_common::str_enum! {
 ///     /// A coarse label.
 ///     pub enum Shade {
 ///         /// Light.
@@ -192,7 +192,7 @@ macro_rules! str_enum {
 /// `parse`, never `Other` directly, so a known spelling cannot hide in `Other`.
 ///
 /// ```
-/// piquel_common::open_str_enum! {
+/// sourceorigin_common::open_str_enum! {
 ///     /// How a user authenticated.
 ///     pub enum Method {
 ///         /// A passkey.
@@ -251,7 +251,7 @@ macro_rules! open_str_enum {
     };
 }
 
-/// A value that identifies a person outside Piquel, such as a provider's subject
+/// A value that identifies a person outside SourceOrigin, such as a provider's subject
 /// identifier or a client IP. Storage keeps it apart from the record holding it, so
 /// it can be deleted on its own; it then reads back as [`Self::Erased`].
 ///
@@ -405,7 +405,7 @@ macro_rules! uuid_id {
     };
 }
 
-uuid_id!(UserId, "Immutable global Piquel account identifier.");
+uuid_id!(UserId, "Immutable global Origin Account identifier.");
 uuid_id!(SessionId, "Opaque central-session identifier.");
 uuid_id!(TokenId, "Identifier for a token record or JWT.");
 uuid_id!(PasskeyId, "Identifier of a stored passkey credential.");

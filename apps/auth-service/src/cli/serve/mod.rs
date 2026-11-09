@@ -18,7 +18,7 @@ use hyper_util::{
     server::graceful::GracefulShutdown,
     service::TowerToHyperService,
 };
-use piquel_repository::Database;
+use sourceorigin_repository::Database;
 use std::{
     io,
     pin::Pin,

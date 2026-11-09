@@ -61,7 +61,7 @@ body.admin .auth::before {
   padding-top: 0.5rem;
   border-top: 1px solid var(--line);
 }
-/* piquel.fr's own pages, in the same frame as the signed-out ones, wider. */
+/* sourceorigin.dev's own pages, in the same frame as the signed-out ones, wider. */
 .auth > header .site-links {
   margin-left: auto;
   display: flex;

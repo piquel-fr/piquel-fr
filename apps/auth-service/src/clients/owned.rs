@@ -14,7 +14,7 @@ use crate::{
     security::ApiError,
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId,
     clients::{
         AllowedScopes, ClientField, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris,
@@ -22,8 +22,8 @@ use piquel_common::{
     },
     protocol::oauth::Scope,
 };
-use piquel_crypto::{ClientSecret, Secret};
-use piquel_repository::{DatabaseTransaction, StoredClientSecret, StoredOidcClient};
+use sourceorigin_crypto::{ClientSecret, Secret};
+use sourceorigin_repository::{DatabaseTransaction, StoredClientSecret, StoredOidcClient};
 use serde::Serialize;
 use std::error::Error;
 use thiserror::Error;

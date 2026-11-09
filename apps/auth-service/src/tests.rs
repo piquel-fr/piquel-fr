@@ -21,7 +21,7 @@ use axum::{
     response::Response,
 };
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, ClientId, EmailId, Handle, PasskeyId, Provider, SessionId, TokenId,
     UserId,
     clients::{
@@ -32,8 +32,8 @@ use piquel_common::{
     events::{Actor, RevocationReason},
     protocol::oauth::Scope,
 };
-use piquel_crypto::{ClientSecret, KeyEncryptionKey, NoteKey, Secret};
-use piquel_repository::{
+use sourceorigin_crypto::{ClientSecret, KeyEncryptionKey, NoteKey, Secret};
+use sourceorigin_repository::{
     Database, DatabaseConfig, DatabaseError, DatabaseTransaction, InsertAuthorizationCode,
     InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertUser, InsertVerifiedEmail,
     PendingFederation, SessionAuthentication, SessionScope,
@@ -47,9 +47,9 @@ use std::{
 use tower::ServiceExt;
 
 /// Auth origin of the replicas, and of the fixtures that send requests to them.
-pub(crate) const AUTH_ORIGIN: &str = "https://auth.piquel.fr";
-/// piquel.fr's origin in tests, whose policies auth links.
-pub(crate) const WEB_ORIGIN: &str = "https://piquel.fr";
+pub(crate) const AUTH_ORIGIN: &str = "https://auth.sourceorigin.dev";
+/// sourceorigin.dev's origin in tests, whose policies auth links.
+pub(crate) const WEB_ORIGIN: &str = "https://sourceorigin.dev";
 /// The key-encryption key of every test that stores signing keys. Tests share one
 /// database, so they must all open the keys any of them stored.
 const KEY_ENCRYPTION_KEY: &str = "dGVzdHMgc2hhcmUgdGhpcyBrZXktZW5jcnlwdGlvbiE";
@@ -114,7 +114,7 @@ impl AuthConfig {
             key_encryption_key: Arc::new(key_encryption_key()),
             audit: AuditConfig::new(
                 origin,
-                NoteKey::generate("auth.piquel.fr/audit").expect("audit key"),
+                NoteKey::generate("auth.sourceorigin.dev/audit").expect("audit key"),
             )
             .expect("audit keys"),
             trusted_proxies: vec![],
@@ -155,7 +155,7 @@ impl Replicas {
 
     /// Builds both replicas from `config`, with GitHub sign-in enabled.
     pub(crate) async fn with_github(mut config: AuthConfig) -> Self {
-        let secret = std::env::temp_dir().join(format!("piquel-github-secret-{}", TokenId::new()));
+        let secret = std::env::temp_dir().join(format!("sourceorigin-github-secret-{}", TokenId::new()));
         std::fs::write(&secret, "secret").expect("provider secret");
         config
             .federation
@@ -205,7 +205,7 @@ impl Replicas {
     /// A pool of up to `connections` to the test database, such as a fixture
     /// passes to [`Database::isolated`] for a schema of its own.
     pub(crate) fn database_config(connections: u32) -> DatabaseConfig {
-        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
+        let url = sourceorigin_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
         DatabaseConfig::new(&url, connections, std::time::Duration::from_secs(5))

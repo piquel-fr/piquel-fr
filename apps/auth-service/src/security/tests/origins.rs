@@ -11,7 +11,7 @@ use super::*;
 )]
 async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_boundaries() {
     let fixture = SecurityFixture::new().await;
-    let own = "https://auth.piquel.fr";
+    let own = "https://auth.sourceorigin.dev";
     let response = fixture
         .request(Method::POST, "/account/passkeys", Some(own), true)
         .await;
@@ -29,10 +29,10 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         None,
         Some("null"),
         Some("https://evil.example"),
-        Some("https://piquel.fr"),
-        Some("https://auth.piquel.fr.evil.example"),
-        Some("https://auth.piquel.fr:444"),
-        Some("http://auth.piquel.fr"),
+        Some("https://sourceorigin.dev"),
+        Some("https://auth.sourceorigin.dev.evil.example"),
+        Some("https://auth.sourceorigin.dev:444"),
+        Some("http://auth.sourceorigin.dev"),
     ] {
         let response = fixture
             .request(Method::POST, "/account/passkeys", origin, true)
@@ -43,7 +43,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         .request(
             Method::POST,
             "/webauthn/authenticate/start",
-            Some("https://piquel.fr"),
+            Some("https://sourceorigin.dev"),
             true,
         )
         .await;
@@ -130,7 +130,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     SecurityFixture::exact_cors(&response, own);
-    // A public client sends its codes and tokens, never cookies or Piquel's CSRF header.
+    // A public client sends its codes and tokens, never cookies or Origin Auth's CSRF header.
     let response = fixture
         .request(
             Method::OPTIONS,
@@ -153,7 +153,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         None,
         Some("null"),
         Some("https://evil.example"),
-        Some("https://piquel.fr"),
+        Some("https://sourceorigin.dev"),
     ] {
         let response = fixture
             .request(Method::OPTIONS, "/account/passkeys", origin, false)
@@ -221,7 +221,7 @@ fn endpoint_policy_requires_browser_proof_outside_protocol_endpoints() {
 /// `no-referrer` page sends `Origin: null`, and the CSRF header changes nothing.
 #[test]
 fn pages_take_forms_only_from_auth_pages() {
-    let own = Some("https://auth.piquel.fr");
+    let own = Some("https://auth.sourceorigin.dev");
     for (fetch_site, origin, csrf, mutation, accepted) in [
         (None, None, false, false, true),
         (

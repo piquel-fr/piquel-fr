@@ -2,8 +2,8 @@
 //! the schema owner's, which `migrate` and `audit prune` may use.
 
 use super::AuthConfig;
-use piquel_common::config::{ConfigurationError, SecretReference, Variable};
-use piquel_repository::{DatabaseConfig, RuntimeRole};
+use sourceorigin_common::config::{ConfigurationError, SecretReference, Variable};
+use sourceorigin_repository::{DatabaseConfig, RuntimeRole};
 use std::time::Duration;
 
 /// Default number of pooled authentication connections.
@@ -11,7 +11,7 @@ const DATABASE_POOL_SIZE: u32 = 10;
 /// Maximum startup wait for a pooled database connection.
 const DATABASE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-piquel_common::variables! {
+sourceorigin_common::variables! {
     /// The database's variables, in the configuration reference's order.
     #[cfg(test)]
     pub(crate) const VARIABLES;
@@ -20,7 +20,7 @@ piquel_common::variables! {
     /// `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted
     /// private network. For a local Unix socket, use `localhost` as the host and
     /// the socket's absolute directory as the `host` parameter, such as
-    /// `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
+    /// `postgres://USER:PASSWORD@localhost/sourceorigin?host=/run/postgresql&sslmode=disable`.
     /// Required.
     const DATABASE_URL = "AUTH_DATABASE_URL";
     /// Where to read the database password, through `env://NAME` or

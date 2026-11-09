@@ -3,7 +3,7 @@
 use super::{RepositoryExecutor, SecurityRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{TokenId, admin::Invitation};
+use sourceorigin_common::{TokenId, admin::Invitation};
 use std::time::Duration;
 
 impl SecurityRepository<'_> {

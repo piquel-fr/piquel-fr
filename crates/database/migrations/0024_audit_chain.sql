@@ -30,7 +30,7 @@ CREATE TABLE audit_anchor (
 );
 
 -- Guards sealed history: a sealed event is never updated, and only pruning, which
--- sets piquel.audit_prune for its transaction, deletes one. Checkpoints are never
+-- sets sourceorigin.audit_prune for its transaction, deletes one. Checkpoints are never
 -- updated or deleted, and neither table is truncated. The runtime role cannot
 -- drop these triggers, and may update only unsealed events' chain columns (see
 -- runtime_role.sql); the schema owner can, and the chain is what detects that.
@@ -38,7 +38,7 @@ CREATE FUNCTION guard_sealed_events() RETURNS TRIGGER LANGUAGE plpgsql
 SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
     IF OLD.chain_position IS NULL
-        OR (TG_OP = 'DELETE' AND current_setting('piquel.audit_prune', true) = 'on') THEN
+        OR (TG_OP = 'DELETE' AND current_setting('sourceorigin.audit_prune', true) = 'on') THEN
         RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
     END IF;
     RAISE EXCEPTION 'sealed event at chain position % cannot be changed', OLD.chain_position
@@ -67,7 +67,7 @@ CREATE TRIGGER audit_checkpoints_guard
 CREATE FUNCTION guard_audit_anchor() RETURNS TRIGGER LANGUAGE plpgsql
 SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
-    IF TG_OP <> 'DELETE' AND current_setting('piquel.audit_prune', true) = 'on' THEN
+    IF TG_OP <> 'DELETE' AND current_setting('sourceorigin.audit_prune', true) = 'on' THEN
         IF TG_OP = 'INSERT' THEN
             RETURN NEW;
         END IF;

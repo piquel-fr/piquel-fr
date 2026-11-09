@@ -238,7 +238,7 @@ class Passkeys {
   async #post(path, body) {
     const response = await fetch(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
+      headers: { 'content-type': 'application/json', 'x-sourceorigin-csrf': '1' },
       body: JSON.stringify(body)
     });
     if (response.ok)

@@ -2,11 +2,11 @@
 
 ### Service
 
-- `AUTH_PUBLIC_BASE_URL`: The exact origin auth serves, such as `https://auth.piquel.fr`. It is the OpenID Connect issuer and the passkeys' relying party, so it must use a domain name. Required.
+- `AUTH_PUBLIC_BASE_URL`: The exact origin auth serves, such as `https://auth.sourceorigin.dev`. It is the OpenID Connect issuer and the passkeys' relying party, so it must use a domain name. Required.
 - `AUTH_PUBLIC_LISTENER`: The address auth listens on, behind the HTTPS ingress. Default: `127.0.0.1:8080`.
-- `AUTH_WEB_ORIGIN`: piquel.fr's origin. Every page links its privacy policy and terms, and discovery advertises them. Default: `https://piquel.fr`.
+- `AUTH_WEB_ORIGIN`: sourceorigin.dev's origin. Every page links its privacy policy and terms, and discovery advertises them. Default: `https://sourceorigin.dev`.
 - `AUTH_ADMIN_LISTENER`: The address the admin dashboard listens on, such as `0.0.0.0:8081`. Set it together with `AUTH_ADMIN_ORIGIN`; without them, auth serves no dashboard. Only a private route may reach this listener.
-- `AUTH_ADMIN_ORIGIN`: The admin dashboard's origin, such as `https://admin.piquel.fr`. Set it together with `AUTH_ADMIN_LISTENER`.
+- `AUTH_ADMIN_ORIGIN`: The admin dashboard's origin, such as `https://admin.sourceorigin.dev`. Set it together with `AUTH_ADMIN_LISTENER`.
 - `AUTH_INVITE_REQUIRED`: `false` lets anyone sign up; `true`, the default, requires an invitation. It changes signing up only: existing accounts keep their access.
 - `AUTH_REQUESTS_PER_MINUTE`: How many requests one client may make a minute in each rate category, such as pages, sign-in and tokens. Default: `120`.
 - `AUTH_TRUSTED_PROXIES`: The proxies in front of auth, as comma-separated IP addresses or CIDR ranges. Each must overwrite `X-Forwarded-For` with the one client address, which auth then throttles on. A missing or ambiguous header from one of them is refused, and the header is ignored from any other peer. Unset, auth trusts `PIQUELD_INGRESS_PROXIES`, and without either it throttles on the direct peer's address.
@@ -14,7 +14,7 @@
 
 ### Database
 
-- `AUTH_DATABASE_URL`: The PostgreSQL URL every command connects with. Over TCP it requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network. For a local Unix socket, use `localhost` as the host and the socket's absolute directory as the `host` parameter, such as `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`. Required.
+- `AUTH_DATABASE_URL`: The PostgreSQL URL every command connects with. Over TCP it requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network. For a local Unix socket, use `localhost` as the host and the socket's absolute directory as the `host` parameter, such as `postgres://USER:PASSWORD@localhost/sourceorigin?host=/run/postgresql&sslmode=disable`. Required.
 - `AUTH_DATABASE_PASSWORD`: Where to read the database password, through `env://NAME` or `file:///path`, when the URL leaves it out.
 - `AUTH_DATABASE_OWNER_URL`: The schema owner `migrate` connects as instead, in the same format as `AUTH_DATABASE_URL`, which `audit prune` uses too. `migrate` then creates or resets the role `AUTH_DATABASE_URL` names, with the `AUTH_DATABASE_PASSWORD` password and only row access to auth's tables. The owner must be a superuser.
 - `AUTH_DATABASE_OWNER_PASSWORD`: Where to read the schema owner's password, as for `AUTH_DATABASE_PASSWORD`.
@@ -37,4 +37,4 @@
 
 - `AUTH_SMTP_URL`: The SMTP relay auth sends through: `smtps://USER@HOST:465`, with implicit TLS, or `smtp://USER@HOST:587`, which requires STARTTLS. Only a loopback host, such as a local Mailpit, may be reached without TLS. Unset, email is off: adding an address is refused and queued messages are dropped.
 - `AUTH_SMTP_PASSWORD`: Where to read the password of the URL's user, through `env://NAME` or `file:///path`. Required when the URL names a user; never put it in the URL.
-- `AUTH_EMAIL_FROM`: The sender of every message. Default: `Piquel <security@piquel.fr>`.
+- `AUTH_EMAIL_FROM`: The sender of every message. Default: `Origin Account <security@sourceorigin.dev>`.

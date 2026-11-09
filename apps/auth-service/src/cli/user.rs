@@ -5,11 +5,11 @@ use super::{CliError, Confirm, Console, Output};
 use crate::{AdminError, AuthConfig, Reason, UserRef, recovery::Revoke};
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
-use piquel_common::{
+use sourceorigin_common::{
     PasskeyId,
     admin::{UserDetail, UserPage},
 };
-use piquel_repository::{RecentRecovery, RecoveryState};
+use sourceorigin_repository::{RecentRecovery, RecoveryState};
 
 /// Accounts, in any status.
 #[derive(Subcommand)]

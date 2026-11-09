@@ -3,7 +3,7 @@ use crate::{
     Database, DatabaseError,
     repositories::{SessionRepository, UserRepository},
 };
-use piquel_common::{Handle, SessionId, UserId};
+use sourceorigin_common::{Handle, SessionId, UserId};
 
 /// A non-`UUIDv7` ID and JSON outside its record's type both fail decoding as
 /// [`DatabaseError::InvalidStoredData`], not as a generic operation failure.

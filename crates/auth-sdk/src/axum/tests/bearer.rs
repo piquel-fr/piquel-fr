@@ -1,7 +1,7 @@
 //! Bearer rejections against the shared challenge vectors.
 
 use super::*;
-use piquel_common::protocol::challenge::BearerChallenge;
+use sourceorigin_common::protocol::challenge::BearerChallenge;
 
 /// The status and header of a challenge vector, without its `error_description`,
 /// which the extractors do not send.

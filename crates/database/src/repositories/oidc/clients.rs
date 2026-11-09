@@ -10,7 +10,7 @@ use crate::{
     repositories::{JsonArray, OidcRepository, RepositoryExecutor, Unsigned},
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, ClientSecretId, UserId,
     admin::{ApprovedOrigin, Client},
     clients::{

@@ -7,7 +7,7 @@ test *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "${TEST_DATABASE_URL:-}" ]]; then exec just db scratch just db test "$@"; fi
-    cargo nextest run --locked -p auth-service -p piquel-repository --run-ignored all "$@"
+    cargo nextest run --locked -p auth-service -p sourceorigin-repository --run-ignored all "$@"
     just db prepare-check
 
 # Catches a migration that renames a column a cached query uses, and a cached
@@ -52,14 +52,14 @@ scratch *ARGS:
     # PostgreSQL 18 finds its share directory next to the invoked path, so call
     # the real binaries rather than profile symlinks (Nix, Homebrew).
     bin=$(dirname "$(realpath "$(command -v initdb)")")
-    dir=$(mktemp -d /tmp/piquel-db.XXXXXX)
+    dir=$(mktemp -d /tmp/sourceorigin-db.XXXXXX)
     trap '"$bin/pg_ctl" --pgdata "$dir/data" --mode immediate stop >/dev/null 2>&1 || true; rm -rf "$dir"' EXIT
-    "$bin/initdb" --pgdata "$dir/data" --username piquel --auth trust --no-sync >/dev/null
+    "$bin/initdb" --pgdata "$dir/data" --username sourceorigin --auth trust --no-sync >/dev/null
     "$bin/pg_ctl" --pgdata "$dir/data" --log "$dir/postgres.log" --wait \
         --options "-c listen_addresses='' -c unix_socket_directories='$dir' -c fsync=off -c max_connections=400" \
         start >/dev/null
-    export DATABASE_URL="postgres://piquel@localhost/postgres?host=$dir"
-    export TEST_DATABASE_URL="$DATABASE_URL" PGHOST="$dir" PGUSER=piquel PGDATABASE=postgres
+    export DATABASE_URL="postgres://sourceorigin@localhost/postgres?host=$dir"
+    export TEST_DATABASE_URL="$DATABASE_URL" PGHOST="$dir" PGUSER=sourceorigin PGDATABASE=postgres
     sqlx migrate run --source crates/database/migrations >/dev/null
     "$@"
 

@@ -1,12 +1,12 @@
 # Passkey sign-in on your own pages
 
-Let a trusted app's own pages sign users in with their Piquel passkeys, without
-sending them to auth.piquel.fr. Browsers allow this through WebAuthn related
-origins (WebAuthn Level 3 §5.11), once Piquel approves the page's origin.
+Let a trusted app's own pages sign users in with their Origin Account passkeys, without
+sending them to auth.sourceorigin.dev. Browsers allow this through WebAuthn related
+origins (WebAuthn Level 3 §5.11), once SourceOrigin approves the page's origin.
 
 ## Before you start
 
-- The app must be trusted: one of Piquel's own apps, which skip the consent
+- The app must be trusted: one of SourceOrigin's own apps, which skip the consent
   page. Apps registered in the developer console are never trusted, so their
   pages send users to auth's pages instead.
 - The origin must be the origin of one of the app's redirect URIs, over HTTPS,
@@ -33,7 +33,7 @@ Deleting an app removes its origins.
 
 ## Sign in with the TypeScript SDK
 
-The browser client of [`@piquel/auth/browser`](browser-apps.md)
+The browser client of [`@sourceorigin/auth/browser`](browser-apps.md)
 runs the whole flow, falling back to auth's pages whenever it must:
 
 ```ts
@@ -45,7 +45,7 @@ const session = await auth.signInWithPasskey({ scopes: ['profile'] });
 1. Push an authorization request with PKCE, from the page's own origin, to
    `/oauth/par`.
 2. Post its `request_uri` as `{"request_uri": …}` to `/webauthn/related/start`,
-   with `content-type: application/json` and `x-piquel-csrf: 1`.
+   with `content-type: application/json` and `x-sourceorigin-csrf: 1`.
 3. Run the WebAuthn assertion the answer describes.
 4. Post `{"ceremony_id": …, "credential": …}` to `/webauthn/related/finish`. It
    answers `{code, state, iss}` as JSON, instead of redirecting.
@@ -74,9 +74,9 @@ Send the browser to auth's pages, at
 
 ## Check that it works
 
-1. `https://auth.piquel.fr/.well-known/webauthn` lists the approved origin. It
+1. `https://auth.sourceorigin.dev/.well-known/webauthn` lists the approved origin. It
    may take five minutes to appear, since browsers may cache the list that long.
-2. On the page, sign in. The browser offers your Piquel passkeys without leaving
+2. On the page, sign in. The browser offers your Origin Account passkeys without leaving
    the page, and the page receives a code.
 
 ## Troubleshooting
@@ -93,5 +93,5 @@ Send the browser to auth's pages, at
 Browsers honour only a few distinct domains in the list, so approved origins,
 across every app, span at most 5 registrable domains: `example` counts once for
 `app.example.co.uk` and `www.example.co.uk`. Browsers count origins within
-auth's own domain too, as `piquel`. A host without a registrable domain, such as
+auth's own domain too, as `sourceorigin`. A host without a registrable domain, such as
 `localhost`, counts none, and is accepted only within auth's domain.

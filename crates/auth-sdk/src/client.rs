@@ -7,7 +7,7 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId,
     protocol::{
         claims::{IdTokenClaims, LogoutTokenClaims, UserInfo},
@@ -35,8 +35,8 @@ const RANDOM_BYTES: usize = 32;
 /// An auth endpoint failed or answered with an OAuth error.
 ///
 /// ```no_run
-/// # async fn run(client: piquel_auth::Client, refresh: piquel_auth::RefreshToken, signed_in: piquel_auth::IdToken) {
-/// use piquel_auth::{OAuthError, protocol::oauth::ErrorCode};
+/// # async fn run(client: sourceorigin_auth::Client, refresh: sourceorigin_auth::RefreshToken, signed_in: sourceorigin_auth::IdToken) {
+/// use sourceorigin_auth::{OAuthError, protocol::oauth::ErrorCode};
 ///
 /// match client.refresh(&refresh, signed_in.claims()).await {
 ///     Ok(tokens) => println!("access token valid until {}", tokens.expires_at),
@@ -107,13 +107,13 @@ impl OAuthError {
 /// be exchanged.
 ///
 /// ```
-/// use piquel_auth::{
+/// use sourceorigin_auth::{
 ///     LoginError,
 ///     protocol::sdk::{ErrorCategory, ErrorReason, SdkError},
 /// };
 ///
 /// let mixed_up = LoginError::IssuerMismatch {
-///     expected: "https://auth.piquel.fr".into(),
+///     expected: "https://auth.sourceorigin.dev".into(),
 ///     found: "https://evil.example".into(),
 /// };
 /// assert_eq!(
@@ -186,7 +186,7 @@ impl LoginError {
 /// How the client authenticates at the token and revocation endpoints.
 ///
 /// ```
-/// use piquel_auth::Credentials;
+/// use sourceorigin_auth::Credentials;
 ///
 /// let secret = Credentials::Secret("a-confidential-client-secret".to_owned().into());
 /// // Secrets are never printed.
@@ -225,7 +225,7 @@ pub struct ClientConfig {
 /// What to ask for in an authorization request. `openid` is always requested.
 ///
 /// ```
-/// use piquel_auth::{AuthorizeRequest, protocol::challenge::BearerChallenge};
+/// use sourceorigin_auth::{AuthorizeRequest, protocol::challenge::BearerChallenge};
 ///
 /// // An API answered with a step-up challenge: ask auth for what it names, with
 /// // profile claims and a refresh token.
@@ -304,7 +304,7 @@ credential!(
     /// An access token as issued, to send as a bearer credential.
     ///
     /// ```
-    /// use piquel_auth::BearerToken;
+    /// use sourceorigin_auth::BearerToken;
     ///
     /// let token = BearerToken::new("eyJ...".into());
     /// assert_eq!(token.expose(), "eyJ...");
@@ -316,7 +316,7 @@ credential!(
     /// A refresh token. Keep it server-side: it must never reach a browser.
     ///
     /// ```
-    /// use piquel_auth::RefreshToken;
+    /// use sourceorigin_auth::RefreshToken;
     ///
     /// let token = RefreshToken::new("prt_v1_example".into());
     /// // Serializes as itself, for a server-side session store, and never prints.
@@ -420,13 +420,13 @@ impl PendingLogin {
 /// The query parameters of an authorization response.
 ///
 /// ```
-/// use piquel_auth::CallbackParams;
+/// use sourceorigin_auth::CallbackParams;
 ///
 /// let callback = CallbackParams::from_query(
-///     "code=pac_v1_abc&state=af0ifjsldkj&iss=https%3A%2F%2Fauth.piquel.fr",
+///     "code=pac_v1_abc&state=af0ifjsldkj&iss=https%3A%2F%2Fauth.sourceorigin.dev",
 /// )
 /// .expect("no parameter repeats");
-/// assert_eq!(callback.iss.as_deref(), Some("https://auth.piquel.fr"));
+/// assert_eq!(callback.iss.as_deref(), Some("https://auth.sourceorigin.dev"));
 /// // The code is a credential until redeemed, so it is never printed.
 /// assert!(!format!("{callback:?}").contains("pac_v1_abc"));
 /// assert!(CallbackParams::from_query("state=a&state=b").is_none());
@@ -519,13 +519,13 @@ struct ClientInner {
 /// A whole login, from the redirect to the signed-in user:
 ///
 /// ```no_run
-/// # async fn run(issuer: piquel_auth::Issuer, callback_query: &str) -> Result<(), Box<dyn std::error::Error>> {
-/// use piquel_auth::{AuthorizeRequest, CallbackParams, ClientConfig, Credentials, PendingLogin};
+/// # async fn run(issuer: sourceorigin_auth::Issuer, callback_query: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// use sourceorigin_auth::{AuthorizeRequest, CallbackParams, ClientConfig, Credentials, PendingLogin};
 ///
 /// let client = issuer.client(ClientConfig {
 ///     client_id: "notes-web".parse()?,
 ///     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
-///     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
+///     redirect_uri: "https://notes.sourceorigin.dev/auth/callback".parse()?,
 /// });
 ///
 /// // 1. Send the browser to `url`, and keep the pending login server-side under its
@@ -754,7 +754,7 @@ impl Client {
     /// the new ID token breaks §12.2.
     ///
     /// ```no_run
-    /// # async fn run(client: piquel_auth::Client, stored: piquel_auth::RefreshToken, signed_in: piquel_auth::IdToken) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn run(client: sourceorigin_auth::Client, stored: sourceorigin_auth::RefreshToken, signed_in: sourceorigin_auth::IdToken) -> Result<(), Box<dyn std::error::Error>> {
     /// let tokens = client.refresh(&stored, signed_in.claims()).await?;
     /// // A public client stores the rotated token in place of the old one.
     /// let current = tokens.refresh_token.unwrap_or(stored);
@@ -786,7 +786,7 @@ impl Client {
     /// See [`OAuthError`].
     ///
     /// ```no_run
-    /// # async fn run(client: piquel_auth::Client, refresh: piquel_auth::RefreshToken) -> Result<(), piquel_auth::OAuthError> {
+    /// # async fn run(client: sourceorigin_auth::Client, refresh: sourceorigin_auth::RefreshToken) -> Result<(), sourceorigin_auth::OAuthError> {
     /// client.revoke(&refresh).await?;
     /// # Ok(()) }
     /// ```
@@ -809,7 +809,7 @@ impl Client {
     /// another user.
     ///
     /// ```no_run
-    /// # async fn run(client: piquel_auth::Client, tokens: piquel_auth::Tokens, id_token: piquel_auth::IdToken) -> Result<(), piquel_auth::OAuthError> {
+    /// # async fn run(client: sourceorigin_auth::Client, tokens: sourceorigin_auth::Tokens, id_token: sourceorigin_auth::IdToken) -> Result<(), sourceorigin_auth::OAuthError> {
     /// let user = client.userinfo(&tokens.access_token, id_token.claims()).await?;
     /// println!("{} <{:?}>", user.sub, user.profile.email);
     /// # Ok(()) }
@@ -842,9 +842,9 @@ impl Client {
     /// when the app kept its ID token; auth asks the user to confirm either way.
     ///
     /// ```no_run
-    /// # fn run(client: piquel_auth::Client, id_token: piquel_auth::IdToken) -> Result<(), url::ParseError> {
+    /// # fn run(client: sourceorigin_auth::Client, id_token: sourceorigin_auth::IdToken) -> Result<(), url::ParseError> {
     /// // Redirect the browser here once the app's own session is gone.
-    /// let after: url::Url = "https://notes.piquel.fr/".parse()?;
+    /// let after: url::Url = "https://notes.sourceorigin.dev/".parse()?;
     /// let logout = client.logout_url(Some(&id_token), Some(&after));
     /// # Ok(()) }
     /// ```
@@ -876,8 +876,8 @@ impl Client {
     /// auth retries. Any other error answers 400.
     ///
     /// ```no_run
-    /// # async fn run(client: piquel_auth::Client, logout_token: &str) -> Result<(), piquel_auth::TokenError> {
-    /// use piquel_auth::LogoutScope;
+    /// # async fn run(client: sourceorigin_auth::Client, logout_token: &str) -> Result<(), sourceorigin_auth::TokenError> {
+    /// use sourceorigin_auth::LogoutScope;
     ///
     /// // The `logout_token` form field auth posted.
     /// let logout = client.logout_token(logout_token).await?;

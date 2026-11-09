@@ -175,7 +175,7 @@ crate::__str_enum_sqlx!(KeyId);
 /// unknown `kty` is skipped rather than failing the whole set.
 ///
 /// ```
-/// use piquel_common::protocol::jwt::{Jwk, JwkSet, KeyType};
+/// use sourceorigin_common::protocol::jwt::{Jwk, JwkSet, KeyType};
 ///
 /// let set: JwkSet<serde_json::Value> = serde_json::from_str(r#"{"keys": [
 ///     {"kty": "RSA", "kid": "key-2026", "use": "sig", "alg": "RS256", "n": "AQAB", "e": "AQAB"},
@@ -228,7 +228,7 @@ impl Jwk {
     /// (RFC 7517 §4.3).
     ///
     /// ```
-    /// use piquel_common::protocol::jwt::Jwk;
+    /// use sourceorigin_common::protocol::jwt::Jwk;
     ///
     /// let key = |ops: &str| -> Jwk {
     ///     serde_json::from_str(&format!(r#"{{"kty": "RSA", "kid": "a", "n": "AQAB", "e": "AQAB"{ops}}}"#))

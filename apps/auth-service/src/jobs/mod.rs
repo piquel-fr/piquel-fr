@@ -9,15 +9,15 @@ use crate::{
     deliveries::{AnnouncementSender, BackchannelLogoutSender, EmailSender, OutboundClient},
 };
 use chrono::Utc;
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, ErrorChain, UserId,
     alerts::{Alert, AlertKind},
     events::{EventContext, JobName},
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, ExclusiveConnection, LockKey,
 };
-use piquel_telemetry::{Counter, Gauge, Histogram};
+use sourceorigin_telemetry::{Counter, Gauge, Histogram};
 use std::{
     sync::{
         Arc, Mutex, PoisonError,
@@ -252,20 +252,20 @@ impl Jobs {
 
 /// Rows each cleanup pass deleted or changed.
 static CLEANUP_CHANGED: Counter = Counter::new(
-    "piquel.auth.cleanup.changed",
+    "sourceorigin.auth.cleanup.changed",
     "{row}",
     "Rows cleanup deleted or changed: expired state, personal data past retention and stuck deliveries.",
 );
 /// How long each cleanup pass took.
 static CLEANUP_DURATION: Histogram = Histogram::new(
-    "piquel.auth.cleanup.duration",
+    "sourceorigin.auth.cleanup.duration",
     "s",
     "Duration of cleanup passes.",
     &[0.01, 0.1, 1.0, 5.0, 15.0, 30.0, 60.0, 90.0],
 );
 /// Cleanup passes that ran out of budget with rows left.
 static CLEANUP_OVERRUNS: Counter = Counter::new(
-    "piquel.auth.cleanup.overruns",
+    "sourceorigin.auth.cleanup.overruns",
     "{pass}",
     "Cleanup passes that stopped at their time budget with rows left to clean.",
 );
@@ -578,7 +578,7 @@ impl JobCount {
 /// Accounts whose purge keeps failing, counted after each purge run.
 static FAILING_PURGES: JobCount = JobCount::new(
     Gauge::new(
-        "piquel.auth.account_purge.failing",
+        "sourceorigin.auth.account_purge.failing",
         "{account}",
         "Accounts scheduled for deletion whose purge failed at least 3 times in a row.",
     ),

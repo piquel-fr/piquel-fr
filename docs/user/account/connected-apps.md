@@ -1,7 +1,7 @@
 # Connected apps
 
-The **Connected apps** tab of your settings, at `auth.piquel.fr/settings/apps`,
-lists the apps you signed in to with Piquel that keep access to your account,
+The **Connected apps** tab of your settings, at `auth.sourceorigin.dev/settings/apps`,
+lists the apps you signed in to with Origin Auth that keep access to your account,
 and what each can see. Remove any you no longer use.
 
 ## Before you start
@@ -11,7 +11,7 @@ passkey confirmation.
 
 ## How an app gets access
 
-The first time an app signs you in, Piquel asks **Continue to** the app, names
+The first time an app signs you in, Origin Auth asks **Continue to** the app, names
 the site it sends you back to, and lists what the app will receive:
 
 - **Your account identifier**,
@@ -23,15 +23,15 @@ the site it sends you back to, and lists what the app will receive:
   when you aren't using it.
 
 An app never sees your passkeys, and can't change your account. An app that
-another Piquel account registered is marked **Unverified app, registered by**
-the handle of whoever registered it: Piquel hasn't checked who runs it, so
+another Origin Account registered is marked **Unverified app, registered by**
+the handle of whoever registered it: SourceOrigin hasn't checked who runs it, so
 continue only if you trust it.
 
 Select **Continue** to allow it, or **Cancel** to refuse. Once you allow it,
 the app doesn't ask again unless it asks for more. To sign in to the app with
 another account, select **Not you? Switch account**.
 
-Apps that Piquel makes don't ask: they are marked **Made by Piquel**.
+Apps that Origin Auth makes don't ask: they are marked **Made by SourceOrigin**.
 
 ## Read the list
 
@@ -47,7 +47,7 @@ The page says **The app no longer has access to your account.** The app can
 no longer refresh its access, and needs your approval again before it signs
 you in. Access it already has can last up to 5 minutes.
 
-An app made by Piquel gets its access back, without asking, the next time you
+An app made by SourceOrigin gets its access back, without asking, the next time you
 sign in to it.
 
 Removing an app's access doesn't sign out your devices: other apps share them.

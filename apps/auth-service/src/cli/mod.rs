@@ -55,19 +55,19 @@ use error::CliError;
 use handle::HandleCommand;
 use invite::InviteCommand;
 use keys::KeysCommand;
-use piquel_common::ErrorChain;
-use piquel_repository::Database;
-use piquel_telemetry::Telemetry;
+use sourceorigin_common::ErrorChain;
+use sourceorigin_repository::Database;
+use sourceorigin_telemetry::Telemetry;
 use session::SessionCommand;
 use std::{process::ExitCode, time::Duration};
 use tracing::Instrument;
 use user::UserCommand;
 
-/// Piquel authentication service. Runs `serve` when no command is given.
+/// Origin Auth authentication service. Runs `serve` when no command is given.
 #[derive(Parser)]
 #[command(
     after_help = "Every command uses AUTH_DATABASE_URL, except migrate and audit prune when \
-                  AUTH_DATABASE_OWNER_URL is set. See https://docs.piquel.fr/dev/operations/administration.html."
+                  AUTH_DATABASE_OWNER_URL is set. See https://docs.sourceorigin.dev/dev/operations/administration.html."
 )]
 pub struct Cli {
     /// Defaults to serving when no administrative command is supplied.

@@ -21,7 +21,7 @@ detail.
   `preferred_username`: 3–32 characters of `[a-z0-9-]`, without a leading, trailing
   or double hyphen, so it is a valid DNS label. Signup trims and lowercases it, and
   refuses reserved names (infrastructure labels such as `auth` and `www`, RFC 2142
-  mailboxes, piquel.fr routes, the brand, and the handles administrators reserve)
+  mailboxes, sourceorigin.dev routes, the brand, and the handles administrators reserve)
   and names that look like one: hyphens
   are dropped, and `0`, `1` or `i`, `5`, `rn` and `vv` read as `o`, `l`, `s`, `m` and
   `w`. Every handle and look-alike stays unique, current or not: a handle is not

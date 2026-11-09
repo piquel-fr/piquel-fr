@@ -1,13 +1,13 @@
 [package]
-name = "piquel-ui"
-description = "Components, layouts and stylesheet of auth.piquel.fr's server-rendered pages"
+name = "sourceorigin-ui"
+description = "Components, layouts and stylesheet of auth.sourceorigin.dev's server-rendered pages"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-piquel-common = { workspace = true, features = ["admin", "events"] }
+sourceorigin-common = { workspace = true, features = ["admin", "events"] }
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -8,13 +8,13 @@ use axum::{
     http::{HeaderMap, request::Parts},
 };
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, PasskeyId, SessionId, UserId,
     events::{DomainEvent, EventContext, InlineSignIn, RevocationReason},
     protocol::{api::ErrorCode, step_up::StepUpRequirement},
 };
-use piquel_crypto::{CryptoError, Secret};
-use piquel_repository::{
+use sourceorigin_crypto::{CryptoError, Secret};
+use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSession, LAST_SEEN_INTERVAL,
     SessionAuthentication, SessionScope, StoredSession,
 };

@@ -151,7 +151,7 @@ Tokens are signed with the current key set ([keys](keys.md)). The access token
 (`at+jwt`) is for the request's audience; an ID token is issued when the scopes
 include `openid`, with the request's nonce. Both last five minutes
 (`ACCESS_TOKEN_SECONDS`) and report the code's authentication, not the
-session's current one. `piquel.auth.tokens.issued{grant_type, token_type}` counts
+session's current one. `sourceorigin.auth.tokens.issued{grant_type, token_type}` counts
 them once the transaction commits.
 
 ### Refresh families

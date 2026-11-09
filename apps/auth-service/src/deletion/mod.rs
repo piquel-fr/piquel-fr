@@ -31,12 +31,12 @@ use crate::{
 };
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, ClientId, PasskeyId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
 };
-use piquel_crypto::Secret;
-use piquel_repository::{DatabaseTransaction, StoredUser};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{DatabaseTransaction, StoredUser};
 
 /// How long an account scheduled for deletion can still be restored.
 pub(crate) const GRACE_PERIOD_DAYS: i64 = 30;

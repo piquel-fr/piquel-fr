@@ -2,7 +2,7 @@
 
 use super::moment;
 use crate::layout::page_head;
-use piquel_common::admin::{AuditPage, ChainPoint, Pruning, VerificationKeys};
+use sourceorigin_common::admin::{AuditPage, ChainPoint, Pruning, VerificationKeys};
 use topcoat::{
     Result,
     view::{View, class, component, view},

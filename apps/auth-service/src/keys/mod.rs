@@ -17,12 +17,12 @@ use crate::{
     security::SESSION_LIFETIME_DAYS,
 };
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     events::{DomainEvent, EventContext, SigningKeyChange},
     protocol::jwt::KeyId,
 };
-use piquel_crypto::{CryptoError, Digest, KeyEncryptionKey, KeySet, PublicKey, Rs256Key, Secret};
-use piquel_repository::{
+use sourceorigin_crypto::{CryptoError, Digest, KeyEncryptionKey, KeySet, PublicKey, Rs256Key, Secret};
+use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSigningKey, SigningKeyState,
     SigningKeyType, StoredSigningKey,
 };

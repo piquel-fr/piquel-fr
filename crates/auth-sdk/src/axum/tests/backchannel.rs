@@ -4,7 +4,7 @@
 use super::*;
 use crate::{LogoutScope, SessionId};
 use chrono::TimeDelta;
-use piquel_common::{
+use sourceorigin_common::{
     DeliveryId,
     protocol::claims::{Absent, Audience, LogoutEvents, LogoutTokenClaims},
 };

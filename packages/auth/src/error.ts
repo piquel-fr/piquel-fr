@@ -32,7 +32,7 @@ export type TokenReason = Extract<
 
 /**
  * What failed, as each kind of failure describes it. `code` is a category every SDK
- * shares (`piquel_common::protocol::sdk`), except `missing_token` and
+ * shares (`sourceorigin_common::protocol::sdk`), except `missing_token` and
  * `invalid_request`: a resource server's request carried no bearer token, or a
  * malformed `Authorization` header, which no other SDK reports as an error.
  */

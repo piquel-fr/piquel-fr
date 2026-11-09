@@ -7,7 +7,7 @@ use crate::{
     tests::{Browser, Replicas},
 };
 use axum::http::{Method, StatusCode};
-use piquel_common::events::{Actor, DomainEvent, EventContext, RequestOrigin};
+use sourceorigin_common::events::{Actor, DomainEvent, EventContext, RequestOrigin};
 use serde_json::Value;
 
 /// The inbox routes, shared and the owner's, over the test database.
@@ -254,7 +254,7 @@ async fn owners_choose_which_notifications_are_emailed() {
     assert_eq!(emails, [true, false], "a repeat changes nothing");
 
     let links = UnsubscribeLinks::new(
-        "https://auth.piquel.fr".parse().expect("origin"),
+        "https://auth.sourceorigin.dev".parse().expect("origin"),
         crate::config::LinkKeys::generate(),
     );
     let link = url::Url::parse(&links.link(alice.user_id).expect("link")).expect("URL");

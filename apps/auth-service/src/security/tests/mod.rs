@@ -17,13 +17,13 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, SessionId, UserId,
     clients::{ClientKind, ClientOwner},
     events::{Actor, Browser, Platform, RevocationReason, UserAgentFamily},
 };
-use piquel_crypto::Digest;
-use piquel_repository::{Database, SessionScope, StoredSession};
+use sourceorigin_crypto::Digest;
+use sourceorigin_repository::{Database, SessionScope, StoredSession};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -151,14 +151,14 @@ impl SecurityFixture {
             request = request.header(header::ORIGIN, origin);
         }
         if csrf {
-            request = request.header("x-piquel-csrf", "1");
+            request = request.header("x-sourceorigin-csrf", "1");
         }
         if method == Method::OPTIONS {
             request = request
                 .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
                 .header(
                     header::ACCESS_CONTROL_REQUEST_HEADERS,
-                    "content-type, x-piquel-csrf",
+                    "content-type, x-sourceorigin-csrf",
                 );
         }
         let mut request = request.body(Body::empty()).expect("request");
@@ -206,7 +206,7 @@ impl SecurityFixture {
 
 /// The origin of auth's own pages in the policy tests.
 fn site() -> url::Origin {
-    url::Url::parse("https://auth.piquel.fr")
+    url::Url::parse("https://auth.sourceorigin.dev")
         .expect("URL")
         .origin()
 }

@@ -11,8 +11,8 @@ use axum::{
     Router,
     http::{Method, StatusCode},
 };
-use piquel_common::events::{Actor, DomainEvent, RevocationReason};
-use piquel_repository::Database;
+use sourceorigin_common::events::{Actor, DomainEvent, RevocationReason};
+use sourceorigin_repository::Database;
 use serde_json::{Value, json};
 
 /// The session routes over the test database.

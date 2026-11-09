@@ -10,7 +10,7 @@ use openssl::{
     rsa::Rsa,
     sign::{Signer, Verifier},
 };
-use piquel_common::protocol::jwt::{
+use sourceorigin_common::protocol::jwt::{
     Algorithm, Claim, Jwk, JwkSet, KeyId, KeyType, KeyUse, TokenType,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};

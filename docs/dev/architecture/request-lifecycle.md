@@ -52,7 +52,7 @@ security layer throttles or refuses is still traced. Each request gets a root
 span named after its method and route template, an access log line and a
 duration measurement. A 5xx response marks the span failed and carries its trace
 ID in `X-Trace-Id`. The admin listener labels all of it
-`piquel.listener = "admin"`, and the health probes log at debug level only.
+`sourceorigin.listener = "admin"`, and the health probes log at debug level only.
 [Telemetry](telemetry.md) covers the rest.
 
 ## The security layer
@@ -67,7 +67,7 @@ auth's, and `HttpSecurity::admin` for the dashboard's.
 Each listener runs at most 64 requests at once (`HttpSecurity::admit`). The next
 one answers `503` with `Retry-After: 1` at once, before any check that could
 query the database, so a flood is refused instead of queueing for the pool. It
-counts `piquel.auth.throttled{category="overloaded"}`, and any origin may read
+counts `sourceorigin.auth.throttled{category="overloaded"}`, and any origin may read
 the refusal. The public and admin listeners each have their own limit, and
 health probes take no slot.
 
@@ -123,13 +123,13 @@ otherwise. Then `check_browser` applies the CSRF rule of the endpoint's class:
   hints.
 - **Pages and the dashboard** take any navigation, but a form only from their own
   origin's pages, by `BrowserRequest::is_same_origin`
-  (`piquel_common::protocol::same_origin`): `Sec-Fetch-Site: same-origin` when the
+  (`sourceorigin_common::protocol::same_origin`): `Sec-Fetch-Site: same-origin` when the
   browser sends it, otherwise an `Origin` equal to the site's. A plain form
   cannot send a custom header, and sends `Origin: null` under
   `Referrer-Policy: no-referrer`, so the CSRF header would not work there.
 - **Every other route**, the account APIs and ceremonies included, refuses an
   origin that is not allowed, and a mutation (any method but `GET` and `HEAD`)
-  without an allowed `Origin` or without the `x-piquel-csrf` header. The passkey
+  without an allowed `Origin` or without the `x-sourceorigin-csrf` header. The passkey
   script sends the header; a cross-site form cannot.
 
 ### Rate limit
@@ -140,7 +140,7 @@ one-minute window, counted in PostgreSQL (`SecurityRepository::allow_request`)
 under a SHA-256 of `<category>:<ip>`, so every replica shares it. Categories are
 independent: an app's userinfo calls never block its code exchanges, and browsing
 auth's pages never blocks a passkey ceremony. An exhausted budget answers `429`
-with `Retry-After: 60` and counts `piquel.auth.throttled{category}`. Discovery and
+with `Retry-After: 60` and counts `sourceorigin.auth.throttled{category}`. Discovery and
 health probes spend nothing, and an unmatched path has no route, so it spends
 nothing either.
 

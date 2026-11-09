@@ -1,7 +1,7 @@
 # Profile
 
-The **Profile** tab of your settings, at `auth.piquel.fr/settings/profile`,
-holds what apps you sign in to with Piquel see of you: your handle, your
+The **Profile** tab of your settings, at `auth.sourceorigin.dev/settings/profile`,
+holds what apps you sign in to with Origin Auth see of you: your handle, your
 display name and your picture.
 
 ![The profile settings: the picture, handle and display name, each with a Change button](../../images/account/profile.png)
@@ -25,8 +25,8 @@ A handle is 3 to 32 characters long: lowercase letters, numbers, and single
 hyphens between them.
 
 A handle can't be taken if another account has it or had it, or if it looks
-too much like one that does, such as `rnary` beside `mary`. Names Piquel uses
-itself, such as `auth`, `www` or `piquel`, are reserved. The page says which
+too much like one that does, such as `rnary` beside `mary`. Names SourceOrigin uses
+itself, such as `auth`, `www` or `sourceorigin`, are reserved. The page says which
 handle blocks the one you chose.
 
 ### Change your handle
@@ -65,7 +65,7 @@ Apps show your picture beside your name, or your initials while you have none.
    move it, and use **Zoom** to zoom in.
 4. Select **Upload picture**.
 
-Piquel keeps only the image, cropped to a square: nothing else in the file,
+Origin Auth keeps only the image, cropped to a square: nothing else in the file,
 such as where a photo was taken. Apps show the new picture once they refresh
 your profile.
 

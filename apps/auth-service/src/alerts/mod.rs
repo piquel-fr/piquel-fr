@@ -2,11 +2,11 @@
 //! audit chain. Whatever finds a condition raises its alert while it holds, and
 //! clears it once it no longer does, each change recorded as an event.
 
-use piquel_common::{
+use sourceorigin_common::{
     alerts::{Alert, AlertKind, StoredAlert},
     events::{DomainEvent, EventContext},
 };
-use piquel_repository::{DatabaseError, DatabaseTransaction};
+use sourceorigin_repository::{DatabaseError, DatabaseTransaction};
 
 /// Raises and clears alerts in a transaction, recording each change as caused
 /// as its context says.

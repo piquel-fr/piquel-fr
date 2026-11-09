@@ -1,7 +1,7 @@
 //! Disabling and enabling an account, and reading its event history.
 
 use super::*;
-use piquel_common::events::RevocationReason;
+use sourceorigin_common::events::RevocationReason;
 use serde_json::json;
 
 /// The event list shows changes: an administrator's views of an account only
@@ -38,7 +38,7 @@ async fn views_are_listed_only_when_asked_for() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn disabling_ends_sessions_and_is_recorded() {
-    let capture = piquel_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
+    let capture = sourceorigin_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
     let harness = Harness::new().await;
     let service = harness.service();
     let admin = harness.admin().await;

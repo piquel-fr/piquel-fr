@@ -92,7 +92,7 @@ crate::str_enum! {
 /// that failed. It serializes as the vectors' expected errors do:
 ///
 /// ```
-/// use piquel_common::protocol::sdk::{ErrorCategory, ErrorReason, SdkError};
+/// use sourceorigin_common::protocol::sdk::{ErrorCategory, ErrorReason, SdkError};
 ///
 /// let expired = SdkError::new(ErrorCategory::InvalidToken, ErrorReason::Expired);
 /// assert_eq!(

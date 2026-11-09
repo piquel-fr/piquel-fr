@@ -1,6 +1,6 @@
 # Recover your account
 
-If you lost every passkey of your account, Piquel support can help you add a
+If you lost every passkey of your account, SourceOrigin support can help you add a
 new one. This page explains how to ask, and what happens once support starts
 the recovery.
 
@@ -13,7 +13,7 @@ the recovery.
 
 ## Ask support
 
-Email [contact@piquel.fr](mailto:contact@piquel.fr) with your handle, and say
+Email [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev) with your handle, and say
 that you lost every passkey.
 
 Support then checks that you own the account. They confirm your request through
@@ -32,7 +32,7 @@ account by pretending to be you.
 
 When support starts the recovery, every device is signed out of your account,
 and email addresses you hadn't confirmed are removed. Support emails a link to
-your primary email address, with the subject "Recover your Piquel account". If
+your primary email address, with the subject "Recover your Origin Account". If
 your account has no confirmed address, support gives you the link through the
 channel they confirmed.
 
@@ -75,7 +75,7 @@ so you can always get back in.
 
 While a recovery can be undone, every settings and developer console page asks
 "Your account was recovered on \<date>. Was this you?". Before the link is
-used, it says "Piquel support started a recovery of your account on \<date>"
+used, it says "SourceOrigin support started a recovery of your account on \<date>"
 instead.
 
 - Select **Yes, it was me** to hide the question in this browser.
@@ -96,7 +96,7 @@ way to undo the recovery, support asks for stronger proof first. They:
 - unlink GitHub and Google sign-in,
 - withdraw every app's access to your account.
 
-Every confirmed email address of the account receives "Piquel support secured
+Every confirmed email address of the account receives "SourceOrigin support secured
 your account". Support then gives you the recovery link themselves, through the
 channel they confirmed, rather than emailing it. Undoing this recovery later
 doesn't bring back what support removed.
@@ -108,6 +108,6 @@ doesn't bring back what support removed.
 - **"This link is incomplete."** Open the link again from the email, without
   changing it.
 - **"Opening this link needs scripts allowed."** Allow JavaScript for
-  auth.piquel.fr, then open the link again.
+  auth.sourceorigin.dev, then open the link again.
 - **You lost the new passkey within the 15 days.** It can't add a second
   passkey yet, so contact support. They can undo the recovery and start another.
