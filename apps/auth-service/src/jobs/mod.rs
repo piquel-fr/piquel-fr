@@ -3,6 +3,7 @@
 
 use crate::{
     AuditKeys, AuthConfig, KeyStore, SigningKeys, StartupError,
+    alerts::Alerts,
     audit::{Sealer, Verifier},
     deletion::{DeletionError, Deletions},
     deliveries::{AnnouncementSender, BackchannelLogoutSender, EmailSender, OutboundClient},
@@ -10,14 +11,18 @@ use crate::{
 use chrono::Utc;
 use piquel_common::{
     AccountStatus, ErrorChain, UserId,
-    events::{Actor, EventContext, JobName, RequestOrigin},
+    alerts::{Alert, AlertKind},
+    events::{EventContext, JobName},
 };
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, ExclusiveConnection, LockKey,
 };
 use piquel_telemetry::{Counter, Gauge, Histogram};
 use std::{
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
     time::Duration,
 };
 use tokio::{
@@ -94,12 +99,13 @@ impl Jobs {
         keys: &SigningKeys,
     ) -> Result<Self, StartupError> {
         let mut jobs = Self::new();
-        jobs.exclusive(Cleanup, database.clone());
-        AccountPurge::observe();
+        jobs.exclusive(Cleanup::new(), database.clone());
+        FAILING_PURGES.observe();
         jobs.exclusive(AccountPurge, database.clone());
         jobs.exclusive(Sealer::new(&config.audit), database.clone());
         let audit_keys = AuditKeys::for_server(&config.passkey.origin, config.audit.verifier())
             .map_err(StartupError::AuditKeys)?;
+        Verifier::observe();
         jobs.exclusive(Verifier::new(audit_keys), database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
         jobs.spawn(|shutdown| store.run(reloaded, shutdown));
@@ -109,7 +115,8 @@ impl Jobs {
             OutboundClient::new().map_err(StartupError::Outbound)?,
         );
         jobs.deliveries(logout, database);
-        jobs.deliveries(EmailSender::new(database.clone(), &config.email), database);
+        let email = EmailSender::new(database.clone(), &config.email, config.dashboard.as_ref());
+        jobs.deliveries(email, database);
         jobs.deliveries(
             AnnouncementSender::new(database.clone(), &config.email),
             database,
@@ -269,15 +276,121 @@ static CLEANUP_OVERRUNS: Counter = Counter::new(
 /// one-minute budget runs out.
 /// Short pauses between batches keep cleanup from monopolizing the database under
 /// heavy churn.
-struct Cleanup;
+struct Cleanup {
+    /// Maximum time spent draining one pass.
+    budget: Duration,
+    /// Passes in a row on this replica that ran out of time.
+    overruns: Streak,
+    /// Passes in a row on this replica that failed.
+    failures: Streak,
+}
 
 impl Cleanup {
-    /// Maximum time spent draining one pass.
+    /// Maximum time spent draining one pass in production.
     const BUDGET: Duration = Duration::from_mins(1);
+    /// Passes in a row that run out of time before the [`Alert::CleanupBehind`]
+    /// alert is raised: the next pass picks up what one leaves, so a single
+    /// burst is no problem.
+    const BEHIND_AFTER: u32 = 3;
+    /// Passes in a row that fail before the [`Alert::CleanupFailing`] alert is
+    /// raised: a single one may be the database's passing failure.
+    const FAILING_AFTER: u32 = 3;
+
     /// Pause between full batches, allowing live requests to use the pool.
     const PAUSE: Duration = Duration::from_millis(100);
     /// Per-table batch bound.
     const BATCH_SIZE: u32 = 1_000;
+
+    /// Cleanup with the production budget.
+    const fn new() -> Self {
+        Self {
+            budget: Self::BUDGET,
+            overruns: Streak::new(Self::BEHIND_AFTER),
+            failures: Streak::new(Self::FAILING_AFTER),
+        }
+    }
+
+    /// Drains one pass, until it finds nothing, runs out of time or shutdown is
+    /// requested. Returns whether it ran out of time, or `None` when shutdown
+    /// stopped it.
+    async fn drain(
+        &self,
+        connection: &mut ExclusiveConnection,
+        shutdown: &Shutdown,
+    ) -> Result<Option<bool>, DatabaseError> {
+        let started = Instant::now();
+        let deadline = started + self.budget;
+        let mut behind = Some(false);
+        let mut changed = Self::batch(connection).await?;
+        while changed > 0 {
+            CLEANUP_CHANGED.add(changed, &());
+            if Instant::now() >= deadline {
+                CLEANUP_OVERRUNS.add(1, &());
+                tracing::warn!("expired authentication state cleanup is falling behind");
+                behind = Some(true);
+                break;
+            }
+            tokio::select! {
+                biased;
+                () = shutdown.requested() => {
+                    behind = None;
+                    break;
+                },
+                () = tokio::time::sleep(Self::PAUSE) => {}
+            }
+            changed = Self::batch(connection).await?;
+        }
+        CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
+        Ok(behind)
+    }
+
+    /// Changes the alerts after a pass that ended with `drained`, and returns
+    /// how it ended. The [`Self::FAILING_AFTER`]th pass in a row that fails
+    /// raises [`Alert::CleanupFailing`], and one that works clears it. The
+    /// [`Self::BEHIND_AFTER`]th in a row that runs out of time raises
+    /// [`Alert::CleanupBehind`], and one that deletes everything due clears it. A
+    /// pass that shutdown stopped changes neither.
+    async fn ended(
+        &self,
+        connection: &mut ExclusiveConnection,
+        drained: Result<Option<bool>, DatabaseError>,
+    ) -> Result<(), DatabaseError> {
+        let behind = match drained {
+            Ok(Some(behind)) => behind,
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                let alert = Alert::CleanupFailing {};
+                self.failures
+                    .failed(connection, JobName::Cleanup, alert)
+                    .await;
+                return Err(error);
+            }
+        };
+        // The pass counts before anything that may fail: its alerts change in a
+        // transaction that may not commit, and the streaks must still see it.
+        self.failures.reset();
+        let due = if behind {
+            self.overruns.extend()
+        } else {
+            self.overruns.reset();
+            None
+        };
+        let mut tx = connection.begin().await?;
+        let context = EventContext::system(JobName::Cleanup);
+        let mut alerts = Alerts::new(&mut tx, &context);
+        alerts.clear(AlertKind::CleanupFailing).await?;
+        let mut holds = None;
+        if let Some(due) = due {
+            holds = Some(due.apply(&mut alerts, Alert::CleanupBehind {}).await?);
+        } else if !behind {
+            alerts.clear(AlertKind::CleanupBehind).await?;
+        }
+        tx.commit().await?;
+        if let Some(holds) = holds {
+            self.overruns.settle(holds);
+        }
+        Ok(())
+    }
 
     /// Runs one batch and returns how many rows it changed. Abandoning stuck keys
     /// needs a transaction of its own, so its locks last until it decides.
@@ -299,43 +412,178 @@ impl ExclusiveJob for Cleanup {
     const EVERY: Duration = Duration::from_mins(5);
     type Error = DatabaseError;
 
-    /// Stops after the current batch once shutdown is requested.
+    /// Stops after the current batch once shutdown is requested. Raises and
+    /// clears its alerts as [`Self::ended`] says.
     async fn run(
         &self,
         connection: &mut ExclusiveConnection,
         shutdown: &Shutdown,
     ) -> Result<(), DatabaseError> {
-        let started = Instant::now();
-        let deadline = started + Self::BUDGET;
-        let mut changed = Self::batch(connection).await?;
-        while changed > 0 {
-            CLEANUP_CHANGED.add(changed, &());
-            if Instant::now() >= deadline {
-                CLEANUP_OVERRUNS.add(1, &());
-                tracing::warn!("expired authentication state cleanup is falling behind");
-                break;
-            }
-            tokio::select! {
-                biased;
-                () = shutdown.requested() => break,
-                () = tokio::time::sleep(Self::PAUSE) => {}
-            }
-            changed = Self::batch(connection).await?;
-        }
-        CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
-        Ok(())
+        let drained = self.drain(connection, shutdown).await;
+        self.ended(connection, drained).await
     }
 }
 
-/// Accounts whose purge keeps failing, from [`FAILING_PURGES_COUNT`].
-static FAILING_PURGES: Gauge = Gauge::new(
-    "piquel.auth.account_purge.failing",
-    "{account}",
-    "Accounts scheduled for deletion whose purge failed at least 3 times in a row.",
+/// What a streak long enough calls for after another run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Due {
+    /// Raising its alert.
+    Raise,
+    /// Marking the alert it raised seen, while that is current.
+    Seen,
+}
+
+impl Due {
+    /// Raises `alert` in `alerts`, or marks it seen, as due, and says whether it
+    /// holds as raised: `false` when it was no longer current to be seen, as it
+    /// cleared meanwhile, such as by another replica's run or an operator's
+    /// verification.
+    async fn apply(self, alerts: &mut Alerts<'_, '_>, alert: Alert) -> Result<bool, DatabaseError> {
+        match self {
+            Self::Raise => alerts.raise(alert).await.map(|()| true),
+            Self::Seen => alerts.seen(&alert).await,
+        }
+    }
+}
+
+/// Runs in a row on this replica that ended one way, such as cleanup passes that
+/// ran out of time, which raise an alert once there are enough of them. A job's
+/// lock may move between replicas, so it counts this replica's runs only, and a
+/// count lasts until this replica's next run. A streak raises its alert once,
+/// then only marks it seen while it is current. Once it clears meanwhile, such
+/// as by another replica's run or an operator's verification, the run that
+/// found it cleared starts a new streak, so it takes as many runs again to raise
+/// it, and email every administrator, again.
+pub(crate) struct Streak {
+    /// Runs in the streak so far.
+    runs: AtomicU32,
+    /// Runs in a row that raise the alert.
+    alert_after: u32,
+    /// Whether this streak raised its alert.
+    raised: AtomicBool,
+}
+
+impl Streak {
+    /// A streak that raises its alert after `alert_after` runs in a row.
+    pub(crate) const fn new(alert_after: u32) -> Self {
+        Self {
+            runs: AtomicU32::new(0),
+            alert_after,
+            raised: AtomicBool::new(false),
+        }
+    }
+
+    /// Counts one more run, and says what it calls for once the streak is long
+    /// enough: raising the alert, until it was raised, then marking it seen.
+    fn extend(&self) -> Option<Due> {
+        if self.runs.fetch_add(1, Ordering::Relaxed) + 1 < self.alert_after {
+            None
+        } else if self.raised.load(Ordering::Relaxed) {
+            Some(Due::Seen)
+        } else {
+            Some(Due::Raise)
+        }
+    }
+
+    /// Settles a run whose alert was raised or seen, once that committed: the
+    /// streak goes on while the alert `holds`, and once it cleared, this run
+    /// starts a new one.
+    fn settle(&self, holds: bool) {
+        if !holds {
+            self.runs.store(1, Ordering::Relaxed);
+        }
+        self.raised.store(holds, Ordering::Relaxed);
+    }
+
+    /// Ends the streak.
+    pub(crate) fn reset(&self) {
+        self.runs.store(0, Ordering::Relaxed);
+        self.raised.store(false, Ordering::Relaxed);
+    }
+
+    /// Counts a run of `job` that failed, and raises `alert` on `connection`
+    /// once enough failed in a row, or marks it seen once raised. Raising may
+    /// fail as the run did, such as while the database is down: that is logged,
+    /// since the run returns its own failure.
+    pub(crate) async fn failed(
+        &self,
+        connection: &mut ExclusiveConnection,
+        job: JobName,
+        alert: Alert,
+    ) {
+        let Some(due) = self.extend() else {
+            return;
+        };
+        let context = EventContext::system(job);
+        let applied = async {
+            let mut tx = connection.begin().await?;
+            let holds = due
+                .apply(&mut Alerts::new(&mut tx, &context), alert)
+                .await?;
+            tx.commit().await?;
+            Ok::<_, DatabaseError>(holds)
+        };
+        match applied.await {
+            Ok(holds) => self.settle(holds),
+            Err(error) => {
+                let error = ErrorChain(&error);
+                tracing::error!(%error, ?job, "could not raise the alert of a failing job");
+            }
+        }
+    }
+}
+
+/// A count the replica running a periodic job takes after each run, which its
+/// gauge reports. Every replica runs the job in turn, so each reports the count
+/// of its own latest run, at most one run older than the newest; one whose count
+/// is older than two runs, because it stopped running the job, reports none.
+/// Alerts read the minimum across replicas, or wait one run, before taking a
+/// count as current.
+pub(crate) struct JobCount {
+    /// The gauge reporting it.
+    gauge: Gauge,
+    /// How often the job runs.
+    every: Duration,
+    /// The latest count on this replica, and when it was taken.
+    counted: Mutex<Option<(u64, Instant)>>,
+}
+
+impl JobCount {
+    /// A count `gauge` reports, of a job that runs `every` so often.
+    pub(crate) const fn new(gauge: Gauge, every: Duration) -> Self {
+        Self {
+            gauge,
+            every,
+            counted: Mutex::new(None),
+        }
+    }
+
+    /// Registers the gauge.
+    pub(crate) fn observe(&'static self) {
+        self.gauge.observe(|| {
+            let counted = *self.counted.lock().unwrap_or_else(PoisonError::into_inner);
+            counted
+                .filter(|(_, at)| at.elapsed() < self.every * 2)
+                .map(|(count, _)| (count, ()))
+        });
+    }
+
+    /// Keeps `count`, taken now.
+    pub(crate) fn set(&self, count: u64) {
+        *self.counted.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((count, Instant::now()));
+    }
+}
+
+/// Accounts whose purge keeps failing, counted after each purge run.
+static FAILING_PURGES: JobCount = JobCount::new(
+    Gauge::new(
+        "piquel.auth.account_purge.failing",
+        "{account}",
+        "Accounts scheduled for deletion whose purge failed at least 3 times in a row.",
+    ),
+    AccountPurge::EVERY,
 );
-/// The latest count of [`FAILING_PURGES`] on this replica, and when it was taken.
-/// The replica running the purge counts after each run.
-static FAILING_PURGES_COUNT: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
 
 /// Purges the accounts whose deletion grace period ended, each in a transaction of
 /// its own, attributed to [`JobName::AccountPurge`]. One run purges at most
@@ -354,22 +602,6 @@ impl AccountPurge {
     /// Failures in a row after which [`FAILING_PURGES`] counts an account.
     const FAILING_ATTEMPTS: u16 = 3;
 
-    /// Registers [`FAILING_PURGES`]. Every replica runs the job in turn, so each
-    /// reports the count of its own latest run, at most one run older than the
-    /// newest; one whose count is older than two runs, because it stopped running
-    /// the job, reports none. Alerts read the minimum across replicas, or wait one
-    /// run, before taking a count as current.
-    fn observe() {
-        FAILING_PURGES.observe(|| {
-            let counted = *FAILING_PURGES_COUNT
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            counted
-                .filter(|(_, at)| at.elapsed() < Self::EVERY * 2)
-                .map(|(count, _)| (count, ()))
-        });
-    }
-
     /// Purges `user_id` in `tx` if it is still scheduled for deletion and due,
     /// rechecked under the account lock, since it may have been restored meanwhile.
     pub(crate) async fn purge(
@@ -385,14 +617,9 @@ impl AccountPurge {
         if user.status != AccountStatus::Deleting || !due {
             return Ok(());
         }
-        let context = EventContext {
-            actor: Actor::System {
-                job: JobName::AccountPurge,
-            },
-            origin: RequestOrigin::default(),
-            reason: None,
-        };
-        Deletions::new(&mut tx, context).purge(&user).await?;
+        Deletions::new(&mut tx, EventContext::system(JobName::AccountPurge))
+            .purge(&user)
+            .await?;
         Ok(tx.commit().await?)
     }
 }
@@ -405,7 +632,8 @@ impl ExclusiveJob for AccountPurge {
 
     /// Stops after the current account once shutdown is requested. A failing
     /// account is logged and recorded, which delays its next attempt, so it cannot
-    /// hold back the others. Then counts the accounts that keep failing.
+    /// hold back the others. Then counts the accounts that keep failing, which
+    /// raise the [`Alert::PurgesFailing`] alert, or clear it once there are none.
     async fn run(
         &self,
         connection: &mut ExclusiveConnection,
@@ -429,10 +657,15 @@ impl ExclusiveJob for AccountPurge {
             .deletions()
             .count_failing(Self::FAILING_ATTEMPTS)
             .await?;
-        *FAILING_PURGES_COUNT
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some((failing, Instant::now()));
-        Ok(())
+        FAILING_PURGES.set(failing);
+        let mut tx = connection.begin().await?;
+        let context = EventContext::system(JobName::AccountPurge);
+        let mut alerts = Alerts::new(&mut tx, &context);
+        match failing {
+            0 => alerts.clear(AlertKind::PurgesFailing).await,
+            _ => alerts.raise(Alert::PurgesFailing {}).await,
+        }?;
+        Ok(tx.commit().await?)
     }
 }
 

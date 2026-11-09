@@ -28,9 +28,10 @@ use piquel_common::{
     RecoveryId,
     handle::{MAX_LENGTH, MIN_LENGTH},
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::IgnoredAny};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
+pub use piquel_common::form::Checkbox;
 /// Why a query could not be written as a link: one of its fields is not a name and
 /// a value.
 pub use serde_urlencoded::ser::Error as QueryError;
@@ -145,6 +146,23 @@ pub struct Messages<'a> {
 }
 
 impl<'a> Messages<'a> {
+    /// The page's alert, taken out when a dialog is `shown` again, so the
+    /// dialog says the refusal instead of the page behind its scrim; with no
+    /// dialog open, the page keeps it.
+    #[must_use]
+    pub fn into_dialog(self, shown: bool) -> (Option<&'a str>, Self) {
+        match self.alert {
+            Some(Alert::Page(alert)) if shown => (
+                Some(alert),
+                Self {
+                    alert: None,
+                    ..self
+                },
+            ),
+            _ => (None, self),
+        }
+    }
+
     /// Only an `alert`.
     #[must_use]
     pub const fn alert(alert: Alert<'a>) -> Self {
@@ -289,36 +307,6 @@ impl Fields {
         deserializer: D,
     ) -> std::result::Result<T, D::Error> {
         Ok(Self::lenient(deserializer)?.unwrap_or_default())
-    }
-}
-
-/// A checkbox, or a flag a query sets by its name alone: checked when the form
-/// sends its name, whatever the value, since browsers send nothing for an unchecked
-/// one. It decodes from text, as a change's fields must, where a `bool` would not.
-/// It is checked as `on`, as browsers send it; leave it out of a form or link with
-/// `#[serde(default, skip_serializing_if = "Checkbox::is_off")]`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Checkbox(pub bool);
-
-impl Checkbox {
-    /// Whether it is unchecked, so its form sends nothing.
-    #[must_use]
-    pub const fn is_off(&self) -> bool {
-        !self.0
-    }
-}
-
-impl Serialize for Checkbox {
-    /// Writes `on` when checked, as browsers send it.
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        self.0.then_some("on").serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Checkbox {
-    /// Checked, whatever the value: an unchecked box is not sent at all.
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        IgnoredAny::deserialize(deserializer).map(|_| Self(true))
     }
 }
 
@@ -700,4 +688,23 @@ pub(crate) async fn open<'a>(
             </button>
         </form>
     })
+}
+
+/// What a page says, and where.
+#[cfg(test)]
+mod tests {
+    use super::{Alert, Messages};
+
+    /// A dialog shown again says the page's alert instead of the page behind its
+    /// scrim; with no dialog shown, the page keeps it.
+    #[test]
+    fn a_dialog_shown_again_takes_the_page_alert() {
+        let refused = Messages::alert(Alert::Page("Refused"));
+        let (said, page) = refused.into_dialog(true);
+        assert_eq!(said, Some("Refused"));
+        assert!(page.alert.is_none());
+        let (said, page) = refused.into_dialog(false);
+        assert_eq!(said, None);
+        assert!(matches!(page.alert, Some(Alert::Page("Refused"))));
+    }
 }

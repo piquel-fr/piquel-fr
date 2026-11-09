@@ -398,6 +398,7 @@ impl HttpSecurity {
             | Endpoint::Account
             | Endpoint::Page
             | Endpoint::Dashboard
+            | Endpoint::Unsubscribe
             | Endpoint::Other => false,
         })
     }

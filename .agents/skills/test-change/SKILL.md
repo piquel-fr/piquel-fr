@@ -60,9 +60,9 @@ settings are always worth one pass.
   Account endpoints and settings also need a session cookie, so those checks are
   usually simpler from Playwright.
 - **Lasting coverage:** if the change deserves a regression test, add a focused
-  spec to `tests/browser`. `oidc.spec.ts` also needs the `browser-e2e` OIDC
-  client, which previews don't register. When consent or OIDC changes, run the
-  suite as `tests/browser/README.md` describes.
+  spec to `tests/browser`. Several specs need the OIDC clients that
+  `tests/browser/README.md` lists, which previews don't register. When consent
+  or OIDC changes, run the suite as that README describes.
 
 After fixing anything, run `just preview` again and repeat the checks the fix
 could affect.

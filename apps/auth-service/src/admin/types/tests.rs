@@ -52,33 +52,38 @@ fn rotation_choices_are_the_periods_they_name() {
 #[test]
 fn announcements_are_bounded_text_to_bounded_accounts() {
     let everyone = || AnnouncementRecipients::Everyone;
-    let draft = AnnouncementDraft::new(" Incident ", "\r\nFirst.\r\n\r\n\tSecond.\n", everyone())
-        .expect("a draft");
+    let draft = AnnouncementDraft::new(
+        " Incident ",
+        "\r\nFirst.\r\n\r\n\tSecond.\n",
+        everyone(),
+        false,
+    )
+    .expect("a draft");
     assert_eq!(
         (draft.subject.as_str(), draft.body.as_str()),
         ("Incident", "First.\n\n\tSecond.")
     );
     for subject in ["", "  ", "Two\nlines", &"é".repeat(151)] {
         assert!(matches!(
-            AnnouncementDraft::new(subject, "Text", everyone()),
+            AnnouncementDraft::new(subject, "Text", everyone(), false),
             Err(AdminError::InvalidSubject)
         ));
     }
     for body in ["", " \n ", "Bell\u{7}", &"é".repeat(20_001)] {
         assert!(matches!(
-            AnnouncementDraft::new("Incident", body, everyone()),
+            AnnouncementDraft::new("Incident", body, everyone(), false),
             Err(AdminError::InvalidBody)
         ));
     }
     let chosen =
         |count| AnnouncementRecipients::Accounts(vec![UserRef::Handle("ada".into()); count]);
-    assert!(AnnouncementDraft::new("Incident", "Text", chosen(1_000)).is_ok());
+    assert!(AnnouncementDraft::new("Incident", "Text", chosen(1_000), false).is_ok());
     assert!(matches!(
-        AnnouncementDraft::new("Incident", "Text", chosen(0)),
+        AnnouncementDraft::new("Incident", "Text", chosen(0), false),
         Err(AdminError::NoRecipients)
     ));
     assert!(matches!(
-        AnnouncementDraft::new("Incident", "Text", chosen(1_001)),
+        AnnouncementDraft::new("Incident", "Text", chosen(1_001), false),
         Err(AdminError::TooManyRecipients)
     ));
 }

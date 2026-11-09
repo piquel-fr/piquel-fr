@@ -2,8 +2,8 @@
 
 use super::{announcements::announcement, *};
 use crate::AuditKeys;
-use piquel_common::AnnouncementId;
 use piquel_common::protocol::claims::Acr;
+use piquel_common::{AnnouncementId, alerts::AlertsShown};
 
 /// Production's committed audit keys.
 fn committed_keys() -> AuditKeys {
@@ -94,6 +94,16 @@ impl AdminOperation {
                 ]
             }
             Self::DiscardAnnouncement => vec![service.discard_announcement(operator, id).await],
+            Self::ListAlerts => vec![
+                service
+                    .alerts(operator, AlertsShown::Current)
+                    .await
+                    .map(drop),
+                service
+                    .alerts(operator, AlertsShown::Previous)
+                    .await
+                    .map(drop),
+            ],
             // Pruning checks its operator before anything else too.
             Self::PruneAuditChain => vec![
                 service
@@ -134,7 +144,8 @@ impl AdminOperation {
             | Self::RotateSigningKey
             | Self::RevokeSigningKey
             | Self::ImportSigningKey
-            | Self::SendAnnouncement => return None,
+            | Self::SendAnnouncement
+            | Self::UpdateAlert => return None,
         })
     }
 }

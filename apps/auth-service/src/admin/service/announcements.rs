@@ -109,8 +109,9 @@ impl AdminService {
     /// Sends the draft `id` at `revision`, the one its sender checked, and
     /// returns how many accounts it went to: every account if it is to everyone,
     /// or the chosen ones still there. Each with a primary verified address is
-    /// emailed it, from the `announcement` delivery channel, and every one gets
-    /// it as a notification in their inbox. Recorded, without the text, which
+    /// emailed it, from the `announcement` delivery channel, unless they turned
+    /// announcements' email off and it is not essential, and every one gets it
+    /// as a notification in their inbox. Recorded, without the text, which
     /// never changes once sent. A draft changed since its sender checked it is refused, to be
     /// checked again.
     pub(crate) async fn send_announcement(
@@ -120,17 +121,18 @@ impl AdminService {
         revision: u64,
     ) -> Result<u64, AdminError> {
         let mut tx = self.database.begin().await?;
-        let Some(recipients) = tx.announcements().send(id, revision).await? else {
+        let Some(sent) = tx.announcements().send(id, revision).await? else {
             // Its connection goes back to the pool before the lookup takes one.
             tx.rollback().await?;
             return Err(self.unchangeable(id).await);
         };
-        let sent = DomainEvent::AnnouncementSent {
+        let event = DomainEvent::AnnouncementSent {
             announcement_id: id,
-            recipients,
+            recipients: sent.recipients,
+            essential: sent.essential,
         };
-        Self::finish(tx, operator, None, vec![sent]).await?;
-        Ok(recipients)
+        Self::finish(tx, operator, None, vec![event]).await?;
+        Ok(sent.recipients)
     }
 
     /// The accounts `recipients` names, each once, or `None` for everyone. An
@@ -168,6 +170,7 @@ impl AdminService {
             subject: &draft.subject,
             body: &draft.body,
             recipients: accounts.map_or(Recipients::Everyone, Recipients::Accounts),
+            essential: draft.essential,
         }
     }
 

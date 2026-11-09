@@ -553,7 +553,8 @@ impl AccountService {
         match undoable.probation {
             None => {
                 tx.recoveries().cancel_open(user).await?;
-                tx.record(context, Some(user), undone).await
+                tx.record(context, Some(user), undone).await?;
+                Ok(())
             }
             Some(probation) => {
                 Self::take_back_passkey(tx, context, user, probation.passkey()).await?;

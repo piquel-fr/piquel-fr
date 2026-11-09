@@ -1,13 +1,13 @@
-//! What an account's owner is told about their account: the notifications of
-//! their inbox, each derived from an event about the account by
-//! [`DomainEvent::notification`](crate::events::DomainEvent::notification).
+//! What an account's owner is told about their account, and administrators
+//! about the service: the notifications of their inbox, each derived from an
+//! event by [`DomainEvent::notification`](crate::events::DomainEvent::notification).
 //!
 //! A notification holds no personal data and renders from itself alone, so it
 //! reads the same once its event's personal data is erased, or the event pruned.
 //! Its event's security history entry, while kept, tells the rest.
 
 use crate::{
-    AnnouncementId,
+    AlertId, AnnouncementId,
     events::{Actor, DomainEvent},
 };
 use chrono::{DateTime, Utc};
@@ -19,7 +19,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// A variant holds only IDs, enums, flags and timestamps, never a secret, an
 /// address or a [`Personal`](crate::Personal) value, except an announcement,
-/// which holds the text administrators wrote. A targeted announcement's text,
+/// which holds the text administrators wrote, and a raised alert, which holds
+/// the alert's text; it names no account. A targeted announcement's text,
 /// which may name its recipients, goes with them: purging an account deletes its
 /// notifications, and the announcement once its last recipient is purged.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,12 +69,25 @@ pub enum Notification {
         /// Its text, as they wrote it, which becomes the notification's `body`.
         text: String,
     },
+    /// An alert was raised, to every active administrator. It holds what the
+    /// alert said when it was raised, not the alert itself: a newer release's
+    /// alert would not decode in an older one's inbox.
+    AlertRaised {
+        /// The alert.
+        alert_id: AlertId,
+        /// The alert's subject, prefixed with "Alert: ". Named apart from the
+        /// `subject` every notification is shown with, which it becomes.
+        title: String,
+        /// What it said, which becomes the notification's `body`.
+        text: String,
+    },
 }
 
 impl DomainEvent {
-    /// The notification this event, caused by `actor`, gives its subject, if
-    /// any. Every variant is named, so a new event cannot be added without
-    /// deciding whether its subject is told.
+    /// The notification this event, caused by `actor`, gives its audience
+    /// ([`Notification::audience`]), if any: its subject, or for a raised alert,
+    /// every active administrator. Every variant is named, so a new event cannot
+    /// be added without deciding whether anyone is told.
     ///
     /// A change the owner makes to their own name tells them nothing they don't
     /// know; one made by support does. Notices that are emails today, about the
@@ -106,9 +120,16 @@ impl DomainEvent {
                 purge_after: *purge_after,
             },
             Self::AccountRestored {} => Notification::AccountRestored,
+            Self::AlertRaised { alert_id, alert } => Notification::AlertRaised {
+                alert_id: *alert_id,
+                title: format!("Alert: {}", alert.subject()),
+                text: alert.body(),
+            },
             // The owner made it, so they know. Only the owner, or their social
-            // signup, sets a picture.
+            // signup, sets a picture, and only the owner changes their
+            // notification preferences.
             Self::HandleChanged { .. }
+            | Self::NotificationPreferenceChanged(_)
             | Self::DisplayNameChanged { .. }
             | Self::PictureRemoved {}
             | Self::PictureChanged { .. }
@@ -171,11 +192,75 @@ impl DomainEvent {
             | Self::AuditChainVerified(_)
             // It concerns no one account: sending writes each recipient's.
             | Self::AnnouncementSent { .. }
-            | Self::AlertRaised { .. }
+            // Administrators follow an alert on the dashboard's Alerts tab, or
+            // with `auth-service alerts list`, once it is raised.
+            | Self::AlertUpdated { .. }
             | Self::AlertCleared { .. }
             | Self::Imported(_) => return None,
         })
     }
+}
+
+crate::str_enum! {
+    /// A category of notifications whose email the owner chooses to receive, on
+    /// by default. Everything about the account itself, its security category, is
+    /// not one: it is always emailed, so no switch can hide it.
+    pub enum EmailCategory {
+        /// Administrators' announcements. An essential one is emailed whatever
+        /// the preference.
+        Announcements = "announcements",
+    }
+}
+
+impl EmailCategory {
+    /// Its name, in settings and on the dashboard.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Announcements => "Announcements",
+        }
+    }
+
+    /// What it holds, and what turning its email off does.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Announcements => {
+                "News from Piquel, such as a new feature. Announcements about a security incident, or a change to the privacy policy or terms, reach you by email either way."
+            }
+        }
+    }
+}
+
+/// Whether the owner receives a category's email, e.g.
+/// `{"category": "announcements", "email": false}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationPreference {
+    /// The category.
+    pub category: EmailCategory,
+    /// Whether its notifications are emailed.
+    pub email: bool,
+}
+
+impl NotificationPreference {
+    /// What changing to it did, as the history says, e.g. "Announcements:
+    /// emails turned off".
+    #[must_use]
+    pub fn change(self) -> String {
+        let state = if self.email { "on" } else { "off" };
+        format!("{}: emails turned {state}", self.category.label())
+    }
+}
+
+/// Whose inbox a notification goes to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Audience {
+    /// The account its event is about.
+    Subject,
+    /// Every active administrator, for an event about the service rather than
+    /// one account.
+    Administrators,
 }
 
 /// Which of the account's verified addresses a notification's email goes to,
@@ -192,8 +277,37 @@ pub enum Addressees {
 }
 
 impl Notification {
-    /// Where its email goes. Every notification is emailed: each is about the
-    /// account itself, so none can be turned off.
+    /// Whose inbox it goes to.
+    #[must_use]
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub const fn audience(&self) -> Audience {
+        match self {
+            Self::AlertRaised { .. } => Audience::Administrators,
+            Self::PrimaryEmailChanged
+            | Self::EmailRemoved
+            | Self::AccountSecured { .. }
+            | Self::Recovered
+            | Self::RecoveryUndone
+            | Self::HandleChanged
+            | Self::DisplayNameChanged
+            | Self::PictureRemoved
+            | Self::AccountDisabled
+            | Self::AccountEnabled
+            | Self::DeletionScheduled { .. }
+            | Self::AccountRestored
+            | Self::Announcement { .. } => Audience::Subject,
+        }
+    }
+
+    /// Whether its page and email link the admin dashboard's Alerts tab, while
+    /// auth serves a dashboard.
+    #[must_use]
+    pub const fn links_alerts(&self) -> bool {
+        matches!(self, Self::AlertRaised { .. })
+    }
+
+    /// Where its email goes. Every notification is emailed, except an
+    /// announcement whose recipient turned [`EmailCategory::Announcements`] off.
     #[must_use]
     #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn addressees(&self) -> Addressees {
@@ -208,6 +322,7 @@ impl Notification {
             | Self::AccountEnabled
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
+            | Self::AlertRaised { .. }
             // Through the `announcement` channel, which has workers of its own.
             | Self::Announcement { .. } => Addressees::Primary,
         }
@@ -217,7 +332,7 @@ impl Notification {
     #[must_use]
     pub fn subject(&self) -> &str {
         match self {
-            Self::Announcement { title, .. } => title,
+            Self::Announcement { title, .. } | Self::AlertRaised { title, .. } => title,
             Self::PrimaryEmailChanged => "Your primary email address changed",
             Self::EmailRemoved => "An email address was removed from your account",
             Self::AccountSecured { .. } => "Piquel support secured your account",
@@ -237,7 +352,7 @@ impl Notification {
     #[must_use]
     pub fn body(&self) -> String {
         match self {
-            Self::Announcement { text, .. } => text.clone(),
+            Self::Announcement { text, .. } | Self::AlertRaised { text, .. } => text.clone(),
             Self::PrimaryEmailChanged => "Another of your verified addresses is now the primary one. Piquel sends notices about your account there, and apps that read your email address see it the next time they refresh your profile. If you didn’t make this change, sign in and review your security history.".to_owned(),
             Self::EmailRemoved => "Piquel no longer sends anything to that address. If you didn’t remove it, sign in and review your security history.".to_owned(),
             Self::AccountSecured { kept } => {

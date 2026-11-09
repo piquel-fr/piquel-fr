@@ -40,6 +40,14 @@ pub enum LockKey {
     /// sharing a database run at once; no release takes it.
     #[cfg(any(test, feature = "test-util"))]
     ExclusivityTest = -2,
+    /// The lock exclusion test, apart from every job's key, so a test running a
+    /// job never holds it; no release takes it.
+    #[cfg(any(test, feature = "test-util"))]
+    LockTest = -3,
+    /// The locked transactions test, apart from [`Self::LockTest`], which
+    /// expects its key free; no release takes it.
+    #[cfg(any(test, feature = "test-util"))]
+    TransactionTest = -4,
 }
 
 impl LockKey {

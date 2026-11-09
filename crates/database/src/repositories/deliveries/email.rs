@@ -85,29 +85,22 @@ pub struct PendingAddress {
 }
 
 impl EmailMessage {
-    /// The messages `event` sends, each with the ID of the address it goes to:
-    /// its link, if it is one that mails a link, and its notification, `notified`,
-    /// if it gave one. Runs in the event's transaction, before a removed address
-    /// is deleted.
-    async fn for_event(
+    /// The link `event` mails its subject, `user_id`, if it is one that mails a
+    /// link, with the ID of the address it goes to.
+    async fn links(
         event: &DomainEvent,
         user_id: UserId,
-        notified: Option<&Notified>,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<(EmailId, Self)>, DatabaseError> {
-        // Only the events that mail an address read the addresses.
-        let mails = notified.is_some()
-            || matches!(
-                event,
-                DomainEvent::EmailAdded { .. } | DomainEvent::RecoveryStarted { revoke: None, .. }
-            );
-        let emails = if mails {
-            tx.emails().list(user_id).await?
-        } else {
-            Vec::new()
-        };
-        let verified = || emails.iter().filter(|email| email.verified_at.is_some());
-        let mut messages: Vec<_> = match event {
+        // Only the events that mail a link read the addresses.
+        if !matches!(
+            event,
+            DomainEvent::EmailAdded { .. } | DomainEvent::RecoveryStarted { revoke: None, .. }
+        ) {
+            return Ok(Vec::new());
+        }
+        let emails = tx.emails().list(user_id).await?;
+        Ok(match event {
             // An address a provider imported verified needs no link.
             DomainEvent::EmailAdded { email_id, .. } => emails
                 .iter()
@@ -124,8 +117,9 @@ impl EmailMessage {
                 recovery_id,
                 revoke: None,
                 ..
-            } => verified()
-                .filter(|email| email.is_primary)
+            } => emails
+                .iter()
+                .filter(|email| email.verified_at.is_some() && email.is_primary)
                 .map(|email| {
                     let message = Self::RecoveryLink {
                         recovery_id: *recovery_id,
@@ -135,10 +129,21 @@ impl EmailMessage {
                 })
                 .collect(),
             _ => Vec::new(),
-        };
-        let Some(notified) = notified else {
-            return Ok(messages);
-        };
+        })
+    }
+
+    /// The emails of `notified`, which `event` wrote, each with the ID of the
+    /// address it goes to: one to each verified address of its account that its
+    /// addressees name. Runs in the event's transaction, before a removed address
+    /// is deleted.
+    async fn notifying(
+        event: &DomainEvent,
+        notified: &Notified,
+        tx: &mut DatabaseTransaction<'_>,
+    ) -> Result<Vec<(EmailId, Self)>, DatabaseError> {
+        let emails = tx.emails().list(notified.user_id).await?;
+        // The affected address and the recovery are the event's subject's: only
+        // the subject's own notifications are about them.
         let affected = match event {
             DomainEvent::PrimaryEmailChanged {
                 previous_email_id, ..
@@ -157,24 +162,24 @@ impl EmailMessage {
             _ => None,
         };
         let addressees = notified.notification.addressees();
-        messages.extend(
-            verified()
-                .filter(|email| match addressees {
-                    Addressees::Verified => true,
-                    Addressees::Affected => affected == Some(email.id),
-                    Addressees::Primary => email.is_primary,
-                })
-                .map(|email| {
-                    let message = Self::Notification {
-                        address: email.normalized_email.clone(),
-                        notification_id: notified.id,
-                        notification: notified.notification.clone(),
-                        recovery_id,
-                    };
-                    (email.id, message)
-                }),
-        );
-        Ok(messages)
+        Ok(emails
+            .into_iter()
+            .filter(|email| email.verified_at.is_some())
+            .filter(|email| match addressees {
+                Addressees::Verified => true,
+                Addressees::Affected => affected == Some(email.id),
+                Addressees::Primary => email.is_primary,
+            })
+            .map(|email| {
+                let message = Self::Notification {
+                    address: email.normalized_email,
+                    notification_id: notified.id,
+                    notification: notified.notification.clone(),
+                    recovery_id,
+                };
+                (email.id, message)
+            })
+            .collect())
     }
 }
 
@@ -183,22 +188,29 @@ impl Channel for Email {
     type Recipient = UserId;
     type Payload = EmailMessage;
 
-    /// One message to each address of the event's subject that its link or
-    /// notification goes to. Its `destination` names the account and the
-    /// address's ID, never the address.
+    /// The link the event mails its subject, if any, and one message to each
+    /// address of each notified account that its notification goes to. Its
+    /// `destination` names the account and the address's ID, never the address.
     async fn deliveries(
         event: &DomainEvent,
         subject: Option<UserId>,
-        notified: Option<&Notified>,
+        notified: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
-        let Some(user_id) = subject else {
-            return Ok(vec![]);
-        };
-        let messages = EmailMessage::for_event(event, user_id, notified, tx).await?;
+        let mut messages = Vec::new();
+        if let Some(user_id) = subject {
+            for (email_id, message) in EmailMessage::links(event, user_id, tx).await? {
+                messages.push((user_id, email_id, message));
+            }
+        }
+        for notified in notified {
+            for (email_id, message) in EmailMessage::notifying(event, notified, tx).await? {
+                messages.push((notified.user_id, email_id, message));
+            }
+        }
         Ok(messages
             .into_iter()
-            .map(|(email_id, message)| NewDelivery {
+            .map(|(user_id, email_id, message)| NewDelivery {
                 destination: format!("account {user_id}, address {email_id}"),
                 recipient: user_id,
                 payload: message,

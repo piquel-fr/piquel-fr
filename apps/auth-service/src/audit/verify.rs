@@ -13,6 +13,7 @@ use piquel_common::events::{DomainEvent, EventContext};
 use piquel_crypto::CryptoError;
 use piquel_repository::{
     AuditRepository, ChainLink, ChainedEvent, Checkpoint, DatabaseTransaction, RecordedEvent,
+    Verifications,
 };
 use std::collections::BTreeMap;
 
@@ -166,9 +167,10 @@ impl AuditChain {
 
     /// Records `verification`, made as `context`, in `tx`, and commits: the
     /// dashboard's audit page shows the newest one recorded. A broken chain raises
-    /// its alert, and an intact one clears it, unless the keys were given with
-    /// `--key`, such as another environment's, which say nothing of this one's
-    /// checkpoints.
+    /// its alert, and an intact one clears it; either clears the alert of a
+    /// verification that keeps failing. None of this happens when the keys were
+    /// given with `--key`, such as another environment's, which say nothing of
+    /// this one's checkpoints.
     pub(crate) async fn record(
         mut tx: DatabaseTransaction<'_>,
         context: &EventContext,
@@ -182,6 +184,7 @@ impl AuditChain {
                 Some(broken) => alerts.raise(Alert::AuditChainBroken(broken.clone())).await,
                 None => alerts.clear(AlertKind::AuditChainBroken).await,
             }?;
+            alerts.clear(AlertKind::VerificationFailing).await?;
         }
         Ok(tx.commit().await?)
     }
@@ -212,19 +215,19 @@ impl AuditChain {
             unsealed: tx.audit().unsealed_count().await?,
         };
         // A verification a newer release recorded reads as unknown, so as none.
-        let verified =
-            tx.events()
-                .newest_audit_verification()
-                .await?
-                .and_then(|stored| match stored.event {
-                    RecordedEvent::Known(DomainEvent::AuditChainVerified(verification)) => {
-                        Some(RecordedVerification {
-                            at: stored.occurred_at,
-                            verification,
-                        })
-                    }
-                    _ => None,
-                });
+        let verified = tx
+            .events()
+            .newest_audit_verification(Verifications::Any)
+            .await?
+            .and_then(|stored| match stored.event {
+                RecordedEvent::Known(DomainEvent::AuditChainVerified(verification)) => {
+                    Some(RecordedVerification {
+                        at: stored.occurred_at,
+                        verification,
+                    })
+                }
+                _ => None,
+            });
         let after =
             after.unwrap_or_else(|| chain.anchor.as_ref().map_or(0, |anchor| anchor.position));
         // One more than a page tells whether another follows.

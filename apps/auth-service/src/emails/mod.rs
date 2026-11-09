@@ -402,7 +402,8 @@ impl Added<'_> {
             address: Personal::Value(self.address.clone()),
             provider: self.provider,
         };
-        Ok(tx.record(self.context, Some(self.user_id), added).await?)
+        tx.record(self.context, Some(self.user_id), added).await?;
+        Ok(())
     }
 }
 
