@@ -9,6 +9,9 @@ mod cropper;
 mod data;
 /// Email addresses, and confirming one.
 mod emails;
+
+/// The inbox, and one notification's page.
+mod notifications;
 /// The account at a glance.
 mod overview;
 /// The profile: the handle, display name and picture apps see.
@@ -23,6 +26,10 @@ mod timeline;
 pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, connected_apps};
 pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
+pub use notifications::{
+    InboxChange, InboxPage, InboxRow, InboxState, NotificationPage, NotificationState,
+    UnsubscribeStep, inbox, notification, unsubscribe,
+};
 pub use overview::{AccountOverview, OverviewLinks, account_overview};
 pub use profile::{
     CROP_SIZE, CROP_X, CROP_Y, PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog,
@@ -91,6 +98,8 @@ impl<'a> Audience<'a> {
 pub enum Tab {
     /// The account at a glance.
     Overview,
+    /// The inbox.
+    Notifications,
     /// Passkeys and social sign-in.
     SignIn,
     /// The handle, display name and picture apps see.
@@ -113,6 +122,7 @@ impl Tab {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
+            Self::Notifications => "Notifications",
             Self::SignIn => "Sign-in methods",
             Self::Profile => "Profile",
             Self::Emails => "Email addresses",
@@ -129,6 +139,7 @@ impl Tab {
     pub(crate) const fn icon(self) -> Icon {
         match self {
             Self::Overview => Icon::Home,
+            Self::Notifications => Icon::Bell,
             Self::SignIn => Icon::Key,
             Self::Profile => Icon::Profile,
             Self::Emails => Icon::Mail,

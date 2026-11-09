@@ -11,7 +11,7 @@ mod context;
 mod history;
 /// The values event payloads carry beside IDs.
 mod payload;
-/// User agent classification on real browser headers.
+/// User agent classification on real browser headers, and stored job names.
 #[cfg(test)]
 mod tests;
 
@@ -20,15 +20,18 @@ pub use context::{
 };
 pub use history::{FollowUp, HistoryActor, HistoryEntry};
 pub use payload::{
-    GrantRevocation, ImportedAudit, InlineSignIn, RecordedOrigin, RecoveryRevocation,
-    RevocationReason, SignInFailure, SigningKeyChange,
+    CodeRedemptionFailure, GrantRevocation, ImportedAudit, InlineSignIn, RecordedOrigin,
+    RecoveryRevocation, RevocationReason, SignInFailure, SigningKeyChange,
 };
 
 use crate::{
-    AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
-    PictureId, Provider, RecoveryId, SessionId, TokenId,
+    AlertId, AnnouncementId, AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle,
+    PasskeyId, Personal, PictureId, Provider, RecoveryId, SessionId, TokenId,
+    admin::{AuditVerification, ChainBreak, ChainProblem, VerificationKeys},
+    alerts::{Alert, AlertStatus},
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
+    notifications::NotificationPreference,
     protocol::jwt::KeyId,
 };
 use chrono::{DateTime, Utc};
@@ -108,14 +111,19 @@ pub enum DomainEvent {
         provider: Provider,
     },
     /// An unverified email address was added to the account. Its verification
-    /// email is queued with it.
+    /// email is queued with it, unless a provider imported it verified, which
+    /// [`Self::EmailVerified`] then records.
     EmailAdded {
         /// The new address.
         email_id: EmailId,
         /// The address itself.
         address: Personal<NormalizedEmail>,
+        /// The provider it was imported from, when signing up or linking with one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<Provider>,
     },
-    /// Someone holding the address's verification link confirmed it.
+    /// Someone holding the address's verification link confirmed it, or the
+    /// provider it was imported from is authoritative for it.
     EmailVerified {
         /// The verified address.
         email_id: EmailId,
@@ -172,6 +180,14 @@ pub enum DomainEvent {
     CodeReplayed {
         /// The client that redeemed the code.
         client_id: ClientId,
+    },
+    /// A client's redemption of an authorization code failed, which expired the
+    /// code: it cannot be redeemed again.
+    CodeRedemptionFailed {
+        /// The client that redeemed the code.
+        client_id: ClientId,
+        /// Why it failed.
+        reason: CodeRedemptionFailure,
     },
     /// A signup invitation was created.
     InvitationCreated {
@@ -385,6 +401,57 @@ pub enum DomainEvent {
         /// How many events were deleted.
         deleted: u64,
     },
+    /// The audit chain was verified, by `auth-service audit verify`, from the
+    /// dashboard or by auth's own verifier job, with what that found. It concerns
+    /// no account.
+    AuditChainVerified(AuditVerification),
+    /// An administrator or operator sent an announcement, such as a security
+    /// incident or a change to the privacy policy, to every account or to chosen
+    /// ones. Each recipient with a primary verified address is emailed it, and
+    /// every recipient gets it as a notification in their inbox. It concerns no
+    /// one account.
+    AnnouncementSent {
+        /// The announcement.
+        announcement_id: AnnouncementId,
+        /// How many accounts it went to.
+        recipients: u64,
+        /// Whether it was emailed to every recipient with a primary verified
+        /// address, whatever their preference, as a security incident or a change
+        /// to the privacy policy or terms must be. Its sender chose so.
+        #[serde(default)]
+        essential: bool,
+    },
+    /// A condition that needs an administrator's attention began to hold, so the
+    /// alert `alert_id` was raised. It concerns no account.
+    AlertRaised {
+        /// The alert.
+        alert_id: AlertId,
+        /// What it says.
+        alert: Alert,
+    },
+    /// An administrator posted an update on the current alert `alert_id`,
+    /// saying where its handling stands, with their note as the reason. The
+    /// first acknowledges it: it stops counting as a warning, though it stays
+    /// current while its condition holds. It concerns no account.
+    AlertUpdated {
+        /// The alert.
+        alert_id: AlertId,
+        /// What it says.
+        alert: Alert,
+        /// Where its handling stands.
+        status: AlertStatus,
+    },
+    /// The condition of the alert `alert_id` no longer holds, or holds
+    /// differently, as another alert, so it cleared. It concerns no account.
+    AlertCleared {
+        /// The alert.
+        alert_id: AlertId,
+        /// What it said.
+        alert: Alert,
+    },
+    /// The owner turned a category of notifications' email on or off, in their
+    /// settings or with an email's unsubscribe link.
+    NotificationPreferenceChanged(NotificationPreference),
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -397,7 +464,7 @@ impl DomainEvent {
     /// The payload version stored with the event. A change an older release could
     /// not decode, such as a new variant of an enum inside a payload, gets the next
     /// version of that kind, written only by the events that use it, so older
-    /// releases still read the others. See `docs/architecture/database-crate.md`.
+    /// releases still read the others. See `docs/dev/architecture/database.md`.
     #[must_use]
     pub const fn version(&self) -> i16 {
         match self {
@@ -411,6 +478,10 @@ impl DomainEvent {
                 inline: Some(InlineSignIn { origin, .. }),
                 ..
             } => origin.version(),
+            Self::AuditChainVerified(verification) => verification.version(),
+            Self::AlertRaised { alert, .. }
+            | Self::AlertUpdated { alert, .. }
+            | Self::AlertCleared { alert, .. } => alert.version(),
             _ => Self::FIRST_VERSION,
         }
     }
@@ -424,6 +495,7 @@ impl DomainEvent {
             | Self::GrantIssued { client_id, .. }
             | Self::GrantRevoked { client_id, .. }
             | Self::CodeReplayed { client_id }
+            | Self::CodeRedemptionFailed { client_id, .. }
             | Self::ClientRegistered { client_id, .. }
             | Self::ClientUpdated { client_id, .. }
             | Self::ClientEnabled { client_id }
@@ -482,6 +554,12 @@ impl DomainEvent {
             | Self::AccountRestored {}
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
+            | Self::AuditChainVerified(_)
+            | Self::AnnouncementSent { .. }
+            | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
+            | Self::AlertCleared { .. }
+            | Self::NotificationPreferenceChanged(_)
             | Self::Imported(_) => None,
         }
     }
@@ -509,6 +587,7 @@ impl DomainEvent {
             | Self::GrantIssued { .. }
             | Self::GrantRevoked { .. }
             | Self::CodeReplayed { .. }
+            | Self::CodeRedemptionFailed { .. }
             | Self::InvitationCreated { .. }
             | Self::InvitationRevoked { .. }
             | Self::AccountDisabled { .. }
@@ -545,6 +624,12 @@ impl DomainEvent {
             | Self::AccountRestored {}
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
+            | Self::AuditChainVerified(_)
+            | Self::AnnouncementSent { .. }
+            | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
+            | Self::AlertCleared { .. }
+            | Self::NotificationPreferenceChanged(_)
             | Self::Imported(_) => None,
         }
     }
@@ -572,6 +657,7 @@ impl DomainEvent {
             Self::GrantIssued { .. } => "grant_issued",
             Self::GrantRevoked { .. } => "grant_revoked",
             Self::CodeReplayed { .. } => "code_replayed",
+            Self::CodeRedemptionFailed { .. } => "code_redemption_failed",
             Self::InvitationCreated { .. } => "invitation_created",
             Self::InvitationRevoked { .. } => "invitation_revoked",
             Self::AccountDisabled { .. } => "account_disabled",
@@ -608,7 +694,40 @@ impl DomainEvent {
             Self::AccountRestored {} => "account_restored",
             Self::AccountPurged {} => "account_purged",
             Self::AuditHistoryPruned { .. } => "audit_history_pruned",
+            Self::AuditChainVerified(_) => "audit_chain_verified",
+            Self::AnnouncementSent { .. } => "announcement_sent",
+            Self::AlertRaised { .. } => "alert_raised",
+            Self::AlertUpdated { .. } => "alert_updated",
+            Self::AlertCleared { .. } => "alert_cleared",
+            Self::NotificationPreferenceChanged(_) => "notification_preference_changed",
             Self::Imported(_) => "imported",
+        }
+    }
+}
+
+impl AuditVerification {
+    /// Its payload version as a recorded event. A new [`ChainProblem`] or
+    /// [`VerificationKeys`] is one older releases cannot decode, so it fails to
+    /// compile here until it is given the next version.
+    #[must_use]
+    pub const fn version(&self) -> i16 {
+        if let Some(ChainBreak { problem, .. }) = &self.broken {
+            match problem {
+                ChainProblem::MissingEvent
+                | ChainProblem::EventBeforeAnchor
+                | ChainProblem::EventChanged
+                | ChainProblem::CheckpointMismatch
+                | ChainProblem::CheckpointSignature
+                | ChainProblem::CheckpointMalformed
+                | ChainProblem::CheckpointBeyondChain => {}
+                // Releases before it cannot decode it.
+                ChainProblem::OutOfOrder => return 2,
+            }
+        }
+        match self.keys {
+            VerificationKeys::Committed
+            | VerificationKeys::Given
+            | VerificationKeys::Uncommitted => DomainEvent::FIRST_VERSION,
         }
     }
 }

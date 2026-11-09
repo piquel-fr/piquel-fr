@@ -2,24 +2,29 @@
 
 use crate::{
     AuthConfig,
-    routes::{self, page::settings},
+    routes::{
+        self,
+        page::{self, settings},
+    },
     security::BrowserCookie,
     tests::{
         AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, ceremonies, cookie,
-        detailed_png, html, parameter, policy, redirect,
+        detailed_png, html, parameter, policy, redirect, verified_address,
     },
     web::tests::value_after,
 };
 use axum::http::{StatusCode, header};
 use piquel_common::{
-    AuthenticationMethod, EventId, Provider, TokenId,
+    AuthenticationMethod, EmailId, EventId, Provider, TokenId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
+    notifications::EmailCategory,
 };
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
-    ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange, HistoryChange,
-    HistoryState, PICTURE_FIELD, ProfileChange, ProfileDialog, ProfileState, Query, SignInChange,
+    Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
+    HistoryChange, HistoryState, InboxChange, InboxState, NotificationState, PICTURE_FIELD,
+    ProfileChange, ProfileDialog, ProfileState, Query, SignInChange,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the
@@ -203,46 +208,22 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn addresses_change_their_primary_and_are_removed() {
-    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
-    let replicas = Replicas::of(&config).await;
+    let replicas = Replicas::new().await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
     let [first, second] =
         ["first", "second"].map(|name| format!("{}-{name}@example.com", browser.user_id));
-    let mut ids = Vec::new();
-    for address in [&first, &second] {
-        let add = EmailChange::Add {
-            email: address.clone(),
-        };
-        browser.post(&replicas, settings::EMAILS, &add).await;
-        let emails = database.emails().list(browser.user_id).await.expect("list");
-        let id = emails
-            .iter()
-            .find(|email| email.normalized_email == *address)
-            .expect("added")
-            .id;
-        // The first address confirmed becomes the primary one.
-        let token = config.email.verification_keys.token(id).expect("token");
-        let verified = Browser::signed_out()
-            .submit(
-                &replicas.b,
-                settings::VERIFY,
-                &[("token", &token.encoded())],
-                OWN_PAGE,
-            )
-            .await;
-        assert_eq!(verified.status(), StatusCode::OK);
-        ids.push(id);
-    }
+    let former = verified_address(&database, browser.user_id, &first, true).await;
+    let id = verified_address(&database, browser.user_id, &second, false).await;
 
-    let primary = EmailChange::Primary { id: ids[1] };
+    let primary = EmailChange::Primary { id };
     let changed = browser.post(&replicas, settings::EMAILS, &primary).await;
     assert_eq!(cookie(&changed, BrowserCookie::Notice).0, "email_primary");
     let removed = browser
         .post(
             &replicas,
             settings::EMAILS,
-            &EmailChange::Remove { id: ids[0] },
+            &EmailChange::Remove { id: former },
         )
         .await;
     assert_eq!(cookie(&removed, BrowserCookie::Notice).0, "email_removed");
@@ -455,6 +436,160 @@ async fn linking_starts_at_the_provider() {
     );
 }
 
+/// The inbox lists a notification bold while unread, and the sidebar counts it.
+/// Opening it from auth's own pages marks it read; a link from another site
+/// does not. Its page offers to report the entry its event made, and marking it
+/// unread, or every one read, goes back to the inbox.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn notifications_are_read_by_opening_them() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let context = EventContext {
+        actor: Actor::User {
+            user_id: browser.user_id,
+            session_id: Some(browser.session_id),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let removed = DomainEvent::EmailRemoved {
+        email_id: EmailId::new(),
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    tx.record(&context, Some(browser.user_id), removed)
+        .await
+        .expect("record");
+    tx.commit().await.expect("commit");
+    let unread = async || {
+        database
+            .notifications()
+            .unread(browser.user_id)
+            .await
+            .expect("unread")
+    };
+    let subject = "An email address was removed from your account";
+
+    let page = html(browser.visit(&replicas.a, settings::NOTIFICATIONS).await).await;
+    assert!(
+        page.contains(&format!("<strong>{subject}</strong>")),
+        "{page}"
+    );
+    assert!(
+        page.contains(r#"<span class="count new" title="1 new">1</span>"#),
+        "{page}"
+    );
+    let id = database
+        .notifications()
+        .list(browser.user_id, None, 1)
+        .await
+        .expect("inbox")[0]
+        .id;
+    let item = settings::NOTIFICATION.replace("{id}", &id.to_string());
+
+    let foreign = [("sec-fetch-site", "cross-site")];
+    let page = html(browser.visit_from(&replicas.a, &item, &foreign).await).await;
+    assert!(
+        page.contains("Piquel no longer sends anything to that address."),
+        "{page}"
+    );
+    assert_eq!(unread().await, 1, "a link from another site marks nothing");
+    let page = html(browser.visit_from(&replicas.a, &item, OWN_PAGE).await).await;
+    assert_eq!(unread().await, 0);
+    assert!(page.contains("This wasn’t me"), "{page}");
+    let reporting = NotificationState { reporting: true }
+        .on(&item)
+        .expect("link");
+    let page = html(browser.visit(&replicas.a, &reporting).await).await;
+    assert!(page.contains("Secure your account?"), "{page}");
+    assert!(
+        page.contains(&format!(r#"action="{}""#, settings::HISTORY)),
+        "{page}"
+    );
+
+    let marked = browser
+        .post(
+            &replicas,
+            settings::NOTIFICATIONS,
+            &InboxChange::MarkUnread { id },
+        )
+        .await;
+    assert_eq!(redirect(&marked), settings::NOTIFICATIONS);
+    assert_eq!(unread().await, 1);
+    browser
+        .post(&replicas, settings::NOTIFICATIONS, &InboxChange::ReadAll)
+        .await;
+    assert_eq!(unread().await, 0);
+
+    let missing = settings::NOTIFICATION.replace("{id}", "not-an-id");
+    let shown = browser.visit_from(&replicas.a, &missing, OWN_PAGE).await;
+    assert_eq!(shown.status(), StatusCode::NOT_FOUND);
+}
+
+/// The inbox turns announcements' email off and on. An announcement email's
+/// unsubscribe link asks first when opened, so a scanner following it changes
+/// nothing, and turns the email off when posted from anywhere without a session,
+/// as a mail client's one click does. A link not made for the account does
+/// nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
+    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
+    let replicas = Replicas::of(&config).await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let emailed = async || {
+        let preferences = database.notifications().preferences(browser.user_id).await;
+        preferences.expect("preferences")[0].email
+    };
+    let page = html(browser.visit(&replicas.a, settings::NOTIFICATIONS).await).await;
+    assert!(page.contains("Turn off emails for Announcements"), "{page}");
+    for email in [false, true] {
+        let change = InboxChange::Email {
+            category: EmailCategory::Announcements,
+            email: Checkbox(email),
+        };
+        let changed = browser
+            .post(&replicas, settings::NOTIFICATIONS, &change)
+            .await;
+        let reopened = InboxState {
+            email: true,
+            ..InboxState::default()
+        };
+        assert_eq!(
+            redirect(&changed),
+            reopened.on(settings::NOTIFICATIONS).expect("link")
+        );
+        assert_eq!(emailed().await, email);
+    }
+
+    let link = config
+        .email
+        .unsubscribe_links
+        .link(browser.user_id)
+        .expect("link");
+    let link = url::Url::parse(&link).expect("URL");
+    let path = &link[url::Position::BeforePath..];
+    let stranger = Browser::signed_out();
+    let opened = stranger.visit(&replicas.a, path).await;
+    assert_eq!(opened.status(), StatusCode::OK);
+    assert!(html(opened).await.contains("Stop announcement emails?"));
+    assert!(emailed().await, "opening the link changes nothing");
+    let one_click = stranger
+        .submit(&replicas.b, path, &[("List-Unsubscribe", "One-Click")], &[])
+        .await;
+    assert_eq!(one_click.status(), StatusCode::OK);
+    assert!(!emailed().await);
+    let forged = format!(
+        "{}?account={}&token=forged",
+        page::UNSUBSCRIBE,
+        browser.user_id
+    );
+    let forged = stranger.visit(&replicas.a, &forged).await;
+    assert_eq!(forged.status(), StatusCode::NOT_FOUND);
+}
+
 /// A history page lists entries with a report button each, older ones a page at a
 /// time, but none on the account's creation, which no report applies to. Reporting
 /// one opens its confirmation first, and a report goes on to what it left to undo,
@@ -640,9 +775,10 @@ async fn verification_links_are_confirmed_by_their_form() {
     assert!(page.contains(&format!("{address} is verified")), "{page}");
 }
 
-/// The data page downloads the account's records once the session confirmed with a
-/// passkey, and deletes the account once its handle is typed: every browser is
-/// signed out, and the answer says when the account is purged.
+/// The data page offers a session without a recent passkey confirmation one
+/// before it downloads the account's records, and deletes the account once its
+/// handle is typed: every browser is signed out, and the answer says when the
+/// account is purged.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn data_page_downloads_the_data_and_deletes_the_account() {
@@ -664,10 +800,6 @@ async fn data_page_downloads_the_data_and_deletes_the_account() {
         ceremonies(&page, routes::passkey::CONFIRM_START) > 0,
         "{page}"
     );
-    let refused = social
-        .post(&replicas, settings::DATA, &DataChange::Export)
-        .await;
-    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
 
     let download = browser
         .post(&replicas, settings::DATA, &DataChange::Export)

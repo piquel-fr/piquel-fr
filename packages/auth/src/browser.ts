@@ -264,6 +264,8 @@ type SessionTokens = Tokens & { idToken: IdToken };
 export class Session {
   readonly #owner: BrowserClient;
   #tokens: SessionTokens;
+  /** The claims of the sign-in's ID token, which every refresh must carry over (OIDC Core §12.2). */
+  readonly #signedIn: IdTokenClaims;
   /** The refresh under way, which concurrent requests share. */
   #refreshing: Promise<void> | undefined;
   /**
@@ -275,6 +277,7 @@ export class Session {
   private constructor(owner: BrowserClient, tokens: SessionTokens, steppedUp: boolean) {
     this.#owner = owner;
     this.#tokens = tokens;
+    this.#signedIn = tokens.idToken.claims;
     this.#steppedUpAt = steppedUp ? this.#clock() : undefined;
   }
 
@@ -320,7 +323,8 @@ export class Session {
   /**
    * `fetch` with the access token as a bearer credential. When the resource answers
    * `insufficient_user_authentication` (RFC 9470), the browser goes to auth to sign
-   * in again with the challenge's `acr_values` and `max_age`, and comes back to this
+   * in again with the challenge's `acr_values` and `max_age`, as the same user, whose
+   * ID token it sends as `id_token_hint`, and comes back to this
    * page, where the action runs again; the returned promise never settles. If the
    * resource still refuses that retry, it throws the challenge as an
    * `insufficient_user_authentication` error instead of leaving again. A
@@ -351,9 +355,11 @@ export class Session {
       );
     }
     const scopes = this.#tokens.scopes.all.filter((scope) => scope !== 'openid');
+    // Sent as `id_token_hint`, so auth signs in this user only.
     return this.#owner.login({
       scopes,
       stepUp: requirement,
+      idTokenHint: this.#tokens.idToken,
       ...(returnTo === undefined ? {} : { returnTo })
     });
   }
@@ -373,17 +379,10 @@ export class Session {
     return this.#owner.client.issuer.clock();
   }
 
-  /** Redeems `refreshToken`, keeping the session's user (OIDC Core §12.2). */
+  /** Redeems `refreshToken`, keeping the session's user and sign-in (OIDC Core §12.2). */
   async #refresh(refreshToken: string): Promise<void> {
-    const tokens = await this.#owner.client.refresh(refreshToken);
-    const idToken = tokens.idToken ?? this.#tokens.idToken;
-    if (!this.#tokens.idToken.sameUser(idToken)) {
-      throw new AuthError(
-        { code: 'invalid_token', reason: 'invalid_claims' },
-        'the refreshed ID token names another user'
-      );
-    }
-    this.#tokens = { ...tokens, idToken };
+    const tokens = await this.#owner.client.refresh(refreshToken, this.#signedIn);
+    this.#tokens = { ...tokens, idToken: tokens.idToken ?? this.#tokens.idToken };
   }
 }
 

@@ -26,6 +26,13 @@ pub enum LockKey {
     /// Schema migrations, held by `Database::run_migrations` for its connection, so
     /// overlapping `migrate` runs take turns.
     Migrations = 7,
+    /// The periodic verification of the audit chain, apart from
+    /// [`Self::AuditChain`] so it never holds sealing back.
+    AuditVerification = 8,
+    /// Changes to alerts, taken per transaction by
+    /// [`AlertRepository::current`](crate::AlertRepository::current), so two
+    /// changes to the same kind never both find none current.
+    Alerts = 9,
     /// The job runner panic test; no release takes it.
     #[cfg(any(test, feature = "test-util"))]
     Test = -1,
@@ -33,6 +40,14 @@ pub enum LockKey {
     /// sharing a database run at once; no release takes it.
     #[cfg(any(test, feature = "test-util"))]
     ExclusivityTest = -2,
+    /// The lock exclusion test, apart from every job's key, so a test running a
+    /// job never holds it; no release takes it.
+    #[cfg(any(test, feature = "test-util"))]
+    LockTest = -3,
+    /// The locked transactions test, apart from [`Self::LockTest`], which
+    /// expects its key free; no release takes it.
+    #[cfg(any(test, feature = "test-util"))]
+    TransactionTest = -4,
 }
 
 impl LockKey {
@@ -81,14 +96,16 @@ impl Database {
 }
 
 impl ExclusiveConnection {
-    /// Opens a transaction on the locked connection.
+    /// Opens a read committed, read-write transaction on the locked connection,
+    /// whatever defaults the role has: sealing events must read committed data,
+    /// and a default the role set itself would otherwise stop every seal.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if `BEGIN` fails.
     pub async fn begin(&mut self) -> Result<DatabaseTransaction<'_>, DatabaseError> {
         self.connection
-            .begin()
+            .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED, READ WRITE")
             .await
             .map(DatabaseTransaction::new)
             .map_err(Into::into)

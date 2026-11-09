@@ -21,11 +21,15 @@ pub enum DatabaseError {
     /// A uniqueness constraint rejected the write; its driver diagnostic is retained.
     #[error("the operation conflicts with existing data")]
     Conflict(#[source] Source),
+    /// A check constraint or trigger refused the write, such as the one keeping
+    /// an account at 100 active passkeys; its driver diagnostic is retained.
+    #[error("a database check refused the write")]
+    Refused(#[source] Source),
     /// The database did not answer within the bounded wait.
     #[error("the database operation timed out")]
     Timeout(#[source] tokio::time::error::Elapsed),
     /// `PostgreSQL` cancelled the statement, which ran past its statement timeout
-    /// (see `database-crate.md`) or was cancelled by an operator.
+    /// (see `docs/dev/architecture/database.md`) or was cancelled by an operator.
     #[error("the database cancelled a statement that ran too long")]
     Cancelled(#[source] Source),
     /// A statement waited for a lock past its lock timeout.
@@ -107,6 +111,9 @@ impl From<sqlx::Error> for DatabaseError {
             },
             sqlx::Error::Database(error) if error.is_unique_violation() => {
                 Self::Conflict(Box::new(sqlx::Error::Database(error)))
+            }
+            sqlx::Error::Database(error) if error.is_check_violation() => {
+                Self::Refused(Box::new(sqlx::Error::Database(error)))
             }
             sqlx::Error::Database(error) if error.code().as_deref() == Some(QUERY_CANCELED) => {
                 Self::Cancelled(Box::new(sqlx::Error::Database(error)))

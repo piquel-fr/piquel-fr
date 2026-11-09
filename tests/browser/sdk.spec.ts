@@ -1,3 +1,9 @@
+/**
+ * The TypeScript SDK's login client, driven from Node, through `browser-e2e-sdk`,
+ * a trusted client that must push its requests: the browser sees only the
+ * `request_uri`, the SDK completes the callback and validates the ID token, and
+ * a step-up sign-in meets its `acr_values` and `max_age`.
+ */
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { Issuer, type Fetch } from '../../packages/auth/src/index.ts';
 import { addPasskeys, authUrl, serveClient, signUp } from './helpers';
@@ -52,9 +58,10 @@ test('the TypeScript SDK signs in through a pushed request, then steps up', asyn
   await page.waitForURL(atCallback);
   const tokens = await login.complete(pending, new URL(page.url()).searchParams);
   const claims = tokens.idToken?.claims;
-  expect(claims?.preferred_username).toBe(username);
-  expect(await login.userinfo(tokens.accessToken)).toMatchObject({
-    sub: claims?.sub,
+  if (claims === undefined) throw new Error('the sign-in returned no ID token');
+  expect(claims.preferred_username).toBe(username);
+  expect(await login.userinfo(tokens.accessToken, claims)).toMatchObject({
+    sub: claims.sub,
     preferred_username: username
   });
 
@@ -66,6 +73,6 @@ test('the TypeScript SDK signs in through a pushed request, then steps up', asyn
   await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
   await page.waitForURL(atCallback);
   const stepped = await login.complete(stepUp.pending, new URL(page.url()).searchParams);
-  expect(stepped.idToken?.claims).toMatchObject({ sub: claims?.sub, sid: claims?.sid, acr: 'phr' });
-  expect(stepped.idToken?.claims.auth_time).toBeGreaterThan(Number(claims?.auth_time));
+  expect(stepped.idToken?.claims).toMatchObject({ sub: claims.sub, sid: claims.sid, acr: 'phr' });
+  expect(stepped.idToken?.claims.auth_time).toBeGreaterThan(Number(claims.auth_time));
 });

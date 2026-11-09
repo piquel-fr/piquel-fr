@@ -61,7 +61,7 @@ enum Outcome<X> {
 /// }
 ///
 /// async fn whoami(Authenticated(token): Authenticated<Tenant>) -> String {
-///     format!("{:?} in {}", token.subject, token.extra.tenant)
+///     format!("{:?} in {}", token.subject(), token.extra().tenant)
 /// }
 ///
 /// let validator = issuer
@@ -203,7 +203,7 @@ enum Reason {
 ///
 /// async fn audited(token: Result<Authenticated, AuthRejection>) -> Response {
 ///     match token {
-///         Ok(Authenticated(token)) => format!("{:?}", token.subject).into_response(),
+///         Ok(Authenticated(token)) => format!("{:?}", token.subject()).into_response(),
 ///         Err(rejection) => {
 ///             if let Some(error) = rejection.token_error() {
 ///                 eprintln!("refused a token: {error}");
@@ -340,7 +340,7 @@ fn token<X: Clone + Send + Sync + 'static>(
 /// use piquel_auth::axum::Authenticated;
 ///
 /// async fn whoami(Authenticated(token): Authenticated) -> String {
-///     format!("{:?}", token.subject)
+///     format!("{:?}", token.subject())
 /// }
 /// ```
 #[derive(Clone, Debug)]

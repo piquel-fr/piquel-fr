@@ -1,11 +1,12 @@
-//! Sends the `email` channel over SMTP.
+//! Sends the `email` and `announcement` channels over SMTP.
 //!
 //! A link's delivery names the account and the address's ID, and a recovery link's
 //! the recovery's too: the sender reads the address when it sends, so an address
 //! verified or removed, or a recovery used or undone, in the meantime receives
 //! nothing, and derives the link's token again from the ID, under the key that
 //! made its stored digest, so it is stored nowhere and survives a change of token
-//! digest key. Notices carry the address they go to.
+//! digest key. A notification's email carries the address it goes to and the
+//! notification, and says what the inbox says.
 //!
 //! Every attempt sends the same content, with the delivery's ID as `Message-ID`.
 //! SMTP is at least once like the queue: if the connection breaks after the relay
@@ -14,19 +15,28 @@
 
 use super::{DeliveryError, Failure, Sender};
 use crate::{
-    config::EmailConfig,
+    config::{DashboardConfig, EmailConfig},
     emails::{VERIFICATION_LIFETIME, VerificationKeys},
+    notifications::UnsubscribeLinks,
     recovery::{self, RecoveryLinks},
-    routes::page::settings,
+    routes::{
+        self,
+        page::{self, settings},
+    },
 };
 use askama::Template;
 use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-    message::{Mailbox, MultiPart},
+    message::{
+        Mailbox, MultiPart,
+        header::{HeaderName, HeaderValue},
+    },
 };
-use piquel_common::{DeliveryId, ErrorChain, Handle, UserId, config::Origin};
+use piquel_common::{
+    AnnouncementId, DeliveryId, ErrorChain, Handle, UserId, admin, config::Origin,
+};
 use piquel_crypto::CryptoError;
-use piquel_repository::{Database, DatabaseError, Delivery, Email, EmailMessage};
+use piquel_repository::{Announcement, Database, DatabaseError, Delivery, Email, EmailMessage};
 use std::{fmt::Display, time::Duration};
 
 /// Sends a built message, classifying failures for the retry policy. The SMTP
@@ -81,12 +91,23 @@ pub(crate) struct EmailSender<M> {
     verification_keys: VerificationKeys,
     /// Builds recovery links.
     recovery_links: RecoveryLinks,
+    /// Builds announcements' unsubscribe links.
+    unsubscribe_links: UnsubscribeLinks,
+    /// The admin dashboard's Alerts tab, which an alert's notification links,
+    /// unless the dashboard is off.
+    alerts: Option<String>,
 }
 
 impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
-    /// Sends through the configured relay, or drops everything without one.
-    pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
+    /// Sends through the configured relay, or drops everything without one,
+    /// linking alerts on the `dashboard`, if auth serves one.
+    pub(crate) fn new(
+        database: Database,
+        config: &EmailConfig,
+        dashboard: Option<&DashboardConfig>,
+    ) -> Self {
         Self::with_mailer(database, config.smtp.clone(), config)
+            .linking(dashboard.map(|dashboard| &dashboard.origin))
     }
 }
 
@@ -100,7 +121,16 @@ impl<M: Mailer> EmailSender<M> {
             origin: config.origin.clone(),
             verification_keys: config.verification_keys.clone(),
             recovery_links: config.recovery_links.clone(),
+            unsubscribe_links: config.unsubscribe_links.clone(),
+            alerts: None,
         }
+    }
+
+    /// Links alerts' notifications to the Alerts tab of the dashboard at
+    /// `dashboard`.
+    pub(crate) fn linking(self, dashboard: Option<&Origin>) -> Self {
+        let alerts = dashboard.map(|dashboard| dashboard.join(routes::dashboard::ALERTS));
+        Self { alerts, ..self }
     }
 
     /// Sends `message` about `user_id`'s account, as the delivery `id`. Does
@@ -125,6 +155,62 @@ impl<M: Mailer> EmailSender<M> {
         mailer.send(self.compose(id, &content)?).await
     }
 
+    /// Sends the announcement `announcement` to `user_id`'s primary verified
+    /// address, as the delivery `id`. Does nothing while email is disabled, or
+    /// once the account has no such address or is no longer a recipient, as after
+    /// a purge, so the delivery succeeds rather than retrying.
+    async fn announce(
+        &self,
+        id: DeliveryId,
+        user_id: UserId,
+        announcement: AnnouncementId,
+    ) -> Result<(), DeliveryError> {
+        let Some(mailer) = &self.mailer else {
+            tracing::info!(%id, "email is disabled; delivery dropped");
+            return Ok(());
+        };
+        let Some(content) = self.announcement(user_id, announcement).await? else {
+            tracing::info!(%id, "the account has no primary address to announce to; delivery dropped");
+            return Ok(());
+        };
+        mailer.send(self.compose(id, &content)?).await
+    }
+
+    /// What the announcement `id` says to `user_id`, at its primary verified
+    /// address now, if it still has one and still receives it, with the link
+    /// turning announcements' email off unless it is essential.
+    async fn announcement(
+        &self,
+        user_id: UserId,
+        id: AnnouncementId,
+    ) -> Result<Option<Content>, DeliveryError> {
+        let email = self
+            .database
+            .emails()
+            .announcement(user_id, id)
+            .await
+            .map_err(|error| Self::unread(&error))?;
+        let Some(email) = email else {
+            return Ok(None);
+        };
+        let unsubscribe = if email.essential {
+            None
+        } else {
+            let link = self.unsubscribe_links.link(user_id).map(Some);
+            Some(Self::rebuilt(link, "unsubscribe", &user_id)?)
+        };
+        Ok(Some(Content::announcement(
+            email.address,
+            Announced {
+                subject: email.subject,
+                body: email.body,
+                everyone: email.everyone,
+                unsubscribe,
+            },
+            &self.origin,
+        )))
+    }
+
     /// What `message` says, with its links and the address it goes to: the one it
     /// copied, or, for a link, the address that still waits for it.
     async fn content(
@@ -132,7 +218,6 @@ impl<M: Mailer> EmailSender<M> {
         user_id: UserId,
         message: &EmailMessage,
     ) -> Result<Option<Content>, DeliveryError> {
-        let history = self.origin.join(settings::HISTORY);
         Ok(Some(match message {
             EmailMessage::VerifyAddress { email_id } => {
                 let pending = self
@@ -161,14 +246,6 @@ impl<M: Mailer> EmailSender<M> {
                     hours: VERIFICATION_LIFETIME.num_hours(),
                 }
             }
-            EmailMessage::PrimaryAddressChanged { address } => Content::PrimaryAddressChanged {
-                address: address.clone(),
-                history,
-            },
-            EmailMessage::AddressRemoved { address } => Content::AddressRemoved {
-                address: address.clone(),
-                history,
-            },
             EmailMessage::RecoveryLink {
                 recovery_id,
                 email_id,
@@ -196,21 +273,20 @@ impl<M: Mailer> EmailSender<M> {
                     undo: self.recovery_links.undo_url(*recovery_id).into(),
                 }
             }
-            EmailMessage::RecoveryRevoked {
+            EmailMessage::Notification {
                 address,
+                notification_id,
+                notification,
                 recovery_id,
-                kept,
-            } => Content::RecoveryRevoked {
+            } => Content::Notification {
                 address: address.clone(),
-                undo: kept.then(|| self.recovery_links.undo_url(*recovery_id).into()),
-            },
-            EmailMessage::Recovered {
-                address,
-                recovery_id,
-            } => Content::Recovered {
-                address: address.clone(),
-                undo: self.recovery_links.undo_url(*recovery_id).into(),
-                days: recovery::PROBATION.num_days(),
+                subject: notification.subject().to_owned(),
+                body: notification.body(),
+                page: self
+                    .origin
+                    .join(&settings::NOTIFICATION.replace("{id}", &notification_id.to_string())),
+                undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
+                alerts: self.alerts.clone().filter(|_| notification.links_alerts()),
             },
         }))
     }
@@ -257,7 +333,25 @@ impl<M: Mailer> EmailSender<M> {
             .address()
             .parse()
             .map_err(|_| DeliveryError::Permanent(Failure::InvalidAddress))?;
-        Message::builder()
+        let mut message = Message::builder();
+        // RFC 8058: mail clients offer to unsubscribe, posting to the link in one
+        // click.
+        if let Content::Announcement {
+            unsubscribe: Some(link),
+            ..
+        } = content
+        {
+            message = message
+                .raw_header(HeaderValue::new(
+                    HeaderName::new_from_ascii_str("List-Unsubscribe"),
+                    format!("<{link}>"),
+                ))
+                .raw_header(HeaderValue::new(
+                    HeaderName::new_from_ascii_str("List-Unsubscribe-Post"),
+                    "List-Unsubscribe=One-Click".to_owned(),
+                ));
+        }
+        message
             .from(self.from.clone())
             .to(Mailbox::new(None, to))
             .subject(content.subject())
@@ -278,8 +372,58 @@ impl<M: Mailer> Sender for EmailSender<M> {
     }
 }
 
+/// Sends announcements' email through `M`, as [`EmailSender`] sends account
+/// holders', on a channel of their own, so an announcement to every account never
+/// holds back a verification or recovery link.
+pub(crate) struct AnnouncementSender<M>(EmailSender<M>);
+
+impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
+    /// Sends through the configured relay, or drops everything without one.
+    pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
+        Self(EmailSender::new(database, config, None))
+    }
+
+    /// The plain-text body of `announcement`'s email, linking the inbox on
+    /// `auth`, auth's origin, which the dashboard shows before it is sent.
+    ///
+    /// # Errors
+    /// Fails when the template cannot render.
+    pub(crate) fn preview(
+        announcement: &admin::Announcement,
+        auth: &Origin,
+    ) -> Result<String, askama::Error> {
+        // The unsubscribe link names the recipient, so the preview shows the
+        // page it opens.
+        let unsubscribe = (!announcement.essential).then(|| auth.join(page::UNSUBSCRIBE));
+        let content = Content::announcement(
+            String::new(),
+            Announced {
+                subject: announcement.subject.clone(),
+                body: announcement.body.clone(),
+                everyone: announcement.everyone,
+                unsubscribe,
+            },
+            auth,
+        );
+        Text { content: &content }.render()
+    }
+}
+
+impl<M: Mailer> Sender for AnnouncementSender<M> {
+    type Channel = Announcement;
+    /// An announcement stays worth reading for days, through a long relay outage
+    /// or a slow send to every account.
+    const MAX_AGE: Duration = Duration::from_hours(72);
+
+    async fn send(&self, delivery: &Delivery<Announcement>) -> Result<(), DeliveryError> {
+        self.0
+            .announce(delivery.id, delivery.recipient, delivery.payload)
+            .await
+    }
+}
+
 /// What a message says, with everything its templates show. Each
-/// [`EmailMessage`] becomes one of these.
+/// [`EmailMessage`], and each announcement's email, becomes one of these.
 enum Content {
     /// A verification link.
     VerifyAddress {
@@ -293,20 +437,6 @@ enum Content {
         link: String,
         /// How many hours the link works.
         hours: i64,
-    },
-    /// The notice to a previous primary address.
-    PrimaryAddressChanged {
-        /// The previous primary address.
-        address: String,
-        /// The account's security history.
-        history: String,
-    },
-    /// The notice to a removed address.
-    AddressRemoved {
-        /// The removed address.
-        address: String,
-        /// The account's security history.
-        history: String,
     },
     /// A recovery's link, to the account's primary address.
     RecoveryLink {
@@ -322,47 +452,93 @@ enum Content {
         /// it.
         undo: String,
     },
-    /// The notice to each verified address that support revoked passkeys and
-    /// started a recovery whose link it printed.
-    RecoveryRevoked {
-        /// The address.
+    /// A notification of the account's.
+    Notification {
+        /// The address it goes to.
         address: String,
-        /// The recovery's undo page, while a kept passkey can cancel it.
+        /// Its subject, which the email's is.
+        subject: String,
+        /// What it says.
+        body: String,
+        /// Its page in the inbox.
+        page: String,
+        /// The undo page of the recovery it is about, while a passkey can undo it.
         undo: Option<String>,
+        /// The dashboard's Alerts tab, for an alert's, unless the dashboard is off.
+        alerts: Option<String>,
     },
-    /// The notice to each verified address that a recovery enrolled a passkey.
-    Recovered {
-        /// The address.
+    /// An announcement administrators sent, to the account's primary address.
+    Announcement {
+        /// The primary address.
         address: String,
-        /// The recovery's undo page, where an older passkey undoes it.
-        undo: String,
-        /// How many days the recovery can be undone.
-        days: i64,
+        /// Its subject, as they wrote it.
+        subject: String,
+        /// Its text, as they wrote it, for the plain-text body.
+        body: String,
+        /// The same text as paragraphs of lines, for the HTML body.
+        paragraphs: Vec<Vec<String>>,
+        /// Whether it went to every account, rather than to chosen ones.
+        everyone: bool,
+        /// The inbox, where the account reads it again.
+        inbox: String,
+        /// The link turning announcements' email off, unless it is essential.
+        unsubscribe: Option<String>,
     },
 }
 
+/// What an announcement's email says, whoever it goes to.
+struct Announced {
+    /// Its subject, as administrators wrote it.
+    subject: String,
+    /// Its text, as they wrote it.
+    body: String,
+    /// Whether it went to every account, rather than to chosen ones.
+    everyone: bool,
+    /// The link turning announcements' email off, unless it is essential.
+    unsubscribe: Option<String>,
+}
+
 impl Content {
+    /// An announcement's email to `address`, saying what was `announced`, which
+    /// links the account's inbox on `origin`.
+    fn announcement(address: String, announced: Announced, origin: &Origin) -> Self {
+        let Announced {
+            subject,
+            body,
+            everyone,
+            unsubscribe,
+        } = announced;
+        let paragraphs = admin::Announcement::paragraphs(&body)
+            .into_iter()
+            .map(|lines| lines.into_iter().map(str::to_owned).collect())
+            .collect();
+        Self::Announcement {
+            address,
+            subject,
+            body,
+            paragraphs,
+            everyone,
+            inbox: origin.join(settings::NOTIFICATIONS),
+            unsubscribe,
+        }
+    }
+
     /// Where the message goes.
     fn address(&self) -> &str {
         match self {
             Self::VerifyAddress { address, .. }
-            | Self::PrimaryAddressChanged { address, .. }
-            | Self::AddressRemoved { address, .. }
             | Self::RecoveryLink { address, .. }
-            | Self::RecoveryRevoked { address, .. }
-            | Self::Recovered { address, .. } => address,
+            | Self::Notification { address, .. }
+            | Self::Announcement { address, .. } => address,
         }
     }
 
     /// The message's subject.
-    const fn subject(&self) -> &'static str {
+    fn subject(&self) -> &str {
         match self {
             Self::VerifyAddress { .. } => "Confirm your email address for Piquel",
-            Self::PrimaryAddressChanged { .. } => "Your Piquel primary email address changed",
-            Self::AddressRemoved { .. } => "Your email address was removed from Piquel",
             Self::RecoveryLink { .. } => "Recover your Piquel account",
-            Self::RecoveryRevoked { .. } => "Piquel support is recovering your account",
-            Self::Recovered { .. } => "A recovery added a passkey to your Piquel account",
+            Self::Notification { subject, .. } | Self::Announcement { subject, .. } => subject,
         }
     }
 }

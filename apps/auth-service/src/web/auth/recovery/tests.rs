@@ -3,6 +3,7 @@
 
 use crate::{
     AdminService,
+    deletion::Deletions,
     recovery::PROBATION,
     routes::{
         self,
@@ -12,8 +13,8 @@ use crate::{
     security::{BrowserCookie, RequestContext},
     tests::{
         Browser, Replicas, captures, ceremonies, cookie, html, location, operator, parameter,
-        recovery_links, recovery_reason, recovery_token, redirect, register, registration, sends,
-        unusable_passkey,
+        policy, recovery_links, recovery_reason, recovery_token, redirect, register, registration,
+        sends, unusable_passkey,
     },
     web::tests::authorize,
 };
@@ -26,7 +27,7 @@ use piquel_common::{
 };
 use piquel_repository::{Database, InsertPasskey, StoredPasskey};
 use piquel_ui::{
-    HistoryChange, LoginChange, LoginQuery, Query, RecoverChange, SignInState, UndoChange,
+    Checkbox, HistoryChange, LoginChange, LoginQuery, Query, RecoverChange, SignInState, UndoChange,
 };
 use url::Position;
 
@@ -113,6 +114,38 @@ impl Recovering {
     /// A browser signed in to the account since the recovery started.
     async fn signed_in(&self) -> Browser {
         Browser::sign_in(&self.database, self.user_id).await
+    }
+
+    /// A signed-out browser holding the offer to restore the account, which
+    /// support schedules for deletion, that a sign-in with the passkey from before
+    /// the recovery made.
+    async fn restore_offer(&self) -> Browser {
+        AdminService::new(self.database.clone(), true)
+            .schedule_deletion(&operator(), self.user_id, recovery_reason())
+            .await
+            .expect("scheduled");
+        let passkeys = self.database.passkeys().list_active(self.user_id).await;
+        let older = passkeys
+            .expect("passkeys")
+            .into_iter()
+            .find(|passkey| passkey.friendly_name == "Existing key")
+            .expect("older passkey");
+        let mut tx = self.database.begin().await.expect("transaction");
+        tx.users()
+            .find_by_id_for_update(self.user_id)
+            .await
+            .expect("lock");
+        let offered = Deletions::offer_restore(tx, self.user_id, older.id)
+            .await
+            .expect("offer");
+        let mut response = axum::http::Response::new(());
+        offered.set_on(&mut response).expect("cookie");
+        let response = axum::response::Response::from_parts(
+            response.into_parts().0,
+            axum::body::Body::empty(),
+        );
+        let (offer, _) = cookie(&response, BrowserCookie::Restore);
+        Browser::signed_out().with_cookie(BrowserCookie::Restore, offer)
     }
 
     /// Uses the link, enrolling a passkey that whoever used it then renamed to
@@ -322,7 +355,7 @@ async fn settings_show_the_recovery() {
     let key = |stage| format!("piquel-recovery:{}:{stage}:confirmed", browser.session_id);
     let asks = |page: &str, stage, refusal| {
         let key = key(stage);
-        let banner = r#"<section class="notice warning stack" hidden="""#;
+        let banner = r#"<section class="notice warning stack" "#;
         let answer = ">Yes, it was me</button>";
         let undo = format!(
             r#"<a class="button danger small" href="{RECOVER_UNDO}#recovery={}">{refusal}</a>"#,
@@ -413,53 +446,180 @@ async fn settings_show_the_recovery() {
     assert!(!page.contains("Remove passkey"), "{page}");
 }
 
+/// A recovering account and a trusted app its sign-ins go on to.
+struct ForAnApp {
+    /// The service.
+    replicas: Replicas,
+    /// The app.
+    client: ClientRegistration,
+    /// Its authorization request.
+    authorize: String,
+    /// The account.
+    recovering: Recovering,
+}
+
+impl ForAnApp {
+    /// An account recovering with a passkey from before, and the app.
+    async fn new() -> Self {
+        let replicas = Replicas::new().await;
+        let database = Replicas::database().await;
+        let client = ClientRegistration {
+            trusted: true,
+            ..registration(ClientKind::Public, "https://client.example")
+        };
+        register(&database, &client).await.expect("client");
+        let authorize = authorize(&client, &[]);
+        let recovering = Recovering::new(&database, true).await;
+        Self {
+            replicas,
+            client,
+            authorize,
+            recovering,
+        }
+    }
+
+    /// Starts an authorization in a signed-out browser, and returns its token.
+    async fn start(&self) -> String {
+        let browser = Browser::signed_out();
+        let sign_in = location(&browser.visit(&self.replicas.a, &self.authorize).await);
+        parameter(&sign_in, "transaction")
+    }
+
+    /// Asserts that `response` sends the browser on to the app with a code.
+    fn reaches_the_app(&self, response: &axum::response::Response) {
+        let continued = location(response);
+        let app = self.client.redirect_uris[0].as_str();
+        assert_eq!(&continued[..Position::AfterPath], app);
+        assert!(!parameter(&continued, "code").is_empty(), "{continued}");
+    }
+
+    /// Where `response` sends the browser, from the path on.
+    fn to(response: &axum::response::Response) -> String {
+        location(response)[Position::BeforePath..].to_owned()
+    }
+
+    /// The sign-in page continuing `transaction`, asking the question if `asks`.
+    fn sign_in(transaction: &str, asks: bool) -> String {
+        let query = LoginQuery {
+            transaction: Some(transaction.to_owned()),
+            recovery: Checkbox(asks),
+            ..LoginQuery::default()
+        };
+        query.on(LOGIN).expect("link")
+    }
+
+    /// The path resuming `transaction`.
+    fn resume(transaction: &str) -> String {
+        format!("{AUTHORIZE_RESUME}?transaction={transaction}")
+    }
+}
+
 /// A sign-in that goes on to an app first asks whether a recovery of the account
-/// that can still be undone was its owner's: its link goes on through the
-/// authorization, which it keeps, and another undoes the recovery. A sign-in that
-/// goes on to auth's own pages leaves them to ask.
+/// that can still be undone was its owner's, whichever way it signed in: on the
+/// sign-in page, or by resuming the authorization, as a provider's sign-in does.
+/// Only the question's form goes on, keeping the authorization, so no link skips
+/// it, and an answer about another recovery answers nothing; its other answer
+/// undoes the recovery. A browser that signed in before the authorization
+/// started is not asked, and a sign-in that goes on to auth's own pages leaves
+/// them to ask.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn a_sign_in_for_an_app_asks_about_a_recovery() {
-    let replicas = Replicas::new().await;
-    let database = Replicas::database().await;
-    let client = ClientRegistration {
-        trusted: true,
-        ..registration(ClientKind::Public, "https://client.example")
-    };
-    register(&database, &client).await.expect("client");
-    let authorize = authorize(&client, &[]);
-    let sign_in = location(&Browser::signed_out().visit(&replicas.a, &authorize).await);
-    let transaction = parameter(&sign_in, "transaction");
-    let recovering = Recovering::new(&database, true).await;
+async fn every_sign_in_for_an_app_asks_about_a_recovery() {
+    let app = ForAnApp::new().await;
+    let replicas = &app.replicas;
+    let recovering = &app.recovering;
+
+    // Signing in on the sign-in page.
+    let transaction = app.start().await;
+    let question = ForAnApp::sign_in(&transaction, true);
     let browser = recovering.signed_in().await;
-    let query = LoginQuery {
-        transaction: Some(transaction.clone()),
-        ..LoginQuery::default()
-    };
-    let here = query.on(LOGIN).expect("link");
-    let asked = browser
-        .post(&replicas, &here, &LoginChange::SignedIn {})
+    let here = ForAnApp::sign_in(&transaction, false);
+    let signed_in = browser
+        .post(replicas, &here, &LoginChange::SignedIn {})
         .await;
+    assert_eq!(ForAnApp::to(&signed_in), question);
+    // Resuming it instead, as a link could, asks again.
+    let resumed = browser
+        .visit(&replicas.a, &ForAnApp::resume(&transaction))
+        .await;
+    assert_eq!(ForAnApp::to(&resumed), question);
+    let asked = browser.visit(&replicas.a, &question).await;
     assert_eq!(asked.status(), StatusCode::OK);
+    // Its form may go on to the app.
+    let form_action = policy(&asked)
+        .split(';')
+        .find(|directive| directive.trim().starts_with("form-action"))
+        .expect("form-action");
+    assert!(
+        form_action.contains("https://client.example"),
+        "{form_action}"
+    );
     let page = html(asked).await;
-    let resume = format!("{AUTHORIZE_RESUME}?transaction={transaction}");
-    let yes = format!(r#"<a class="button" href="{resume}">Yes, continue</a>"#);
+    let yes = format!(
+        r#"<input type="hidden" name="action" value="recovery_recognized"><input type="hidden" name="recovery" value="{}">"#,
+        recovering.id
+    );
     assert!(page.contains(&yes), "{page}");
     let no = format!(
-        r#"<a class="button secondary" href="{RECOVER_UNDO}#recovery={}">No, cancel it</a>"#,
+        r#"<a class="button secondary full" href="{RECOVER_UNDO}#recovery={}">No, cancel it</a>"#,
         recovering.id
     );
     assert!(page.contains(&no), "{page}");
-    let continued = location(&browser.visit(&replicas.a, &resume).await);
+    // An answer about another recovery, as from a tab another account left open,
+    // answers nothing.
+    let stale = LoginChange::RecoveryRecognized {
+        recovery: RecoveryId::new(),
+    };
+    let stale = browser.post(replicas, &question, &stale).await;
+    assert_eq!(ForAnApp::to(&stale), question);
+    let answer = LoginChange::RecoveryRecognized {
+        recovery: recovering.id,
+    };
+    app.reaches_the_app(&browser.post(replicas, &question, &answer).await);
+
+    // Signing in some other way resumes the authorization, which asks.
+    let transaction = app.start().await;
+    let browser = recovering.signed_in().await;
+    let resumed = browser
+        .visit(&replicas.a, &ForAnApp::resume(&transaction))
+        .await;
     assert_eq!(
-        &continued[..Position::AfterPath],
-        client.redirect_uris[0].as_str()
+        ForAnApp::to(&resumed),
+        ForAnApp::sign_in(&transaction, true)
     );
-    assert!(!parameter(&continued, "code").is_empty(), "{continued}");
+
+    // A browser already signed in goes on without asking.
+    app.reaches_the_app(&browser.visit(&replicas.a, &app.authorize).await);
 
     let settled = browser
-        .post(&replicas, LOGIN, &LoginChange::SignedIn {})
+        .post(replicas, LOGIN, &LoginChange::SignedIn {})
         .await;
     assert_eq!(settled.status(), StatusCode::SEE_OTHER);
     assert_eq!(redirect(&settled), settings::HOME);
+}
+
+/// Restoring an account support scheduled for deletion during its recovery's
+/// probation, which the deletion leaves, with a passkey from before the
+/// recovery, for an app, resumes the authorization, which asks about the
+/// recovery too.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn restoring_for_an_app_asks_about_a_recovery() {
+    let app = ForAnApp::new().await;
+    let transaction = app.start().await;
+    app.recovering.enroll("Recovered passkey").await;
+    let restoring = app.recovering.restore_offer().await;
+    let here = ForAnApp::sign_in(&transaction, false);
+    let restored = restoring
+        .post(&app.replicas, &here, &LoginChange::Restore {})
+        .await;
+    let resume = ForAnApp::resume(&transaction);
+    assert_eq!(redirect(&restored), resume);
+    let (session, _) = cookie(&restored, BrowserCookie::Session);
+    let browser = Browser::signed_out().with_cookie(BrowserCookie::Session, session);
+    let resumed = browser.visit(&app.replicas.a, &resume).await;
+    assert_eq!(
+        ForAnApp::to(&resumed),
+        ForAnApp::sign_in(&transaction, true)
+    );
 }

@@ -92,7 +92,8 @@ async fn acr_targets_and_grants_keep_their_authentication() {
 /// `unmet_authentication_requirements` instead of its user looping through
 /// sign-in. A social sign-in, which a passkey could still step up, and a
 /// probation sign-in from before the request go to sign in, as before. Without a
-/// target, a probation sign-in is enough.
+/// target, a probation sign-in is enough, once the sign-in page asked whether the
+/// recovery was the owner's.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_probation_sign_in_short_of_the_target_answers_the_client() {
@@ -184,6 +185,7 @@ async fn a_probation_sign_in_short_of_the_target_answers_the_client() {
     );
     flow.cookie = probation_sign_in().await;
     let response = flow.request(Method::GET, &resume, &[], None).await;
-    let code = parameter(&flow.client_redirect(&response), "code");
-    assert!(!code.is_empty(), "no target, no refusal");
+    let asked = location(&response);
+    assert_eq!(asked.path(), routes::page::LOGIN, "no target, no refusal");
+    assert_eq!(parameter(&asked, "recovery"), "on", "the recovery question");
 }

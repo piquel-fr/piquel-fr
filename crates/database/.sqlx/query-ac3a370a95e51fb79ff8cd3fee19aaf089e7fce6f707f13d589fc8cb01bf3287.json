@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO alerts (id, payload, version) VALUES ($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ac3a370a95e51fb79ff8cd3fee19aaf089e7fce6f707f13d589fc8cb01bf3287"
+}

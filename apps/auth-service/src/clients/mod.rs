@@ -426,7 +426,7 @@ impl<'a, 't> ClientRegistry<'a, 't> {
     /// Fails if the client does not exist or was already deleted, or the database
     /// fails.
     pub async fn delete(&mut self, id: &ClientId) -> Result<(), ClientRegistryError> {
-        // Families before the client, in the order a refresh rotation locks them.
+        // Families before the client, in the order a refresh locks them.
         self.tx
             .tokens()
             .lock_client_families(std::slice::from_ref(id))
@@ -540,12 +540,16 @@ impl<'a, 't> ClientRegistry<'a, 't> {
     /// already started can no longer finish.
     ///
     /// # Errors
-    /// Fails if the origin is not approved for the client or the database fails.
+    /// Fails if the client is unknown or deleted, the origin is not approved for it,
+    /// or the database fails.
     pub async fn remove_origin(
         &mut self,
         id: &ClientId,
         origin: &RelatedOrigin,
     ) -> Result<(), ClientRegistryError> {
+        // Locked as every change to a client is, so an inline sign-in completing
+        // under the client's share lock sees the origin approved or gone.
+        self.locked(id).await?;
         if !self.tx.oidc().remove_related_origin(id, origin).await? {
             return Err(ClientRegistryError::OriginNotApproved {
                 origin: origin.clone(),
@@ -596,7 +600,8 @@ impl<'a, 't> ClientRegistry<'a, 't> {
 
     /// Records `event`, about no account, as made in this registry's context.
     async fn record(&mut self, event: DomainEvent) -> Result<(), ClientRegistryError> {
-        Ok(self.tx.record(&self.context, None, event).await?)
+        self.tx.record(&self.context, None, event).await?;
+        Ok(())
     }
 }
 

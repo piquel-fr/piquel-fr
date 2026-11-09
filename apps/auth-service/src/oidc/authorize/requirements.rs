@@ -1,13 +1,17 @@
 //! Whether a session meets a pending authorization's sign-in requirements: the
 //! hinted account, a fresh enough sign-in, and the target `acr`.
 
+use crate::account::AccountService;
 use crate::oidc::{OAuthCode, OAuthError, OidcApplication, Reject};
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    AuthenticationMethod, UserId,
+    AuthenticationMethod, RecoveryId, UserId,
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
-use piquel_repository::{SessionAuthentication, StoredAuthorizationRequest, StoredSession};
+use piquel_repository::{
+    DatabaseError, DatabaseTransaction, SessionAuthentication, StoredAuthorizationRequest,
+    StoredSession,
+};
 
 impl OidcApplication {
     /// Requires the session to meet the pending authorization's requirements.
@@ -102,12 +106,34 @@ impl OidcApplication {
             max_age: None,
         };
         unconfirmed_passkey
-            && authentication.auth_time >= request.started_at
+            && Self::signed_in_for(request, session)
             && request
                 .hinted_user_id
                 .is_none_or(|subject| subject == session.user_id)
             && target
                 .check(Some(&authentication.acr), None, Utc::now())
                 .is_err()
+    }
+
+    /// Whether `session` signed in, or in again, after `request` started: for it.
+    pub(super) fn signed_in_for(
+        request: &StoredAuthorizationRequest,
+        session: &StoredSession,
+    ) -> bool {
+        SessionAuthentication::from(session).auth_time >= request.started_at
+    }
+
+    /// The recovery of `user`'s account that can still be undone, if any, which a
+    /// sign-in for an application first asks about: was it the owner's
+    /// (`docs/dev/security/account-recovery.md`, C3)? An owner signing in with an
+    /// older passkey learns of it there, even when its notice reached only a
+    /// hijacked mailbox. Every sign-in for an application asks, or, inline, sends
+    /// the browser to auth's pages to.
+    pub(in crate::oidc) async fn undoable_recovery(
+        tx: &mut DatabaseTransaction<'_>,
+        user: UserId,
+    ) -> Result<Option<RecoveryId>, DatabaseError> {
+        let undoable = AccountService::undoable(tx, user).await?;
+        Ok(undoable.map(|undoable| undoable.id()))
     }
 }

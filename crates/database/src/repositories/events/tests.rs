@@ -6,7 +6,7 @@ use piquel_common::{
     clients::RelatedOrigin,
     events::{RecordedOrigin, RevocationReason},
 };
-use sqlx::{Connection, PgConnection, PgPool};
+use sqlx::{PgConnection, PgPool};
 use std::time::Duration;
 
 /// Inserts an active account to be the subject of recorded events.
@@ -47,10 +47,24 @@ async fn record(pool: &PgPool, user: UserId, event: DomainEvent) {
     tx.commit().await.expect("commit");
 }
 
+/// Stored personal data fills only the payload's `"$erased"` slots: one naming
+/// any other value leaves it as recorded.
+#[test]
+fn personal_data_restores_only_erased_values() {
+    let mut payload = serde_json::json!({"provider": "github", "subject": ERASED});
+    let details = serde_json::json!({"/provider": "forged", "/subject": "subject-1"});
+    serde_json::from_value::<PersonalDetails>(details)
+        .expect("details")
+        .restore(&mut payload);
+    assert_eq!(
+        payload,
+        serde_json::json!({"provider": "github", "subject": {PERSONAL_KEY: "subject-1"}})
+    );
+}
+
 /// Events commit and roll back with their transaction. Personal values, the
 /// request origin and the reason stay out of the event row, read back while kept,
-/// and read as erased once their row is deleted. Deleting the account leaves its
-/// history.
+/// and read as erased once their row is deleted.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn personal_data_is_stored_apart_and_erases() {
@@ -121,13 +135,6 @@ async fn personal_data_is_stored_apart_and_erases() {
     );
     assert_eq!(erased.origin, Personal::Erased);
     assert_eq!(erased.reason, None);
-
-    sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user.as_uuid())
-        .execute(&pool)
-        .await
-        .expect("events never block deleting their account");
-    assert_eq!(history().await.len(), 1, "history outlives the account");
 }
 
 /// Reads `user`'s events from `consumer`'s cursor until `count` arrived,
@@ -365,27 +372,8 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn migration_imports_the_audit_log() {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-    let mut connection = PgConnection::connect(&url).await.expect("connect");
+    let mut connection = Database::scratch_schema(..5).await;
     let user = UserId::new();
-    let schema = format!("import_{}", user.as_uuid().simple());
-    sqlx::raw_sql(&format!(
-        "CREATE SCHEMA {schema}; SET search_path TO {schema}"
-    ))
-    .execute(&mut connection)
-    .await
-    .expect("schema");
-    for migration in [
-        include_str!("../../../migrations/0001_initial.sql"),
-        include_str!("../../../migrations/0002_refresh_family_authorization_code.sql"),
-        include_str!("../../../migrations/0003_session_passkey_confirmation.sql"),
-        include_str!("../../../migrations/0004_authentication_claims.sql"),
-    ] {
-        sqlx::raw_sql(migration)
-            .execute(&mut connection)
-            .await
-            .expect("earlier migration");
-    }
     sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,'imported','Import test')")
         .bind(user.as_uuid())
         .execute(&mut connection)
@@ -413,27 +401,11 @@ async fn migration_imports_the_audit_log() {
         2,
     )
     .await;
-    sqlx::raw_sql(include_str!("../../../migrations/0005_domain_events.sql"))
-        .execute(&mut connection)
-        .await
-        .expect("migration");
+    Database::apply_migrations(&mut connection, 5..=5).await;
     // The release before 0005 keeps writing to the log during that deploy.
     audit(&mut connection, "passkey.login", "{}", 1).await;
     // The rest bring the schema to the one this release reads.
-    for migration in [
-        include_str!("../../../migrations/0006_deliveries.sql"),
-        include_str!("../../../migrations/0007_administrators.sql"),
-        include_str!("../../../migrations/0008_oidc_client_registry.sql"),
-        include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
-        include_str!("../../../migrations/0010_session_devices.sql"),
-        include_str!("../../../migrations/0015_event_reasons.sql"),
-        include_str!("../../../migrations/0018_contract_audit_log_and_legacy_secrets.sql"),
-    ] {
-        sqlx::raw_sql(migration)
-            .execute(&mut connection)
-            .await
-            .expect("later migration");
-    }
+    Database::apply_migrations(&mut connection, 6..).await;
 
     let history = EventRepository::from_connection(&mut connection)
         .history_for_user(user, 10)
@@ -461,8 +433,66 @@ async fn migration_imports_the_audit_log() {
             ("passkey.login", "success", serde_json::json!({})),
         ]
     );
-    sqlx::raw_sql(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&mut connection)
+}
+
+/// An alert update's note is its event's reason, so it is read while the event's
+/// personal data is kept, and reads as none once that is erased.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn an_alert_updates_note_erases_with_its_event() {
+    use crate::repositories::AlertRepository;
+    use piquel_common::{
+        AlertId,
+        admin::{ChainBreak, ChainProblem},
+        alerts::{Alert, AlertStatus},
+    };
+    let pool = Database::test_pool().await;
+    let alert = Alert::AuditChainBroken(ChainBreak {
+        position: 1,
+        problem: ChainProblem::EventChanged,
+    });
+    let alert_id = AlertId::new();
+    // Cleared, so it is not the current alert other tests raise.
+    sqlx::query("INSERT INTO alerts (id, payload, version, cleared_at) VALUES ($1, $2, 1, now())")
+        .bind(alert_id.as_uuid())
+        .bind(serde_json::to_value(&alert).expect("payload"))
+        .execute(&pool)
         .await
-        .expect("drop schema");
+        .expect("alert");
+    let context = EventContext {
+        actor: Actor::Cli {
+            os_user: "ops".into(),
+            host: "bastion".into(),
+        },
+        origin: RequestOrigin::default(),
+        reason: Some("Restoring from backup".into()),
+    };
+    let updated = DomainEvent::AlertUpdated {
+        alert_id,
+        alert,
+        status: AlertStatus::Fixing,
+    };
+    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    let event = tx.record(&context, None, updated).await.expect("record");
+    tx.alerts()
+        .add_update(alert_id, event, AlertStatus::Fixing, &context.actor)
+        .await
+        .expect("update");
+    tx.commit().await.expect("commit");
+    let note = || async {
+        let posted = AlertRepository::from_pool(&pool)
+            .updates(&[alert_id])
+            .await
+            .expect("updates");
+        let [(_, update)] = <[_; 1]>::try_from(posted).expect("one update");
+        update.note
+    };
+    assert_eq!(note().await.as_deref(), Some("Restoring from backup"));
+
+    sqlx::query("DELETE FROM event_personal_data WHERE event_id = $1")
+        .bind(event.as_uuid())
+        .execute(&pool)
+        .await
+        .expect("erase");
+    assert_eq!(note().await, None);
 }

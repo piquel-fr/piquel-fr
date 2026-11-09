@@ -160,12 +160,21 @@ impl HistoryRow<'_> {
             HistoryEntry::IdentityUnlinked { provider } => {
                 format!("{} sign-in unlinked", provider.name())
             }
-            HistoryEntry::EmailAdded { email_id, address } => {
+            HistoryEntry::EmailAdded {
+                email_id,
+                address,
+                provider,
+            } => {
                 let address = address.as_ref().map_or_else(
                     || holdings.email(*email_id),
                     |address| format!(" {address}"),
                 );
-                format!("Email address{address} added")
+                match provider {
+                    Some(provider) => {
+                        format!("Email address{address} added from {}", provider.name())
+                    }
+                    None => format!("Email address{address} added"),
+                }
             }
             HistoryEntry::EmailVerified { email_id } => {
                 format!("Email address{} confirmed", holdings.email(*email_id))
@@ -200,6 +209,7 @@ impl HistoryRow<'_> {
             HistoryEntry::Recovered { .. } => "Account recovered: a passkey was added".to_owned(),
             HistoryEntry::RecoveryUndone => "Account recovery undone".to_owned(),
             HistoryEntry::AccountExported => "Account data downloaded".to_owned(),
+            HistoryEntry::NotificationPreferenceChanged(preference) => preference.change(),
             HistoryEntry::DeletionScheduled { purge_after } => format!(
                 "Account deletion scheduled for {}",
                 purge_after.format("%-d %b %Y")
@@ -256,7 +266,7 @@ impl HistoryRow<'_> {
 
     /// Whether it is something to look at: a failure, a report, or an
     /// administrator's change.
-    const fn worrying(&self) -> bool {
+    pub(crate) const fn worrying(&self) -> bool {
         matches!(
             self.entry,
             HistoryEntry::TokenReused
@@ -284,7 +294,7 @@ impl HistoryRow<'_> {
     }
 
     /// Who did it, if not the account itself, and why, if they said.
-    fn by(&self) -> Option<String> {
+    pub(crate) fn by(&self) -> Option<String> {
         let actor = match self.actor {
             HistoryActor::Admin => "By a Piquel administrator",
             HistoryActor::Operator => "By a Piquel operator",
@@ -469,22 +479,7 @@ async fn entry<'a>(
                     <small class="wrap">(by)</small>
                 }
                 if reporting {
-                    <div class="notice stack warning">
-                        <strong tabindex="-1" autofocus="">"Secure your account?"</strong>
-                        <p>
-                            "This signs out every device but this one, and every app you use with Piquel must sign in again, including on this device. Your passkeys keep working."
-                        </p>
-                        if row.entry.follow_up().is_some() {
-                            <p>"Afterwards, you can confirm with your passkey to undo this change."</p>
-                        }
-                        change_form(
-                            action: page.page,
-                            change: HistoryChange::Report { event_id: row.id, before },
-                            label: "Sign out everywhere else",
-                            class: "danger",
-                            cancel: back.to_owned(),
-                        )
-                    </div>
+                    report_form(row: row, action: page.page, before: before, cancel: back)
                 }
             </div>
             if reportable && !reporting {
@@ -496,6 +491,37 @@ async fn entry<'a>(
                 )
             }
         </li>
+    })
+}
+
+/// Confirming that `row` was not the owner's, which posts the report to the
+/// history page at `action`, staying on the page that started after `before`, or
+/// goes back to `cancel`. It takes the focus once open.
+#[component]
+pub(crate) async fn report_form<'a>(
+    cx: &Cx,
+    row: &'a HistoryRow<'a>,
+    action: &'a str,
+    before: Option<EventId>,
+    cancel: &'a str,
+) -> Result<impl View> {
+    Ok(view! {
+        <div class="notice stack warning">
+            <strong tabindex="-1" autofocus="">"Secure your account?"</strong>
+            <p>
+                "This signs out every device but this one, and every app you use with Piquel must sign in again, including on this device. Your passkeys keep working."
+            </p>
+            if row.entry.follow_up().is_some() {
+                <p>"Afterwards, you can confirm with your passkey to undo this change."</p>
+            }
+            change_form(
+                action: action,
+                change: HistoryChange::Report { event_id: row.id, before },
+                label: "Sign out everywhere else",
+                class: "danger",
+                cancel: cancel.to_owned(),
+            )
+        </div>
     })
 }
 

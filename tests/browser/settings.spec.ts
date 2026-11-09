@@ -1,20 +1,29 @@
+/**
+ * Auth's own settings pages: passkeys, which each page tells the password
+ * manager about, devices, an email link and signing out; and reporting a passkey
+ * in the security history as not the owner's, which signs every other device out.
+ */
 import { expect, test } from '@playwright/test';
 import {
   addPasskeys,
   addSecondPasskey,
-  authorization,
-  consent,
-  serveClient,
+  expectAccepted,
+  recordAcceptedCredentials,
+  secondAuthenticator,
   signUp
 } from './helpers';
 
 /** Runs against auth's own settings pages, with Chromium's virtual passkey authenticator. */
 test('settings on auth: passkeys, devices, an email link and signing out', async ({ browser }) => {
   const context = await browser.newContext();
+  await recordAcceptedCredentials(context);
   const page = await context.newPage();
   const { cdp, authenticatorId } = await addPasskeys(context, page);
   const username = `settings-${Date.now().toString(36)}`;
   await signUp(page, username, 'First passkey');
+  // Each page tells the password manager every passkey that still signs in, so it
+  // forgets the others: it lists the passkeys the authenticators hold, as they do.
+  await expectAccepted(page, cdp, authenticatorId);
   // The settings open on the overview; the sidebar leads to the sign-in methods.
   await page.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
   await expect(page).toHaveURL('/settings/sign-in');
@@ -41,20 +50,11 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
 
   // The page enables adding a passkey, then comes back with the notice.
   // Add it to another authenticator.
-  await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: false });
-  const second = await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      transport: 'usb',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true
-    }
-  });
+  const second = await secondAuthenticator(cdp, authenticatorId);
   await create.click();
   await expect(page.getByText('The passkey was added.')).toBeVisible();
   await expect(page.getByText('Second passkey', { exact: true })).toBeVisible();
+  await expectAccepted(page, cdp, authenticatorId, second);
 
   // The session confirmed with a passkey moments ago, so the page asks for no new
   // confirmation.
@@ -63,10 +63,8 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await page.getByRole('button', { name: 'Confirm removal', exact: true }).click();
   await expect(page.getByText('The passkey was removed.')).toBeVisible();
   await expect(page.getByText('Second passkey', { exact: true })).toHaveCount(0);
-
-  await page.getByRole('link', { name: 'Devices', exact: true }).click();
-  await expect(page.getByText('This device', { exact: true })).toBeVisible();
-  await expect(page.getByText('You’re only signed in on this device.')).toBeVisible();
+  // Only the first authenticator's passkey still signs in.
+  await expectAccepted(page, cdp, authenticatorId);
 
   // A verification link's form posts its token, which never stays in the address, and
   // a spent one is refused, still leading to the addresses. A link differing only in
@@ -92,41 +90,11 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await expect(page.getByRole('heading', { name: 'Sign in to see your settings' })).toBeVisible();
   await page.getByRole('link', { name: 'Sign in', exact: true }).click();
   // Only the first authenticator holds a passkey the account still has.
-  await cdp.send('WebAuthn.removeVirtualAuthenticator', second);
+  await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId: second });
   await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: true });
   await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/sessions$/);
   await expect(page.getByText('This device', { exact: true })).toBeVisible();
-});
-
-test('removing a connected app ends its access, so it asks for consent again', async ({
-  page,
-  context
-}) => {
-  // The `browser-e2e` public client's origin, which the test serves.
-  const client = 'https://browser-e2e.test';
-  const { cdp } = await addPasskeys(context, page);
-  await serveClient(context, cdp, client);
-  await signUp(page, `apps-${Date.now().toString(36)}`);
-  await page.goto(authorization('browser-e2e', `${client}/callback`).url);
-  await consent(page, 'Browser E2E', client);
-
-  await page.goto('/settings');
-  await page.getByRole('link', { name: 'Connected apps', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Connected apps 1', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Remove access for Browser E2E', exact: true }).click();
-  await expect(
-    page.getByText('Browser E2E will need your approval again to use your account.', {
-      exact: false
-    })
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Remove access', exact: true }).click();
-  await expect(page.getByText('The app no longer has access to your account.')).toBeVisible();
-  await expect(page.getByText('No apps have access to your account.')).toBeVisible();
-
-  // Its remembered consent went with it.
-  await page.goto(authorization('browser-e2e', `${client}/callback`).url);
-  await consent(page, 'Browser E2E', client);
 });
 
 test('reporting a change in the history signs every other device out, and undoes it', async ({

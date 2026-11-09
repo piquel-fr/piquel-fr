@@ -353,8 +353,14 @@ impl Scenario {
         let payloads = payloads.expect("payloads").into_iter();
         payloads
             .map(|payload| {
-                let kind = payload["type"].as_str().expect("type").to_owned();
-                (kind, payload["kept"].as_bool())
+                // A notification's email is named by the notification's kind.
+                let message = match payload.get("notification") {
+                    Some(notification) => notification,
+                    None => &payload,
+                };
+                let kind = message.get("kind").or_else(|| message.get("type"));
+                let kind = kind.and_then(|kind| kind.as_str()).expect("kind");
+                (kind.to_owned(), message["kept"].as_bool())
             })
             .collect()
     }

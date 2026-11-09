@@ -2,6 +2,8 @@
 
 use super::{FederationApplication, FederationError, Flow, FlowCookie, Provider, ProviderPicture};
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
+use crate::config::EmailConfig;
+use crate::emails::EmailApplication;
 use crate::security::BrowserCookie;
 use axum::http::HeaderMap;
 use piquel_common::{
@@ -10,6 +12,7 @@ use piquel_common::{
     protocol::api::Identity,
 };
 use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
+use std::net::IpAddr;
 
 impl FederationApplication {
     /// Verifies that the signup ID shown by the social page belongs to this browser.
@@ -35,11 +38,14 @@ impl FederationApplication {
     }
 
     /// Attaches verified signup evidence only inside account-and-first-passkey
-    /// creation. Returns the profile picture the provider reported, which the
-    /// caller imports once the account is committed.
+    /// creation, from `client_ip`, importing its address as `email` allows.
+    /// Returns the profile picture the provider reported, which the caller
+    /// imports once the account is committed.
     pub(crate) async fn attach_signup(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
+        email: &EmailConfig,
+        client_ip: IpAddr,
         pending_id: TokenId,
         headers: &HeaderMap,
         user_id: UserId,
@@ -63,11 +69,9 @@ impl FederationApplication {
         tx.federation()
             .insert_identity(&Self::identity(&pending, user_id))
             .await?;
-        if let Some(email) = &pending.email {
-            tx.federation().set_first_email(user_id, email).await?;
-        }
         tx.record(context, Some(user_id), Self::linked(&pending))
             .await?;
+        EmailApplication::import(tx, context, email, client_ip, user_id, &pending).await?;
         // Checked again, as stored evidence is read back.
         Ok(pending
             .picture_url
@@ -147,10 +151,12 @@ impl AccountService {
     /// once they confirmed with a passkey, and returns where the browser continues, with
     /// the deletion of the evidence's cookie. The evidence must name this account, and
     /// this session when settings started the link. The account must keep a passkey, and
-    /// a repeated callback may confirm only the identity already linked here.
+    /// a repeated callback may confirm only the identity already linked here. Its
+    /// address is imported as `email` allows.
     pub(crate) async fn link_identity(
         &self,
         owner: &Owner,
+        email: &EmailConfig,
         headers: &HeaderMap,
     ) -> Result<(String, FlowCookie), AccountError> {
         let user = owner.user();
@@ -179,6 +185,7 @@ impl AccountService {
         if tx.passkeys().list_active(user).await?.is_empty() {
             return Err(FederationError::LinkRequiresPasskey.into());
         }
+        let context = owner.context();
         match tx
             .federation()
             .find_active(&evidence.issuer, &evidence.subject)
@@ -191,16 +198,15 @@ impl AccountService {
                     .insert_identity(&FederationApplication::identity(&evidence, user))
                     .await?;
                 tx.record(
-                    &owner.context(),
+                    &context,
                     Some(user),
                     FederationApplication::linked(&evidence),
                 )
                 .await?;
             }
         }
-        if let Some(email) = &evidence.email {
-            tx.federation().set_first_email(user, email).await?;
-        }
+        let client_ip = owner.request().client_ip;
+        EmailApplication::import(&mut tx, &context, email, client_ip, user, &evidence).await?;
         tx.commit().await?;
         Ok((evidence.return_to, FlowCookie(Flow::Settled)))
     }

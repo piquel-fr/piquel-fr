@@ -6,18 +6,6 @@ Someone, hopefully you, added {{ address }} to the Piquel account @{{ handle }}.
 {{ link }}
 
 The link works once, for {{ hours }} hours. If you did not add this address, ignore this email: the address will be removed when the link expires.
-{%- when Content::PrimaryAddressChanged { address, history } %}
-Another email address replaced {{ address }} as the primary address of your Piquel account. Piquel's security emails now go there.
-
-If you made this change, there is nothing to do. If you did not, sign in and review your account's security history:
-
-{{ history }}
-{%- when Content::AddressRemoved { address, history } %}
-{{ address }} was removed from your Piquel account.
-
-If you made this change, there is nothing to do. If you did not, sign in and review your account's security history:
-
-{{ history }}
 {%- when Content::RecoveryLink { address: _, handle, link, hours, undo } %}
 Piquel support started a recovery of the Piquel account @{{ handle }}, so its owner can add a new passkey. The account was signed out everywhere. If it is yours, open this link and follow the steps to add a passkey:
 
@@ -26,26 +14,40 @@ Piquel support started a recovery of the Piquel account @{{ handle }}, so its ow
 The link works once, for {{ hours }} hours. If you didn't ask for this, contact Piquel support. If you still have a passkey, you can also cancel the recovery:
 
 {{ undo }}
-{%- when Content::RecoveryRevoked { address: _, undo } %}
-Piquel support revoked passkeys of your Piquel account, signed it out everywhere, and started a recovery so its owner can add a new passkey. Support gives the recovery link only to the person it confirmed as the owner, directly.
+{%- when Content::Notification { address: _, subject, body, page, undo, alerts } %}
+{{ subject }}.
+
+{{ body }}
 {%- match undo %}
 {%- when Some with (undo) %}
 
-If you didn't ask for this and still have a passkey, cancel the recovery, then contact Piquel support:
+Undo the recovery:
 
 {{ undo }}
 {%- when None %}
-
-If you didn't ask for this, contact Piquel support straight away.
 {%- endmatch %}
-{%- when Content::Recovered { address: _, undo, days } %}
-A recovery added a new passkey to your Piquel account and signed in with it. If that was you, there is nothing to do. For {{ days }} days, that passkey can sign in but can't change your account's security settings.
+{%- if let Some(alerts) = alerts %}
 
-If it wasn't you, use a passkey you had before the recovery to undo it. You have {{ days }} days to do so. Undoing it removes the recovery's passkey, signs out every device and withdraws every app's access; apps ask for it again next time:
+See the alerts on the admin dashboard:
 
-{{ undo }}
+{{ alerts }}
+{%- endif %}
 
-If you have no passkey from before the recovery, contact Piquel support, who can undo it for you.
+Read it in your Piquel notifications:
+
+{{ page }}
+{%- when Content::Announcement { address: _, subject: _, body, paragraphs: _, everyone, inbox, unsubscribe } %}
+{{ body }}
+
+{% if everyone %}Piquel sent this announcement to every account.{% else %}Piquel sent this announcement to your account.{% endif %} You can read it again in your Piquel notifications:
+
+{{ inbox }}
+{%- if let Some(unsubscribe) = unsubscribe %}
+
+To stop receiving announcements by email, open:
+
+{{ unsubscribe }}
+{%- endif %}
 {%- endmatch %}
 
 Piquel

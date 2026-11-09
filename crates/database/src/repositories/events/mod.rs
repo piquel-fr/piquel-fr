@@ -6,7 +6,7 @@
 //! value, lives in a separate row that retention and account purges delete; reads
 //! then return [`Personal::Erased`] in its place.
 
-use super::{EventRepository, RepositoryExecutor};
+use super::{EventRepository, KindProbe, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -14,10 +14,10 @@ use piquel_common::{
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
 use piquel_telemetry::Telemetry;
-use serde::{Deserialize, Serialize, de::value::MapDeserializer};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::types::Json;
-use std::{fmt::Display, iter, net::IpAddr};
+use std::net::IpAddr;
 
 /// Key under which a [`Personal`] value serializes; matches its serde rename.
 const PERSONAL_KEY: &str = "$personal";
@@ -30,9 +30,9 @@ const ERASED: &str = "$erased";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventCursor {
     /// The writing transaction's ID.
-    txid: i64,
+    pub(crate) txid: i64,
     /// The event's position in insertion order.
-    sequence: i64,
+    pub(crate) sequence: i64,
 }
 
 /// Which events [`EventRepository::list`] returns. The default matches every event.
@@ -114,39 +114,6 @@ impl RecordedEvent {
     }
 }
 
-/// How decoding `{"kind": …}` alone as a [`DomainEvent`] fails, which tells
-/// whether this release knows the kind. Only serde's derive knows the variant
-/// names, and it reports an unknown one through [`serde::de::Error::unknown_variant`].
-#[derive(Debug, thiserror::Error)]
-enum KindProbe {
-    /// The kind is no variant of this release's [`DomainEvent`].
-    #[error("unknown event kind")]
-    Unknown,
-    /// Anything else, such as the missing data of a known kind.
-    #[error("{0}")]
-    Other(String),
-}
-
-impl serde::de::Error for KindProbe {
-    /// Keeps the message, for the error to be complete.
-    fn custom<T: Display>(message: T) -> Self {
-        Self::Other(message.to_string())
-    }
-
-    /// Marks the kind as unknown.
-    fn unknown_variant(_: &str, _: &'static [&'static str]) -> Self {
-        Self::Unknown
-    }
-}
-
-impl KindProbe {
-    /// Whether `kind` is the serde tag of a [`DomainEvent`] variant of this release.
-    fn knows(kind: &str) -> bool {
-        let tag = MapDeserializer::<_, Self>::new(iter::once(("kind", kind)));
-        !matches!(DomainEvent::deserialize(tag), Err(Self::Unknown))
-    }
-}
-
 /// An event joined with its personal data, as the read queries return it.
 struct EventRow {
     /// Event identifier.
@@ -211,7 +178,7 @@ impl TryFrom<EventRow> for StoredEvent {
         };
         // Known only if it decodes to an event this release writes in the same
         // version. A version this release does not write came from a newer one.
-        let decoded = KindProbe::knows(&row.kind).then(|| {
+        let decoded = KindProbe::knows::<DomainEvent>(&row.kind).then(|| {
             DomainEvent::deserialize(&Value::Object(Map::from_iter([
                 ("kind".to_owned(), Value::String(row.kind.clone())),
                 ("data".to_owned(), payload.clone()),
@@ -254,6 +221,17 @@ struct TaggedEvent {
     data: Value,
 }
 
+/// Which verifications of the audit chain
+/// [`EventRepository::newest_audit_verification`] reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verifications {
+    /// Every one.
+    Any,
+    /// Those made with the environment's own keys, not keys given with `--key`,
+    /// which say nothing of its checkpoints.
+    OwnKeys,
+}
+
 /// The [`Personal`] values of one payload, keyed by their JSON pointer, as stored
 /// in `event_personal_data.details`.
 #[derive(Default, Serialize, Deserialize)]
@@ -291,10 +269,15 @@ impl PersonalDetails {
         }
     }
 
-    /// Puts each stored value back where [`Self::extract`] found it.
+    /// Puts each stored value back where [`Self::extract`] found it. Only an
+    /// `"$erased"` slot is filled, so stored personal data can never replace a
+    /// value of the payload, which the audit chain covers.
     fn restore(self, payload: &mut Value) {
         for (pointer, personal) in self.0 {
-            if let Some(slot) = payload.pointer_mut(&pointer) {
+            if let Some(slot) = payload
+                .pointer_mut(&pointer)
+                .filter(|slot| slot.as_str() == Some(ERASED))
+            {
                 *slot = Value::Object(Map::from_iter([(PERSONAL_KEY.to_owned(), personal)]));
             }
         }
@@ -407,6 +390,10 @@ impl EventRepository<'_> {
     /// `offset`. A `before` event that does not exist, or concerns another account
     /// than `subject`, matches nothing.
     ///
+    /// Newest means last in the order events are sealed in, `(txid, sequence)`,
+    /// which `audit verify` checks against the chain, so sealed history is listed
+    /// in chain order. `sequence` alone is not covered by the chain.
+    ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or a stored event does not decode.
@@ -435,15 +422,15 @@ impl EventRepository<'_> {
                 AND ($2::text IS NULL OR e.kind = $2)
                 AND (
                     $3::uuid IS NULL
-                    OR e.sequence < (
-                        SELECT sequence FROM domain_events
+                    OR (e.txid, e.sequence) < (
+                        SELECT txid, sequence FROM domain_events
                         WHERE id = $3
                         AND ($1::uuid IS NULL OR subject_user_id = $1)
                     )
                 )
                 AND ($5::uuid IS NULL OR e.id = $5)
                 AND ($7::text IS NULL OR e.kind <> $7)
-                ORDER BY e.sequence DESC
+                ORDER BY e.txid DESC, e.sequence DESC
                 LIMIT $4 OFFSET $6"#,
                 filter.subject.map(UserId::as_uuid),
                 filter.kind.as_deref(),
@@ -457,6 +444,47 @@ impl EventRepository<'_> {
         .into_iter()
         .map(StoredEvent::try_from)
         .collect()
+    }
+
+    /// The newest `audit_chain_verified` event of those `counted`, by when it was
+    /// recorded. The kind is written into the query, not bound, so every plan
+    /// reads the `(kind, occurred_at)` index: one entry, however many events
+    /// there are, or as many as the newest verifications that were left out.
+    /// After the clock steps back, an older verification can read as the newest
+    /// until the next one is recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or the stored event does not decode.
+    pub async fn newest_audit_verification(
+        &mut self,
+        counted: Verifications,
+    ) -> Result<Option<StoredEvent>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                EventRow,
+                r#"SELECT
+                    e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
+                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
+                    e.subject_user_id AS "subject_user_id: UserId",
+                    e.trace_id AS "trace_id: TraceId",
+                    p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
+                    p.user_agent_family AS "browser?: Browser",
+                    p.platform AS "platform?: Platform",
+                    p.details AS "details?", p.reason AS "reason?"
+                FROM domain_events e
+                LEFT JOIN event_personal_data p ON p.event_id = e.id
+                WHERE e.kind = 'audit_chain_verified'
+                AND ($1 OR e.payload ->> 'keys' IS DISTINCT FROM 'given')
+                ORDER BY e.occurred_at DESC
+                LIMIT 1"#,
+                counted == Verifications::Any,
+            )
+        )?
+        .map(StoredEvent::try_from)
+        .transpose()
     }
 
     /// Counts the events of any of `kinds`, the serde tags of [`DomainEvent`]
@@ -547,7 +575,7 @@ impl EventRepository<'_> {
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 WHERE e.client_id = $1
-                ORDER BY e.sequence DESC
+                ORDER BY e.txid DESC, e.sequence DESC
                 LIMIT $2"#,
                 client_id.as_str(),
                 i64::from(limit),

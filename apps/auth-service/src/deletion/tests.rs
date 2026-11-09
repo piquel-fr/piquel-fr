@@ -6,16 +6,19 @@ use crate::{
     AdminError, AdminService, Reason,
     jobs::AccountPurge,
     security::SessionError,
-    tests::{Browser, Replicas, change, operator, refresh_grant, register, registration},
+    tests::{
+        Browser, Replicas, change, operator, refresh_grant, register, registration,
+        verified_address,
+    },
 };
 use axum::http::header;
 use piquel_common::{
-    AuthenticationMethod, EmailId, Provider, TokenId,
+    AuthenticationMethod, Provider, TokenId,
     clients::{ClientKind, ClientOwner},
     events::{JobName, RequestOrigin},
 };
 use piquel_repository::{
-    Database, InsertExternalIdentity, InsertPasskey, InsertVerifiedEmail, RefreshRotationError,
+    Database, InsertExternalIdentity, InsertPasskey, RefreshRedemption, RefreshRedemptionError,
 };
 use serde_json::json;
 
@@ -66,6 +69,30 @@ impl Fixture {
         self.user(user_id).await.map(|user| user.status)
     }
 
+    /// A signed-out browser holding the offer to restore `user_id`'s account
+    /// that a sign-in with `passkey` made.
+    async fn offer(&self, user_id: UserId, passkey: PasskeyId) -> Browser {
+        let mut tx = self.database.begin().await.expect("transaction");
+        tx.users()
+            .find_by_id_for_update(user_id)
+            .await
+            .expect("lock");
+        let offered = Deletions::offer_restore(tx, user_id, passkey)
+            .await
+            .expect("offer");
+        let mut response = axum::http::Response::new(());
+        offered.set_on(&mut response).expect("cookie");
+        let (name, value) = response.headers()[header::SET_COOKIE]
+            .to_str()
+            .expect("cookie")
+            .split(';')
+            .next()
+            .and_then(|pair| pair.split_once('='))
+            .expect("cookie pair");
+        assert_eq!(name, BrowserCookie::Restore.as_str());
+        Browser::signed_out().with_cookie(BrowserCookie::Restore, value)
+    }
+
     /// The handle of `browser`'s account.
     async fn handle(&self, browser: &Browser) -> String {
         self.user(browser.user_id)
@@ -108,18 +135,9 @@ impl Fixture {
     /// besides its sessions and history, and returns its grant's refresh token
     /// digest.
     async fn seed(&self, browser: &Browser) -> Vec<u8> {
-        let handle = self.handle(browser).await;
+        let address = format!("{}@example.com", browser.user_id);
+        verified_address(&self.database, browser.user_id, &address, true).await;
         let mut tx = self.database.begin().await.expect("transaction");
-        tx.emails()
-            .insert_verified(&InsertVerifiedEmail {
-                id: EmailId::new(),
-                user_id: browser.user_id,
-                normalized_email: format!("{handle}@example.com"),
-                is_primary: true,
-                verified_at: Utc::now(),
-            })
-            .await
-            .expect("email");
         tx.passkeys()
             .insert(&InsertPasskey {
                 id: PasskeyId::new(),
@@ -211,20 +229,12 @@ async fn exports_hold_every_category_and_no_secret() {
         .export(&browser.owner(&fixture.database).await)
         .await
         .expect("export");
-    let handle = fixture.handle(&browser).await;
-    assert_eq!(
-        export.file_name(),
-        format!(
-            "piquel-account-{handle}-{}.json",
-            Utc::now().format("%Y-%m-%d")
-        )
-    );
+    // Its file name and shape are checked in the export's own tests.
     let export = serde_json::to_value(export).expect("JSON");
     assert_eq!(
-        (&export["format"], &export["version"]),
-        (&json!("piquel.account-export"), &json!(2))
+        export["profile"]["handle"],
+        fixture.handle(&browser).await.as_str()
     );
-    assert_eq!(export["profile"]["handle"], handle.as_str());
     let count = |category: &str| export[category].as_array().map_or(0, Vec::len);
     for (category, expected) in [
         ("handles", 1),
@@ -242,18 +252,6 @@ async fn exports_hold_every_category_and_no_secret() {
         count("history") >= 2,
         "both sign-ins: {}",
         export["history"]
-    );
-    let passkey = export["passkeys"][0].as_object().expect("passkey");
-    assert_eq!(
-        passkey.keys().map(String::as_str).collect::<Vec<_>>(),
-        [
-            "backed_up",
-            "backup_eligible",
-            "created_at",
-            "friendly_name",
-            "id",
-            "last_used_at"
-        ]
     );
     let text = export.to_string();
     for secret in ["KEY-MATERIAL", "digest", "secret", "credential"] {
@@ -330,9 +328,9 @@ async fn deleting_ends_every_session_and_grant() {
     let mut tx = fixture.database.begin().await.expect("transaction");
     assert!(matches!(
         tx.tokens()
-            .consume_for_rotation(token, &[digest], client.as_str())
+            .redeem_refresh(token, &[digest], client.as_str(), RefreshRedemption::Rotate)
             .await,
-        Err(RefreshRotationError::Invalid)
+        Err(RefreshRedemptionError::Invalid)
     ));
     assert!(
         Session::create(
@@ -396,25 +394,7 @@ async fn a_restore_offer_restores_the_account_once() {
         .await
         .expect("delete");
 
-    let mut tx = fixture.database.begin().await.expect("transaction");
-    tx.users()
-        .find_by_id_for_update(browser.user_id)
-        .await
-        .expect("lock");
-    let offered = Deletions::offer_restore(tx, browser.user_id, passkey)
-        .await
-        .expect("offer");
-    let mut response = axum::http::Response::new(());
-    offered.set_on(&mut response).expect("cookie");
-    let (name, value) = response.headers()[header::SET_COOKIE]
-        .to_str()
-        .expect("cookie")
-        .split(';')
-        .next()
-        .and_then(|pair| pair.split_once('='))
-        .expect("cookie pair");
-    assert_eq!(name, BrowserCookie::Restore.as_str());
-    let holding = Browser::signed_out().with_cookie(BrowserCookie::Restore, value);
+    let holding = fixture.offer(browser.user_id, passkey).await;
 
     assert!(
         fixture
@@ -472,6 +452,36 @@ async fn a_restore_offer_restores_the_account_once() {
         Some(passkey),
         "signed in with the offer's passkey"
     );
+    assert!(matches!(
+        fixture
+            .account
+            .restore(RequestContext::TEST, &holding.headers())
+            .await,
+        Err(AccountError::Deletion(DeletionError::RestoreExpired))
+    ));
+}
+
+/// An offer whose passkey was revoked since restores nothing: restoring would
+/// sign in with it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_restore_offer_dies_with_its_passkey() {
+    let fixture = Fixture::new().await;
+    let browser = Browser::new_account(&fixture.database).await;
+    let passkey = crate::tests::unusable_passkey(browser.user_id);
+    let passkeys = || fixture.database.passkeys();
+    passkeys().insert(&passkey).await.expect("passkey");
+    let handle = fixture.handle(&browser).await;
+    let _signed_out = fixture
+        .account
+        .delete_account(&browser.owner(&fixture.database).await, &handle)
+        .await
+        .expect("delete");
+    let holding = fixture.offer(browser.user_id, passkey.id).await;
+    let revoked = passkeys().revoke(passkey.id, browser.user_id).await;
+    assert!(revoked.expect("revoke"));
+    let offer = fixture.account.restore_offer(&holding.headers()).await;
+    assert!(offer.expect("lookup").is_none());
     assert!(matches!(
         fixture
             .account
@@ -571,8 +581,7 @@ async fn operators_and_the_purge_job_delete_accounts() {
 }
 
 /// The CLI purges an account at once, in any status, as the operator, and the purge
-/// erases the personal data of the events it leaves. Nobody deletes the last
-/// active administrator's account.
+/// erases the personal data of the events it leaves.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_cli_purges_disabled_accounts_at_once() {

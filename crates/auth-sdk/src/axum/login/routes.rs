@@ -1,15 +1,12 @@
 //! The routes' handlers: starting a login, completing it, and both logouts.
 
 use super::{
-    LOGIN_COOKIE, Login, PENDING_LIFETIME, SESSION_COOKIE, STEP_UP_COOKIE, STEP_UP_RETURN,
+    Login, MAX_PENDING_COOKIE_BYTES, PENDING_LIFETIME, ReturnTo, STEP_UP_RETURN, SessionCookie,
 };
 use crate::{
-    Acr, AuthorizeRequest, CallbackParams, LoginError, StepUpRequirement, TokenError,
-    axum::{
-        StoredLogin,
-        bearer::ErrorChain,
-        session::{PendingAuthorization, SessionKey},
-    },
+    Acr, AuthorizeRequest, CallbackParams, LoginError, RefreshToken, StepUpRequirement, TokenError,
+    axum::{StoredLogin, bearer::ErrorChain, seal::SealError, session::PendingAuthorization},
+    protocol::{oauth::Scope, sdk::ErrorCategory},
 };
 use axum::{
     Form, Json,
@@ -17,10 +14,12 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::TimeDelta;
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
+
+/// Longest a session's revocation may hold up the sign-in or logout ending it,
+/// whatever the HTTP client's own timeout.
+const REVOCATION_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The query of `GET /login`.
 #[derive(Deserialize)]
@@ -45,9 +44,10 @@ pub(super) struct LogoutForm {
 }
 
 impl Login {
-    /// `GET /login`: stores a pending login and redirects to auth.
+    /// `GET /login`: keeps a pending login in a sealed cookie and redirects to auth.
     pub(super) async fn start(
         State(login): State<Arc<Self>>,
+        headers: HeaderMap,
         Query(query): Query<StartQuery>,
     ) -> Response {
         let return_to = query
@@ -58,21 +58,20 @@ impl Login {
             acr: query.acr_values.as_deref().and_then(Acr::select),
             max_age: query.max_age,
         };
+        // Without a refresh token, a session could not learn that auth ended it.
+        let mut scopes = login.scopes.clone();
+        scopes.insert(Scope::OfflineAccess);
         let request = AuthorizeRequest {
-            scopes: login.scopes.clone(),
+            scopes,
             step_up,
             ..AuthorizeRequest::default()
         };
-        let randomness_unavailable = || {
-            tracing::error!("operating system randomness is unavailable");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        };
-        let Ok(key) = SessionKey::generate() else {
-            return randomness_unavailable();
-        };
         let (url, pending) = match login.client.authorize(&request).await {
             Ok(started) => started,
-            Err(LoginError::Randomness(_)) => return randomness_unavailable(),
+            Err(LoginError::Randomness(_)) => {
+                tracing::error!("operating system randomness is unavailable");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
             // Auth refused or could not take the pushed request.
             Err(error) => {
                 tracing::warn!(error = %ErrorChain(&error), "sign-in could not start");
@@ -83,115 +82,225 @@ impl Login {
                     .into_response();
             }
         };
-        let pending = PendingAuthorization {
+        let name = login.cookies.pending(pending.state());
+        // A step-up strengthens the session it starts from, so it is pinned to its
+        // user. The session holds no raw ID token to send as `id_token_hint`, so auth
+        // may let another account sign in; the callback refuses it.
+        let subject = match login.open_session(&headers) {
+            SessionCookie::Open(session) if query.step_up => Some(session.subject().to_owned()),
+            _ => None,
+        };
+        let mut pending = PendingAuthorization {
             login: pending,
             return_to,
             step_up: query.step_up,
+            subject,
+            expires_at: login.now() + PENDING_LIFETIME,
         };
-        let expires = login.now() + PENDING_LIFETIME;
-        if let Err(error) = login.sessions.insert_pending(&key, &pending, expires).await {
-            return Self::store_failure(&error);
-        }
+        // A `return_to` too long for the cookie returns home instead, or to the root
+        // if home is too long too.
+        let mut fallbacks = [login.home.clone(), ReturnTo::root()].into_iter();
+        let sealed = loop {
+            let sealed = match login.seal_pending(&pending, &name) {
+                Ok(sealed) => sealed,
+                Err(error) => return Self::failure(&error, "a pending login could not be sealed"),
+            };
+            if name.len() + sealed.len() <= MAX_PENDING_COOKIE_BYTES {
+                break sealed;
+            }
+            let Some(fallback) = fallbacks.next() else {
+                tracing::error!("even a login returning to the root outgrows its cookie");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            };
+            tracing::debug!("return_to is too long for the login cookie; falling back");
+            pending.return_to = fallback;
+        };
         let mut response = Redirect::to(url.as_str()).into_response();
         response.headers_mut().append(
             header::SET_COOKIE,
-            Self::set_cookie(LOGIN_COOKIE, key.as_cookie(), PENDING_LIFETIME),
+            Self::set_cookie(&name, &sealed, PENDING_LIFETIME),
         );
         response
     }
 
-    /// `GET /callback`: completes the pending login and starts a session.
+    /// `pending`, sealed for the cookie `name`.
+    fn seal_pending(
+        &self,
+        pending: &PendingAuthorization,
+        name: &str,
+    ) -> Result<String, SealError> {
+        self.cookie_key.pending.seal(pending, &self.context(name))
+    }
+
+    /// The pending login `sealed` holds as the cookie `name`, expired or not, if it
+    /// opens: only then is the cookie this client's to read or drop.
+    fn open_pending(&self, sealed: &str, name: &str) -> Option<PendingAuthorization> {
+        self.cookie_key.pending.open(sealed, &self.context(name))
+    }
+
+    /// `GET /callback`: completes the pending login its `state` names and starts a
+    /// session. Only the cookie holding that login is read and dropped, so a
+    /// callback for another login, or a link with a made-up `state`, leaves logins in
+    /// progress alone. Auth redeems a code once, so a copied cookie completes nothing
+    /// twice.
     pub(super) async fn callback(
         State(login): State<Arc<Self>>,
-        headers: HeaderMap,
         Query(callback): Query<CallbackParams>,
+        headers: HeaderMap,
     ) -> Response {
-        let Some(key) = Self::cookie(&headers, LOGIN_COOKIE).and_then(SessionKey::parse) else {
+        let state = callback.state.as_deref().unwrap_or_default();
+        let name = login.cookies.pending(state);
+        let pending = Self::cookie(&headers, &name)
+            .and_then(|sealed| login.open_pending(sealed, &name))
+            .filter(|pending| pending.login.state() == state);
+        // A cookie that does not open, or holds another tab's login, is left alone.
+        let Some(pending) = pending else {
             return (
                 StatusCode::BAD_REQUEST,
                 "This sign-in has no pending login; start again.",
             )
                 .into_response();
         };
-        let pending = match login.sessions.take_pending(&key, login.now()).await {
-            Ok(Some(pending)) => pending,
-            Ok(None) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "This sign-in expired or was already used; start again.",
-                )
-                    .into_response();
-            }
-            Err(error) => return Self::store_failure(&error),
+        let mut response = if pending.expires_at > login.now() {
+            login.complete(&headers, pending, &callback).await
+        } else {
+            (
+                StatusCode::BAD_REQUEST,
+                "This sign-in expired; start again.",
+            )
+                .into_response()
         };
-        let tokens = match login.client.complete(pending.login, &callback).await {
+        // Spent whatever the outcome: the code may have been redeemed.
+        response
+            .headers_mut()
+            .append(header::SET_COOKIE, Self::clear_cookie(&name));
+        response
+    }
+
+    /// Completes `pending` from `callback` and starts its session. The session the
+    /// browser had, in `headers`, is replaced, and its refresh token revoked before
+    /// the new session is set, so no copy of it, nor a response still in flight that
+    /// sets it back, outlives its access token. If auth cannot revoke it, the sign-in
+    /// fails with 502 and the browser keeps its session; the code is spent, so the
+    /// user starts again.
+    ///
+    /// A step-up must sign in the user it started from, and the one whose session it
+    /// replaces, as after switching accounts in another tab: otherwise it fails, and
+    /// the session it would replace is kept, its refresh token unrevoked.
+    async fn complete(
+        &self,
+        headers: &HeaderMap,
+        pending: PendingAuthorization,
+        callback: &CallbackParams,
+    ) -> Response {
+        let tokens = match self.client.complete(pending.login, callback).await {
             Ok(tokens) => tokens,
             Err(error) => {
                 tracing::debug!(error = %ErrorChain(&error), "sign-in failed");
-                let status = if error.code().code == crate::protocol::sdk::ErrorCategory::Network {
-                    StatusCode::BAD_GATEWAY
-                } else {
-                    StatusCode::BAD_REQUEST
+                // The issuer's failures, unreachable or with unusable keys, are not the
+                // browser's: answer 502, as the bearer path answers 503.
+                let status = match error.code().code {
+                    ErrorCategory::Network | ErrorCategory::Keys => StatusCode::BAD_GATEWAY,
+                    _ => StatusCode::BAD_REQUEST,
                 };
                 return (status, format!("Sign-in failed: {error}.")).into_response();
             }
         };
-        let issuer = login.client.issuer().issuer().to_owned();
-        let (Some(stored), Ok(session)) =
-            (StoredLogin::new(issuer, tokens), SessionKey::generate())
-        else {
+        let Some(stored) = StoredLogin::new(tokens, self.now() + self.lifetime) else {
             return StatusCode::BAD_GATEWAY.into_response();
         };
-        // A fresh key on every sign-in: a key planted before login is worthless after.
-        if let Some(previous) = Self::cookie(&headers, SESSION_COOKIE).and_then(SessionKey::parse)
-            && let Err(error) = login.sessions.delete(&previous).await
+        let previous = match self.open_session(headers) {
+            SessionCookie::Open(previous) => Some(previous),
+            _ => None,
+        };
+        let replaced = previous.as_ref().map(|previous| previous.subject());
+        if pending.step_up
+            && [pending.subject.as_deref(), replaced]
+                .into_iter()
+                .flatten()
+                .any(|subject| subject != stored.subject())
         {
-            return Self::store_failure(&error);
+            tracing::debug!("a step-up signed in another account");
+            self.abandon(&stored).await;
+            return (
+                StatusCode::BAD_REQUEST,
+                "Sign-in failed: this step-up signed in another account than this session's.",
+            )
+                .into_response();
         }
-        let now = login.now();
-        match login
-            .sessions
-            .insert(&session, &stored, now + login.lifetime, now)
-            .await
+        if let Some(refresh_token) = previous
+            .as_ref()
+            .and_then(|previous| previous.refresh_token())
+            && !self.revoke(refresh_token).await
         {
-            Ok(true) => {}
-            Ok(false) => {
-                tracing::debug!("sign-in completed after auth ended its session");
+            self.abandon(&stored).await;
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Signing in could not end your previous session; start again.",
+            )
+                .into_response();
+        }
+        let session = match self.session_cookie(&stored) {
+            Ok(session) => session,
+            Err(error) => {
+                tracing::error!(error = %ErrorChain(&error), "sign-in failed");
                 return (
-                    StatusCode::BAD_REQUEST,
-                    "Sign-in failed: this session was signed out; start again.",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Sign-in failed: {error}."),
                 )
                     .into_response();
             }
-            Err(error) => return Self::store_failure(&error),
-        }
+        };
         let mut response = Redirect::to(pending.return_to.as_str()).into_response();
         let cookies = response.headers_mut();
-        cookies.append(
-            header::SET_COOKIE,
-            Self::set_cookie(SESSION_COOKIE, session.as_cookie(), login.lifetime),
-        );
-        cookies.append(
-            header::SET_COOKIE,
-            Self::set_cookie(LOGIN_COOKIE, "", TimeDelta::zero()),
-        );
+        cookies.append(header::SET_COOKIE, session);
         // A step-up marks its return; any other sign-in drops an unused marker, which
         // belonged to the session this one replaces.
         let marker = if pending.step_up {
             Self::set_cookie(
-                STEP_UP_COOKIE,
-                &URL_SAFE_NO_PAD.encode(pending.return_to.as_str()),
+                &self.cookies.step_up,
+                &Self::step_up_marker(pending.return_to.as_str()),
                 STEP_UP_RETURN,
             )
         } else {
-            Self::set_cookie(STEP_UP_COOKIE, "", TimeDelta::zero())
+            Self::clear_cookie(&self.cookies.step_up)
         };
         cookies.append(header::SET_COOKIE, marker);
         response
     }
-    /// `POST /logout`: deletes the session and redirects to RP-initiated logout.
-    /// `POST` only, and only from the app's own pages, so another site cannot sign
-    /// the user out.
+
+    /// Revokes the grant of `login`, a sign-in the callback refuses after redeeming
+    /// its code, so it does not live on at auth unused. A failure is logged by
+    /// [`Self::revoke`] and changes nothing: the refusal stands either way.
+    async fn abandon(&self, login: &StoredLogin) {
+        if let Some(refresh_token) = login.refresh_token() {
+            self.revoke(refresh_token).await;
+        }
+    }
+
+    /// Revokes `refresh_token` at auth, within [`REVOCATION_DEADLINE`], so a hanging
+    /// auth cannot hold up the sign-in or logout around it. Returns whether auth
+    /// revoked it, logging why not.
+    async fn revoke(&self, refresh_token: &RefreshToken) -> bool {
+        match tokio::time::timeout(REVOCATION_DEADLINE, self.client.revoke(refresh_token)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(error)) => {
+                tracing::warn!(error = %ErrorChain(&error), "a refresh token could not be revoked");
+                false
+            }
+            Err(_) => {
+                tracing::warn!("revoking a refresh token timed out");
+                false
+            }
+        }
+    }
+
+    /// `POST /logout`: revokes the session's refresh token at auth, so no copy of the
+    /// cookie refreshes again, clears the cookies, and redirects to RP-initiated
+    /// logout. If auth cannot revoke it, the answer is 502 and the cookie is kept, so
+    /// the user can try again: clearing it would leave copies refreshing. `POST`
+    /// only, and only from the app's own pages, so another site cannot sign the user
+    /// out.
     pub(super) async fn logout(State(login): State<Arc<Self>>, headers: HeaderMap) -> Response {
         if !login.same_origin(&headers) {
             return (
@@ -201,33 +310,32 @@ impl Login {
                 .into_response();
         }
         let mut destination = login.home.as_str().to_owned();
-        if let Some(key) = Self::cookie(&headers, SESSION_COOKIE).and_then(SessionKey::parse) {
-            match login.sessions.load(&key, login.now()).await {
-                Ok(Some(session)) => {
-                    destination = login
-                        .client
-                        .logout_url(&session.login.id_token, login.after_logout.as_ref())
-                        .into();
-                }
-                Ok(None) => {}
-                Err(error) => return Self::store_failure(&error),
+        if let SessionCookie::Open(session) = login.open_session(&headers) {
+            if let Some(refresh_token) = session.refresh_token()
+                && !login.revoke(refresh_token).await
+            {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    "Signing out could not reach the sign-in service; try again.",
+                )
+                    .into_response();
             }
-            if let Err(error) = login.sessions.delete(&key).await {
-                return Self::store_failure(&error);
-            }
+            destination = login
+                .client
+                .logout_url(None, login.after_logout.as_ref())
+                .into();
         }
         let mut response = Redirect::to(&destination).into_response();
-        for cookie in [SESSION_COOKIE, STEP_UP_COOKIE] {
-            response.headers_mut().append(
-                header::SET_COOKIE,
-                Self::set_cookie(cookie, "", TimeDelta::zero()),
-            );
+        for cookie in [&login.cookies.session, &login.cookies.step_up] {
+            response
+                .headers_mut()
+                .append(header::SET_COOKIE, Self::clear_cookie(cookie));
         }
         response
     }
 
-    /// `POST /backchannel-logout`: validates auth's logout token and deletes the
-    /// sessions it names (OIDC Back-Channel Logout 1.0 §2.8). Auth posts it server to
+    /// `POST /backchannel-logout`: validates auth's logout token and hands it to the
+    /// app's handler (OIDC Back-Channel Logout 1.0 §2.8). Auth posts it server to
     /// server, so there is no origin to check: the signed token is the authentication.
     pub(super) async fn backchannel_logout(
         State(login): State<Arc<Self>>,
@@ -240,11 +348,17 @@ impl Login {
         response
     }
 
-    /// Applies the logout token in `form`, answering as [`LoginRoutes`](super::LoginRoutes) documents.
+    /// Applies the logout token in `form`, answering as
+    /// [`LoginRoutes::on_backchannel_logout`](super::LoginRoutes::on_backchannel_logout)
+    /// documents.
     async fn receive_logout(&self, form: Option<Form<LogoutForm>>) -> Response {
         let invalid = || {
             let body = Json(serde_json::json!({ "error": "invalid_request" }));
             (StatusCode::BAD_REQUEST, body).into_response()
+        };
+        // The route is mounted only with a handler.
+        let Some(handler) = &self.on_logout else {
+            return StatusCode::NOT_FOUND.into_response();
         };
         let Some(Form(form)) = form else {
             tracing::warn!("back-channel logout without a logout_token form field");
@@ -261,21 +375,9 @@ impl Login {
                 return invalid();
             }
         };
-        // An ended `sid` is remembered for as long as a session started now would
-        // last, far beyond any ID token a racing sign-in could still complete with.
-        let now = self.now();
-        match self
-            .sessions
-            .log_out(&token, now + self.lifetime, now)
-            .await
-        {
-            Ok(applied) => {
-                if !applied {
-                    tracing::debug!("back-channel logout token applied before");
-                }
-                StatusCode::OK.into_response()
-            }
-            Err(error) => Self::store_failure(&error),
+        match handler(token).await {
+            Ok(()) => StatusCode::OK.into_response(),
+            Err(error) => Self::failure(error.as_ref(), "the back-channel logout handler failed"),
         }
     }
 }

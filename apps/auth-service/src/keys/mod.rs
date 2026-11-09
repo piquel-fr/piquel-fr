@@ -459,7 +459,7 @@ struct Change<'t, 'c> {
     now: DateTime<Utc>,
     /// Who makes it, for its events. `None` for rotation by the service itself,
     /// which records none yet: a release may write `JobName::KeyRotation` only
-    /// once the release before it reads it (see `database-crate.md`).
+    /// once the release before it reads it (see `docs/dev/architecture/database.md`).
     context: Option<EventContext>,
 }
 

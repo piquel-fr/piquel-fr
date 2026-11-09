@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT FROM announcements a\n            JOIN announcement_recipients r ON r.announcement_id = a.id\n            WHERE r.user_id = $1 AND NOT a.everyone\n            ORDER BY a.id FOR UPDATE OF a",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "14f793188a9ba315364f3f06eced4915e96635d76122c39f16439130e34927a6"
+}

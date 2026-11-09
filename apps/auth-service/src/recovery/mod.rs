@@ -168,6 +168,11 @@ impl UndoableRecovery {
         })
     }
 
+    /// The recovery.
+    pub(crate) const fn id(&self) -> RecoveryId {
+        self.recovery.id
+    }
+
     /// Whether its link was used, so it is in probation: starting another
     /// recovery waits until it is undone or settles.
     pub(crate) const fn is_probation(&self) -> bool {
@@ -548,7 +553,8 @@ impl AccountService {
         match undoable.probation {
             None => {
                 tx.recoveries().cancel_open(user).await?;
-                tx.record(context, Some(user), undone).await
+                tx.record(context, Some(user), undone).await?;
+                Ok(())
             }
             Some(probation) => {
                 Self::take_back_passkey(tx, context, user, probation.passkey()).await?;

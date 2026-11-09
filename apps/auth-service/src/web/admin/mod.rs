@@ -25,6 +25,10 @@
 
 /// The administrators.
 mod administrators;
+/// The alerts administrators are shown, and the updates they post on them.
+mod alerts;
+/// Announcements to accounts.
+mod announcements;
 /// The audit chain's state, and the checkpoints it may be pruned through.
 mod audit;
 /// The OIDC clients, one client, and the changes made to them.
@@ -53,9 +57,9 @@ mod tests;
 mod users;
 
 use crate::{
-    AdminError, AdminService, AuthConfig, KeyStore, MAX_REQUEST_BODY_BYTES,
+    AdminError, AdminService, AuthConfig, KeyStore, MAX_DASHBOARD_BODY_BYTES,
     account::{AccountError, AccountService},
-    admin::{AdminOperation, DashboardSignIn, SignedInAdmin},
+    admin::{AdminOperation, DashboardSignIn, Overview, Problem, SignedInAdmin},
     assets::EmbeddedAssets,
     config::{DashboardConfig, PolicyLinks},
     federation::ReturnTo,
@@ -76,7 +80,7 @@ use piquel_ui::{
 use serde::Deserialize;
 use std::{
     future::Future,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration as StdDuration, Instant},
 };
 use topcoat::{
@@ -99,9 +103,95 @@ use topcoat::{
 /// shown: showing it asks for a confirmation this much newer than the service
 /// needs.
 const FORM_TIME: Duration = Duration::minutes(2);
-/// How long every page shows the health the overview last found, before a page
+/// How long every page shows what the overview last found, before a page
 /// reads it again: the status bar must not cost each page the overview's queries.
-const HEALTH_FOR: StdDuration = StdDuration::from_secs(60);
+const ATTENTION_FOR: StdDuration = StdDuration::from_secs(60);
+
+/// What the overview last found, as every page shows it: the status bar's
+/// count, and the tabs the sidebar marks.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Attention {
+    /// How many things need attention: each open alert, and each other problem.
+    count: u32,
+    /// Whether alerts are open, which marks the Alerts tab.
+    alerts: bool,
+    /// Whether the overview found another problem, which marks its own tab.
+    overview: bool,
+}
+
+impl Attention {
+    /// What `overview` found.
+    fn of(overview: &Overview) -> Self {
+        let others = overview
+            .problems()
+            .iter()
+            .filter(|problem| !matches!(problem, Problem::OpenAlerts(_)))
+            .count();
+        let count = u32::try_from(overview.open_alerts)
+            .unwrap_or(u32::MAX)
+            .saturating_add(u32::try_from(others).unwrap_or(u32::MAX));
+        Self {
+            count,
+            alerts: overview.open_alerts > 0,
+            overview: others > 0,
+        }
+    }
+
+    /// The status bar's health.
+    const fn health(self) -> Health {
+        match self.count {
+            0 => Health::Normal,
+            count => Health::Warnings(count),
+        }
+    }
+
+    /// The tabs the sidebar marks.
+    fn tabs(self) -> Vec<DashboardTab> {
+        [
+            (self.overview, DashboardTab::Overview),
+            (self.alerts, DashboardTab::Alerts),
+        ]
+        .into_iter()
+        .filter_map(|(marked, tab)| marked.then_some(tab))
+        .collect()
+    }
+}
+
+/// What the overview last found, and when, as every page shows it. A read that
+/// started before the cache was last forgotten is not kept: it may predate the
+/// change that forgot it.
+#[derive(Default)]
+struct AttentionCache {
+    /// Counts the times it was forgotten.
+    generation: u64,
+    /// What was found, and when.
+    found: Option<(Instant, Attention)>,
+}
+
+impl AttentionCache {
+    /// What was found, if less than [`ATTENTION_FOR`] ago, or else the
+    /// generation a fresh read starts in.
+    fn fresh(&self) -> Result<Attention, u64> {
+        self.found
+            .filter(|(read, _)| read.elapsed() < ATTENTION_FOR)
+            .map(|(_, attention)| attention)
+            .ok_or(self.generation)
+    }
+
+    /// Keeps `attention`, read from `generation` on, unless it was forgotten
+    /// since.
+    fn keep(&mut self, generation: u64, attention: Attention) {
+        if generation == self.generation {
+            self.found = Some((Instant::now(), attention));
+        }
+    }
+
+    /// Forgets what was found, and any read already under way.
+    fn forget(&mut self) {
+        self.generation += 1;
+        self.found = None;
+    }
+}
 
 /// The dashboard's pages, and what every one of them needs.
 #[derive(Clone)]
@@ -132,8 +222,8 @@ pub(crate) struct AdminApplication {
     policy: HeaderValue,
     /// Piquel's policies on piquel.fr, which every page's footer links.
     policies: PolicyLinks,
-    /// The health the overview last found, and when, shared by every page.
-    health: Arc<Mutex<Option<(Instant, Health)>>>,
+    /// What the overview last found, and when, shared by every page.
+    attention: Arc<Mutex<AttentionCache>>,
 }
 
 /// What a page answers in its place, such as the redirect through auth's handoff
@@ -241,7 +331,7 @@ impl AdminApplication {
             kek: config.key_encryption_key.clone(),
             policy: HeaderValue::try_from(policy)?,
             policies: config.oidc.policies.clone(),
-            health: Arc::default(),
+            attention: Arc::default(),
         })
     }
 
@@ -254,7 +344,7 @@ impl AdminApplication {
             // pages, by a stricter rule: Topcoat's also takes `Sec-Fetch-Site: none`.
             .with(OriginPolicy::dangerous_disable())
             // axum's body limit does not reach Topcoat, whose own default is 2 MiB.
-            .with(BodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            .with(BodyLimit::max(MAX_DASHBOARD_BODY_BYTES))
             .layer(answers)
             .route(overview::overview)
             .route(preferences)
@@ -269,7 +359,10 @@ impl AdminApplication {
             .route(settings::emails)
             .route(settings::apps)
             .route(settings::history)
-            .route(settings::display_name);
+            .route(settings::notifications)
+            .route(settings::display_name)
+            // `ListAlerts` lists the alerts that cleared on a page of their own.
+            .route(alerts::previous);
         let pages = AdminOperation::ALL
             .iter()
             .filter_map(|operation| Self::page(*operation))
@@ -346,6 +439,14 @@ impl AdminApplication {
             Op::ListSigningKeys => &keys::list,
             Op::RotateSigningKey => &keys::rotate,
             Op::RevokeSigningKey => &keys::revoke,
+            Op::ListAnnouncements => &announcements::list,
+            Op::ViewAnnouncement => &announcements::show,
+            Op::DraftAnnouncement => &announcements::draft,
+            Op::EditAnnouncement => &announcements::edit,
+            Op::DiscardAnnouncement => &announcements::discard,
+            Op::SendAnnouncement => &announcements::send,
+            Op::ListAlerts => &alerts::list,
+            Op::UpdateAlert => &alerts::update,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
             // Importing takes the deployment's PEM private key, which must never
@@ -552,48 +653,57 @@ struct SearchQuery {
 
 impl AdminApplication {
     /// Whether the service needs attention, as the overview last found, read
-    /// again once that is [`HEALTH_FOR`] old. A browser that is not signed in
+    /// again once that is [`ATTENTION_FOR`] old. A browser that is not signed in
     /// learns nothing, and neither does a page whose read fails: the status bar
     /// never costs the page, so a failed read is logged and shows as normal.
-    async fn health(cx: &Cx) -> Health {
+    async fn attention(cx: &Cx) -> Attention {
         let app = Self::of(cx);
         let Ok(admin) = Self::admin(cx).await else {
-            return Health::Normal;
+            return Attention::default();
         };
-        let cached = app
-            .health
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .filter(|(read, _)| read.elapsed() < HEALTH_FOR)
-            .map(|(_, health)| health);
-        if let Some(health) = cached {
-            return health;
-        }
+        let generation = match Self::attention_cache(cx).fresh() {
+            Ok(attention) => return attention,
+            Err(generation) => generation,
+        };
         match app.service.overview(&admin.operator).await {
-            Ok(overview) => Self::remember_health(cx, &overview),
+            Ok(overview) => Self::remember_attention(cx, generation, &overview),
             Err(error) => {
                 tracing::warn!(error = %ErrorChain(&error), "the health check failed");
-                Health::Normal
+                Attention::default()
             }
         }
     }
 
-    /// Keeps what `overview` found as the health every page shows for the next
-    /// [`HEALTH_FOR`], and says what that is.
-    pub(super) fn remember_health(cx: &Cx, overview: &crate::admin::Overview) -> Health {
-        let health = match u32::try_from(overview.problems().len()).unwrap_or(u32::MAX) {
-            0 => Health::Normal,
-            count => Health::Warnings(count),
-        };
-        *Self::of(cx)
-            .health
+    /// The cache of what every page shows.
+    fn attention_cache(cx: &Cx) -> MutexGuard<'_, AttentionCache> {
+        Self::of(cx)
+            .attention
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some((Instant::now(), health));
-        health
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The generation a read of the overview starts in, which
+    /// [`Self::remember_attention`] takes once it is done.
+    pub(super) fn attention_generation(cx: &Cx) -> u64 {
+        Self::attention_cache(cx).generation
+    }
+
+    /// Keeps what `overview`, read from `generation` on, found as what every
+    /// page shows for the next [`ATTENTION_FOR`], and says what that is.
+    pub(super) fn remember_attention(cx: &Cx, generation: u64, overview: &Overview) -> Attention {
+        let attention = Attention::of(overview);
+        Self::attention_cache(cx).keep(generation, attention);
+        attention
+    }
+
+    /// Forgets what every page shows, so the next page reads it again: an
+    /// administrator's own change, such as an update on an alert, shows at once.
+    pub(super) fn forget_attention(cx: &Cx) {
+        Self::attention_cache(cx).forget();
     }
 
     /// Each tab's page, in the sidebar's order.
-    fn tabs(cx: &Cx) -> [(DashboardTab, String); 10] {
+    fn tabs(cx: &Cx) -> [(DashboardTab, String); 12] {
         [
             (
                 DashboardTab::Overview,
@@ -617,6 +727,11 @@ impl AdminApplication {
             ),
             (DashboardTab::SigningKeys, href!(keys::list).resolve(cx)),
             (DashboardTab::Audit, href!(audit::verify).resolve(cx)),
+            (
+                DashboardTab::Announcements,
+                href!(announcements::list).resolve(cx),
+            ),
+            (DashboardTab::Alerts, href!(alerts::list).resolve(cx)),
         ]
     }
 
@@ -717,7 +832,6 @@ impl AdminApplication {
             .unwrap_or_default();
         let picture = admin.and_then(|admin| Self::picture(cx, admin.picture));
         let administrator = admin.map(|admin| Who {
-            user: None,
             name: admin.handle.as_str(),
             handle: admin.handle.as_str(),
             picture: picture.as_deref(),
@@ -725,7 +839,8 @@ impl AdminApplication {
         });
         // The avatar leads to the administrator's own settings, on auth.
         let me = app.auth.join(routes::page::settings::HOME);
-        let health = Self::health(cx).await;
+        let attention = Self::attention(cx).await;
+        let marked = attention.tabs();
         let environment = app.auth.host();
         let dashboard = Dashboard {
             title,
@@ -741,7 +856,8 @@ impl AdminApplication {
             preferences: BrowserCookie::read_preferences(headers(cx)),
             preferences_action: prefer,
             here,
-            health: Some(health),
+            health: Some(attention.health()),
+            attention: &marked,
             environment,
             policies: app.policies.links(),
             search: Search {

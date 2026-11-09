@@ -56,16 +56,13 @@ async fn every_change_needs_a_confirmation() {
     let id = account.create(ClientKind::Confidential).await;
     let social = account.social().await.owner(&account.database).await;
     let client = account.find(social, &id).await;
-    let logout = ClientPatch {
-        post_logout_uris: Some(vec!["https://attacker.example/".into()]),
-        ..ClientPatch::default()
-    };
     let rename = || ClientPatch {
         display_name: Some("Renamed".into()),
         ..ClientPatch::default()
     };
+    // `every_confirmed_operation_checks_the_owner_itself` covers changing the
+    // redirect URIs, rotating a secret and deleting.
     for refused in [
-        service.update_client(&client, logout).await.map(drop),
         service.update_client(&client, rename()).await.map(drop),
         service.set_client_enabled(&client, false).await,
         service.set_client_enabled(&client, true).await,
@@ -84,7 +81,6 @@ async fn every_change_needs_a_confirmation() {
         kept.display_name, "Notes",
         "the refused changes were rolled back"
     );
-    assert_eq!(kept.post_logout_uris, Vec::<String>::new());
     assert!(kept.enabled);
 
     let client = account.find(account.owner().await, &id).await;

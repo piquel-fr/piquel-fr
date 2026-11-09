@@ -35,7 +35,7 @@ impl LoginApp {
     async fn start() -> Self {
         use piquel_auth::{
             ClientConfig, Credentials, Resource,
-            axum::{BearerLayer, LoginRoutes, MemoryBackend, RequireAuthentication, SignedIn},
+            axum::{BearerLayer, CookieKey, LoginRoutes, RequireAuthentication, SignedIn},
             protocol::challenge::BearerChallenge,
         };
         let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -45,11 +45,7 @@ impl LoginApp {
         let origin = format!("https://localhost:{port}");
         let flow = Flow::at(&origin, true, false).await;
         let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
-        let http = reqwest::Client::builder()
-            .add_root_certificate(certificate)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("HTTP client");
+        let http = reqwest::Client::builder().add_root_certificate(certificate);
         let clock = ManualClock(Arc::new(std::sync::Mutex::new(Utc::now())));
         let issuer = piquel_auth::Issuer::builder()
             .http_client(http)
@@ -92,7 +88,7 @@ impl LoginApp {
                 let request = Request::get(path)
                     .header(
                         header::AUTHORIZATION,
-                        format!("Bearer {}", user.login().access_token.expose()),
+                        format!("Bearer {}", user.login().access_token().expose()),
                     )
                     .body(Body::empty())
                     .expect("API request");
@@ -108,8 +104,10 @@ impl LoginApp {
                 }
             }
         };
-        let auth = LoginRoutes::new(client, MemoryBackend::default())
-            .scopes("profile offline_access".parse().expect("scopes"))
+        let key = CookieKey::generate().expect("cookie key");
+        let auth = LoginRoutes::new(client, key)
+            .expect("a confidential client")
+            .scopes("profile".parse().expect("scopes"))
             .after_logout(
                 flow.client.post_logout_uris[0]
                     .as_str()
@@ -120,7 +118,7 @@ impl LoginApp {
             .route(
                 "/notes",
                 axum::routing::get(|user: SignedIn| async move {
-                    user.login().access_token.expose().to_owned()
+                    user.login().access_token().expose().to_owned()
                 }),
             )
             .route("/settings", axum::routing::get(call_api("/settings")))
@@ -130,10 +128,19 @@ impl LoginApp {
         Self { flow, app, clock }
     }
 
-    /// Sends a request to the app with an optional cookie. Posts carry the app's
-    /// `Origin`, as a browser on its pages sends.
+    /// The name of the login routes' cookie ending in `suffix`, which names the
+    /// client.
+    fn named(&self, suffix: &str) -> String {
+        format!("__Host-piquel-{}-{suffix}", self.flow.client.id)
+    }
+
+    /// Sends a request to the app with an optional cookie, as a browser navigating to
+    /// a page does. Posts carry the app's `Origin`, as a browser on its pages sends.
     async fn send(&self, method: Method, uri: &str, cookie: Option<&str>) -> Response {
-        let mut request = Request::builder().method(method.clone()).uri(uri);
+        let mut request = Request::builder()
+            .method(method.clone())
+            .uri(uri)
+            .header("sec-fetch-mode", "navigate");
         if method == Method::POST {
             let callback =
                 Url::parse(self.flow.client.redirect_uris[0].as_str()).expect("callback");
@@ -187,8 +194,15 @@ impl LoginApp {
                 "{cookie}"
             );
         }
+        // Pushed requests keep `state` out of the URL: the cookie is named for it.
+        let pending = self.named("login-");
+        let cookie = Self::cookies(&start)
+            .into_iter()
+            .find(|cookie| cookie.starts_with(&pending))
+            .and_then(|cookie| cookie.split(';').next().map(str::to_owned))
+            .expect("pending login cookie");
         (
-            Self::cookie(&start, "__Host-piquel-login"),
+            cookie,
             Url::parse(&Self::location(&start)).expect("authorization URL"),
         )
     }
@@ -235,8 +249,9 @@ impl LoginApp {
 }
 
 /// The SDK's login routes sign a user in through the provider, keep tokens in the
-/// store, refresh them there, rotate the session on every sign-in, refuse open
-/// redirects, and log out through the provider.
+/// session cookie, refresh them there, refuse open redirects, and log out through
+/// the provider. Logout revokes the refresh token, so a copy of the cookie ends at
+/// its next refresh.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn sdk_login_routes_run_against_the_provider() {
@@ -250,31 +265,32 @@ async fn sdk_login_routes_run_against_the_provider() {
     let callback = app.sign_in(&LoginApp::location(&page), None).await;
     assert_eq!(LoginApp::location(&callback), "/notes?page=2");
     let cookies = LoginApp::cookies(&callback);
+    let session = app.named("session");
     assert!(
         cookies
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-session=")
+            .any(|cookie| cookie.starts_with(&format!("{session}="))
                 && cookie.ends_with("; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=43200"))
     );
-    assert!(cookies.iter().any(|cookie| cookie
-        == "__Host-piquel-login=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"));
-    let first = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let pending = app.named("login-");
+    assert!(cookies.iter().any(|cookie| cookie.starts_with(&pending)
+        && cookie.ends_with("=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0")));
+    let first = LoginApp::cookie(&callback, &app.named("session"));
     let shown = app.send(Method::GET, "/notes", Some(&first)).await;
     assert_eq!(shown.status(), StatusCode::OK);
     let access = Flow::text(shown).await;
 
-    // A second sign-in rotates the session and ends the first one.
+    // A second sign-in replaces the browser's session.
     let callback = app.sign_in("/auth/login", Some(&first)).await;
     assert_eq!(LoginApp::location(&callback), "/");
-    let second = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let second = LoginApp::cookie(&callback, &app.named("session"));
     assert_ne!(first, second);
-    let stale = app.send(Method::GET, "/notes", Some(&first)).await;
-    assert_eq!(LoginApp::location(&stale), "/auth/login?return_to=%2Fnotes");
 
-    // Near expiry, the access token is refreshed in the store.
+    // Near expiry, the access token is refreshed, and the response carries it.
     app.clock.advance(290);
     let refreshed = app.send(Method::GET, "/notes", Some(&second)).await;
     assert_eq!(refreshed.status(), StatusCode::OK);
+    let copy = LoginApp::cookie(&refreshed, &app.named("session"));
     assert_ne!(Flow::text(refreshed).await, access);
 
     // Open redirects are refused: login falls back to the home page.
@@ -293,10 +309,20 @@ async fn sdk_login_routes_run_against_the_provider() {
     assert!(
         LoginApp::cookies(&logout)
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-session=;"))
+            .any(|cookie| cookie.starts_with(&format!("{}=;", app.named("session"))))
     );
-    let after = app.send(Method::GET, "/notes", Some(&second)).await;
+    // A copy of the cookie works until its access token expires, then its refresh is
+    // refused: the session ends, and its cookie is cleared.
+    let kept = app.send(Method::GET, "/notes", Some(&copy)).await;
+    assert_eq!(kept.status(), StatusCode::OK);
+    app.clock.advance(300);
+    let after = app.send(Method::GET, "/notes", Some(&copy)).await;
     assert_eq!(after.status(), StatusCode::SEE_OTHER);
+    assert!(
+        LoginApp::cookies(&after)
+            .iter()
+            .any(|cookie| cookie.starts_with(&format!("{}=;", app.named("session"))))
+    );
 }
 
 /// A client required to push its authorization requests signs in through the SDK's
@@ -336,7 +362,7 @@ async fn sdk_step_up_runs_against_the_provider() {
         .sign_in_again(AuthenticationMethod::Federation)
         .await;
     let callback = app.sign_in("/auth/login", None).await;
-    let first = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let first = LoginApp::cookie(&callback, &app.named("session"));
 
     let page = app.send(Method::GET, "/settings", Some(&first)).await;
     let login = LoginApp::location(&page);
@@ -387,8 +413,8 @@ async fn sdk_step_up_runs_against_the_provider() {
         .await;
     let callback = app.finish_login(browser, pending, Some(&first)).await;
     assert_eq!(LoginApp::location(&callback), "/settings");
-    let second = LoginApp::cookie(&callback, "__Host-piquel-session");
-    let retry = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let second = LoginApp::cookie(&callback, &app.named("session"));
+    let retry = LoginApp::cookie(&callback, &app.named("step-up"));
 
     let page = app
         .send(
@@ -400,7 +426,7 @@ async fn sdk_step_up_runs_against_the_provider() {
     assert!(
         LoginApp::cookies(&page)
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-step-up=;")),
+            .any(|cookie| cookie.starts_with(&format!("{}=;", app.named("step-up")))),
         "the retry marker is used up"
     );
     assert_eq!(page.status(), StatusCode::OK);
@@ -414,8 +440,8 @@ async fn sdk_step_up_runs_against_the_provider() {
     assert_eq!(login, "/auth/login?return_to=%2Fstubborn&step_up=true");
     let callback = app.sign_in(&login, Some(&second)).await;
     assert_eq!(LoginApp::location(&callback), "/stubborn");
-    let third = LoginApp::cookie(&callback, "__Host-piquel-session");
-    let retry = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let third = LoginApp::cookie(&callback, &app.named("session"));
+    let retry = LoginApp::cookie(&callback, &app.named("step-up"));
     let cookies = format!("{third}; {retry}");
     // Only the returning `GET` is the retry.
     let other = app.send(Method::POST, "/stubborn", Some(&cookies)).await;
@@ -426,13 +452,13 @@ async fn sdk_step_up_runs_against_the_provider() {
     // An ordinary sign-in drops a marker its return never used.
     let page = app.send(Method::GET, "/stubborn", Some(&third)).await;
     let callback = app.sign_in(&LoginApp::location(&page), Some(&third)).await;
-    let fourth = LoginApp::cookie(&callback, "__Host-piquel-session");
-    let unused = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let fourth = LoginApp::cookie(&callback, &app.named("session"));
+    let unused = LoginApp::cookie(&callback, &app.named("step-up"));
     let callback = app.sign_in("/auth/login", Some(&fourth)).await;
     assert!(
         LoginApp::cookies(&callback)
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-step-up=;")),
+            .any(|cookie| cookie.starts_with(&format!("{}=;", app.named("step-up")))),
         "the unused marker {unused} is dropped"
     );
 }

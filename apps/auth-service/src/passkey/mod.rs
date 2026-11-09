@@ -2,7 +2,7 @@
 //! passkey sign-in on the pages of approved related origins, and the admin
 //! dashboard's own passkey confirmation, on its origin.
 use crate::account::AccountService;
-use crate::config::PasskeyConfig;
+use crate::config::{EmailConfig, PasskeyConfig};
 use crate::deliveries::OutboundClient;
 use crate::oidc::OidcApplication;
 use crate::routes;
@@ -20,7 +20,7 @@ use piquel_common::{
 };
 use piquel_crypto::Secret;
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertPasskey, StoredPasskey,
+    Database, DatabaseError, DatabaseTransaction, InsertPasskey, PasskeyRepository, StoredPasskey,
 };
 use std::sync::Arc;
 use url::Url;
@@ -71,6 +71,8 @@ pub struct PasskeyApplication {
     invite_required: bool,
     /// Fetches the picture a social signup's provider reported.
     outbound: OutboundClient,
+    /// Whether email is sent, which importing a social signup's address needs.
+    email: EmailConfig,
 }
 
 /// Human-readable `WebAuthn` relying party name.
@@ -82,10 +84,12 @@ impl PasskeyApplication {
     /// Builds `WebAuthn` from the already validated origin and admission policy.
     /// `oidc` completes the authorization requests of related origins' sign-ins,
     /// and the admin dashboard at `dashboard`, if auth serves one, confirms with
-    /// passkeys on its own pages.
+    /// passkeys on its own pages. `email` verifies the addresses social signups
+    /// bring.
     pub(crate) fn new(
         database: Database,
         config: &PasskeyConfig,
+        email: &EmailConfig,
         dashboard: Option<&Origin>,
         oidc: OidcApplication,
     ) -> Result<Self, PasskeyConfigError> {
@@ -97,6 +101,7 @@ impl PasskeyApplication {
             dashboard: dashboard.cloned(),
             invite_required: config.invite_required,
             outbound: OutboundClient::new().map_err(PasskeyConfigError::Outbound)?,
+            email: email.clone(),
         })
     }
 
@@ -183,6 +188,7 @@ impl PasskeyApplication {
             .await
             .map_err(|error| match error {
                 DatabaseError::Conflict(_) => PasskeyError::PasskeyAlreadyRegistered(error),
+                DatabaseError::Refused(_) => PasskeyError::TooManyPasskeys(Some(error)),
                 DatabaseError::NotFound
                 | DatabaseError::Timeout(_)
                 | DatabaseError::Cancelled(_)
@@ -237,6 +243,20 @@ impl PasskeyApplication {
     /// Decodes the account's active passkeys for `WebAuthn`.
     async fn keys(&self, user_id: UserId) -> Result<Vec<Passkey>, PasskeyError> {
         Self::decode(self.database.passkeys().list_active(user_id).await?)
+    }
+
+    /// The credentials a new registration for `user_id` excludes: all its active
+    /// ones. Refuses an account that already keeps the most passkeys, before the
+    /// authenticator creates one the account could not store.
+    async fn exclusions(&self, user_id: UserId) -> Result<Vec<CredentialID>, PasskeyError> {
+        let stored = self.database.passkeys().list_active(user_id).await?;
+        if stored.len() >= PasskeyRepository::LIMIT {
+            return Err(PasskeyError::TooManyPasskeys(None));
+        }
+        Ok(Self::decode(stored)?
+            .iter()
+            .map(|key| key.cred_id().clone())
+            .collect())
     }
 
     /// Decodes stored passkey rows into `WebAuthn` credentials.

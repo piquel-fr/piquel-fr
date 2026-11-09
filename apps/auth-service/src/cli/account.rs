@@ -4,16 +4,18 @@
 use super::{CliError, Confirm, Console, Output};
 use crate::{
     Reason, UserRef,
-    account::{AccountOperation, Subject, Viewer},
+    account::{AccountOperation, AccountService, Subject, Viewer},
     emails::EmailView,
     grants::ConnectedApp,
     history::HistoryPage,
+    notifications::{NotificationItem, NotificationPage, NotificationView},
     pictures::PictureView,
     sessions::{Revoked, SessionItem},
 };
 use clap::{Args, Subcommand};
 use piquel_common::{
-    ClientId, EmailId, EventId, PasskeyId, Provider, SessionId, UserId,
+    ClientId, EmailId, EventId, NotificationId, PasskeyId, Provider, SessionId, UserId,
+    notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
 };
 
@@ -58,6 +60,40 @@ enum Setting {
         /// Continue with entries older than this one, the last one listed.
         #[arg(long)]
         before: Option<EventId>,
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Read the account's notifications, as its inbox shows them. Reading one
+    /// never marks it read.
+    #[command(subcommand)]
+    Notifications(Notifications),
+}
+
+/// The account's inbox.
+#[derive(Subcommand)]
+enum Notifications {
+    /// List the notifications, newest first.
+    List {
+        /// Continue with notifications older than this one, the last one listed.
+        #[arg(long)]
+        before: Option<NotificationId>,
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Show one notification, with its security history entry while kept.
+    Show {
+        /// The notification, as `list` shows it.
+        notification: NotificationId,
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Show which categories of notifications the account receives by email.
+    /// Only the owner changes them, since turning one off could hide a notice
+    /// from them.
+    Preferences {
         /// Output format.
         #[command(flatten)]
         output: Output,
@@ -279,11 +315,20 @@ impl AccountCommand {
                 Picture::Remove { .. } => Op::RemovePicture,
             },
             Setting::History { .. } => Op::ViewHistory,
+            Setting::Notifications(notifications) => match notifications {
+                Notifications::List { .. } => Op::ListNotifications,
+                Notifications::Show { .. } => Op::ViewNotification,
+                Notifications::Preferences { .. } => Op::ViewNotificationPreferences,
+            },
         }
     }
 
     /// Runs this command as the operator at this terminal. Reads are recorded as
     /// views of the account, as `user show` is.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "One arm per command, so a new command cannot skip running."
+    )]
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Self { user, setting } = self;
         let id = console.user(&user).await?;
@@ -381,6 +426,7 @@ impl AccountCommand {
                     Self::print_history,
                 )?;
             }
+            Setting::Notifications(notifications) => notifications.run(account, &read()).await?,
         }
         Ok(())
     }
@@ -483,6 +529,78 @@ impl AccountCommand {
         }
         if let Some(next) = page.next {
             eprintln!("More may follow: --before {next}");
+        }
+    }
+}
+
+impl Notifications {
+    /// Prints the inbox, one notification, or the email preferences, as `viewer`
+    /// reads them, marking nothing read.
+    async fn run(self, account: &AccountService, viewer: &Viewer) -> Result<(), CliError> {
+        match self {
+            Self::List { before, output } => output.print(
+                &account.notifications(viewer, before).await?,
+                Self::print_list,
+            )?,
+            Self::Show {
+                notification,
+                output,
+            } => output.print(
+                &account.notification(viewer, notification).await?,
+                Self::print_one,
+            )?,
+            Self::Preferences { output } => output.print(
+                &account.notification_preferences(viewer).await?[..],
+                Self::print_preferences,
+            )?,
+        }
+        Ok(())
+    }
+
+    /// Prints each category and whether it is emailed. Everything about the
+    /// account itself always is.
+    fn print_preferences(preferences: &[NotificationPreference]) {
+        println!("CATEGORY\tEMAIL");
+        println!("security\talways");
+        for preference in preferences {
+            let email = if preference.email { "on" } else { "off" };
+            println!("{}\t{email}", preference.category);
+        }
+    }
+
+    /// Prints one notification per line, and how to continue if there may be more.
+    fn print_list(page: &NotificationPage) {
+        println!("ID\tTIME\tREAD\tSUBJECT");
+        for item in &page.notifications {
+            println!(
+                "{}\t{}\t{}\t{}",
+                item.id,
+                item.created_at.to_rfc3339(),
+                item.read(),
+                item.subject
+            );
+        }
+        if let Some(next) = page.next {
+            eprintln!("More may follow: --before {next}");
+        }
+    }
+
+    /// Prints a notification: its subject, when, whether it was read, what it
+    /// says, and its history entry's ID while the history keeps it.
+    fn print_one(view: &NotificationView) {
+        let NotificationItem {
+            subject,
+            body,
+            created_at,
+            ..
+        } = &view.item;
+        println!("{subject}");
+        println!("{}  read: {}", created_at.to_rfc3339(), view.item.read());
+        println!();
+        println!("{body}");
+        if let Some(entry) = &view.history {
+            println!();
+            println!("History entry: {} (by {})", entry.id, entry.actor);
         }
     }
 }

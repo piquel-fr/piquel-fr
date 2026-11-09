@@ -19,6 +19,7 @@ generated secrets, and URLs.
 | --- | --- |
 | auth, with the settings at `/settings` | `https://auth-<slug>.dev.piquel.fr` |
 | admin | `https://admin-<slug>.dev.piquel.fr` |
+| docs, the documentation book | `https://docs-<slug>.dev.piquel.fr` |
 | web (redirects to auth, keeping the path) | `https://<slug>.dev.piquel.fr` |
 | www (redirects to web) | `https://www-<slug>.dev.piquel.fr` |
 

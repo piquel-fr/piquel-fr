@@ -56,6 +56,14 @@
   html[data-sidebar='collapsed'] .sidebar .count.warning {
     position: static;
   }
+  html[data-sidebar='collapsed'] .sidebar .count.new {
+    position: static;
+    min-width: 1.2rem;
+    width: auto;
+    height: auto;
+    padding: 0 0.3rem;
+    color: var(--on-accent);
+  }
   .sidebar form .collapse {
     display: none;
   }

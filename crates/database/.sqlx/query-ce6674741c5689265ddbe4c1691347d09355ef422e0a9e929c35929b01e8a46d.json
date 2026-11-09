@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE notifications\n                SET read_at = CASE WHEN $3 THEN coalesce(read_at, now()) END\n                WHERE user_id = $1 AND id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ce6674741c5689265ddbe4c1691347d09355ef422e0a9e929c35929b01e8a46d"
+}

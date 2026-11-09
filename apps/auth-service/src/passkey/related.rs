@@ -138,7 +138,9 @@ impl PasskeyApplication {
             claim,
             sign_in,
         } = app.consume_related(input.ceremony_id).await?;
-        // The origin may have been removed, or given to another client, since.
+        // The origin may have been removed, or given to another client, since. This
+        // refuses it before the passkey is checked; completing the sign-in checks
+        // again under the client's lock.
         if origin != started
             || app
                 .database
@@ -177,13 +179,16 @@ impl PasskeyApplication {
             user_id,
             credential,
             InlineSignIn {
-                client_id,
-                origin: origin.into(),
+                client_id: client_id.clone(),
+                origin: origin.clone().into(),
             },
         )
         .await
         .map_err(PasskeyError::from)?;
-        let response = app.oidc.complete_inline(&mut tx, &claim, &session).await?;
+        let response = app
+            .oidc
+            .complete_inline(&mut tx, &claim, &session, &client_id, &origin)
+            .await?;
         tx.commit().await?;
         Ok(Json(response))
     }

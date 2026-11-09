@@ -10,13 +10,14 @@ use piquel_common::{
             AccessTokenClaims, Acr, Actor, Amr, Audience, Confirmation, IdTokenClaims,
             LogoutTokenClaims, ProfileClaims,
         },
-        jwt::{Algorithm, TokenType},
+        jwt::{Algorithm, Claim, TokenType},
         oauth::Scopes,
         sdk::{ErrorCategory, ErrorReason, SdkError},
         step_up::StepUpRequirement,
     },
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::marker::PhantomData;
 use thiserror::Error;
 
 /// Why a token was rejected. [`Self::code`] gives the shared SDK code, and
@@ -73,7 +74,7 @@ pub enum TokenError {
     Keys(#[source] KeyError),
     /// The signature does not verify.
     #[error("token signature is invalid")]
-    BadSignature,
+    BadSignature(#[source] jsonwebtoken::signature::Error),
     /// Claims are missing or have the wrong type.
     #[error("token claims are invalid")]
     InvalidClaims(#[source] serde_json::Error),
@@ -138,6 +139,19 @@ pub enum TokenError {
     /// The user's authentication is too weak or too old for the request (RFC 9470).
     #[error("authentication does not meet {0:?}")]
     InsufficientUserAuthentication(StepUpRequirement),
+    /// The token names another user than expected: a step-up that came back as
+    /// another account, or a refresh (OIDC Core §12.2).
+    #[error("token names the user {found:?}, expected {expected:?}")]
+    SubjectMismatch {
+        /// The user expected.
+        expected: String,
+        /// The token's `sub`.
+        found: String,
+    },
+    /// A refreshed ID token changes the original authentication's claim (OIDC Core
+    /// §12.2), which a refresh must carry over unchanged.
+    #[error("a refreshed ID token changes the original authentication's {0}")]
+    AuthenticationChanged(Claim),
     /// A valid token lacks scopes the request needs.
     #[error("token lacks the scopes {required}")]
     InsufficientScope {
@@ -163,7 +177,7 @@ impl TokenError {
             Self::WrongType { .. } => ErrorReason::WrongType,
             Self::UnsupportedAlgorithm(_) => ErrorReason::UnsupportedAlgorithm,
             Self::UnknownKey(_) => ErrorReason::UnknownKey,
-            Self::BadSignature => ErrorReason::BadSignature,
+            Self::BadSignature(_) => ErrorReason::BadSignature,
             Self::InvalidClaims(_) | Self::InvalidSubject(_) | Self::NoLogoutTarget => {
                 ErrorReason::InvalidClaims
             }
@@ -176,6 +190,8 @@ impl TokenError {
             Self::NonceMismatch => ErrorReason::NonceMismatch,
             Self::WrongAuthorizedParty { .. } => ErrorReason::WrongAuthorizedParty,
             Self::AuthenticationTooOld { .. } => ErrorReason::AuthenticationTooOld,
+            Self::SubjectMismatch { .. } => ErrorReason::SubjectMismatch,
+            Self::AuthenticationChanged(_) => ErrorReason::AuthenticationChanged,
         };
         SdkError::new(ErrorCategory::InvalidToken, reason)
     }
@@ -198,9 +214,15 @@ impl TokenError {
         }
     }
 
+    /// The account `sub` names.
+    pub(crate) fn account(sub: &str) -> Result<UserId, Self> {
+        sub.parse()
+            .map_err(|_| Self::InvalidSubject(sub.to_owned()))
+    }
+
     /// Requires the authentication `acr` and `auth_time` describe to meet
     /// `requirement` at `now`, allowing the leeway on `auth_time`.
-    fn require_authentication(
+    pub(crate) fn require_authentication(
         requirement: StepUpRequirement,
         acr: Option<&Acr>,
         auth_time: Option<DateTime<Utc>>,
@@ -250,13 +272,15 @@ pub enum Subject {
     Client(ClientId),
 }
 
-/// A validated access token. `S` proves which scopes it holds: [`Scopes`] keeps the
-/// granted list, while a [`scopes!`](crate::scopes) marker or tuple proves those
-/// scopes are present. `X` holds application claims.
+/// A validated access token, only built by
+/// [`ResourceValidator::validate`](crate::ResourceValidator::validate), so code that
+/// takes one knows every check passed. `S` proves which scopes it holds: a
+/// [`scopes!`](crate::scopes) marker or tuple proves those scopes were granted, and
+/// [`Scopes`] proves none. `X` holds application claims.
 ///
-/// ```
-/// use chrono::{TimeDelta, Utc};
-/// use piquel_auth::{AccessToken, ProfileClaims, Scopes, Subject};
+/// ```no_run
+/// # async fn run(issuer: piquel_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// use piquel_auth::{Resource, Scopes};
 ///
 /// piquel_auth::scopes! {
 ///     /// Scopes of the notes API.
@@ -266,63 +290,135 @@ pub enum Subject {
 ///     }
 /// }
 ///
-/// // Normally returned by `ResourceValidator::validate`.
-/// let token: AccessToken = AccessToken {
-///     subject: Subject::User("01936f3e-8c00-7000-8000-000000000001".parse()?),
-///     client_id: "notes-web".parse()?,
-///     scopes: "openid notes:read".parse()?,
-///     token_id: "01936f3e-8c00-7000-8000-000000000003".parse()?,
-///     session_id: None,
-///     auth_time: None,
-///     amr: Vec::new(),
-///     acr: None,
-///     actor: None,
-///     confirmation: None,
-///     profile: ProfileClaims::default(),
-///     issued_at: Utc::now(),
-///     expires_at: Utc::now() + TimeDelta::minutes(5),
-///     extra: (),
-/// };
+/// let notes_api = issuer.resource(Resource::new("notes-api")?);
+/// let token = notes_api.validate::<Scopes>(token).await?;
 /// let readable = token.require::<notes::Read>()?;
-/// assert_eq!(readable.scopes, notes::Read);
+/// println!("{:?} may read notes", readable.subject());
 /// assert!(token.require::<(notes::Read, notes::Write)>().is_err());
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # Ok(()) }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessToken<S = Scopes, X = ()> {
     /// Who the token acts for.
-    pub subject: Subject,
+    subject: Subject,
     /// Client that requested the token.
-    pub client_id: ClientId,
-    /// The scopes proven present.
-    pub scopes: S,
-    /// Unique token ID, for replay detection.
-    pub token_id: TokenId,
-    /// Browser session behind the token, when a user signed in.
-    pub session_id: Option<SessionId>,
+    client_id: ClientId,
+    /// The granted scopes.
+    scopes: Scopes,
+    /// Proof that `scopes` holds `S`. Invariant, so no subtyping coercion turns it
+    /// into a proof of another scope set.
+    proof: PhantomData<fn(S) -> S>,
+    /// Unique token ID.
+    token_id: TokenId,
+    /// Browser session behind the token.
+    session_id: Option<SessionId>,
     /// When the user authenticated.
-    pub auth_time: Option<DateTime<Utc>>,
-    /// How the user authenticated (RFC 8176); values this version does not know are
-    /// dropped.
-    pub amr: Vec<Amr>,
-    /// The authentication context class reached; a class this version does not know
-    /// reads as none.
-    pub acr: Option<Acr>,
-    /// Who is acting for the subject, for exchanged tokens.
-    pub actor: Option<Actor>,
-    /// The key the token is bound to, for sender-constrained tokens.
-    pub confirmation: Option<Confirmation>,
-    /// Profile and email claims allowed by the granted scopes.
-    pub profile: ProfileClaims,
+    auth_time: Option<DateTime<Utc>>,
+    /// How the user authenticated.
+    amr: Vec<Amr>,
+    /// The authentication context class reached.
+    acr: Option<Acr>,
+    /// Who is acting for the subject.
+    actor: Option<Actor>,
+    /// The key the token is bound to.
+    confirmation: Option<Confirmation>,
+    /// Profile and email claims.
+    profile: ProfileClaims,
     /// When the token was issued.
-    pub issued_at: DateTime<Utc>,
+    issued_at: DateTime<Utc>,
     /// When the token expires.
-    pub expires_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
     /// Application claims.
-    pub extra: X,
+    extra: X,
 }
 
 impl<S, X> AccessToken<S, X> {
+    /// Who the token acts for.
+    #[must_use]
+    pub const fn subject(&self) -> &Subject {
+        &self.subject
+    }
+
+    /// Client that requested the token.
+    #[must_use]
+    pub const fn client_id(&self) -> &ClientId {
+        &self.client_id
+    }
+
+    /// The granted scopes, every scope `S` requires among them.
+    #[must_use]
+    pub const fn scopes(&self) -> &Scopes {
+        &self.scopes
+    }
+
+    /// Unique token ID, for replay detection.
+    #[must_use]
+    pub const fn token_id(&self) -> TokenId {
+        self.token_id
+    }
+
+    /// Browser session behind the token, when a user signed in.
+    #[must_use]
+    pub const fn session_id(&self) -> Option<SessionId> {
+        self.session_id
+    }
+
+    /// When the user authenticated.
+    #[must_use]
+    pub const fn auth_time(&self) -> Option<DateTime<Utc>> {
+        self.auth_time
+    }
+
+    /// How the user authenticated (RFC 8176); values this version does not know are
+    /// dropped.
+    #[must_use]
+    pub fn amr(&self) -> &[Amr] {
+        &self.amr
+    }
+
+    /// The authentication context class reached; a class this version does not know
+    /// reads as none.
+    #[must_use]
+    pub const fn acr(&self) -> Option<&Acr> {
+        self.acr.as_ref()
+    }
+
+    /// Who is acting for the subject, for exchanged tokens.
+    #[must_use]
+    pub const fn actor(&self) -> Option<&Actor> {
+        self.actor.as_ref()
+    }
+
+    /// The key the token is bound to, for sender-constrained tokens.
+    #[must_use]
+    pub const fn confirmation(&self) -> Option<&Confirmation> {
+        self.confirmation.as_ref()
+    }
+
+    /// Profile and email claims allowed by the granted scopes.
+    #[must_use]
+    pub const fn profile(&self) -> &ProfileClaims {
+        &self.profile
+    }
+
+    /// When the token was issued.
+    #[must_use]
+    pub const fn issued_at(&self) -> DateTime<Utc> {
+        self.issued_at
+    }
+
+    /// When the token expires.
+    #[must_use]
+    pub const fn expires_at(&self) -> DateTime<Utc> {
+        self.expires_at
+    }
+
+    /// Application claims.
+    #[must_use]
+    pub const fn extra(&self) -> &X {
+        &self.extra
+    }
+
     /// Requires the token's authentication to meet `requirement` at `now`; use the
     /// issuer's clock, as [`ResourceValidator::now`](crate::ResourceValidator::now)
     /// gives.
@@ -347,17 +443,13 @@ impl<X> AccessToken<Scopes, X> {
         let subject = if session_id.is_none() && claims.sub == claims.client_id.as_str() {
             Subject::Client(claims.client_id.clone())
         } else {
-            Subject::User(
-                claims
-                    .sub
-                    .parse()
-                    .map_err(|_| TokenError::InvalidSubject(claims.sub.clone()))?,
-            )
+            Subject::User(TokenError::account(&claims.sub)?)
         };
         Ok(Self {
             subject,
             client_id: claims.client_id,
             scopes: claims.scope,
+            proof: PhantomData,
             token_id: claims.jti,
             session_id,
             auth_time: claims.authentication.auth_time,
@@ -371,28 +463,32 @@ impl<X> AccessToken<Scopes, X> {
             extra: claims.extra,
         })
     }
+}
 
-    /// Requires the scopes `S`, returning the token with their proof.
+impl<S, X> AccessToken<S, X> {
+    /// Requires the scopes `T`, returning the token with their proof.
     ///
     /// # Errors
-    /// [`TokenError::InsufficientScope`], naming every scope `S` requires.
-    pub fn require<S: ScopeSet>(&self) -> Result<AccessToken<S, X>, TokenError>
+    /// [`TokenError::InsufficientScope`], naming every scope `T` requires.
+    pub fn require<T: ScopeSet>(&self) -> Result<AccessToken<T, X>, TokenError>
     where
-        X: Clone,
+        Self: Clone,
     {
         self.clone().into_scoped()
     }
 
     /// Like [`Self::require`], consuming the token.
-    pub(crate) fn into_scoped<S: ScopeSet>(self) -> Result<AccessToken<S, X>, TokenError> {
-        let scopes =
-            S::from_granted(&self.scopes).ok_or_else(|| TokenError::InsufficientScope {
-                required: S::required(),
-            })?;
+    pub(crate) fn into_scoped<T: ScopeSet>(self) -> Result<AccessToken<T, X>, TokenError> {
+        if !T::holds(&self.scopes) {
+            return Err(TokenError::InsufficientScope {
+                required: T::required(),
+            });
+        }
         Ok(AccessToken {
             subject: self.subject,
             client_id: self.client_id,
-            scopes,
+            scopes: self.scopes,
+            proof: PhantomData,
             token_id: self.token_id,
             session_id: self.session_id,
             auth_time: self.auth_time,
@@ -409,9 +505,10 @@ impl<X> AccessToken<Scopes, X> {
 }
 
 /// A validated ID token, kept with its compact form for logout's `id_token_hint`.
-/// It serializes so a server-side session can store it; deserializing does not
-/// validate it again.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Only this SDK's validation makes one, in [`Tokens`](crate::Tokens), so code that
+/// takes one knows every check passed: it does not deserialize, and a session keeps
+/// only its claims.
+#[derive(Clone, PartialEq, Eq)]
 pub struct IdToken {
     /// The validated claims.
     claims: IdTokenClaims,
@@ -430,6 +527,16 @@ impl std::fmt::Debug for IdToken {
 }
 
 impl IdToken {
+    /// A token holding `claims` and the compact form `raw` without validating
+    /// anything, for the axum tests that need a signed-in user.
+    #[cfg(all(test, feature = "axum"))]
+    pub(crate) fn unchecked(claims: IdTokenClaims, raw: &str) -> Self {
+        Self {
+            claims,
+            raw: raw.to_owned(),
+        }
+    }
+
     /// The validated claims.
     #[must_use]
     pub const fn claims(&self) -> &IdTokenClaims {
@@ -440,6 +547,12 @@ impl IdToken {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.raw
+    }
+
+    /// The validated claims, without the token.
+    #[must_use]
+    pub fn into_claims(self) -> IdTokenClaims {
+        self.claims
     }
 
     /// Requires the sign-in to meet `requirement` at `now`, with the leeway on
@@ -461,15 +574,51 @@ impl IdToken {
         )
     }
 
+    /// Requires this token to name the user `expected` names.
+    ///
+    /// # Errors
+    /// [`TokenError::SubjectMismatch`] if it names another.
+    pub fn require_subject(&self, expected: &str) -> Result<(), TokenError> {
+        if self.claims.sub == expected {
+            Ok(())
+        } else {
+            Err(TokenError::SubjectMismatch {
+                expected: expected.to_owned(),
+                found: self.claims.sub.clone(),
+            })
+        }
+    }
+
+    /// Requires this ID token, from a refresh, to carry over the sign-in `signed_in`
+    /// describes (OIDC Core §12.2): the same `sub`, `auth_time` and `acr`, and no
+    /// `nonce` but the sign-in's. Its `iss`, `aud` and `azp` already passed the same
+    /// checks as the sign-in's.
+    ///
+    /// # Errors
+    /// [`TokenError::SubjectMismatch`] or [`TokenError::AuthenticationChanged`].
+    pub fn require_refresh_of(&self, signed_in: &IdTokenClaims) -> Result<(), TokenError> {
+        self.require_subject(&signed_in.sub)?;
+        let (new, old) = (&self.claims, signed_in);
+        let changed = if new.authentication.auth_time != old.authentication.auth_time {
+            Some(Claim::AuthTime)
+        } else if new.authentication.acr != old.authentication.acr {
+            Some(Claim::AuthenticationClass)
+        } else if new.nonce.is_some() && new.nonce != old.nonce {
+            Some(Claim::Nonce)
+        } else {
+            None
+        };
+        changed.map_or(Ok(()), |claim| {
+            Err(TokenError::AuthenticationChanged(claim))
+        })
+    }
+
     /// The signed-in account.
     ///
     /// # Errors
     /// [`TokenError::InvalidSubject`] if `sub` is not an account ID.
     pub fn user_id(&self) -> Result<UserId, TokenError> {
-        self.claims
-            .sub
-            .parse()
-            .map_err(|_| TokenError::InvalidSubject(self.claims.sub.clone()))
+        TokenError::account(&self.claims.sub)
     }
 }
 

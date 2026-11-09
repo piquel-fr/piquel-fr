@@ -155,6 +155,7 @@ const jwk: json.Decoder<Jwk> = json.object({
   alg: json.optional(json.oneOf(ALGORITHMS)),
   e: json.string,
   kid: json.string,
+  key_ops: json.optional(json.array(json.string)),
   kty: json.oneOf(KEY_TYPES),
   n: json.string,
   use: json.optional(json.oneOf(KEY_USES))
@@ -162,41 +163,64 @@ const jwk: json.Decoder<Jwk> = json.object({
 
 const jwkSet = json.object({ keys: json.array((value) => value) });
 
-/** One usable signing key. */
+/** Shortest and longest RSA modulus a key may have, in bits (RFC 7518 §3.3). */
+const MODULUS_BITS = { min: 2048, max: 8192 };
+/**
+ * The only RSA exponent a key may have, 65537 in base64url: Cloudflare Workers
+ * imports only 3, 17 and 65537, so a wider rule would let runtimes disagree on a key.
+ */
+const EXPONENT = 'AQAB';
+
+/** `bytes` without their leading zero bytes, which add nothing to a big-endian number. */
+const significant = (bytes: Uint8Array) => {
+  const start = bytes.findIndex(Boolean);
+  return bytes.subarray(start < 0 ? bytes.length : start);
+};
+
+/** One signing key a set lists for verification. */
 class SigningKey {
   /** Key ID matched against token headers. */
   readonly kid: string;
   /** The algorithms the key may verify: the one the set names, or any. */
   readonly algorithms: readonly Algorithm[];
-  readonly #jwk: Jwk;
+  /**
+   * What keeps the key from verifying, as every SDK judges it: a modulus outside 2048
+   * to 8192 bits, not counting leading zero bytes, or an exponent other than 65537.
+   * `undefined` for a usable key.
+   */
+  readonly defect: string | undefined;
+  /** The modulus without its leading zero bytes, in base64url, as it is imported. */
+  readonly #n: string;
   /** The imported key, once a token needed it. */
   #imported: Promise<CryptoKey> | undefined;
 
-  constructor(key: Jwk) {
+  /** A key whose `n` and `e` decoded to `n` and `e`. */
+  constructor(key: Jwk, n: Uint8Array, e: Uint8Array) {
     this.kid = key.kid;
     this.algorithms = key.alg === undefined ? ALGORITHMS : [key.alg];
-    this.#jwk = key;
+    const [modulus, exponent] = [significant(n), significant(e)];
+    this.#n = base64.encode(modulus);
+    const bits = modulus.length === 0 ? 0 : modulus.length * 8 - Math.clz32(modulus[0] ?? 0) + 24;
+    if (bits < MODULUS_BITS.min || bits > MODULUS_BITS.max) {
+      this.defect = `its RSA modulus is ${String(bits)} bits, outside 2048 to 8192`;
+    } else if (base64.encode(exponent) !== EXPONENT) {
+      this.defect = 'its RSA exponent is not 65537';
+    }
   }
 
   /**
-   * The key, imported for RS256 verification on first use. A modulus outside 2048 to
-   * 8192 bits is refused, as the Rust SDK's verifier refuses it, so no SDK accepts a
-   * token signed with a weak key.
+   * The key, imported for RS256 verification on first use, without leading zero bytes,
+   * so a padded key verifies in every runtime. Only a key without a defect is imported,
+   * so its exponent is 65537.
    */
   imported(): Promise<CryptoKey> {
-    this.#imported ??= (async () => {
-      const key = await crypto.subtle.importKey(
-        'jwk',
-        { kty: this.#jwk.kty, n: this.#jwk.n, e: this.#jwk.e },
-        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-        false,
-        ['verify']
-      );
-      // The modulus's real size: leading zero bytes in `n` add none.
-      const bits = (key.algorithm as RsaHashedKeyAlgorithm).modulusLength;
-      if (bits < 2048 || bits > 8192) throw new RangeError(`an RSA key of ${String(bits)} bits`);
-      return key;
-    })();
+    this.#imported ??= crypto.subtle.importKey(
+      'jwk',
+      { kty: 'RSA', n: this.#n, e: EXPONENT },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
     return this.#imported;
   }
 }
@@ -225,7 +249,8 @@ export class KeySet {
   /**
    * Parses a key set, from its JSON text or the parsed document. Keys this SDK cannot
    * use are skipped, as RFC 7517 §5 asks: an unknown `kty` or `alg`, a `use` other
-   * than `sig`, no `kid`, or material that is not base64url. Throws `keys` errors when
+   * than `sig`, `key_ops` without `verify` (§4.3), no `kid`, or material that is not
+   * base64url. Throws `keys` errors when
    * the document is not a key set (`invalid_document`), or two usable keys share a
    * `kid` (`duplicate_key_id`).
    */
@@ -258,14 +283,16 @@ export class KeySet {
       } catch {
         continue;
       }
-      if (base64.decode(key.n) === undefined || base64.decode(key.e) === undefined) continue;
+      if (key.key_ops !== undefined && !key.key_ops.includes('verify')) continue;
+      const [n, e] = [base64.decode(key.n), base64.decode(key.e)];
+      if (n === undefined || e === undefined) continue;
       if (keys.some((usable) => usable.kid === key.kid)) {
         throw new AuthError(
           { code: 'keys', reason: 'duplicate_key_id' },
           `two signing keys share the key ID ${JSON.stringify(key.kid)}`
         );
       }
-      keys.push(new SigningKey(key));
+      keys.push(new SigningKey(key, n, e));
     }
     return new KeySet(keys);
   }
@@ -306,7 +333,9 @@ type Source = {
  * - Keys are fetched at most once every 30 seconds, whatever the reason, so unknown
  *   key IDs cannot flood the issuer.
  * - Keys stay fresh for the response's `Cache-Control: max-age`, bounded to 30
- *   seconds through 24 hours, or one hour without one.
+ *   seconds through 24 hours, or one hour without one; `no-store` or `no-cache`
+ *   keeps them 30 seconds.
+ * - Every fetch is `https`, follows no redirect, and gives up after 10 seconds.
  * - A failed fetch keeps the last good keys, and still counts as a fetch.
  */
 export class KeyCache {
@@ -324,12 +353,18 @@ export class KeyCache {
   /** The fetch in flight, which concurrent verifications wait for instead of fetching. */
   #fetching: Promise<void> | undefined;
 
-  /** Keys fetched from `jwksUri` on first use. */
+  /** Keys fetched from `jwksUri` on first use; throws a `keys` error unless it uses `https`. */
   constructor(jwksUri: string, options?: KeyCacheOptions);
   /** @internal A fixed set; {@link KeyCache.fixed} is its public name. */
   constructor(keys: KeySet);
   constructor(source: string | KeySet, options: KeyCacheOptions = {}) {
     if (typeof source === 'string') {
+      if (asciiLowercase(source.slice(0, 8)) !== 'https://') {
+        throw new AuthError(
+          { code: 'keys' },
+          `signing keys at ${source} must be fetched over https`
+        );
+      }
       this.#source = { url: source, http: new Http(options.fetch) };
     } else {
       this.#source = undefined;
@@ -355,7 +390,8 @@ export class KeyCache {
    * Verifies `jws`'s signature under `algorithm`, which the caller checked with
    * {@link Jws.requireAlgorithm}, with the key its `kid` names. Throws `unknown_key`
    * when no usable key matches, `keys` or `network` errors when keys were needed but
-   * could not be fetched, and `bad_signature` when the signature does not verify.
+   * could not be fetched, `unusable_key` when the key cannot verify, which is the key
+   * set's fault, and `bad_signature` when the signature does not verify.
    */
   async verify(jws: Jws, algorithm: Algorithm): Promise<void> {
     const kid = jws.header.kid;
@@ -367,12 +403,24 @@ export class KeyCache {
         `key ${JSON.stringify(kid)} is not for ${algorithm}`
       );
     }
+    const unusable = (why: string, cause?: unknown) =>
+      new AuthError(
+        { code: 'keys', reason: 'unusable_key' },
+        `signing key ${JSON.stringify(kid)} cannot verify signatures: ${why}`,
+        { cause }
+      );
+    if (key.defect !== undefined) throw unusable(key.defect);
+    let imported: CryptoKey;
+    try {
+      imported = await key.imported();
+    } catch (error) {
+      throw unusable('no verifier can be built from it', error);
+    }
     let verified = false;
     let cause: unknown;
     try {
-      verified = await jws.verifiedBy(await key.imported());
+      verified = await jws.verifiedBy(imported);
     } catch (error) {
-      // The key could not verify RS256, such as a key too weak for it.
       cause = error;
     }
     if (!verified) {

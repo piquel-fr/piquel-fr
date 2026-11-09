@@ -1,5 +1,5 @@
 //! The audit history: every recorded domain event, and the tamper-evident chain
-//! over them (see `docs/security/audit-history.md`).
+//! over them (see `docs/dev/security/audit-history.md`).
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{
@@ -18,8 +18,9 @@ use std::path::PathBuf;
 pub(super) enum AuditCommand {
     /// Page through recorded events, newest first.
     List(ListEvents),
-    /// Recompute the chain and check every checkpoint against it. Exits non-zero,
-    /// naming the first position that does not match, when the chain is broken.
+    /// Recompute the chain and check every checkpoint against it, and record what
+    /// it found, which the dashboard's Audit tab shows. Exits non-zero, naming the
+    /// first position that does not match, when the chain is broken.
     Verify {
         /// The keys to check checkpoints against.
         #[command(flatten)]

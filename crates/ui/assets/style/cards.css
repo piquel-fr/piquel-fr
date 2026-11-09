@@ -51,6 +51,47 @@
 .empty {
   color: var(--muted);
 }
+/* A list or feed below a card's body, such as a notification's history entry. */
+.card > .body + .events {
+  border-top: 1px solid var(--line);
+}
+/* The inbox: a read notification's subject in the text's weight, an unread
+   one's bold, each a link to its own page that covers the whole row, so the row
+   opens it wherever it is clicked. */
+.inbox > li {
+  flex-wrap: nowrap;
+}
+.inbox a {
+  color: var(--fg);
+  text-decoration: none;
+}
+/* Its card clips the last row's highlight to its rounded corners. */
+.card:has(> .inbox) {
+  overflow: hidden;
+}
+.inbox > li:has(.text > a) {
+  position: relative;
+}
+.inbox > li:has(.text > a):hover {
+  background: var(--surface-2);
+}
+.inbox .text > a::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+/* Only an unread notification shows its dot; a read one keeps the room. */
+.inbox li.read .dot {
+  visibility: hidden;
+}
+.inbox time {
+  flex: none;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.inbox p {
+  margin: 0.2rem 0;
+}
 
 /* Lists of rows inside a card: the text keeps its room, and the row's buttons
    wrap under it on a narrow window. */
@@ -172,6 +213,10 @@
 }
 .dialog h2 {
   font-size: 1.05rem;
+}
+/* A list in a dialog lines up with the dialog's text, not a card's edge. */
+.dialog .list > li {
+  padding-inline: 0;
 }
 /* The mark a dialog may start with, such as the passkey's. */
 .dialog-mark {

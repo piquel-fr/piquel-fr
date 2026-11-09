@@ -82,6 +82,12 @@ pre code {
   overflow-wrap: normal;
   font-size: 0.82rem;
 }
+/* An email's plain-text body, wrapped as a mail app wraps it. */
+pre.email {
+  white-space: pre-wrap;
+  font-family: var(--sans);
+  font-size: 0.92rem;
+}
 time {
   font-family: var(--mono);
   font-size: 0.86em;

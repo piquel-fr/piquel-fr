@@ -6,9 +6,11 @@
 //! recovery's passkey: whoever used the link can rename it.
 
 use crate::{
-    Notice, Title,
+    LoginChange, Notice, Title,
     browser::Browser,
-    form::{Ceremony, Fields, Precision, fragment_form, new_passkey, passkey_form, time},
+    form::{
+        Ceremony, Fields, Precision, change_form, fragment_form, new_passkey, passkey_form, time,
+    },
     layout::Dismissal,
 };
 use chrono::{DateTime, Utc};
@@ -421,8 +423,8 @@ async fn incomplete(cx: &Cx) -> Result<impl View> {
 }
 
 /// What the account's pages ask of its `recovery` that can still be undone, until
-/// `session` answers: whether it was the owner's, which shows unless this browser
-/// already said yes to it at this stage, and since a passkey
+/// `session` answers: whether it was the owner's, shown without scripts too,
+/// which hides once this browser said yes to it at this stage, and since a passkey
 /// `confirmed` the session, if one did, with a link to undo it on the undo page,
 /// `undo`. In probation, a notice, shown without scripts, says what the recovery
 /// holds back meanwhile, and who can undo it.
@@ -434,7 +436,7 @@ pub async fn recovery_banner<'a>(
     confirmed: bool,
     undo: &'a str,
 ) -> Result<impl View> {
-    let dismissal = Dismissal::new(cx, recovery.dismiss_key(session, confirmed));
+    let dismissal = Dismissal::new(cx, recovery.dismiss_key(session, confirmed), true);
     let href = recovery.undo_href(undo);
     Ok(view! {
         <section class="notice warning stack" :hidden=(dismissal.hidden()) @mount=(dismissal.mount())>
@@ -460,21 +462,27 @@ pub async fn recovery_banner<'a>(
 }
 
 /// What a sign-in asks of the account's `recovery` that can still be undone,
-/// before it goes on to an app: whether it was the owner's, going on at
-/// `continue_href` if so, or to undo it on the undo page, `undo`. The answer is
-/// not kept, so the account's pages still ask.
+/// before it goes on to an app: whether it was the owner's, which the sign-in
+/// page's form at `action` answers to go on, so no link can skip it, or, if not,
+/// to undo it on the undo page, `undo`. The answer is not kept, so the account's
+/// pages still ask.
 #[component]
 pub async fn recovery_prompt<'a>(
     cx: &Cx,
     recovery: &'a Recovery,
-    continue_href: &'a str,
+    action: &'a str,
     undo: &'a str,
 ) -> Result<impl View> {
     let href = recovery.undo_href(undo);
     Ok(view! {
         <h1>(recovery.question())</h1>
-        <a class="button" href=(continue_href)>"Yes, continue"</a>
-        <a class="button secondary" href=(href.as_str())>(recovery.refusal())</a>
+        change_form(
+            action: action,
+            change: LoginChange::RecoveryRecognized { recovery: recovery.id },
+            label: "Yes, continue",
+            class: "full",
+        )
+        <a class="button secondary full" href=(href.as_str())>(recovery.refusal())</a>
     })
 }
 

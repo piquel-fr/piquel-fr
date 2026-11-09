@@ -1,3 +1,10 @@
+/**
+ * Recovering an account as support does: `user recover` prints the link, a second
+ * browser adds a passkey with it and lands in settings under the probation's
+ * restriction and its "Was this you?" question; the owner signs in with the
+ * passkey from before and undoes the recovery, which signs the second browser
+ * out. Skipped without `E2E_RECOVER`.
+ */
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { signedUp, withPasskeys } from './helpers';
@@ -41,8 +48,8 @@ test('a recovery link adds a passkey, and the owner undoes it with an older one'
     recovering.getByText(/the passkey the recovery added signs in but can.t confirm changes/)
   ).toBeVisible();
   // Answering the question hides it for this session, across page loads, and gives
-  // the focus to the page's heading. The page, which shows it, has run once it has
-  // loaded.
+  // the focus to the page's heading. The page, which hides it once answered, has run
+  // once it has loaded.
   const itWasMe = recovering.getByRole('button', { name: 'Yes, it was me', exact: true });
   await itWasMe.click();
   await expect(itWasMe).toBeHidden();

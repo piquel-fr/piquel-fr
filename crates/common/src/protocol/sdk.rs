@@ -38,6 +38,8 @@ crate::str_enum! {
         PkceUnsupported = "pkce_unsupported",
         /// Two keys in one set share a `kid`.
         DuplicateKeyId = "duplicate_key_id",
+        /// No verifier can be built from a key for the token's algorithm.
+        UnusableKey = "unusable_key",
         /// The token is not a compact JWS, or a segment does not decode.
         Malformed = "malformed",
         /// The header lists `crit` extensions, which the SDKs do not support
@@ -70,6 +72,13 @@ crate::str_enum! {
         WrongAuthorizedParty = "wrong_authorized_party",
         /// `auth_time` is missing or older than the requested `max_age`.
         AuthenticationTooOld = "authentication_too_old",
+        /// An ID token or `UserInfo` names another user than expected: a step-up that
+        /// came back as another account, a refresh (OIDC Core §12.2), or `UserInfo`
+        /// (OIDC Core §5.3.2).
+        SubjectMismatch = "subject_mismatch",
+        /// A refreshed ID token changes the original authentication's `auth_time`,
+        /// `acr` or `nonce` (OIDC Core §12.2).
+        AuthenticationChanged = "authentication_changed",
         /// A callback's `state` differs from the pending login's.
         StateMismatch = "state_mismatch",
         /// A callback has no `iss` although the issuer advertises it (RFC 9207 §2.4).

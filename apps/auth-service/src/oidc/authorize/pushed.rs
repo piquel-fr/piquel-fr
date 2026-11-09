@@ -1,7 +1,7 @@
 //! Pushed authorization requests (RFC 9126): storing one an authenticated client
 //! pushes, and claiming it from its `request_uri`.
 
-use super::AuthorizationParameters;
+use super::{AuthorizationParameters, RecoveryQuestion};
 use crate::{
     oidc::{
         AUTHORIZATION_REQUEST_MINUTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken,
@@ -85,8 +85,13 @@ impl OidcApplication {
         let (opaque, _) = self
             .claim(self.database.oidc(), client_id, request_uri)
             .await?;
-        self.continue_authorization(context, headers, opaque.encoded())
-            .await
+        self.continue_authorization(
+            context,
+            headers,
+            opaque.encoded(),
+            RecoveryQuestion::Unanswered,
+        )
+        .await
     }
 
     /// Claims the pushed request `request_uri` through `oidc`. Only `client_id` can

@@ -14,7 +14,7 @@ use piquel_common::{
     ErrorChain,
     protocol::{
         challenge::{BearerChallenge, BearerError},
-        oauth::{ErrorDescription, ErrorResponse},
+        oauth::{ErrorDescription, ErrorResponse, InvalidScope},
     },
 };
 use piquel_crypto::CryptoError;
@@ -117,6 +117,9 @@ pub(crate) enum OAuthError {
     /// The address of the page the browser goes on to could not be written.
     #[error("a page's address could not be written")]
     PageAddress(#[from] QueryError),
+    /// A grant read back from the database holds an invalid scope.
+    #[error("a stored grant holds an invalid scope")]
+    StoredScopes(#[from] InvalidScope),
 }
 
 impl OAuthError {
@@ -175,6 +178,7 @@ impl OAuthError {
         match error {
             DatabaseError::NotFound => expected.reject_with(description, error),
             DatabaseError::Conflict(_)
+            | DatabaseError::Refused(_)
             | DatabaseError::Timeout(_)
             | DatabaseError::Cancelled(_)
             | DatabaseError::LockUnavailable(_)
@@ -203,7 +207,8 @@ impl OAuthError {
             | Self::Keys(_)
             | Self::Url(_)
             | Self::CookieHeader(_)
-            | Self::PageAddress(_)) => error,
+            | Self::PageAddress(_)
+            | Self::StoredScopes(_)) => error,
         }
     }
 }
@@ -239,7 +244,8 @@ impl OAuthError {
             | Self::Crypto(_)
             | Self::Url(_)
             | Self::CookieHeader(_)
-            | Self::PageAddress(_) => {
+            | Self::PageAddress(_)
+            | Self::StoredScopes(_) => {
                 ApiError::log_error(self);
                 (
                     OAuthCode::ServerError,
@@ -290,7 +296,8 @@ impl From<OAuthError> for ApiError {
             error @ (OAuthError::Crypto(_)
             | OAuthError::Url(_)
             | OAuthError::CookieHeader(_)
-            | OAuthError::PageAddress(_)) => Self::internal(error),
+            | OAuthError::PageAddress(_)
+            | OAuthError::StoredScopes(_)) => Self::internal(error),
         }
     }
 }
@@ -334,20 +341,20 @@ impl From<piquel_repository::CodeRedemptionError> for OAuthError {
     }
 }
 
-impl From<piquel_repository::RefreshRotationError> for OAuthError {
-    /// Rotation failures reject the grant; persistence failures retain their internal status.
-    fn from(error: piquel_repository::RefreshRotationError) -> Self {
+impl From<piquel_repository::RefreshRedemptionError> for OAuthError {
+    /// Redemption failures reject the grant; persistence failures retain their internal status.
+    fn from(error: piquel_repository::RefreshRedemptionError) -> Self {
         match error {
-            piquel_repository::RefreshRotationError::Database(source) => source.into(),
-            error @ piquel_repository::RefreshRotationError::Invalid => OAuthCode::InvalidGrant
+            piquel_repository::RefreshRedemptionError::Database(source) => source.into(),
+            error @ piquel_repository::RefreshRedemptionError::Invalid => OAuthCode::InvalidGrant
                 .reject_with("refresh_token is unknown, expired or revoked", error),
-            error @ piquel_repository::RefreshRotationError::Replay { .. } => {
+            error @ piquel_repository::RefreshRedemptionError::Replay { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "refresh_token was already used, so its whole token family is now revoked",
                     error,
                 )
             }
-            error @ piquel_repository::RefreshRotationError::Policy { .. } => {
+            error @ piquel_repository::RefreshRedemptionError::Policy { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "the client or account no longer allows this grant, so its token family \
                      is now revoked",

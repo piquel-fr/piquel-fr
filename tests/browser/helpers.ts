@@ -57,6 +57,80 @@ export async function addPasskeys(
   return { cdp, authenticatorId };
 }
 
+/** What a page told the password manager of an account's passkeys. */
+type AcceptedCredentials = {
+  rpId: string;
+  /** The account's user handle, in unpadded base64url. */
+  userId: string;
+  /** The credential ID of every passkey that still signs in, in unpadded base64url. */
+  allAcceptedCredentialIds: string[];
+  /** Why Chromium refused the signal, if it did. */
+  refused?: string;
+};
+
+/**
+ * Records, on every page `context` loads from now on, what it tells the password
+ * manager by `PublicKeyCredential.signalAllAcceptedCredentials`, once Chromium's
+ * own has answered, so a call Chromium refuses says why.
+ */
+export async function recordAcceptedCredentials(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    type Signal = (options: AcceptedCredentials) => Promise<void>;
+    const credentials = PublicKeyCredential as unknown as {
+      signalAllAcceptedCredentials?: Signal;
+    };
+    const own = credentials.signalAllAcceptedCredentials?.bind(PublicKeyCredential);
+    const told: AcceptedCredentials[] = [];
+    (window as unknown as { told: AcceptedCredentials[] }).told = told;
+    credentials.signalAllAcceptedCredentials = async (options) => {
+      const call = { ...options, allAcceptedCredentialIds: [...options.allAcceptedCredentialIds] };
+      try {
+        await own?.(options);
+      } catch (error) {
+        call.refused = String(error);
+        throw error;
+      } finally {
+        told.push(call);
+      }
+    };
+  });
+}
+
+/**
+ * Expects the page `page` shows to have told the password manager, once its
+ * runtime ran, that the passkeys the authenticators `authenticatorIds`
+ * hold, and only those, still sign in, under their own RP ID and user handle.
+ */
+export async function expectAccepted(
+  page: Page,
+  cdp: CDPSession,
+  ...authenticatorIds: string[]
+): Promise<void> {
+  const held = (
+    await Promise.all(
+      authenticatorIds.map((authenticatorId) =>
+        cdp.send('WebAuthn.getCredentials', { authenticatorId })
+      )
+    )
+  ).flatMap(({ credentials }) => credentials);
+  const base64url = (value: string) => Buffer.from(value, 'base64').toString('base64url');
+  // Waits for the call, which the page makes once its runtime runs.
+  const told = await (
+    await page.waitForFunction(() =>
+      (window as unknown as { told?: AcceptedCredentials[] }).told?.at(-1)
+    )
+  ).jsonValue();
+  if (!told) throw new Error('The page told the password manager nothing.');
+  expect(held.length).toBeGreaterThan(0);
+  expect({ ...told, allAcceptedCredentialIds: told.allAcceptedCredentialIds.toSorted() }).toEqual({
+    rpId: held[0].rpId,
+    userId: base64url(held[0].userHandle ?? ''),
+    allAcceptedCredentialIds: held
+      .map((credential) => base64url(credential.credentialId))
+      .toSorted()
+  });
+}
+
 /**
  * Runs `command`, a deployment's CLI named by an environment variable such as
  * `E2E_GRANT_ADMIN`, with `args` appended, and returns what it printed.
@@ -89,15 +163,13 @@ export async function signUp(
 }
 
 /**
- * Adds a passkey named `name` from `page`'s sign-in methods, made by a second
- * authenticator: the first, `authenticatorId`, holds the account's passkey
- * already, so it stops answering. Answers the second authenticator's ID.
+ * A second authenticator, which answers the next ceremonies: the first,
+ * `authenticatorId`, holds the account's passkey already, so it stops answering.
+ * Answers the second authenticator's ID.
  */
-export async function addSecondPasskey(
-  page: Page,
+export async function secondAuthenticator(
   cdp: CDPSession,
-  authenticatorId: string,
-  name: string
+  authenticatorId: string
 ): Promise<string> {
   await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: false });
   const second = await cdp.send('WebAuthn.addVirtualAuthenticator', {
@@ -110,12 +182,26 @@ export async function addSecondPasskey(
       automaticPresenceSimulation: true
     }
   });
+  return second.authenticatorId;
+}
+
+/**
+ * Adds a passkey named `name` from `page`'s sign-in methods, made by a
+ * {@link secondAuthenticator}. Answers that authenticator's ID.
+ */
+export async function addSecondPasskey(
+  page: Page,
+  cdp: CDPSession,
+  authenticatorId: string,
+  name: string
+): Promise<string> {
+  const second = await secondAuthenticator(cdp, authenticatorId);
   await page.goto('/settings/sign-in');
   await page.getByText('Add a passkey', { exact: true }).click();
   await page.getByLabel('New passkey name', { exact: true }).fill(name);
   await page.getByRole('button', { name: 'Create the passkey', exact: true }).click();
   await expect(page.getByText('The passkey was added.')).toBeVisible();
-  return second.authenticatorId;
+  return second;
 }
 
 /** A page in a browser of its own, with a passkey authenticator. */

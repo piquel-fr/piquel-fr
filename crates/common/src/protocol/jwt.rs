@@ -87,6 +87,28 @@ crate::str_enum! {
         Signature = "sig",
     }
 }
+crate::open_str_enum! {
+    /// Operations a JWK's `key_ops` allows (RFC 7517 §4.3). Open, since the
+    /// registry may grow.
+    pub enum KeyOperation {
+        /// Compute a signature or MAC.
+        Sign = "sign",
+        /// Verify a signature or MAC.
+        Verify = "verify",
+        /// Encrypt content.
+        Encrypt = "encrypt",
+        /// Decrypt content and validate decryption.
+        Decrypt = "decrypt",
+        /// Encrypt a key.
+        WrapKey = "wrapKey",
+        /// Decrypt a key and validate decryption.
+        UnwrapKey = "unwrapKey",
+        /// Derive a key.
+        DeriveKey = "deriveKey",
+        /// Derive bits not to be used as a key.
+        DeriveBits = "deriveBits",
+    }
+}
 
 /// Longest key identifier, in bytes.
 const MAX_KEY_ID_LENGTH: usize = 128;
@@ -185,6 +207,10 @@ pub struct Jwk {
     pub alg: Option<Algorithm>,
     /// Base64url RSA public exponent.
     pub e: String,
+    /// Operations the key is for (RFC 7517 §4.3). Auth never sends it; other issuers
+    /// may, instead of `use`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_ops: Option<Vec<KeyOperation>>,
     /// Key identifier, matching the token header's `kid`.
     pub kid: String,
     /// Key family; any value but `RSA` fails parsing.
@@ -194,4 +220,28 @@ pub struct Jwk {
     /// Key purpose. Auth always sends it; other issuers may not.
     #[serde(rename = "use", default, skip_serializing_if = "Option::is_none")]
     pub key_use: Option<KeyUse>,
+}
+
+impl Jwk {
+    /// Whether the key may verify signatures: a `use` other than `sig` already fails
+    /// parsing, so this checks that `key_ops`, when present, lists `verify`
+    /// (RFC 7517 §4.3).
+    ///
+    /// ```
+    /// use piquel_common::protocol::jwt::Jwk;
+    ///
+    /// let key = |ops: &str| -> Jwk {
+    ///     serde_json::from_str(&format!(r#"{{"kty": "RSA", "kid": "a", "n": "AQAB", "e": "AQAB"{ops}}}"#))
+    ///         .expect("a key")
+    /// };
+    /// assert!(key("").verifies());
+    /// assert!(key(r#", "key_ops": ["verify"]"#).verifies());
+    /// assert!(!key(r#", "key_ops": ["encrypt"]"#).verifies());
+    /// ```
+    #[must_use]
+    pub fn verifies(&self) -> bool {
+        self.key_ops
+            .as_ref()
+            .is_none_or(|operations| operations.contains(&KeyOperation::Verify))
+    }
 }

@@ -132,15 +132,16 @@ async fn locked_session_lookup_waits_for_concurrent_logout() {
             .expect("revoke"),
         [session]
     );
+    let mut exchange = pool.begin().await.expect("exchange transaction");
+    let backend = Database::backend(&mut exchange).await;
     let exchange = tokio::spawn(async move {
-        let mut exchange = pool.begin().await.expect("exchange transaction");
         SessionRepository::from_connection(&mut exchange)
             .find_active_by_id_for_update(session)
             .await
             .expect("lookup")
     });
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(!exchange.is_finished(), "lookup must wait for the logout");
+    // The lookup waits for the logout.
+    Database::wait_for_lock(&pool, backend).await;
     logout.commit().await.expect("commit logout");
     assert!(exchange.await.expect("exchange task").is_none());
 }

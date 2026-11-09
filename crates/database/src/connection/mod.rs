@@ -1,6 +1,7 @@
 //! Validated `PostgreSQL` transport, bounded pools and explicit maintenance.
 
 use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction, LockKey};
+use piquel_crypto::ScramVerifier;
 use sqlx::{
     ConnectOptions, Connection, PgConnection, PgPool,
     migrate::Migrator,
@@ -320,16 +321,21 @@ impl Database {
     /// access to the app tables and nothing else; see `runtime_role.sql`. Run it as
     /// the schema owner after migrations, so the grants cover every table.
     ///
-    /// The script holds the password, so it runs on a dedicated connection that
-    /// never logs statements, as one implicit transaction: concurrent queries see
-    /// the old grants or the new ones, never none. It takes an advisory lock, so
+    /// The script sets the password's SCRAM verifier, never the password, so the
+    /// server and its logs never see it. It still runs on a dedicated connection
+    /// that never logs statements, as one implicit transaction: concurrent queries
+    /// see the old grants or the new ones, never none. It takes an advisory lock, so
     /// overlapping runs wait for each other.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::Operation`] if `role` is the schema owner or a
-    /// superuser, or if a statement fails, e.g. when the owner is not a superuser.
+    /// Returns [`DatabaseError::Operation`] if `role` is the schema owner, a
+    /// superuser, a member of another role or the owner of anything, if it or
+    /// `PUBLIC` was granted a server parameter, if its verifier cannot be
+    /// derived, or if a statement fails, e.g. when the owner is not a superuser.
     pub async fn provision(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
+        let verifier = ScramVerifier::new(&role.password)
+            .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
         let options = self.pool.connect_options().as_ref().clone();
         let mut connection = self
             .connect_dedicated(&options.disable_statement_logging())
@@ -337,7 +343,7 @@ impl Database {
         let script = sqlx::query_file_scalar!(
             "src/connection/runtime_role.sql",
             role.name,
-            role.password,
+            verifier.to_string(),
             LockKey::Provisioning.id()
         )
         .fetch_one(&mut connection)
@@ -391,6 +397,67 @@ impl Database {
             .await
             .expect("migrate");
         pool
+    }
+
+    /// Connects to `TEST_DATABASE_URL` in a new schema of its own, with the
+    /// migrations in `versions` applied, for tests of a migration: the test
+    /// database is already migrated. The schema is left behind; test databases
+    /// are disposable.
+    pub(crate) async fn scratch_schema(versions: impl std::ops::RangeBounds<i64>) -> PgConnection {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+        let mut connection = PgConnection::connect(&url).await.expect("connect");
+        let schema = format!("scratch_{}", uuid::Uuid::now_v7().simple());
+        // A schema name cannot be a bind parameter; this one is generated above.
+        sqlx::raw_sql(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema}"
+        ))
+        .execute(&mut connection)
+        .await
+        .expect("schema");
+        Self::apply_migrations(&mut connection, versions).await;
+        connection
+    }
+
+    /// Applies the migrations in `versions` to `connection`'s schema, in order.
+    pub(crate) async fn apply_migrations(
+        connection: &mut PgConnection,
+        versions: impl std::ops::RangeBounds<i64>,
+    ) {
+        for migration in MIGRATOR.iter().filter(|m| versions.contains(&m.version)) {
+            sqlx::raw_sql(&migration.sql)
+                .execute(&mut *connection)
+                .await
+                .unwrap_or_else(|error| panic!("migration {}: {error}", migration.version));
+        }
+    }
+
+    /// The server process of `connection`, to watch its lock waits with
+    /// [`Self::wait_for_lock`].
+    pub(crate) async fn backend(connection: &mut PgConnection) -> i32 {
+        sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(connection)
+            .await
+            .expect("backend pid")
+    }
+
+    /// Waits until the server process `backend` is blocked on a lock.
+    pub(crate) async fn wait_for_lock(pool: &PgPool, backend: i32) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS (
+                    SELECT FROM pg_stat_activity WHERE pid = $1 AND wait_event_type = 'Lock'
+                )",
+            )
+            .bind(backend)
+            .fetch_one(pool)
+            .await
+            .expect("wait state")
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the transaction waits for a lock");
     }
 }
 

@@ -1,0 +1,35 @@
+error: cannot construct `AccessToken<_, _>` with struct literal syntax due to private fields
+  --> tests/ui/forged_access_token.rs:5:26
+   |
+ 5 |     let _: AccessToken = AccessToken {
+   |                          ^^^^^^^^^^^
+ 6 |         subject: Subject::User("01936f3e-8c00-7000-8000-000000000001".parse().unwrap()),
+   |         ------------------------------------------------------------------------------- private field
+ 7 |         client_id: "notes-web".parse().unwrap(),
+   |         --------------------------------------- private field
+ 8 |         scopes: Scopes::default(),
+   |         ------------------------- private field
+ 9 |         token_id: "01936f3e-8c00-7000-8000-000000000003".parse().unwrap(),
+   |         ----------------------------------------------------------------- private field
+10 |         session_id: None,
+   |         ---------------- private field
+11 |         auth_time: None,
+   |         --------------- private field
+12 |         amr: Vec::new(),
+   |         --------------- private field
+13 |         acr: None,
+   |         --------- private field
+14 |         actor: None,
+   |         ----------- private field
+15 |         confirmation: None,
+   |         ------------------ private field
+16 |         profile: ProfileClaims::default(),
+   |         --------------------------------- private field
+17 |         issued_at: now,
+   |         -------------- private field
+18 |         expires_at: now,
+   |         --------------- private field
+19 |         extra: (),
+   |         --------- private field
+   |
+   = note: ...and other private field `proof` that was not provided

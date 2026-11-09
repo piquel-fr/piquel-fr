@@ -32,6 +32,13 @@ static GRANTS_REVOKED: Counter<[Label; 1]> = Counter::new(
     "{grant}",
     "Refresh token families revoked, by reason.",
 );
+/// Failed authorization code redemptions, each of which used its code up, by
+/// reason.
+static CODE_REDEMPTIONS_FAILED: Counter<[Label; 1]> = Counter::new(
+    "piquel.auth.codes.redemption_failed",
+    "{code}",
+    "Authorization code redemptions that failed and used the code up, by reason.",
+);
 /// The pool's connections, as the database semantic conventions name them.
 static CONNECTIONS: Gauge<[Label; 1]> = Gauge::new(
     "db.client.connection.count",
@@ -91,6 +98,9 @@ impl Committed {
             }
             DomainEvent::GrantRevoked { reason, .. } => {
                 GRANTS_REVOKED.add(1, &[("reason", reason.as_str())]);
+            }
+            DomainEvent::CodeRedemptionFailed { reason, .. } => {
+                CODE_REDEMPTIONS_FAILED.add(1, &[("reason", reason.as_str())]);
             }
             _ => {}
         }

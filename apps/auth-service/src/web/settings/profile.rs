@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use piquel_ui::{
-    Alert, Audience, CROP_SIZE, CROP_X, CROP_Y, Messages, Notice, PICTURE_FIELD, ProfileChange,
+    Audience, CROP_SIZE, CROP_X, CROP_Y, Messages, Notice, PICTURE_FIELD, ProfileChange,
     ProfileDialog, ProfileState, Section, Tab, Who,
 };
 use serde::Deserialize;
@@ -184,22 +184,12 @@ impl AccountPage for Profile {
     ) -> Result<Response, Failure> {
         // A refusal is said in the dialog shown again, not behind it, or above the
         // profile when the page no longer has that dialog.
-        let (alert, messages) = match messages.alert {
-            Some(Alert::Page(alert)) if state.open.is_some() => (
-                Some(alert),
-                Messages {
-                    alert: None,
-                    ..messages
-                },
-            ),
-            _ => (None, messages),
-        };
+        let (alert, messages) = messages.into_dialog(state.open.is_some());
         let viewer = reader.viewer();
         let profile = web.account.profile(&viewer).await?;
         let administrator = web.account.is_administrator(&viewer).await?;
         let picture = profile.picture.map(pictures::of);
         let who = Who {
-            user: None,
             name: &profile.display_name,
             handle: profile.handle.as_str(),
             picture: picture.as_deref(),

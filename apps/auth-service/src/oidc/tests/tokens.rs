@@ -1,18 +1,22 @@
-//! Token exchange and refresh: rotation, replay, concurrency, key changes, policy and claims.
+//! Token exchange and refresh: kept and rotated tokens, replay, concurrency, key changes,
+//! policy and claims.
 
 use super::*;
 use crate::config::PolicyLinks;
+use piquel_common::AccountStatus;
 use piquel_common::clients::{AllowedScopes, ScopeName};
 use piquel_common::events::GrantRevocation;
+use piquel_repository::SessionScope;
 
-/// Checks refresh narrowing, replay revocation, client binding and logout.
+/// Checks refresh narrowing, that a confidential client keeps its token, client
+/// binding and logout.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 #[expect(
     clippy::too_many_lines,
-    reason = "The scenario follows one refresh family through narrowing, replay and logout."
+    reason = "The scenario follows one refresh family through narrowing, reuse and logout."
 )]
-async fn confidential_refresh_rotation_logout_and_client_binding() {
+async fn confidential_refresh_keeps_its_token_logout_and_client_binding() {
     let flow = Flow::new(true, true).await;
     let code = flow.code(EMAIL_REFRESH_SCOPES).await;
     assert_eq!(
@@ -95,12 +99,8 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         )
         .expect("verify narrowed ID token");
     assert!(narrowed_claims.profile.email.is_none());
-    let fresh = narrowed["refresh_token"]
-        .as_str()
-        .expect("refresh response contains the rotated token")
-        .to_owned();
-    assert_eq!(flow.refresh(old).await.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(flow.refresh(&fresh).await.status(), StatusCode::BAD_REQUEST);
+    assert!(narrowed.get("refresh_token").is_none(), "{narrowed}");
+    assert_eq!(flow.refresh(old).await.status(), StatusCode::OK, "kept");
     let code = flow.code(REFRESH_SCOPES).await;
     let response = flow
         .exchange(&code, Flow::verifier(), flow.basic.as_deref())
@@ -162,13 +162,6 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         ),
         "{events:?}"
     );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        DomainEvent::GrantRevoked {
-            reason: GrantRevocation::RefreshReplay,
-            ..
-        }
-    )));
 }
 
 /// Replaying a redeemed code revokes the refresh family it produced, while the same
@@ -176,7 +169,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn code_replay_revokes_its_refresh_family() {
-    let flow = Flow::new(true, true).await;
+    let flow = Flow::new(false, true).await;
     let code = flow.code(REFRESH_SCOPES).await;
     let response = flow
         .exchange(&code, Flow::verifier(), flow.basic.as_deref())
@@ -240,40 +233,114 @@ async fn code_replay_revokes_its_refresh_family() {
     assert_eq!(revoked, issued, "the replay revoked the code's own family");
 }
 
-/// The same refresh token, rotated on two replicas at once, rotates exactly once. The
-/// other attempt is a replay, which revokes the family.
+/// The same refresh token, refreshed on two replicas at once: a public client's
+/// rotates exactly once, and the other attempt is a replay, which revokes the
+/// family. A confidential client's serves both and stays valid.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn concurrent_refresh_across_replicas_rotates_once() {
-    let flow = Flow::new(true, true).await;
+async fn concurrent_refreshes_across_replicas() {
     let replicas = Replicas::new().await;
-    let (a, b) = (flow.on(&replicas.a), flow.on(&replicas.b));
-    let code = a.code(REFRESH_SCOPES).await;
-    let response = b
-        .exchange(&code, Flow::verifier(), b.basic.as_deref())
+    for confidential in [false, true] {
+        let flow = Flow::new(confidential, true).await;
+        let (a, b) = (flow.on(&replicas.a), flow.on(&replicas.b));
+        let code = a.code(REFRESH_SCOPES).await;
+        let response = b
+            .exchange(&code, Flow::verifier(), b.basic.as_deref())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let token = Flow::json(response).await["refresh_token"]
+            .as_str()
+            .expect("token response contains a refresh token")
+            .to_owned();
+        let (first, second) = tokio::join!(a.refresh(&token), b.refresh(&token));
+        if confidential {
+            for response in [first, second] {
+                assert_eq!(response.status(), StatusCode::OK);
+                assert!(Flow::json(response).await.get("refresh_token").is_none());
+            }
+            assert_eq!(a.refresh(&token).await.status(), StatusCode::OK, "kept");
+            continue;
+        }
+        let (rotated, replayed) = if first.status() == StatusCode::OK {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        assert_eq!(rotated.status(), StatusCode::OK);
+        assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
+        let rotated = Flow::json(rotated).await["refresh_token"]
+            .as_str()
+            .expect("refresh response contains the rotated token")
+            .to_owned();
+        assert_eq!(
+            a.refresh(&rotated).await.status(),
+            StatusCode::BAD_REQUEST,
+            "the replay revoked the family"
+        );
+        assert!(flow.events().await.iter().any(|event| matches!(
+            event,
+            DomainEvent::GrantRevoked {
+                reason: GrantRevocation::RefreshReplay,
+                ..
+            }
+        )));
+    }
+}
+
+/// A refresh that waits for the account lock while a recovery undo ends every
+/// session, or while the account is disabled, fails once they commit and issues
+/// nothing: it reads its session and account again under the lock, whether its
+/// client rotates its token or keeps it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_refresh_that_waits_for_an_undo_or_disablement_issues_nothing() {
+    for (confidential, disable) in [(false, false), (false, true), (true, false), (true, true)] {
+        let flow = Flow::new(confidential, true).await;
+        let tokens = Flow::json(
+            flow.exchange(
+                &flow.code(REFRESH_SCOPES).await,
+                Flow::verifier(),
+                flow.basic.as_deref(),
+            )
+            .await,
+        )
         .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let token = Flow::json(response).await["refresh_token"]
-        .as_str()
-        .expect("token response contains a refresh token")
-        .to_owned();
-    let (first, second) = tokio::join!(a.refresh(&token), b.refresh(&token));
-    let (rotated, replayed) = if first.status() == StatusCode::OK {
-        (first, second)
-    } else {
-        (second, first)
-    };
-    assert_eq!(rotated.status(), StatusCode::OK);
-    assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
-    let rotated = Flow::json(rotated).await["refresh_token"]
-        .as_str()
-        .expect("refresh response contains the rotated token")
-        .to_owned();
-    assert_eq!(
-        a.refresh(&rotated).await.status(),
-        StatusCode::BAD_REQUEST,
-        "the replay revoked the family"
-    );
+        let token = tokens["refresh_token"]
+            .as_str()
+            .expect("refresh token")
+            .to_owned();
+        let database = flow.app.database.clone();
+        let mut holder = database.begin().await.expect("transaction");
+        holder
+            .users()
+            .find_active_by_id_for_update(flow.user_id)
+            .await
+            .expect("lock")
+            .expect("user");
+        let refreshing = flow.clone();
+        let refresh = tokio::spawn(async move { refreshing.refresh(&token).await });
+        until_blocked(&mut holder, 1).await;
+        if disable {
+            holder
+                .users()
+                .set_status(flow.user_id, AccountStatus::Disabled)
+                .await
+                .expect("disable");
+        } else {
+            let context = RequestContext::TEST.actor(Actor::Anonymous);
+            holder
+                .revoke_sessions(
+                    &context,
+                    flow.user_id,
+                    SessionScope::All,
+                    &RevocationReason::CredentialRemoved,
+                )
+                .await
+                .expect("every session ends");
+        }
+        holder.commit().await.expect("commit");
+        Flow::assert_invalid_grant(refresh.await.expect("refresh")).await;
+    }
 }
 
 /// A new signing key and a new token digest key leave outstanding codes and
@@ -282,7 +349,7 @@ async fn concurrent_refresh_across_replicas_rotates_once() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn changing_keys_keeps_codes_and_refresh_tokens() {
-    let flow = Flow::new(true, true).await;
+    let flow = Flow::new(false, true).await;
     let code = flow.code(REFRESH_SCOPES).await;
     let tokens = Flow::json(
         flow.exchange(
@@ -386,11 +453,12 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
-/// A new picture bumps the profile version, and the next token carries its URL on
-/// auth's origin as `picture`.
+/// A new picture and a rename each bump the profile version, and the next token
+/// carries them: the picture's URL on auth's origin as `picture`, and the new
+/// `preferred_username`.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn pictures_reach_the_next_token() {
+async fn profile_changes_reach_the_next_token() {
     let flow = Flow::new(true, true).await;
     let code = flow.code(PROFILE_REFRESH_SCOPES).await;
     let (tokens, claims) = flow
@@ -400,13 +468,22 @@ async fn pictures_reach_the_next_token() {
         )
         .await;
     assert_eq!(claims.get("picture"), None, "no picture yet");
+    let database = &flow.app.database;
     let picture = piquel_common::PictureId::new();
-    flow.app
-        .database
+    database
         .pictures()
         .set(flow.user_id, picture, b"jpeg")
         .await
         .expect("picture");
+    let renamed =
+        Handle::parse(&format!("renamed-{}", &flow.user_id.to_string()[24..])).expect("handle");
+    let mut tx = database.begin().await.expect("transaction");
+    assert!(
+        tx.rename_handle(flow.user_id, &renamed)
+            .await
+            .expect("rename")
+    );
+    tx.commit().await.expect("commit");
     let (_, refreshed) = flow
         .id_token(
             flow.refresh(tokens["refresh_token"].as_str().expect("refresh token"))
@@ -415,9 +492,10 @@ async fn pictures_reach_the_next_token() {
         .await;
     let issuer = refreshed["iss"].as_str().expect("issuer");
     assert_eq!(refreshed["picture"], format!("{issuer}/pictures/{picture}"));
+    assert_eq!(refreshed["preferred_username"], renamed.as_str());
     assert_eq!(
         refreshed["profile_version"],
-        claims["profile_version"].as_u64().expect("version") + 1
+        claims["profile_version"].as_u64().expect("version") + 2
     );
 }
 
@@ -439,44 +517,4 @@ fn the_picture_needs_the_profile_scope() {
     };
     assert_eq!(released("openid email"), None);
     assert_eq!(released("openid profile"), claims.picture);
-}
-
-/// A rename bumps the profile version, and the next token carries the new
-/// `preferred_username`.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn renames_reach_the_next_token() {
-    let flow = Flow::new(true, true).await;
-    let code = flow.code(PROFILE_REFRESH_SCOPES).await;
-    let (tokens, claims) = flow
-        .id_token(
-            flow.exchange(&code, Flow::verifier(), flow.basic.as_deref())
-                .await,
-        )
-        .await;
-    let database = &flow.app.database;
-    let user = database
-        .users()
-        .find_by_id(flow.user_id)
-        .await
-        .expect("lookup")
-        .expect("user");
-    assert_eq!(claims["preferred_username"], user.handle.as_str());
-    let renamed =
-        Handle::parse(&format!("renamed-{}", &flow.user_id.to_string()[24..])).expect("handle");
-    let mut tx = database.begin().await.expect("transaction");
-    assert!(
-        tx.rename_handle(flow.user_id, &renamed)
-            .await
-            .expect("rename")
-    );
-    tx.commit().await.expect("commit");
-    let (_, refreshed) = flow
-        .id_token(
-            flow.refresh(tokens["refresh_token"].as_str().expect("refresh token"))
-                .await,
-        )
-        .await;
-    assert_eq!(refreshed["preferred_username"], renamed.as_str());
-    assert_eq!(refreshed["profile_version"], user.profile_version + 1);
 }

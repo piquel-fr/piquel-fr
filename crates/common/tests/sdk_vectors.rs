@@ -9,7 +9,14 @@
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
-use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
+use openssl::{
+    hash::MessageDigest,
+    md::Md,
+    pkey::{Id, PKey},
+    pkey_ctx::PkeyCtx,
+    sign::Signer,
+    symm::{Cipher, encrypt_aead},
+};
 use piquel_common::{
     AuthenticationMethod, ClientId, DeliveryId, SessionId, TokenId,
     protocol::{
@@ -57,6 +64,14 @@ const OLD_KID: &str = "key-2025";
 const NEW_KID: &str = "key-2026";
 /// A 1024-bit key, too weak for any SDK to accept.
 const WEAK_KID: &str = "key-weak";
+/// The app's cookie key, as `openssl rand -base64 32` prints one.
+const COOKIE_KEY: &str = "q5xP0Pl8m0l3pkk1Hk0aQe9H6P7l4H6Jt6bq0c5u3jE=";
+/// The fixture client's session cookie.
+const SESSION_COOKIE: &str = "__Host-piquel-notes-web-session";
+/// The HKDF `info` of session cookies' key.
+const SESSION_INFO: &str = "piquel-auth session v1";
+/// The HKDF `info` of pending login cookies' key.
+const PENDING_INFO: &str = "piquel-auth pending login v1";
 
 /// One case file: inputs, the clock, and the expected result.
 #[derive(Serialize)]
@@ -144,15 +159,22 @@ impl Vectors {
     /// committed cases that are no longer generated.
     fn finish(self) {
         let directory = Self::directory();
-        let committed: Vec<PathBuf> = ["discovery", "jwks", "tokens", "challenges", "callbacks"]
-            .into_iter()
-            .flat_map(|category| fs::read_dir(directory.join(category)).into_iter().flatten())
-            .map(|entry| entry.expect("read vector directory").path())
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension == "json")
-            })
-            .collect();
+        let committed: Vec<PathBuf> = [
+            "discovery",
+            "jwks",
+            "tokens",
+            "challenges",
+            "callbacks",
+            "sessions",
+        ]
+        .into_iter()
+        .flat_map(|category| fs::read_dir(directory.join(category)).into_iter().flatten())
+        .map(|entry| entry.expect("read vector directory").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect();
         if std::env::var_os("UPDATE_SDK_VECTORS").is_some() {
             for path in committed {
                 fs::remove_file(path).expect("remove old vector");
@@ -521,7 +543,8 @@ impl Vectors {
             ),
             Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
         );
-        // The Rust SDK's verifier refuses RSA keys under 2048 bits, so every SDK must.
+        // A key too weak to verify is the issuer's fault, not the token's: every SDK
+        // refuses it before checking the signature.
         let weak = PKey::private_key_from_pem(self.weak_pem.as_bytes()).expect("weak test key");
         let weak = weak.rsa().expect("RSA test key");
         let weak_jwks = json!({ "keys": [{
@@ -534,12 +557,42 @@ impl Vectors {
         });
         self.token(
             "access-weak-key",
-            "a token signed with a 1024-bit RSA key is rejected",
+            "a 1024-bit RSA key verifies nothing: the key set is at fault",
             access_case(
                 Self::sign_with(&self.weak_pem, &weak_header, &access),
                 &weak_jwks,
             ),
-            Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        // The old key with each of `members`, `n` or `e`, replaced by `component(bytes)`.
+        let old_key = self.jwks(&[OLD_KID]);
+        let altered = |members: &[&str], component: &dyn Fn(Vec<u8>) -> Vec<u8>| {
+            let mut jwks = old_key.clone();
+            for member in members {
+                let value = jwks["keys"][0][member].as_str().expect("key member");
+                let bytes = URL_SAFE_NO_PAD.decode(value).expect("base64url");
+                jwks["keys"][0][member] = json!(URL_SAFE_NO_PAD.encode(component(bytes)));
+            }
+            jwks
+        };
+        self.token(
+            "access-small-exponent",
+            "an RSA key whose exponent is not 65537 verifies nothing: the key set is at fault",
+            access_case(valid.clone(), &altered(&["e"], &|_| vec![3])),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        self.token(
+            "access-zero-modulus",
+            "an RSA modulus of zero bytes alone verifies nothing: the key set is at fault",
+            access_case(valid.clone(), &altered(&["n"], &|_| vec![0; 257])),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        let padded = altered(&["n", "e"], &|bytes| [vec![0], bytes].concat());
+        self.token(
+            "access-padded-key",
+            "leading zero bytes in a key's n and e change nothing",
+            access_case(valid.clone(), &padded),
+            Expected::ok(&access),
         );
         let mut incomplete = serde_json::to_value(&access).expect("serialize claims");
         incomplete
@@ -1188,6 +1241,139 @@ impl Vectors {
             );
         }
     }
+
+    /// Session cookie cases: the session a `Cookie` header holds for the fixture
+    /// client, sealed with [`COOKIE_KEY`]. They are sealed here with OpenSSL, apart
+    /// from any SDK's own code, and a fixed nonce, so they are reproducible.
+    fn sessions(&mut self) {
+        let session = json!({
+            "claims": Self::id_claims(),
+            "access_token": "eyJhbGciOiJSUzI1NiJ9.access.signature",
+            "expires_at": at(240).timestamp(),
+            "scopes": "offline_access openid profile",
+            "refresh_token": "prt_01936f3e-8c00-7000-8000-000000000007.c2VjcmV0",
+            "ends_at": at(3600).timestamp(),
+        });
+        let mut without_refresh = session.clone();
+        without_refresh
+            .as_object_mut()
+            .expect("session object")
+            .remove("refresh_token");
+        let mut ended = session.clone();
+        ended["ends_at"] = json!(NOW);
+        let context = |client: &str, name: &str| format!("{client}\0{name}");
+        let ours = context(CLIENT, SESSION_COOKIE);
+        let other_key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let seal =
+            |secret, info, context: &str, value: &Value| Self::seal(secret, info, context, value);
+        let mut tampered = seal(COOKIE_KEY, SESSION_INFO, &ours, &session).into_bytes();
+        // Flip one base64url character of the ciphertext for another.
+        tampered[20] = if tampered[20] == b'A' { b'B' } else { b'A' };
+        let tampered = String::from_utf8(tampered).expect("base64url");
+        for (name, description, value, expected) in [
+            (
+                "valid",
+                "a session sealed for this client and cookie opens",
+                seal(COOKIE_KEY, SESSION_INFO, &ours, &session),
+                Some(&session),
+            ),
+            (
+                "without-refresh-token",
+                "a session without a refresh token has no refresh_token field",
+                seal(COOKIE_KEY, SESSION_INFO, &ours, &without_refresh),
+                Some(&without_refresh),
+            ),
+            (
+                "ended",
+                "a session whose ends_at has come is no session, whatever the cookie's Max-Age",
+                seal(COOKIE_KEY, SESSION_INFO, &ours, &ended),
+                None,
+            ),
+            (
+                "tampered",
+                "a changed ciphertext does not open",
+                tampered,
+                None,
+            ),
+            (
+                "other-client",
+                "a session sealed for another client does not open under this one's cookie",
+                seal(
+                    COOKIE_KEY,
+                    SESSION_INFO,
+                    &context("notes-admin", "__Host-piquel-notes-admin-session"),
+                    &session,
+                ),
+                None,
+            ),
+            (
+                "other-cookie",
+                "a value sealed for another of the client's cookies does not open as its session",
+                seal(
+                    COOKIE_KEY,
+                    SESSION_INFO,
+                    &context(CLIENT, "__Host-piquel-notes-web-step-up"),
+                    &session,
+                ),
+                None,
+            ),
+            (
+                "other-key",
+                "a session sealed under another cookie key does not open",
+                seal(other_key, SESSION_INFO, &ours, &session),
+                None,
+            ),
+            (
+                "pending-login-key",
+                "the key sealing pending logins does not open sessions",
+                seal(COOKIE_KEY, PENDING_INFO, &ours, &session),
+                None,
+            ),
+        ] {
+            self.case(
+                &format!("sessions/{name}.json"),
+                &Case {
+                    description,
+                    now: Some(NOW),
+                    input: json!({
+                        "cookie_key": COOKIE_KEY,
+                        "client_id": CLIENT,
+                        "cookie": format!("{SESSION_COOKIE}={value}"),
+                    }),
+                    expected: Expected::Ok(expected.cloned().unwrap_or(Value::Null)),
+                },
+            );
+        }
+    }
+
+    /// `value` as JSON, sealed as the SDKs seal cookies: AES-256-GCM under the key
+    /// HKDF-SHA256 derives from the base64 `secret` with `info` and no salt, with
+    /// `context` as associated data, framed as base64url of the nonce, the ciphertext
+    /// and the tag. The nonce is fixed, which only a generator of fixed cases may do.
+    fn seal(secret: &str, info: &str, context: &str, value: &Value) -> String {
+        use base64::engine::general_purpose::STANDARD;
+        let secret = STANDARD.decode(secret).expect("cookie key");
+        let mut key = [0; 32];
+        let mut hkdf = PkeyCtx::new_id(Id::HKDF).expect("HKDF");
+        hkdf.derive_init().expect("HKDF init");
+        hkdf.set_hkdf_md(Md::sha256()).expect("HKDF digest");
+        hkdf.set_hkdf_key(&secret).expect("HKDF key");
+        hkdf.add_hkdf_info(info.as_bytes()).expect("HKDF info");
+        hkdf.derive(Some(&mut key)).expect("HKDF derive");
+        let nonce = [7; 12];
+        let mut tag = [0; 16];
+        let plain = serde_json::to_vec(value).expect("serialize session");
+        let sealed = encrypt_aead(
+            Cipher::aes_256_gcm(),
+            &key,
+            Some(&nonce),
+            context.as_bytes(),
+            &plain,
+            &mut tag,
+        )
+        .expect("AES-GCM");
+        URL_SAFE_NO_PAD.encode([&nonce[..], &sealed, &tag].concat())
+    }
 }
 
 /// The fixture user's account ID.
@@ -1207,5 +1393,6 @@ fn sdk_vectors_are_current() {
     vectors.tokens();
     vectors.challenges();
     vectors.callbacks();
+    vectors.sessions();
     vectors.finish();
 }

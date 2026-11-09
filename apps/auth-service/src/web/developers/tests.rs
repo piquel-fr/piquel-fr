@@ -39,6 +39,12 @@ fn registration(kind: ClientKind, callback: &str) -> NewAppChange {
     }
 }
 
+/// The ID of the app whose overview is at `overview`.
+fn app_id(overview: &str) -> ClientId {
+    let id = overview.strip_prefix("/developers/clients/");
+    id.expect("an app's overview").parse().expect("app ID")
+}
+
 /// The client secret `page` shows, and that it shows it once.
 fn secret(page: &str) -> &str {
     let secret = value_after(page, r#"<code id="client-secret">"#);
@@ -179,11 +185,7 @@ async fn public_apps_are_registered_then_deleted() {
         "client_registered"
     );
     let overview = redirect(&registered).to_owned();
-    let id: ClientId = overview
-        .strip_prefix("/developers/clients/")
-        .expect("an app's overview")
-        .parse()
-        .expect("app ID");
+    let id = app_id(&overview);
     let page = html(
         browser
             .following(&registered)
@@ -414,11 +416,7 @@ async fn backchannel_logout_uris_are_set_changed_and_removed() {
     let page = html(browser.visit(&replicas.a, &overview).await).await;
     let fact = format!(r#"<code id="backchannel-logout">{told}</code>"#);
     assert!(page.contains(&fact), "{page}");
-    let id: ClientId = overview
-        .strip_prefix("/developers/clients/")
-        .expect("an app's overview")
-        .parse()
-        .expect("app ID");
+    let id = app_id(&overview);
     let settings = developers::of(APP_SETTINGS, &id);
     let page = html(browser.visit(&replicas.a, &settings).await).await;
     assert!(page.contains(&format!(r#"value="{told}""#)), "{page}");
@@ -483,11 +481,7 @@ async fn the_crumb_leads_through_the_app() {
         "{page}"
     );
     assert!(page.contains("<b>Console test</b>"), "{page}");
-    let id: ClientId = overview
-        .strip_prefix("/developers/clients/")
-        .expect("an app's overview")
-        .parse()
-        .expect("app ID");
+    let id = app_id(&overview);
     let settings = developers::of(APP_SETTINGS, &id);
     let page = html(browser.visit(&replicas.a, &settings).await).await;
     assert!(

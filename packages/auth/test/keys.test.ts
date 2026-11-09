@@ -1,7 +1,7 @@
 /** The key cache's fetch rules: one refetch per unknown kid, spacing, freshness and outages, and fixed sets. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Jws, KeyCache, KeySet } from '../src/index.ts';
+import { AuthError, Jws, KeyCache, KeySet } from '../src/index.ts';
 import * as base64 from '../src/base64.ts';
 import { FakeFetch, JWKS_URI, ManualClock, outcome, vector } from './vectors.ts';
 
@@ -82,8 +82,12 @@ test('keys stay fresh for max-age, bounded to 30 seconds through 24 hours, or an
   for (const [cacheControl, lifetime] of [
     ['max-age=5', 30],
     ['public, max-age=600', 600],
+    ['Max-Age="600"', 600],
     ['max-age=999999', 24 * 3600],
-    ['no-cache', 3600]
+    ['public', 3600],
+    // Keys a cache must not keep stay fresh only the 30-second minimum.
+    ['no-store', 30],
+    ['max-age=600, no-cache', 30]
   ] as const) {
     const server = new KeyServer([jwks('rotation-before')], { 'cache-control': cacheControl });
     const clock = new ManualClock(1_767_225_600);
@@ -113,7 +117,21 @@ test('a set with a duplicate kid is rejected and the previous set stays in use',
   assert.equal(server.served, 3);
 });
 
-test('a weak RSA key verifies nothing, however its modulus is written', async () => {
+test('keys are fetched only over https', () => {
+  assert.throws(
+    () => new KeyCache('http://auth.example.com/jwks'),
+    (error: unknown) => error instanceof AuthError && error.code === 'keys'
+  );
+});
+
+test('a key whose key_ops does not list verify is skipped', () => {
+  const [key] = (jwks('rotation-before') as { keys: object[] }).keys;
+  const set = (key_ops: string[]) => KeySet.parse({ keys: [{ ...key, key_ops }] }).kids;
+  assert.deepEqual(set(['verify']), ['key-2025']);
+  assert.deepEqual(set(['wrapKey']), []);
+});
+
+test("a weak RSA key is the key set's fault, however its modulus is written", async () => {
   const weak = vector('tokens', 'access-weak-key').input;
   const [key] = (weak.jwks as { keys: { n: string }[] }).keys;
   assert.ok(key);
@@ -122,7 +140,7 @@ test('a weak RSA key verifies nothing, however its modulus is written', async ()
   const server = new KeyServer([{ keys: [{ ...key, n: base64.encode(padded) }] }]);
   const keys = new KeyCache(JWKS_URI, { fetch: server.fetch });
   assert.deepEqual(await verify(keys, String(weak.token)), {
-    error: { code: 'invalid_token', reason: 'bad_signature' }
+    error: { code: 'keys', reason: 'unusable_key' }
   });
 });
 

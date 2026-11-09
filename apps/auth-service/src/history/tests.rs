@@ -12,7 +12,7 @@ use piquel_common::{
     clients::{ClientKind, ClientOwner},
     events::{EventContext, JobName},
 };
-use piquel_repository::RefreshRotationError;
+use piquel_repository::{RefreshRedemption, RefreshRedemptionError};
 use serde_json::{Value, json};
 
 /// The history routes over the test database.
@@ -336,9 +336,14 @@ async fn reporting_ends_other_sessions_and_every_grant() {
         let mut tx = harness.database.begin().await.expect("transaction");
         assert!(matches!(
             tx.tokens()
-                .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
+                .redeem_refresh(
+                    token,
+                    std::slice::from_ref(&digest),
+                    client.as_str(),
+                    RefreshRedemption::Rotate
+                )
                 .await,
-            Err(RefreshRotationError::Invalid)
+            Err(RefreshRedemptionError::Invalid)
         ));
     }
     let recorded: Vec<_> = harness

@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pending_federation\n                SET consumed_at = now()\n                WHERE id = $1\n                AND browser_digest = $2\n                AND consumed_at IS NULL\n                AND expires_at > now()\n                RETURNING\n                    id AS \"id: TokenId\", browser_digest, provider_name AS \"provider: Provider\",\n                    issuer, subject, email, email_authoritative, display_name, return_to,\n                    link_user_id AS \"link_user_id: UserId\",\n                    link_session_id AS \"link_session_id: SessionId\", expires_at, picture_url",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "browser_digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: Provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "email_authoritative",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "return_to",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "link_user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "link_session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "picture_url",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "7928f25d312f42290c4df795d975fd965623ab6650541ee915d89990b342cb94"
+}

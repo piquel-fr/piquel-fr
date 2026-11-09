@@ -1,6 +1,7 @@
 //! Federation failures and their single mapping to browser responses.
 
 use super::MAX_RETURN_TO_BYTES;
+use crate::emails::EmailError;
 use crate::security::{ApiError, SessionError};
 use axum::http::header::InvalidHeaderValue;
 use piquel_common::{VocabularyError, config::ConfigurationError};
@@ -73,6 +74,9 @@ pub(crate) enum FederationError {
     /// A database operation failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// The provider's address could not be imported.
+    #[error(transparent)]
+    Email(#[from] EmailError),
     /// Shared browser-session policy rejected the request.
     #[error(transparent)]
     Session(#[from] SessionError),
@@ -138,6 +142,7 @@ impl From<FederationError> for ApiError {
                 Self::bad_request("This provider is not linked to your account.")
             }
             FederationError::Database(error) => error.into(),
+            FederationError::Email(error) => error.into(),
             FederationError::Session(error) => error.into(),
             error @ (FederationError::Crypto(_)
             | FederationError::CookieHeader(_)
@@ -182,4 +187,7 @@ pub enum FederationConfigError {
     /// A provider's built-in endpoint is not a URL.
     #[error("a built-in provider endpoint is not a URL")]
     ProviderEndpoint(#[source] url::ParseError),
+    /// A provider's signing key cache could not be built.
+    #[error("could not initialize a provider's signing key cache")]
+    Keys(#[source] piquel_auth::KeyError),
 }

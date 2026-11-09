@@ -1,3 +1,8 @@
 {
-  "$schema": "https://unpkg.com/knip@6.43.0/schema.json"
+  "$schema": "https://unpkg.com/knip@6.43.0/schema.json",
+  "workspaces": {
+    "packages/auth": {
+      "entry": ["examples/browser.ts", "examples/resource.ts"]
+    }
+  }
 }

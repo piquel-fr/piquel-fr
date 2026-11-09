@@ -1,7 +1,10 @@
 //! Sign-in from related pages on approved origins.
 
 use super::*;
-use crate::tests::{change, register};
+use crate::{
+    ClientRegistry,
+    tests::{change, operator, register, until_blocked},
+};
 use piquel_common::clients::RelatedOrigin;
 
 /// PKCE verifier of the pushed requests related pages complete.
@@ -370,13 +373,15 @@ async fn an_account_being_deleted_signs_in_on_auths_pages_only() {
     assert_eq!(Fixture::json(refused).await["code"], "interaction_required");
 }
 
-/// A recovered passkey during its probation signs in on a related page as on
-/// auth's, without confirming the session, so a request for `phr` is refused with
-/// `interaction_required`, for auth's pages to answer the client. Without that
-/// target it signs in.
+/// While the account has a recovery that can still be undone, no passkey signs in
+/// on a related page: only auth's pages ask whether it was the owner's, as every
+/// sign-in for an app does meanwhile, so the page is answered
+/// `interaction_required`. That holds for the owner's passkey while the link is
+/// unused, and for the passkey the link enrolled, whose probation sign-in also
+/// meets no `phr`.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn a_probation_passkey_meets_no_phr_on_related_pages() {
+async fn a_probation_passkey_signs_in_on_auths_pages_only() {
     let mut fixture = Fixture::new().await;
     let replicas = Replicas::new().await;
     fixture.on(&replicas.a);
@@ -392,6 +397,21 @@ async fn a_probation_passkey_meets_no_phr_on_related_pages() {
         })
         .await
         .expect("recovery");
+    // A sign-in on the related page, for `target`, refused for `why`.
+    let refused = async |fixture: &mut Fixture, target: &[(&str, &str)], why: &str| {
+        let request_uri = fixture.push(&page, target).await;
+        let started = Fixture::json(fixture.start_related(&page, &request_uri).await).await;
+        let refused = fixture.finish_related(&page, &started).await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        let body = Fixture::json(refused).await;
+        assert_eq!(body["code"], "interaction_required");
+        let error = body["error"].as_str().expect("error");
+        assert!(error.contains(why), "{error}");
+    };
+    let undoable = "recovery that can still be undone";
+    refused(&mut fixture, &[], undoable).await;
+
+    let mut recoveries = fixture.database().recoveries();
     let completed = recoveries
         .complete(
             fixture.user_id,
@@ -402,16 +422,45 @@ async fn a_probation_passkey_meets_no_phr_on_related_pages() {
         .await;
     assert!(completed.expect("complete"));
 
-    let request_uri = fixture.push(&page, &[("acr_values", "phr")]).await;
-    let started = Fixture::json(fixture.start_related(&page, &request_uri).await).await;
-    let refused = fixture.finish_related(&page, &started).await;
-    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(Fixture::json(refused).await["code"], "interaction_required");
+    refused(&mut fixture, &[("acr_values", "phr")], "does not meet").await;
+    refused(&mut fixture, &[], undoable).await;
+}
 
+/// Removing a page's origin while its sign-in finishes refuses the sign-in:
+/// completing it checks the origin again under its client's lock, which the
+/// removal holds until it commits.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn removing_an_origin_during_a_sign_in_refuses_it() {
+    let mut fixture = Fixture::new().await;
+    let replicas = Replicas::new().await;
+    fixture.on(&replicas.a);
+    let page = RelatedPage::approved(&fixture.app.database).await;
     let request_uri = fixture.push(&page, &[]).await;
     let started = Fixture::json(fixture.start_related(&page, &request_uri).await).await;
-    assert_eq!(
-        fixture.finish_related(&page, &started).await.status(),
-        StatusCode::OK
+    let assertion = fixture.assertion_for(page.origin.url().clone(), &started);
+    let database = fixture.app.database.clone();
+    let mut removal = database.begin().await.expect("transaction");
+    ClientRegistry::new(&mut removal, operator().context())
+        .remove_origin(&page.client.id, &page.origin)
+        .await
+        .expect("removed");
+
+    let finish = fixture.post_from(
+        page.origin.as_str(),
+        routes::passkey::RELATED_FINISH,
+        json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+    );
+    let (finished, ()) = tokio::join!(finish, async {
+        until_blocked(&mut removal, 1).await;
+        removal.commit().await.expect("commit");
+    });
+    assert_eq!(finished.status(), StatusCode::BAD_REQUEST);
+    let events = fixture.events().await;
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, DomainEvent::SignedIn { .. })),
+        "{events:?}"
     );
 }

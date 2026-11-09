@@ -31,7 +31,6 @@ impl UserRow<'_> {
     /// The account, as an avatar shows it.
     pub(crate) fn who(&self) -> Who<'_> {
         Who {
-            user: None,
             name: &self.user.display_name,
             handle: self.user.handle.as_str(),
             picture: self.picture.as_deref(),
@@ -145,6 +144,8 @@ pub struct AccountPages<'a> {
     pub apps: &'a str,
     /// Its security history, as its owner sees it.
     pub history: &'a str,
+    /// Its inbox, as its owner sees it.
+    pub notifications: &'a str,
     /// Giving it a new handle.
     pub handle: &'a str,
     /// Giving it a new display name.
@@ -166,7 +167,6 @@ pub async fn user_page<'a>(
 ) -> Result<impl View> {
     let user = &detail.user;
     let who = Who {
-        user: None,
         name: &user.display_name,
         handle: user.handle.as_str(),
         picture,
@@ -317,6 +317,7 @@ async fn account_actions<'a>(
                     <a data-confirm-first="" class="button secondary small" href=(pages.emails)>"Email addresses"</a>
                     <a data-confirm-first="" class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>
+                    <a class="button secondary small" href=(pages.notifications)>"Notifications"</a>
                     <a data-confirm-first="" class="button secondary small" href=(pages.handle)>"Change handle"</a>
                     <a data-confirm-first="" class="button secondary small" href=(pages.display_name)>"Change display name"</a>
                 },

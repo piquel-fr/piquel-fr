@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE alerts SET cleared_at = now() WHERE id = $1 AND cleared_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b5275d2844d43172a97144fae4bbbb19e087744006c734ffdafa01fce05149cc"
+}

@@ -9,12 +9,16 @@
 //! - `client-spans`: `SendTraced`, a client span around each `reqwest` request.
 //! - `config`: environment variables, validated origins and secret references.
 //! - `email`: email address normalization.
-//! - `events`: the domain events auth records.
+//! - `events`: the domain events auth records, the notifications they give
+//!   owners, and the alerts administrators are shown.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
 
 /// The views of administration: what the admin dashboard shows and the CLI prints.
 #[cfg(feature = "admin")]
 pub mod admin;
+/// What needs an administrator's attention.
+#[cfg(feature = "events")]
+pub mod alerts;
 /// Client spans around outbound `reqwest` requests.
 #[cfg(feature = "client-spans")]
 mod client_span;
@@ -23,14 +27,20 @@ pub mod clients;
 /// Environment variables, validated origins and secret references.
 #[cfg(feature = "config")]
 pub mod config;
-/// Conservative email normalization; see `docs/security/email-normalization.md`.
+/// Conservative email normalization; see `docs/dev/security/email-normalization.md`.
 #[cfg(feature = "email")]
 pub mod email;
 /// Typed domain events: what changed in an account, and who changed it.
 #[cfg(feature = "events")]
 pub mod events;
+/// What auth's HTML forms post that does not decode as itself, such as a
+/// checkbox.
+pub mod form;
 /// Handles: an account's public identifier and login name.
 pub mod handle;
+/// What an account's owner is told about their account, in their inbox.
+#[cfg(feature = "events")]
+pub mod notifications;
 /// The auth protocol's wire documents, shared by auth and the SDKs.
 pub mod protocol;
 
@@ -420,6 +430,15 @@ uuid_id!(
     RecoveryId,
     "Identifier of an account recovery, which its link's token is derived from."
 );
+uuid_id!(
+    NotificationId,
+    "Identifier of a notification in an account's inbox."
+);
+uuid_id!(
+    AnnouncementId,
+    "Identifier of an announcement administrators sent to accounts, by email and in their settings."
+);
+uuid_id!(AlertId, "Identifier of an alert administrators are shown.");
 
 /// The W3C Trace Context ID of a request's trace: 16 bytes, not all zero, written
 /// as 32 lower-case hex digits. Telemetry assigns one to every request and job run;

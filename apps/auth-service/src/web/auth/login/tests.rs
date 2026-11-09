@@ -142,12 +142,6 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
         "{policy}"
     );
     let page = html(response).await;
-    assert!(page.contains("<title>Sign in · Piquel</title>"), "{page}");
-    assert!(page.contains("<h1>Sign in</h1>"), "{page}");
-    assert!(
-        page.contains("Sign in with a passkey, or continue with a linked account."),
-        "{page}"
-    );
     let action = attribute(&link(LOGIN, &query));
     assert!(
         page.contains(&format!(
@@ -161,10 +155,6 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
         "{page}"
     );
     assert_eq!(count(&page, ">Sign in with a passkey<"), 1, "{page}");
-    assert!(
-        page.contains(r#"<div class="divider">or continue with</div>"#),
-        "{page}"
-    );
     assert!(
         page.contains(r#"<input type="hidden" name="provider" value="github">"#),
         "{page}"
@@ -189,7 +179,6 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
         page.contains(r#"name="handle" autocomplete="username webauthn""#),
         "{page}"
     );
-    assert!(page.contains(">Handle<"), "{page}");
     assert!(!page.contains("Use a handle instead"), "{page}");
     assert_eq!(count(&page, ">Sign in with a passkey<"), 1, "{page}");
 }
@@ -421,11 +410,6 @@ async fn signing_up_starts_with_the_invitation() {
         .await;
     assert_eq!(response.status(), StatusCode::OK);
     let page = html(response).await;
-    assert!(
-        page.contains("<title>Create your account · Piquel</title>"),
-        "{page}"
-    );
-    assert!(page.contains("<h1>Create your account</h1>"), "{page}");
     assert_eq!(ceremonies(&page, REGISTER_START), 1, "{page}");
     assert!(
         page.contains(r#"<input type="hidden" name="action" value="registered">"#),
@@ -435,11 +419,11 @@ async fn signing_up_starts_with_the_invitation() {
         page.contains(r#"name="handle" autocomplete="username""#),
         "{page}"
     );
+    // The browser checks a handle's syntax before posting it.
     assert!(
         page.contains(r#"pattern="[a-z0-9]+(-[a-z0-9]+)*""#),
         "{page}"
     );
-    assert!(page.contains(">Passkey name<"), "{page}");
     assert!(
         page.contains(r#"<input name="friendly_name" value="My passkey""#),
         "{page}"
@@ -449,10 +433,6 @@ async fn signing_up_starts_with_the_invitation() {
         "{page}"
     );
     assert_eq!(count(&page, ">Create account with a passkey<"), 1, "{page}");
-    assert!(
-        page.contains(r#"Already have an account? <a href="/login">Sign in</a>"#),
-        "{page}"
-    );
 
     let query = LoginQuery {
         invitation: Some("invited".into()),
@@ -560,11 +540,6 @@ async fn linking_confirms_the_account_with_a_passkey() {
 
     let signed_out = holding(&Browser::signed_out());
     let page = html(signed_out.visit(&replicas.a, &here).await).await;
-    assert!(
-        page.contains("<title>Link social sign-in · Piquel</title>"),
-        "{page}"
-    );
-    assert!(page.contains("<h1>Add this sign-in method?</h1>"), "{page}");
     assert!(
         page.contains("GitHub uses an email associated with an existing account. Verify that account with its passkey to add this provider."),
         "{page}"

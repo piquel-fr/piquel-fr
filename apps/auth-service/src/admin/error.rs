@@ -1,5 +1,6 @@
 //! Admin failures, from the dashboard or the CLI, and their status and message.
 
+use super::UserRef;
 use crate::{
     ClientRegistryError, KeyError, deletion::DeletionError, handles::HandlesError,
     security::ApiError,
@@ -37,6 +38,9 @@ pub enum AdminError {
     /// No OIDC client has this ID.
     #[error("no OIDC client has this ID")]
     ClientNotFound,
+    /// No current alert has this ID.
+    #[error("no current alert has this ID: it cleared, or never existed")]
+    AlertNotFound,
     /// No delivery with this ID is in a state the operation applies to.
     #[error("no {states} delivery has ID {id}")]
     DeliveryNotFound {
@@ -134,6 +138,33 @@ pub enum AdminError {
     /// No administrator reserved this handle.
     #[error("this handle is not on the reserved list")]
     HandleNotReserved,
+    /// An announcement's subject is blank, longer than 150 characters, or not one
+    /// line.
+    #[error("give a subject of 1 to 150 characters, on one line")]
+    InvalidSubject,
+    /// An announcement's text is blank, longer than 20,000 characters, or holds
+    /// control characters other than line breaks and tabs.
+    #[error("give a text of 1 to 20,000 characters, without control characters")]
+    InvalidBody,
+    /// An announcement to chosen accounts names none.
+    #[error("name at least one account, or send it to everyone")]
+    NoRecipients,
+    /// An announcement names more accounts than one may be chosen for.
+    #[error("name at most 1,000 accounts, or send it to everyone")]
+    TooManyRecipients,
+    /// An account an announcement names does not exist.
+    #[error("no account has the ID, handle or verified email {0}")]
+    UnknownRecipient(UserRef),
+    /// No announcement has this ID.
+    #[error("no announcement has this ID")]
+    AnnouncementNotFound,
+    /// The draft changed since its sender checked it, such as by another
+    /// administrator: they check it again before sending it.
+    #[error("the draft changed since you checked it; check it again before sending it")]
+    AnnouncementChanged,
+    /// The announcement was sent, and what was sent never changes.
+    #[error("the announcement was sent, so it can no longer change")]
+    AnnouncementSent,
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -184,6 +215,7 @@ impl AdminError {
             Self::InvitationNotFound => "invitation_not_found",
             Self::ClientNotFound => "client_not_found",
             Self::DeliveryNotFound { .. } => "delivery_not_found",
+            Self::AlertNotFound => "alert_not_found",
             Self::AdministratorTarget => "administrator_target",
             Self::AlreadyDisabled => "already_disabled",
             Self::AlreadyActive => "already_active",
@@ -207,6 +239,14 @@ impl AdminError {
             Self::HandleNotReleased => "handle_not_released",
             Self::HandleReserved => "handle_reserved",
             Self::HandleNotReserved => "handle_not_reserved",
+            Self::InvalidSubject => "invalid_subject",
+            Self::InvalidBody => "invalid_body",
+            Self::NoRecipients => "no_recipients",
+            Self::TooManyRecipients => "too_many_recipients",
+            Self::UnknownRecipient(_) => "unknown_recipient",
+            Self::AnnouncementNotFound => "announcement_not_found",
+            Self::AnnouncementSent => "announcement_sent",
+            Self::AnnouncementChanged => "announcement_changed",
             Self::Database(_) => "database",
             Self::Client(_) => "client",
             Self::Deletion(_) => "deletion",
@@ -248,7 +288,11 @@ impl From<AdminError> for ApiError {
         match error {
             AdminError::InvalidReason
             | AdminError::InvalidInviteExpiry(_)
-            | AdminError::InvalidHandoff => Self::bad_request(message),
+            | AdminError::InvalidHandoff
+            | AdminError::InvalidSubject
+            | AdminError::InvalidBody
+            | AdminError::NoRecipients
+            | AdminError::TooManyRecipients => Self::bad_request(message),
             AdminError::Handle(error) => error.into(),
             AdminError::SessionEnded | AdminError::StepUpRequired(_) => Self::unauthorized(message),
             AdminError::NotAdministrator
@@ -260,8 +304,11 @@ impl From<AdminError> for ApiError {
             | AdminError::InvitationNotFound
             | AdminError::ClientNotFound
             | AdminError::DeliveryNotFound { .. }
+            | AdminError::AlertNotFound
             | AdminError::HandleNotReleased
             | AdminError::HandleNotReserved
+            | AdminError::UnknownRecipient(_)
+            | AdminError::AnnouncementNotFound
             | AdminError::SigningKey(KeyError::Unknown(_)) => Self::not_found(message),
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
@@ -278,6 +325,8 @@ impl From<AdminError> for ApiError {
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator
             | AdminError::HandleReserved
+            | AdminError::AnnouncementSent
+            | AdminError::AnnouncementChanged
             // A stored key that cannot sign is refused, and the form says which.
             | AdminError::SigningKey(
                 KeyError::Stored { .. } | KeyError::Mismatched(_) | KeyError::NoActiveKey,

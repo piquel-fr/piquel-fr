@@ -3,7 +3,7 @@
 //! URI is told, so it can end its own session for the user.
 
 use super::{Channel, NewDelivery};
-use crate::{DatabaseError, DatabaseTransaction};
+use crate::{DatabaseError, DatabaseTransaction, Notified};
 use piquel_common::{ClientId, SessionId, UserId, events::DomainEvent};
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,7 @@ impl Channel for BackchannelLogout {
     async fn deliveries(
         event: &DomainEvent,
         _: Option<UserId>,
+        _: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
         let DomainEvent::SessionRevoked { session_id, .. } = event else {

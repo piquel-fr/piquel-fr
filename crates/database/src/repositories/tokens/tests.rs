@@ -1,7 +1,7 @@
 //! Focused persistence and security contract tests.
 use crate::Database;
 
-use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError};
+use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRedemption, RefreshRedemptionError};
 use crate::repositories::{OidcRepository, SessionRepository, TokenRepository};
 use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication, SessionScope};
 use chrono::{Duration, Utc};
@@ -50,38 +50,17 @@ fn authentication() -> SessionAuthentication {
     }
 }
 
-/// Returns the server process of a connection, to observe its lock waits.
-async fn backend(connection: &mut PgConnection) -> i32 {
-    sqlx::query_scalar("SELECT pg_backend_pid()")
-        .fetch_one(connection)
-        .await
-        .expect("backend pid")
-}
-
-/// Waits until the server process `backend` is blocked on a lock.
-async fn wait_for_lock(pool: &PgPool, backend: i32) {
-    tokio::time::timeout(Wait::from_secs(2), async {
-        loop {
-            let waiting: bool = sqlx::query_scalar(
-                "SELECT EXISTS (
-                    SELECT 1
-                    FROM pg_stat_activity
-                    WHERE pid = $1
-                    AND wait_event_type = 'Lock'
-                )",
-            )
-            .bind(backend)
-            .fetch_one(pool)
-            .await
-            .expect("wait state");
-            if waiting {
-                break;
-            }
-            tokio::time::sleep(Wait::from_millis(10)).await;
-        }
-    })
+/// Counts the rows the connection's server process wrote. The count includes
+/// earlier transactions' rows not flushed to the statistics yet, so only its
+/// change within a transaction shows what that transaction wrote.
+async fn written(connection: &mut PgConnection) -> i64 {
+    sqlx::query_scalar(
+        "SELECT coalesce(sum(n_tup_ins + n_tup_upd + n_tup_del), 0)::BIGINT
+        FROM pg_stat_xact_user_tables",
+    )
+    .fetch_one(connection)
     .await
-    .expect("the transaction waits for a lock");
+    .expect("rows written")
 }
 
 /// A committed account, browser session and unredeemed authorization code.
@@ -195,16 +174,22 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         .await;
     let mut first_tx = pool.begin().await.expect("first transaction");
     TokenRepository::from_connection(&mut first_tx)
-        .consume_for_rotation(first, std::slice::from_ref(&digest_first), client.as_str())
+        .redeem_refresh(
+            first,
+            std::slice::from_ref(&digest_first),
+            client.as_str(),
+            RefreshRedemption::Rotate,
+        )
         .await
         .expect("first refresh");
     let mut second_tx = pool.begin().await.expect("second transaction");
     tokio::time::timeout(
         Wait::from_secs(2),
-        TokenRepository::from_connection(&mut second_tx).consume_for_rotation(
+        TokenRepository::from_connection(&mut second_tx).redeem_refresh(
             second,
             std::slice::from_ref(&digest_second),
             client.as_str(),
+            RefreshRedemption::Rotate,
         ),
     )
     .await
@@ -220,15 +205,20 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         .await
         .expect("lock session");
     let mut rotation = pool.begin().await.expect("rotation transaction");
-    let rotation_backend = backend(&mut rotation).await;
+    let rotation_backend = Database::backend(&mut rotation).await;
     let rotation_task = tokio::spawn(async move {
         let result = TokenRepository::from_connection(&mut rotation)
-            .consume_for_rotation(first, std::slice::from_ref(&digest_first), client.as_str())
+            .redeem_refresh(
+                first,
+                std::slice::from_ref(&digest_first),
+                client.as_str(),
+                RefreshRedemption::Rotate,
+            )
             .await;
         rotation.rollback().await.expect("rollback rotation");
         result
     });
-    wait_for_lock(&pool, rotation_backend).await;
+    Database::wait_for_lock(&pool, rotation_backend).await;
     tokio::time::timeout(
         Wait::from_secs(2),
         SessionRepository::from_connection(&mut logout)
@@ -240,53 +230,153 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
     logout.commit().await.expect("commit logout");
     let result = rotation_task.await.expect("rotation task");
     assert!(
-        matches!(result, Err(RefreshRotationError::Invalid)),
+        matches!(result, Err(RefreshRedemptionError::Invalid)),
         "{result:?}"
     );
 }
 
 /// Replay revokes the family before the grant's JSON is decoded, so invalid stored
-/// scopes cannot keep a replayed family alive.
+/// scopes cannot keep a replayed family alive. A token that is kept is checked
+/// for replay too, since one consumed before its client stopped rotating may
+/// still be presented.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn replay_revokes_family_despite_invalid_scopes() {
     let pool = Database::test_pool().await;
     let client = client(&pool).await;
-    let (token, digest) = Grant::new(&pool, &client)
+    for redemption in [RefreshRedemption::Rotate, RefreshRedemption::Keep] {
+        let (token, digest) = Grant::new(&pool, &client)
+            .await
+            .family(&mut TokenRepository::from_pool(&pool), &client)
+            .await;
+        for statement in [
+            "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1",
+            "UPDATE refresh_token_families SET scopes='[1]'
+            WHERE id=(SELECT family_id FROM refresh_tokens WHERE id=$1)",
+        ] {
+            sqlx::query(statement)
+                .bind(token.as_uuid())
+                .execute(&pool)
+                .await
+                .expect("consumed token with invalid scopes");
+        }
+        let mut tx = pool.begin().await.expect("transaction");
+        let result = TokenRepository::from_connection(&mut tx)
+            .redeem_refresh(
+                token,
+                std::slice::from_ref(&digest),
+                client.as_str(),
+                redemption,
+            )
+            .await;
+        assert!(
+            matches!(result, Err(RefreshRedemptionError::Replay { .. })),
+            "{redemption:?}: {result:?}"
+        );
+        tx.commit().await.expect("commit");
+        let revoked: bool = sqlx::query_scalar(
+            "SELECT f.revoked_at IS NOT NULL
+            FROM refresh_token_families f
+            JOIN refresh_tokens t ON t.family_id = f.id
+            WHERE t.id = $1",
+        )
+        .bind(token.as_uuid())
+        .fetch_one(&pool)
         .await
+        .expect("family");
+        assert!(revoked, "{redemption:?}");
+    }
+}
+
+/// A kept token's redemption writes no row, yet holds its account, session and
+/// family until it commits, so a logout, disablement or recovery undo waits for
+/// the tokens it issues. The token then redeems again.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn a_kept_token_writes_nothing_and_holds_its_locks_until_commit() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let grant = Grant::new(&pool, &client).await;
+    let (token, digest) = grant
         .family(&mut TokenRepository::from_pool(&pool), &client)
         .await;
-    for statement in [
-        "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1",
-        "UPDATE refresh_token_families SET scopes='[1]'
-        WHERE id=(SELECT family_id FROM refresh_tokens WHERE id=$1)",
-    ] {
-        sqlx::query(statement)
-            .bind(token.as_uuid())
-            .execute(&pool)
+    let family: TokenId = sqlx::query_scalar("SELECT family_id FROM refresh_tokens WHERE id = $1")
+        .bind(token.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .expect("family");
+    // Whether another transaction can take each lock a refresh needs exclusively.
+    let available = async || {
+        let mut free = Vec::new();
+        for (statement, id) in [
+            (
+                "SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE NOWAIT",
+                grant.user.as_uuid(),
+            ),
+            (
+                "SELECT 1 FROM sessions WHERE id = $1 FOR UPDATE NOWAIT",
+                grant.session.as_uuid(),
+            ),
+            (
+                "SELECT 1 FROM refresh_token_families WHERE id = $1 FOR UPDATE NOWAIT",
+                family.as_uuid(),
+            ),
+        ] {
+            let mut probe = pool.begin().await.expect("probe");
+            free.push(
+                match sqlx::query(statement).bind(id).execute(&mut *probe).await {
+                    Ok(_) => true,
+                    Err(error)
+                        if error
+                            .as_database_error()
+                            .and_then(sqlx::error::DatabaseError::code)
+                            .as_deref()
+                            == Some("55P03") =>
+                    {
+                        false
+                    }
+                    Err(error) => panic!("probe: {error}"),
+                },
+            );
+            probe.rollback().await.expect("rollback probe");
+        }
+        free
+    };
+    for _ in 0..2 {
+        let mut tx = pool.begin().await.expect("transaction");
+        let before = written(&mut tx).await;
+        let redeemed = TokenRepository::from_connection(&mut tx)
+            .redeem_refresh(
+                token,
+                std::slice::from_ref(&digest),
+                client.as_str(),
+                RefreshRedemption::Keep,
+            )
             .await
-            .expect("consumed token with invalid scopes");
+            .expect("the kept token redeems");
+        assert_eq!(redeemed.family_id, family);
+        assert_eq!(
+            written(&mut tx).await,
+            before,
+            "the redemption writes no row"
+        );
+        assert_eq!(available().await, [false; 3], "held until commit");
+        tx.commit().await.expect("commit");
+        assert_eq!(available().await, [true; 3], "released by commit");
     }
+    // The count does see a write: rotating consumes the token.
     let mut tx = pool.begin().await.expect("transaction");
-    let result = TokenRepository::from_connection(&mut tx)
-        .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
-        .await;
-    assert!(
-        matches!(result, Err(RefreshRotationError::Replay { .. })),
-        "{result:?}"
-    );
-    tx.commit().await.expect("commit");
-    let revoked: bool = sqlx::query_scalar(
-        "SELECT f.revoked_at IS NOT NULL
-        FROM refresh_token_families f
-        JOIN refresh_tokens t ON t.family_id = f.id
-        WHERE t.id = $1",
-    )
-    .bind(token.as_uuid())
-    .fetch_one(&pool)
-    .await
-    .expect("family");
-    assert!(revoked);
+    let before = written(&mut tx).await;
+    TokenRepository::from_connection(&mut tx)
+        .redeem_refresh(
+            token,
+            std::slice::from_ref(&digest),
+            client.as_str(),
+            RefreshRedemption::Rotate,
+        )
+        .await
+        .expect("the token rotates");
+    assert_eq!(written(&mut tx).await, before + 1, "the consumed mark");
 }
 
 /// A replay racing the first redemption waits for it, then revokes the family
@@ -319,7 +409,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
                 .expect("remove redirect URI");
         }
         let mut replay = DatabaseTransaction::new(pool.begin().await.expect("replay"));
-        let replay_backend = backend(&mut replay.inner).await;
+        let replay_backend = Database::backend(&mut replay.inner).await;
         let (code, code_digest, replay_client) =
             (grant.code, grant.code_digest.clone(), client.clone());
         let replay_task = tokio::spawn(async move {
@@ -330,7 +420,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
             replay.commit().await.expect("commit replay");
             result
         });
-        wait_for_lock(&pool, replay_backend).await;
+        Database::wait_for_lock(&pool, replay_backend).await;
         first.commit().await.expect("commit first redemption");
         let result = replay_task.await.expect("replay task");
         assert!(
@@ -339,10 +429,15 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
         );
         let mut rotation = pool.begin().await.expect("rotation transaction");
         let result = TokenRepository::from_connection(&mut rotation)
-            .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
+            .redeem_refresh(
+                token,
+                std::slice::from_ref(&digest),
+                client.as_str(),
+                RefreshRedemption::Rotate,
+            )
             .await;
         assert!(
-            matches!(result, Err(RefreshRotationError::Invalid)),
+            matches!(result, Err(RefreshRedemptionError::Invalid)),
             "redeemable {redeemable}: {result:?}"
         );
     }
@@ -379,7 +474,12 @@ async fn code_replay_by_another_client_revokes_nothing() {
     );
     let mut rotation = pool.begin().await.expect("rotation transaction");
     TokenRepository::from_connection(&mut rotation)
-        .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
+        .redeem_refresh(
+            token,
+            std::slice::from_ref(&digest),
+            client.as_str(),
+            RefreshRedemption::Rotate,
+        )
         .await
         .expect("the family still rotates");
 }
@@ -463,7 +563,7 @@ async fn logout_revokes_a_family_committed_while_it_waited() {
         )
         .await;
     let mut logout = pool.begin().await.expect("logout transaction");
-    let logout_backend = backend(&mut logout).await;
+    let logout_backend = Database::backend(&mut logout).await;
     let (user, session) = (grant.user, grant.session);
     let logout_task = tokio::spawn(async move {
         let revoked = SessionRepository::from_connection(&mut logout)
@@ -473,7 +573,7 @@ async fn logout_revokes_a_family_committed_while_it_waited() {
         logout.commit().await.expect("commit logout");
         revoked
     });
-    wait_for_lock(&pool, logout_backend).await;
+    Database::wait_for_lock(&pool, logout_backend).await;
     exchange.commit().await.expect("commit exchange");
     assert_eq!(logout_task.await.expect("logout task"), [session]);
     let revoked: bool = sqlx::query_scalar(

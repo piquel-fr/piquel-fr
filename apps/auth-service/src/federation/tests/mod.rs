@@ -22,7 +22,7 @@ use axum::{
 };
 use piquel_common::{Handle, PasskeyId};
 use piquel_crypto::Secret;
-use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser, InsertVerifiedEmail};
+use piquel_repository::{DatabaseTransaction, InsertUser, InsertVerifiedEmail};
 use tower::ServiceExt;
 
 /// Isolated database fixture with replaceable provider endpoints and unique subjects.
@@ -35,6 +35,8 @@ struct TestApp {
     secret_file: std::path::PathBuf,
     /// Unique numeric subject returned by this fixture’s provider.
     subject: String,
+    /// Email settings that send, so imported addresses get their links.
+    email: crate::config::EmailConfig,
 }
 impl Drop for TestApp {
     /// Stops the fixture server and attempts to remove its temporary secret.
@@ -60,16 +62,7 @@ impl TestApp {
     }
     /// Creates unique provider evidence with an optional verified primary address.
     async fn with_email(email: Option<&str>) -> Self {
-        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
-            .required()
-            .expect("TEST_DATABASE_URL must name an isolated migrated PostgreSQL database");
-        let database = Database::connect(
-            DatabaseConfig::new(&url, 5, StdDuration::from_secs(5))
-                .expect("database configuration"),
-        )
-        .await
-        .expect("database");
-        database.run_migrations().await.expect("migrations");
+        let database = crate::tests::Replicas::database().await;
         let subject = u64::from_be_bytes(
             piquel_crypto::Secret::generate()
                 .expect("random")
@@ -138,6 +131,10 @@ impl TestApp {
             task,
             secret_file,
             subject: subject.to_string(),
+            email: crate::config::EmailConfig::test(
+                &"https://auth.piquel.fr/".parse().expect("origin"),
+                true,
+            ),
         }
     }
     /// Runs a complete GitHub authorization start and bound callback.
@@ -229,12 +226,20 @@ impl TestApp {
         owner: Option<UserId>,
         email: Option<&str>,
     ) -> (PendingFederation, HeaderMap) {
-        let secret = Secret::generate().expect("browser secret");
-        let pending = PendingFederation {
+        self.pending_from(|pending| PendingFederation {
             email: email.map(str::to_owned),
             link_user_id: owner,
-            ..pending_sign_in(&secret)
-        };
+            ..pending
+        })
+        .await
+    }
+    /// Stores the browser-bound evidence `change` makes of a new GitHub signup's.
+    async fn pending_from(
+        &self,
+        change: impl FnOnce(PendingFederation) -> PendingFederation,
+    ) -> (PendingFederation, HeaderMap) {
+        let secret = Secret::generate().expect("browser secret");
+        let pending = change(pending_sign_in(&secret));
         self.app
             .database
             .federation()

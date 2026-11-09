@@ -5,15 +5,23 @@
 //! [`EmailRepository::pending_address`], so an address removed or verified in the
 //! meantime, or of an account no longer active, receives nothing. Nothing secret is
 //! stored either: the link's token is derived from the address's ID when the
-//! message is sent. Notices to an address that stopped being primary, or was
-//! removed, copy the address instead, so a removal cannot cancel them.
+//! message is sent.
+//!
+//! Every notification an event gives its subject is emailed too, to the addresses
+//! [`Notification::addressees`] names, and says what the inbox says. Its delivery
+//! copies the address and the notification, so removing the address cannot
+//! cancel it.
 
 use super::{Channel, NewDelivery};
 use crate::{
-    DatabaseError, DatabaseTransaction,
+    DatabaseError, DatabaseTransaction, Notified,
     repositories::{EmailRepository, RepositoryExecutor},
 };
-use piquel_common::{EmailId, Handle, RecoveryId, UserId, events::DomainEvent};
+use piquel_common::{
+    EmailId, Handle, NotificationId, RecoveryId, UserId,
+    events::DomainEvent,
+    notifications::{Addressees, Notification},
+};
 use serde::{Deserialize, Serialize};
 
 /// Email to account holders, sent over SMTP by auth-service.
@@ -29,16 +37,6 @@ pub enum EmailMessage {
         /// The unverified address.
         email_id: EmailId,
     },
-    /// Tells the previous primary address that another one replaced it.
-    PrimaryAddressChanged {
-        /// The previous primary address.
-        address: String,
-    },
-    /// Tells a verified address that it was removed from the account.
-    AddressRemoved {
-        /// The removed address.
-        address: String,
-    },
     /// The link of a recovery, sent to the account's primary verified address
     /// while the link works.
     RecoveryLink {
@@ -47,24 +45,18 @@ pub enum EmailMessage {
         /// The primary address when the recovery started.
         email_id: EmailId,
     },
-    /// Tells a verified address that support revoked the account's passkeys and
-    /// started a recovery whose link it printed (`--revoke`). With a kept
-    /// passkey, it links to the undo page; with none, it says to contact support.
-    RecoveryRevoked {
-        /// The address.
+    /// A notification of the account's, to one of the addresses it goes to.
+    Notification {
+        /// The address, copied when the notification was written.
         address: String,
-        /// The recovery, which the undo page names.
-        recovery_id: RecoveryId,
-        /// Whether a passkey was kept, which can undo it.
-        kept: bool,
-    },
-    /// Tells a verified address that a recovery enrolled a passkey, which a
-    /// passkey from before it can undo on the undo page.
-    Recovered {
-        /// The address.
-        address: String,
-        /// The recovery, which the undo page names.
-        recovery_id: RecoveryId,
+        /// The notification, whose page the email links.
+        notification_id: NotificationId,
+        /// What it says.
+        notification: Notification,
+        /// The recovery it is about, while one of the account's passkeys can still
+        /// undo it, whose undo page the email links.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recovery_id: Option<RecoveryId>,
     },
 }
 
@@ -93,30 +85,41 @@ pub struct PendingAddress {
 }
 
 impl EmailMessage {
-    /// The messages `event` sends, each with the ID of the address it goes to.
-    /// Runs in the event's transaction, before a removed address is deleted.
-    async fn for_event(
+    /// The link `event` mails its subject, `user_id`, if it is one that mails a
+    /// link, with the ID of the address it goes to.
+    async fn links(
         event: &DomainEvent,
         user_id: UserId,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<(EmailId, Self)>, DatabaseError> {
+        // Only the events that mail a link read the addresses.
+        if !matches!(
+            event,
+            DomainEvent::EmailAdded { .. } | DomainEvent::RecoveryStarted { revoke: None, .. }
+        ) {
+            return Ok(Vec::new());
+        }
+        let emails = tx.emails().list(user_id).await?;
         Ok(match event {
+            // An address a provider imported verified needs no link.
+            DomainEvent::EmailAdded { email_id, .. } => emails
+                .iter()
+                .filter(|email| email.id == *email_id && email.verified_at.is_none())
+                .map(|email| {
+                    let message = Self::VerifyAddress { email_id: email.id };
+                    (email.id, message)
+                })
+                .collect(),
             // A recovery's link goes to one address, the current primary one, or
             // nowhere without one. A recovery started with `--revoke` mails no
-            // link, since the account's addresses may be someone else's, but
-            // tells every verified address at once. The notice that a link
-            // enrolled a passkey goes to every verified address too, so a
-            // compromised one cannot hide it.
+            // link, since the account's addresses may be someone else's.
             DomainEvent::RecoveryStarted {
                 recovery_id,
                 revoke: None,
                 ..
-            } => tx
-                .emails()
-                .list(user_id)
-                .await?
-                .into_iter()
-                .filter(|email| email.is_primary && email.verified_at.is_some())
+            } => emails
+                .iter()
+                .filter(|email| email.verified_at.is_some() && email.is_primary)
                 .map(|email| {
                     let message = Self::RecoveryLink {
                         recovery_id: *recovery_id,
@@ -125,79 +128,58 @@ impl EmailMessage {
                     (email.id, message)
                 })
                 .collect(),
-            DomainEvent::RecoveryStarted {
-                recovery_id,
-                revoke: Some(revocation),
-                ..
-            } => {
-                Self::to_verified(tx, user_id, |address| Self::RecoveryRevoked {
-                    address,
-                    recovery_id: *recovery_id,
-                    kept: !revocation.kept.is_empty(),
-                })
-                .await?
-            }
-            DomainEvent::RecoveryCompleted { recovery_id, .. } => {
-                Self::to_verified(tx, user_id, |address| Self::Recovered {
-                    address,
-                    recovery_id: *recovery_id,
-                })
-                .await?
-            }
-            event => Self::for_address(event, user_id, tx)
-                .await?
-                .into_iter()
-                .collect(),
+            _ => Vec::new(),
         })
     }
 
-    /// The message `message` builds for each of `user_id`'s verified addresses.
-    async fn to_verified(
+    /// The emails of `notified`, which `event` wrote, each with the ID of the
+    /// address it goes to: one to each verified address of its account that its
+    /// addressees name. Runs in the event's transaction, before a removed address
+    /// is deleted.
+    async fn notifying(
+        event: &DomainEvent,
+        notified: &Notified,
         tx: &mut DatabaseTransaction<'_>,
-        user_id: UserId,
-        message: impl Fn(String) -> Self,
     ) -> Result<Vec<(EmailId, Self)>, DatabaseError> {
-        Ok(tx
-            .emails()
-            .list(user_id)
-            .await?
+        let emails = tx.emails().list(notified.user_id).await?;
+        // The affected address and the recovery are the event's subject's: only
+        // the subject's own notifications are about them.
+        let affected = match event {
+            DomainEvent::PrimaryEmailChanged {
+                previous_email_id, ..
+            } => *previous_email_id,
+            DomainEvent::EmailRemoved { email_id } => Some(*email_id),
+            _ => None,
+        };
+        let recovery_id = match (event, &notified.notification) {
+            (
+                DomainEvent::RecoveryStarted { recovery_id, .. },
+                Notification::AccountSecured { kept: true },
+            )
+            | (DomainEvent::RecoveryCompleted { recovery_id, .. }, Notification::Recovered) => {
+                Some(*recovery_id)
+            }
+            _ => None,
+        };
+        let addressees = notified.notification.addressees();
+        Ok(emails
             .into_iter()
             .filter(|email| email.verified_at.is_some())
-            .map(|email| (email.id, message(email.normalized_email)))
+            .filter(|email| match addressees {
+                Addressees::Verified => true,
+                Addressees::Affected => affected == Some(email.id),
+                Addressees::Primary => email.is_primary,
+            })
+            .map(|email| {
+                let message = Self::Notification {
+                    address: email.normalized_email,
+                    notification_id: notified.id,
+                    notification: notified.notification.clone(),
+                    recovery_id,
+                };
+                (email.id, message)
+            })
             .collect())
-    }
-
-    /// The one message `event` sends about an address, and that address's ID.
-    async fn for_address(
-        event: &DomainEvent,
-        user_id: UserId,
-        tx: &mut DatabaseTransaction<'_>,
-    ) -> Result<Option<(EmailId, Self)>, DatabaseError> {
-        Ok(match event {
-            DomainEvent::EmailAdded { email_id, .. } => Some((
-                *email_id,
-                Self::VerifyAddress {
-                    email_id: *email_id,
-                },
-            )),
-            DomainEvent::PrimaryEmailChanged {
-                previous_email_id: Some(previous),
-                ..
-            } => tx.emails().find(user_id, *previous).await?.map(|email| {
-                let address = email.normalized_email;
-                (*previous, Self::PrimaryAddressChanged { address })
-            }),
-            DomainEvent::EmailRemoved { email_id } => tx
-                .emails()
-                .find(user_id, *email_id)
-                .await?
-                .filter(|email| email.verified_at.is_some())
-                .map(|email| {
-                    let address = email.normalized_email;
-                    (*email_id, Self::AddressRemoved { address })
-                }),
-            _ => None,
-        })
     }
 }
 
@@ -206,20 +188,29 @@ impl Channel for Email {
     type Recipient = UserId;
     type Payload = EmailMessage;
 
-    /// One message to the event's subject, for the events that send one. Its
+    /// The link the event mails its subject, if any, and one message to each
+    /// address of each notified account that its notification goes to. Its
     /// `destination` names the account and the address's ID, never the address.
     async fn deliveries(
         event: &DomainEvent,
         subject: Option<UserId>,
+        notified: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
-        let Some(user_id) = subject else {
-            return Ok(vec![]);
-        };
-        let messages = EmailMessage::for_event(event, user_id, tx).await?;
+        let mut messages = Vec::new();
+        if let Some(user_id) = subject {
+            for (email_id, message) in EmailMessage::links(event, user_id, tx).await? {
+                messages.push((user_id, email_id, message));
+            }
+        }
+        for notified in notified {
+            for (email_id, message) in EmailMessage::notifying(event, notified, tx).await? {
+                messages.push((notified.user_id, email_id, message));
+            }
+        }
         Ok(messages
             .into_iter()
-            .map(|(email_id, message)| NewDelivery {
+            .map(|(user_id, email_id, message)| NewDelivery {
                 destination: format!("account {user_id}, address {email_id}"),
                 recipient: user_id,
                 payload: message,

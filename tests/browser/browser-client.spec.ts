@@ -1,3 +1,8 @@
+/**
+ * The TypeScript SDK's browser client, built, in a client's page: a redirect sign-in
+ * that a reload restores, a passkey sign-in that never leaves the page, and its
+ * fallbacks to auth's pages. `just web test-browser` builds the package first.
+ */
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
@@ -7,8 +12,9 @@ import { addPasskeys, authUrl, serveClient, signUp } from './helpers';
 
 /**
  * The `browser-e2e-inline` trusted public client, approved for passkey sign-in on its
- * own pages, as in `related-origins.spec.ts`: on auth's own host with auth on
- * `localhost`, as in CI, and on another site elsewhere.
+ * own pages. On `localhost`, as in CI, it is on auth's own host, where browsers need
+ * no list. Elsewhere, as on a preview, it is another site, so the browser reads
+ * auth's `/.well-known/webauthn` before signing.
  */
 const client =
   new URL(authUrl).hostname === 'localhost' ? 'https://localhost:4443' : 'https://related-e2e.test';

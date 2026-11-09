@@ -2,7 +2,10 @@
 //! pages in the shell: its sidebar, and what they show a browser that is not
 //! signed in.
 
-use super::{Crumb, NavGroup, NavItem, Policies, Preferences, Shell, Who, page_messages, shell};
+use super::{
+    Crumb, NavGroup, NavItem, PasskeySignal, Policies, Preferences, Shell, Who, page_messages,
+    shell,
+};
 use crate::{Messages, icons::Icon, settings::Tab};
 use piquel_common::TraceId;
 use topcoat::{
@@ -61,11 +64,14 @@ pub struct AccountNav<'a> {
     /// The admin dashboard, for an account that administers Piquel; a section of
     /// its own in the sidebar, which nobody else sees.
     pub dashboard: Option<&'a str>,
+    /// How many notifications are unread, which the inbox's tab counts.
+    pub unread: u64,
 }
 
 /// A signed-in page of `section`, in the account's shell: the sidebar of `nav`
-/// for `who`, signing out by posting to `sign_out`, the preference forms posting
-/// to `preferences_action`, reversing `preferences`, and coming back to `here`,
+/// for `who`, whose passkey script tells the password manager `signal`, signing
+/// out by posting to `sign_out`, the preference forms posting to
+/// `preferences_action`, reversing `preferences`, and coming back to `here`,
 /// the page named `title` in the crumb after `trail`, the pages it is under,
 /// and the status bar linking Piquel's `policies`; an administrator's sidebar
 /// also links the dashboard. Then what the account's `recovery` that can still
@@ -76,6 +82,7 @@ pub async fn account<'a>(
     cx: &Cx,
     nav: AccountNav<'a>,
     who: Who<'a>,
+    signal: PasskeySignal<'a>,
     #[default] trail: &'a [(Crumb<'a>, &'a str)],
     title: Crumb<'a>,
     home: &'a str,
@@ -103,6 +110,7 @@ pub async fn account<'a>(
             href,
             current: nav.current == Some(*tab),
             warning: false,
+            count: (*tab == Tab::Notifications && nav.unread > 0).then_some(nav.unread),
         })
         .collect();
     let console = [NavItem {
@@ -111,6 +119,7 @@ pub async fn account<'a>(
         href: nav.developers,
         current: nav.section == Section::Developers,
         warning: false,
+        count: None,
     }];
     let dashboard: Vec<_> = nav
         .dashboard
@@ -120,6 +129,7 @@ pub async fn account<'a>(
             href,
             current: false,
             warning: false,
+            count: None,
         })
         .into_iter()
         .collect();
@@ -150,6 +160,7 @@ pub async fn account<'a>(
             },
             groups: &groups,
             who: Some(who),
+            signal: Some(signal),
             me: Some(home),
             trail,
             page: title,

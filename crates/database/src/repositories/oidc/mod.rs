@@ -76,11 +76,15 @@ pub struct InsertAuthorizationRequest {
     pub expires_at: DateTime<Utc>,
 }
 
-/// A pending authorization request of an enabled client.
+/// A pending authorization request. Whether its client's current policy still
+/// allows it is the caller's to check.
 #[derive(Clone, Debug)]
 pub struct StoredAuthorizationRequest {
     /// Request identifier.
     pub id: TokenId,
+    /// Whether the client pushed it (RFC 9126), rather than the browser bringing
+    /// its parameters.
+    pub pushed: bool,
     /// Requesting client.
     pub client_id: ClientId,
     /// The client's current consent-screen name.
@@ -142,8 +146,9 @@ pub struct InsertAuthorizationCode {
     pub expires_at: DateTime<Utc>,
 }
 
-/// A code taken by [`OidcRepository::consume_code`]. The caller still checks
-/// the client, redirect URI and PKCE verifier against it.
+/// A code locked by [`OidcRepository::lock_code`] or taken by
+/// [`OidcRepository::consume_code`]. The caller checks the client, redirect URI and
+/// PKCE verifier against the locked code before consuming it.
 #[derive(Clone, Debug)]
 pub struct ConsumedAuthorizationCode {
     /// Code identifier, recorded on the refresh family the exchange creates.
@@ -174,8 +179,8 @@ pub enum CodeRedemptionError {
     /// The database failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
-    /// The code is unknown or expired, or its client, session or account no
-    /// longer allows it.
+    /// The code is unknown or expired, or its session or account no longer
+    /// allows it.
     #[error("the authorization code is invalid")]
     Invalid,
     /// The code was already redeemed; any refresh families issued from it are
@@ -266,7 +271,7 @@ impl OidcRepository<'_> {
                 AND c.id = r.client_id
                 AND c.enabled
                 RETURNING
-                    r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
+                    r.id AS "id: TokenId", r.pushed, r.client_id AS "client_id: ClientId",
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience,
@@ -284,9 +289,10 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// Finds an unconsumed, unexpired request of an enabled client by its id
-    /// and secret digest, which may be any of `digests`: one per accepted digest
-    /// key. A pushed request must be claimed first.
+    /// Finds an unconsumed, unexpired request by its id and secret digest, which
+    /// may be any of `digests`: one per accepted digest key. A pushed request must
+    /// be claimed first. Whether its client still allows it is the caller's to
+    /// check.
     ///
     /// # Errors
     ///
@@ -302,7 +308,7 @@ impl OidcRepository<'_> {
             sqlx::query_as!(
                 StoredAuthorizationRequest,
                 r#"SELECT
-                    r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
+                    r.id AS "id: TokenId", r.pushed, r.client_id AS "client_id: ClientId",
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience,
@@ -316,17 +322,16 @@ impl OidcRepository<'_> {
                 AND r.secret_digest = ANY($2)
                 AND r.consumed_at IS NULL
                 AND r.expires_at > now()
-                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)
-                AND c.enabled"#,
+                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)"#,
                 id.as_uuid(),
                 digests,
             )
         )
     }
 
-    /// Consumes a request that the client's current policy still allows:
-    /// its scopes, audience and redirect URI must remain registered. A pushed
-    /// request must be claimed first.
+    /// Consumes a request. A pushed request must be claimed first. Whether its
+    /// client still allows it is the caller's to check, with the client
+    /// share-locked, before the transaction commits.
     ///
     /// # Errors
     ///
@@ -351,18 +356,8 @@ impl OidcRepository<'_> {
                 AND r.expires_at > now()
                 AND (NOT r.pushed OR r.claimed_at IS NOT NULL)
                 AND c.id = r.client_id
-                AND c.enabled
-                AND c.allowed_scopes @> r.scopes
-                AND c.allowed_audiences ? r.audience
-                AND EXISTS (
-                    SELECT 1
-                    FROM oidc_redirect_uris d
-                    WHERE d.client_id = c.id
-                    AND d.kind = 'authorization'
-                    AND d.uri = r.redirect_uri
-                )
                 RETURNING
-                    r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
+                    r.id AS "id: TokenId", r.pushed, r.client_id AS "client_id: ClientId",
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience,
@@ -436,14 +431,16 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// Consumes an unexpired code once. The client's current policy must still
-    /// allow it, and its session and account must still be active.
+    /// Consumes an unexpired code once, while its session and account are still
+    /// active. Whether its client still allows it is the caller's to check, with
+    /// the client share-locked, before the transaction commits.
     ///
     /// Redeeming an already consumed code with its secret, as the authenticated
     /// `client_id` it was issued to, is a replay (RFC 6749 section 4.1.2): the
     /// refresh families issued from the code are revoked in this transaction, which
-    /// the caller commits even though the exchange fails. The caller still checks
-    /// the returned code's client, so `client_id` only scopes replay detection.
+    /// the caller commits even though the exchange fails. The caller checks the
+    /// code's client under [`Self::lock_code`] first, so `client_id` only scopes
+    /// replay detection.
     ///
     /// # Errors
     ///
@@ -467,22 +464,11 @@ impl OidcRepository<'_> {
                 ConsumedAuthorizationCode,
                 r#"UPDATE authorization_codes c
                 SET consumed_at = now()
-                FROM oidc_clients cl, sessions s, users u
+                FROM sessions s, users u
                 WHERE c.id = $1
                 AND c.secret_digest = ANY($2)
                 AND c.consumed_at IS NULL
                 AND c.expires_at > now()
-                AND cl.id = c.client_id
-                AND cl.enabled
-                AND cl.allowed_scopes @> c.scopes
-                AND cl.allowed_audiences ? c.audience
-                AND EXISTS (
-                    SELECT 1
-                    FROM oidc_redirect_uris d
-                    WHERE d.client_id = cl.id
-                    AND d.kind = 'authorization'
-                    AND d.uri = c.redirect_uri
-                )
                 AND s.id = c.session_id
                 AND s.revoked_at IS NULL
                 AND s.expires_at > now()
@@ -510,6 +496,63 @@ impl OidcRepository<'_> {
                 },
             ),
         }
+    }
+
+    /// The unconsumed, unexpired code matching `id` and one of `digests`, its row
+    /// locked until the transaction ends, so the caller checks its client, redirect
+    /// and verifier before [`Self::consume_code`] or [`Self::expire_code`] decides
+    /// it, and no other redemption of it runs meanwhile. Lock the account first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn lock_code(
+        &mut self,
+        id: TokenId,
+        digests: &[Vec<u8>],
+    ) -> Result<Option<ConsumedAuthorizationCode>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                ConsumedAuthorizationCode,
+                r#"SELECT
+                    id AS "id: TokenId", client_id AS "client_id: ClientId",
+                    user_id AS "user_id: UserId",
+                    session_id AS "session_id: SessionId", redirect_uri, pkce_challenge,
+                    nonce, scopes AS "scopes: JsonArray<String>", audience,
+                    authentication AS "authentication: SessionAuthentication"
+                FROM authorization_codes
+                WHERE id = $1
+                AND secret_digest = ANY($2)
+                AND consumed_at IS NULL
+                AND expires_at > now()
+                FOR UPDATE"#,
+                id.as_uuid(),
+                digests,
+            )
+        )
+    }
+
+    /// Expires code `id`, locked with [`Self::lock_code`], so a code whose
+    /// redemption failed is never redeemed: `-infinity` is past for every
+    /// transaction, however early it began. Consuming it instead would record its
+    /// client as holding tokens from the session, and so tell it of the session's
+    /// logout, though nothing was issued.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn expire_code(&mut self, id: TokenId) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE authorization_codes SET expires_at = '-infinity' WHERE id = $1",
+                id.as_uuid(),
+            )
+        )?;
+        Ok(())
     }
 
     /// Revokes the refresh families issued from an already consumed code and

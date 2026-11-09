@@ -1,12 +1,20 @@
 //! Recomputes the chain from its anchor, checks every checkpoint against it, and
-//! checks that it verifies before it is pruned.
+//! checks that it verifies before it is pruned. Also reads the dashboard's audit
+//! page, which shows the newest verification recorded instead of making one.
 
 use super::{
     AuditChain, AuditCheckpoint, AuditError, AuditKeys, AuditPage, AuditVerification, Chain,
-    ChainBreak, ChainProblem, CheckpointText, Pruning,
+    ChainBreak, ChainProblem, CheckpointText, Pruning, RecordedVerification, StoredChain,
+    VerificationKeys,
 };
+use crate::alerts::Alerts;
+use piquel_common::alerts::{Alert, AlertKind};
+use piquel_common::events::{DomainEvent, EventContext};
 use piquel_crypto::CryptoError;
-use piquel_repository::{ChainLink, Checkpoint, DatabaseTransaction};
+use piquel_repository::{
+    AuditRepository, ChainLink, ChainedEvent, Checkpoint, DatabaseTransaction, RecordedEvent,
+    Verifications,
+};
 use std::collections::BTreeMap;
 
 /// A checkpoint checked on its own, before the chain is compared with it.
@@ -20,7 +28,33 @@ struct Checked {
 /// Every checkpoint by position.
 type CheckedCheckpoints = BTreeMap<u64, Checked>;
 
+/// The newest checkpoint that verifies, as [`AuditKeys::newest_trusted`] finds it.
+pub(crate) struct TrustedCheckpoint {
+    /// The checkpoint, if any verifies.
+    pub(crate) trusted: Option<Checkpoint>,
+    /// The newer checkpoints, newest first, none of which verifies.
+    pub(crate) untrusted: Vec<Checkpoint>,
+}
+
+impl TrustedCheckpoint {
+    /// The lowest position the search read: the trusted checkpoint's, or the
+    /// oldest it passed over once it stopped at its limit, or 0 when it read every
+    /// checkpoint. No checkpoint stored below it can change what it finds.
+    pub(crate) fn floor(&self) -> u64 {
+        match (&self.trusted, self.untrusted.last()) {
+            (Some(trusted), _) => trusted.position,
+            (None, Some(oldest)) if self.untrusted.len() == AuditKeys::UNTRUSTED_LIMIT => {
+                oldest.position
+            }
+            (None, _) => 0,
+        }
+    }
+}
+
 impl AuditKeys {
+    /// The most checkpoints that do not verify [`Self::newest_trusted`] passes over.
+    const UNTRUSTED_LIMIT: usize = 1_000;
+
     /// Checks a checkpoint on its own: a listed key signed its note, and the note
     /// names the position, head and time stored beside it.
     ///
@@ -50,11 +84,59 @@ impl AuditKeys {
             problem,
         })
     }
+
+    /// Reads checkpoints through `audit`, newest first, until one verifies on its
+    /// own: a listed key signed it, and its note names the values stored beside it.
+    /// The database cannot check signatures, so someone with auth's database role
+    /// could add newer checkpoints that do not verify, and removing a key makes
+    /// those it signed fail too; they are returned as well. It looks at no more than
+    /// [`Self::UNTRUSTED_LIMIT`] of them, so they cannot make every read costly,
+    /// and finds none trusted past that many: the sealer then recomputes from the
+    /// anchor, and signs above them.
+    ///
+    /// # Errors
+    /// Returns [`AuditError`] if the database or the cryptographic provider fails.
+    pub(crate) async fn newest_trusted(
+        &self,
+        audit: &mut AuditRepository<'_>,
+    ) -> Result<TrustedCheckpoint, AuditError> {
+        /// Checkpoints read per query.
+        const BATCH: u32 = 100;
+        let mut untrusted = Vec::new();
+        loop {
+            let before = untrusted
+                .last()
+                .map(|checkpoint: &Checkpoint| checkpoint.position);
+            let page = audit.newest_checkpoints(before, BATCH).await?;
+            if page.is_empty() {
+                return Ok(TrustedCheckpoint {
+                    trusted: None,
+                    untrusted,
+                });
+            }
+            for checkpoint in page {
+                if self.check(&checkpoint)?.problem.is_none() {
+                    return Ok(TrustedCheckpoint {
+                        trusted: Some(checkpoint),
+                        untrusted,
+                    });
+                }
+                untrusted.push(checkpoint);
+                if untrusted.len() == Self::UNTRUSTED_LIMIT {
+                    return Ok(TrustedCheckpoint {
+                        trusted: None,
+                        untrusted,
+                    });
+                }
+            }
+        }
+    }
 }
 
 impl AuditChain {
-    /// Rows read per query.
-    const BATCH: u32 = 1_000;
+    /// Rows read per query: few enough that a page of the largest events migration
+    /// 0035 allows still fits in memory.
+    const BATCH: u32 = 100;
     /// Checkpoints per [`AuditPage`].
     const PAGE: u32 = 100;
 
@@ -68,33 +150,86 @@ impl AuditChain {
     /// Returns [`AuditError`] if the database fails or an event cannot be
     /// canonicalized; a broken chain is a result, not an error.
     pub(crate) async fn verify(&self, keys: &AuditKeys) -> Result<AuditVerification, AuditError> {
-        let mut tx = self.database.begin().await?;
+        Self::verify_in(self.database.begin().await?, keys).await
+    }
+
+    /// [`Self::verify`], in `tx`, a transaction just begun, which it makes see one
+    /// snapshot and commits.
+    pub(super) async fn verify_in(
+        mut tx: DatabaseTransaction<'_>,
+        keys: &AuditKeys,
+    ) -> Result<AuditVerification, AuditError> {
         tx.audit().read_snapshot().await?;
-        let verification = Self::verify_in(&mut tx, keys).await?;
+        let verification = Self::verify_snapshot(&mut tx, keys).await?;
         tx.commit().await?;
         Ok(verification)
     }
 
-    /// Verifies the chain, and returns it with up to [`Self::PAGE`] checkpoints after
-    /// `after`, or after the anchor, each judged by [`Self::pruning`], all from one
-    /// snapshot.
+    /// Records `verification`, made as `context`, in `tx`, and commits: the
+    /// dashboard's audit page shows the newest one recorded. A broken chain raises
+    /// its alert, and an intact one clears it; either clears the alert of a
+    /// verification that keeps failing. None of this happens when the keys were
+    /// given with `--key`, such as another environment's, which say nothing of
+    /// this one's checkpoints.
+    pub(crate) async fn record(
+        mut tx: DatabaseTransaction<'_>,
+        context: &EventContext,
+        verification: &AuditVerification,
+    ) -> Result<(), AuditError> {
+        let verified = DomainEvent::AuditChainVerified(verification.clone());
+        tx.record(context, None, verified).await?;
+        if verification.keys != VerificationKeys::Given {
+            let mut alerts = Alerts::new(&mut tx, context);
+            match &verification.broken {
+                Some(broken) => alerts.raise(Alert::AuditChainBroken(broken.clone())).await,
+                None => alerts.clear(AlertKind::AuditChainBroken).await,
+            }?;
+            alerts.clear(AlertKind::VerificationFailing).await?;
+        }
+        Ok(tx.commit().await?)
+    }
+
+    /// The dashboard's audit page: the chain as stored, the newest verification
+    /// the audit log records, and up to [`Self::PAGE`] checkpoints after `after`,
+    /// or after the anchor, each judged by that verification, all from one
+    /// snapshot. It recomputes nothing, so it costs the same however long the
+    /// history: [`Self::verify`] runs only when an operator asks, or the
+    /// [`Verifier`](super::Verifier) job finds the newest verification too old.
     ///
     /// # Errors
-    /// As [`Self::verify`].
-    pub(crate) async fn page(
-        &self,
-        keys: &AuditKeys,
-        after: Option<u64>,
-    ) -> Result<AuditPage, AuditError> {
+    /// Returns [`AuditError`] if the database fails or the recorded verification
+    /// does not decode.
+    pub(crate) async fn page(&self, after: Option<u64>) -> Result<AuditPage, AuditError> {
         let mut tx = self.database.begin().await?;
         tx.audit().read_snapshot().await?;
-        let verification = Self::verify_in(&mut tx, keys).await?;
-        let after = after.unwrap_or_else(|| {
-            verification
-                .anchor
-                .as_ref()
-                .map_or(0, |anchor| anchor.position)
-        });
+        let point = |checkpoint: Checkpoint| {
+            ChainLink {
+                position: checkpoint.position,
+                hash: checkpoint.head,
+            }
+            .point()
+        };
+        let chain = StoredChain {
+            anchor: tx.audit().anchor().await?.map(point),
+            newest: tx.audit().head().await?.as_ref().map(Chain::point),
+            unsealed: tx.audit().unsealed_count().await?,
+        };
+        // A verification a newer release recorded reads as unknown, so as none.
+        let verified = tx
+            .events()
+            .newest_audit_verification(Verifications::Any)
+            .await?
+            .and_then(|stored| match stored.event {
+                RecordedEvent::Known(DomainEvent::AuditChainVerified(verification)) => {
+                    Some(RecordedVerification {
+                        at: stored.occurred_at,
+                        verification,
+                    })
+                }
+                _ => None,
+            });
+        let after =
+            after.unwrap_or_else(|| chain.anchor.as_ref().map_or(0, |anchor| anchor.position));
         // One more than a page tells whether another follows.
         let mut stored = tx.audit().checkpoints(after, Self::PAGE + 1).await?;
         tx.commit().await?;
@@ -103,40 +238,27 @@ impl AuditChain {
         let next = more
             .then(|| stored.last().map(|checkpoint| checkpoint.position))
             .flatten();
+        let broken = verified
+            .as_ref()
+            .and_then(|verified| verified.verification.broken.as_ref());
         let checkpoints = stored
             .into_iter()
             .map(|checkpoint| AuditCheckpoint {
-                point: ChainLink {
-                    position: checkpoint.position,
-                    hash: checkpoint.head,
-                }
-                .point(),
+                pruning: Pruning::of(chain.anchor.as_ref(), broken, checkpoint.position),
                 signed_at: checkpoint.created_at,
-                pruning: Self::pruning(&verification, checkpoint.position),
+                point: point(checkpoint),
             })
             .collect();
         Ok(AuditPage {
-            verification,
+            chain,
+            verified,
             checkpoints,
             next,
         })
     }
 
-    /// Whether `verification`'s chain may be pruned through the checkpoint at
-    /// `position`: only after the anchor, and only if the chain verifies through it.
-    /// `audit prune` and the dashboard's audit page both apply it.
-    fn pruning(verification: &AuditVerification, position: u64) -> Pruning {
-        match (&verification.anchor, &verification.broken) {
-            (Some(anchor), _) if anchor.position >= position => Pruning::Pruned {
-                anchor: anchor.position,
-            },
-            (_, Some(broken)) if broken.position <= position => Pruning::Broken(broken.clone()),
-            _ => Pruning::Prunable,
-        }
-    }
-
     /// [`Self::verify`], in a transaction that sees one snapshot.
-    async fn verify_in(
+    async fn verify_snapshot(
         tx: &mut DatabaseTransaction<'_>,
         keys: &AuditKeys,
     ) -> Result<AuditVerification, AuditError> {
@@ -153,9 +275,9 @@ impl AuditChain {
             .chain(0, 1)
             .await?
             .pop()
-            .filter(|event| event.link.position <= start.position)
+            .filter(|event| event.sealed.link.position <= start.position)
             .map(|event| ChainBreak {
-                position: event.link.position,
+                position: event.sealed.link.position,
                 problem: ChainProblem::EventBeforeAnchor,
             });
         // Checkpoints at or before the anchor signed pruned events: only their
@@ -214,30 +336,41 @@ impl AuditChain {
         })
     }
 
-    /// Recomputes the chain after `start`, comparing each event with its stored hash
-    /// and each new link with `check`. Returns the last link that matched, and the
-    /// first position that did not, if any.
+    /// Recomputes the chain after `start`, comparing each event with its stored hash,
+    /// its recorded order with the previous event's, the one at `start` included
+    /// unless it was pruned, and each new link with `check`. Returns the last link
+    /// that matched, and the first position that did not, if any.
     pub(super) async fn walk(
         tx: &mut DatabaseTransaction<'_>,
         start: ChainLink,
         check: impl Fn(&ChainLink) -> Option<ChainProblem>,
     ) -> Result<(ChainLink, Option<ChainBreak>), AuditError> {
         let mut head = start;
+        let mut previous = tx
+            .audit()
+            .chain(start.position.saturating_sub(1), 1)
+            .await?
+            .pop()
+            .filter(|event| event.sealed.link.position == start.position)
+            .map(|event| event.cursor);
         loop {
             let page = tx.audit().chain(head.position, Self::BATCH).await?;
             if page.is_empty() {
                 return Ok((head, None));
             }
-            for event in page {
+            for ChainedEvent { sealed, cursor } in page {
                 let position = head.position + 1;
-                let problem = if event.link.position == position {
-                    let link = head.extend(&event.content)?;
-                    if link.hash != event.link.hash {
+                let problem = if sealed.link.position == position {
+                    let link = head.extend(&sealed.content)?;
+                    if link.hash != sealed.link.hash {
                         Some(ChainProblem::EventChanged)
+                    } else if previous.is_some_and(|previous| previous >= cursor) {
+                        Some(ChainProblem::OutOfOrder)
                     } else if let Some(problem) = check(&link) {
                         Some(problem)
                     } else {
                         head = link;
+                        previous = Some(cursor);
                         None
                     }
                 } else {
@@ -313,7 +446,8 @@ impl AuditChain {
             return Err(AuditError::NoCheckpoint(through));
         }
         let verification = self.verify(keys).await?;
-        match Self::pruning(&verification, through) {
+        let (anchor, broken) = (verification.anchor.as_ref(), verification.broken.as_ref());
+        match Pruning::of(anchor, broken, through) {
             Pruning::Prunable => Ok(()),
             Pruning::Pruned { anchor } => Err(AuditError::AlreadyPruned { anchor }),
             Pruning::Broken(broken) => Err(AuditError::Broken(broken)),

@@ -164,8 +164,16 @@ impl PasskeyApplication {
         let passkey = Self::insert_passkey(&mut tx, &actor, user_id, key, friendly_name).await?;
         let picture = match pending {
             Some(pending) => {
-                FederationApplication::attach_signup(&mut tx, &actor, pending, &headers, user_id)
-                    .await?
+                FederationApplication::attach_signup(
+                    &mut tx,
+                    &actor,
+                    &app.email,
+                    context.client_ip,
+                    pending,
+                    &headers,
+                    user_id,
+                )
+                .await?
             }
             None => None,
         };
@@ -200,7 +208,7 @@ impl PasskeyApplication {
 
     /// Starts handle-based authentication or lets the authenticator identify the account.
     ///
-    /// Handles are public (`docs/security/handles.md`), so a handle without an active
+    /// Handles are public (`docs/dev/security/handles.md`), so a handle without an active
     /// account or passkey is refused at once, before any ceremony. Text that is not a
     /// handle names no account, so it is refused the same way.
     pub(super) async fn start_login(

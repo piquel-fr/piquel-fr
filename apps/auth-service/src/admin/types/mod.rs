@@ -2,7 +2,10 @@
 
 use super::AdminError;
 use chrono::Duration;
-use piquel_common::{Handle, HandleError, UserId};
+use piquel_common::{
+    Handle, HandleError, UserId,
+    admin::{AnnouncementAudience, DraftAnnouncement},
+};
 use piquel_ui::Grace;
 use serde::Deserialize;
 use std::{fmt, str::FromStr};
@@ -188,8 +191,112 @@ impl FromStr for Reason {
     }
 }
 
+/// Maximum Unicode characters in an announcement's subject.
+const MAX_SUBJECT_CHARS: usize = 150;
+/// Maximum Unicode characters in an announcement's text.
+const MAX_BODY_CHARS: usize = 20_000;
+/// Maximum accounts an announcement is chosen for; more go to everyone.
+pub(super) const MAX_CHOSEN_ACCOUNTS: usize = 1_000;
+
+/// An announcement's draft, as an operator writes it: its subject and text, and
+/// whom it goes to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnnouncementDraft {
+    /// The email's subject: one line of 1 to 150 characters, trimmed.
+    pub(super) subject: String,
+    /// Its text: 1 to 20,000 characters, trimmed, with `\n` line breaks and no
+    /// other control characters but tabs.
+    pub(super) body: String,
+    /// Whom it goes to.
+    pub(super) recipients: AnnouncementRecipients,
+    /// Whether it is emailed to every recipient, whatever their preference.
+    pub(super) essential: bool,
+}
+
+/// Whom an announcement goes to, as an operator names them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AnnouncementRecipients {
+    /// Every account, as of its sending.
+    Everyone,
+    /// The accounts named, at least one and at most 1,000.
+    Accounts(Vec<UserRef>),
+}
+
+impl AnnouncementDraft {
+    /// Checks `subject` and `body`, trimmed, and normalizes the text's line
+    /// breaks, which forms post as `\r\n`, to `\n`. An `essential` one is emailed
+    /// to every recipient, whatever their preference.
+    ///
+    /// # Errors
+    /// [`AdminError::InvalidSubject`] or [`AdminError::InvalidBody`] when either
+    /// breaks its rule, and [`AdminError::NoRecipients`] or
+    /// [`AdminError::TooManyRecipients`] for too few or many chosen accounts.
+    pub fn new(
+        subject: &str,
+        body: &str,
+        recipients: AnnouncementRecipients,
+        essential: bool,
+    ) -> Result<Self, AdminError> {
+        let subject = subject.trim();
+        if subject.is_empty()
+            || subject.chars().count() > MAX_SUBJECT_CHARS
+            || subject.chars().any(char::is_control)
+        {
+            return Err(AdminError::InvalidSubject);
+        }
+        let body = body.replace("\r\n", "\n");
+        let body = body.trim();
+        if body.is_empty()
+            || body.chars().count() > MAX_BODY_CHARS
+            || body
+                .chars()
+                .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+        {
+            return Err(AdminError::InvalidBody);
+        }
+        if let AnnouncementRecipients::Accounts(accounts) = &recipients {
+            if accounts.is_empty() {
+                return Err(AdminError::NoRecipients);
+            }
+            if accounts.len() > MAX_CHOSEN_ACCOUNTS {
+                return Err(AdminError::TooManyRecipients);
+            }
+        }
+        Ok(Self {
+            subject: subject.to_owned(),
+            body: body.to_owned(),
+            recipients,
+            essential,
+        })
+    }
+}
+
+impl TryFrom<&DraftAnnouncement> for AnnouncementDraft {
+    type Error = AdminError;
+    /// Reads the dashboard's form: one account per line of its list, blank lines
+    /// skipped.
+    fn try_from(form: &DraftAnnouncement) -> Result<Self, Self::Error> {
+        let recipients = match form.audience {
+            AnnouncementAudience::Everyone => AnnouncementRecipients::Everyone,
+            AnnouncementAudience::Accounts => AnnouncementRecipients::Accounts(
+                form.accounts
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(|line| match line.parse() {
+                        Ok(user) => user,
+                        Err(never) => match never {},
+                    })
+                    .collect(),
+            ),
+        };
+        Self::new(&form.subject, &form.body, recipients, form.essential.0)
+    }
+}
+
 /// An account as an operator names it: its ID, a verified email of an active
-/// account (anything with an `@`), or its current handle.
+/// account (a value with an `@` other than the leading one of `@handle`), or its
+/// current handle, with or without that `@`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UserRef {
     /// The account's ID.
@@ -202,11 +309,14 @@ pub enum UserRef {
 
 impl FromStr for UserRef {
     type Err = std::convert::Infallible;
-    /// Reads a UUID as an ID, a value with an `@` as an email, and anything else as
-    /// a handle.
+    /// Reads a UUID as an ID, a handle written `@handle`, as the dashboard writes
+    /// them, as that handle, any other value with an `@` as an email, and anything
+    /// else as a handle.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(if let Ok(id) = value.parse() {
             Self::Id(id)
+        } else if let Some(handle) = value.strip_prefix('@').filter(|rest| !rest.contains('@')) {
+            Self::Handle(handle.to_owned())
         } else if value.contains('@') {
             Self::Email(value.to_owned())
         } else {

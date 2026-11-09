@@ -333,23 +333,40 @@ impl Browser {
         ))
     }
 
-    /// Tells the browser's password manager the handle `name` and the display name
-    /// `display_name` of the account whose ID is `user`, so its passkeys show them
-    /// after a change (the `WebAuthn` Signal API). Does nothing where unsupported.
-    pub(crate) fn signal_account(user: &str, name: &str, display_name: &str) -> Expr<()> {
+    /// Tells the browser's password manager, by the `WebAuthn` Signal API, of the
+    /// account whose ID is `user`: its handle `name` and display name
+    /// `display_name`, so its passkeys show them after a change, and `accepted`,
+    /// the credential IDs of every passkey that still signs in to it, so it forgets
+    /// the account's others, such as one removed. It forgets every passkey of the
+    /// account `accepted` does not list, so the server lists them all. Does nothing
+    /// where unsupported.
+    pub(crate) fn signal_account(
+        user: &str,
+        name: &str,
+        display_name: &str,
+        accepted: &[String],
+    ) -> Expr<()> {
         let (user, name, display_name) =
             (user.to_owned(), name.to_owned(), display_name.to_owned());
+        let accepted = accepted.join(" ");
         expr!(raw!(
             r#"(() => {
                 if (!window.isSecureContext || !('PublicKeyCredential' in window)) return;
                 // Passkeys carry the account ID's 16 bytes as their user handle.
                 const bytes = String(${user}).replace(/-/g, '').match(/../g) ?? [];
-                PublicKeyCredential.signalCurrentUserDetails?.({
+                const account = {
                     rpId: location.hostname,
                     userId: btoa(String.fromCharCode(...bytes.map((byte) => parseInt(byte, 16))))
-                        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+                        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+                };
+                PublicKeyCredential.signalCurrentUserDetails?.({
+                    ...account,
                     name: String(${name}),
                     displayName: String(${display_name})
+                }).catch(() => undefined);
+                PublicKeyCredential.signalAllAcceptedCredentials?.({
+                    ...account,
+                    allAcceptedCredentialIds: String(${accepted}).split(' ').filter(Boolean)
                 }).catch(() => undefined);
             })()"#,
             ()

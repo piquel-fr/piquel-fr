@@ -59,6 +59,8 @@ impl Rate {
 /// What needs an administrator's attention.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Problem {
+    /// Alerts are open: nobody posted an update on them yet.
+    OpenAlerts(u64),
     /// Far more sign-ins failed in the last hour than usually do.
     FailedSignIns(Rate),
     /// Messages wait to be delivered, the oldest for longer than they should.
@@ -91,6 +93,8 @@ pub struct Overview {
     pub newest: Vec<User>,
     /// The emails waiting to be sent.
     pub email_backlog: DeliveryBacklog,
+    /// How many alerts are open.
+    pub open_alerts: u64,
     /// When it was read.
     pub now: DateTime<Utc>,
 }
@@ -100,6 +104,9 @@ impl Overview {
     #[must_use]
     pub fn problems(&self) -> Vec<Problem> {
         let mut problems = Vec::new();
+        if self.open_alerts > 0 {
+            problems.push(Problem::OpenAlerts(self.open_alerts));
+        }
         if self.failed_sign_ins.spikes() {
             problems.push(Problem::FailedSignIns(self.failed_sign_ins));
         }
@@ -117,7 +124,8 @@ impl Overview {
 
 impl AdminService {
     /// Reads the overview: the last hour's rates against the week's, what is
-    /// signed in now, the newest events and accounts, and the email backlog.
+    /// signed in now, the newest events and accounts, the email backlog and the
+    /// open alerts.
     ///
     /// # Errors
     /// Fails when the operator may not read, or a query fails.
@@ -148,6 +156,7 @@ impl AdminService {
             events: newest_events,
             newest: self.database.users().newest(NEWEST_SHOWN).await?,
             email_backlog: self.database.deliveries().backlog::<Email>().await?,
+            open_alerts: self.database.alerts().open_count().await?,
             now,
         })
     }

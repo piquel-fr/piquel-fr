@@ -26,7 +26,7 @@ mod session;
 
 pub(crate) use context::RequestContext;
 pub(crate) use cookie::BrowserCookie;
-pub(crate) use http::{CacheClass, Cached, HttpSecurity, HttpSecurityError};
+pub(crate) use http::{CacheClass, Cached, FETCH_SITE_HEADER, HttpSecurity, HttpSecurityError};
 pub(crate) use session::{Confirmed, Credential, OptionalSession, Session, SessionError};
 
 /// Name of the browser proof required on non-protocol mutations.
@@ -149,7 +149,8 @@ impl From<DatabaseError> for ApiError {
                 Self::bad_request("This request has expired or is no longer available.")
             }
             DatabaseError::Conflict(_) => Self::conflict("This information is already in use."),
-            error @ (DatabaseError::Timeout(_)
+            error @ (DatabaseError::Refused(_)
+            | DatabaseError::Timeout(_)
             | DatabaseError::Cancelled(_)
             | DatabaseError::LockUnavailable(_)
             | DatabaseError::InvalidStoredData { .. }

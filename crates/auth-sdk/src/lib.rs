@@ -8,6 +8,10 @@
 //! - [`KeyCache`] verifies JWS signatures against any JWKS URL, refetching on key
 //!   rotation without letting unknown key IDs flood the issuer.
 //!
+//! The user guide shows how to use it, with the `axum` feature:
+//! [signing in with Rust](https://docs.piquel.fr/user/apps/sign-in-rust.html) and
+//! [protecting an API](https://docs.piquel.fr/user/apps/protect-an-api.html).
+//!
 //! Everything starts from a discovered [`Issuer`]:
 //!
 //! ```no_run
@@ -25,7 +29,7 @@
 //! let issuer = Issuer::discover("https://auth.piquel.fr").await?;
 //! let notes = issuer.resource(Resource::new("notes-api")?);
 //! let token = notes.validate::<notes::Read>("eyJ...").await?;
-//! if let Subject::User(user) = token.subject {
+//! if let Subject::User(user) = token.subject() {
 //!     println!("{user} may read notes");
 //! }
 //! # Ok(()) }
@@ -81,14 +85,15 @@
 //! # Time and HTTP
 //!
 //! [`IssuerBuilder::clock`] injects a [`Clock`], so tests can pin time.
-//! [`IssuerBuilder::http_client`] injects the `reqwest` client, for timeouts, proxies
-//! or extra trusted roots.
+//! [`IssuerBuilder::http_client`] takes a `reqwest::ClientBuilder`, for proxies or
+//! extra trusted roots. Whatever it sets, the SDK's transport policy holds: every
+//! request is `https`, follows no redirect, and gives up after 10 seconds.
 //!
 //! Each request runs in an `http.client` `tracing` span, at `info` under the
 //! `piquel_common` target, with its method, host and status only, as OpenTelemetry's
 //! HTTP client conventions name them.
 //!
-//! The behavior follows `docs/architecture/sdk.md` in the piquel-fr repository, and is
+//! The behavior follows `docs/dev/architecture/sdk.md` in the piquel-fr repository, and is
 //! tested against the shared vectors in `tests/sdk-vectors`.
 
 // Documented by its own inner docs, so their links resolve inside the module.
@@ -118,7 +123,7 @@ pub use client::{
 };
 pub use http::NetworkError;
 pub use issuer::{DiscoveryError, Issuer, IssuerBuilder};
-pub use keys::{Jws, JwsHeader, KeyCache, KeyError, KeySet};
+pub use keys::{Jws, JwsHeader, KeyCache, KeyDefect, KeyError, KeySet};
 pub use resource::{Resource, ResourceError, ResourceValidator};
 pub use scope::{Scope, ScopeSet};
 pub use token::{
@@ -186,5 +191,5 @@ impl Clock for SystemClock {
 /// Items the exported macros expand to; not part of the public API.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::protocol::oauth::Scopes;
+    pub use crate::{protocol::oauth::Scopes, scope::Declared};
 }

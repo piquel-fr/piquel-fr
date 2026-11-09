@@ -3,7 +3,7 @@
 
 use super::{
     ConnectedAppRow, DeviceRow, HistoryRow, Holdings, ProviderRow, SignInChange,
-    timeline::activity_feed,
+    notifications::unread_hint, timeline::activity_feed,
 };
 use crate::{
     form::change_form,
@@ -30,6 +30,8 @@ pub struct OverviewLinks<'a> {
     pub devices: &'a str,
     /// The security history.
     pub history: &'a str,
+    /// The inbox.
+    pub notifications: &'a str,
 }
 
 /// What the overview shows of the account.
@@ -51,11 +53,14 @@ pub struct AccountOverview<'a> {
     pub providers: &'a [ProviderRow<'a>],
     /// Now, to say when devices were active.
     pub now: DateTime<Utc>,
+    /// How many notifications are unread.
+    pub unread: u64,
 }
 
-/// The overview page: the tiles, a provider the account could still link, which
-/// the page offers until the browser dismisses it, the newest security activity
-/// and the devices signed in, linking the pages in `links`.
+/// The overview page: what is unread in the inbox, the tiles, a provider the
+/// account could still link, which the page offers until the browser dismisses
+/// it, the newest security activity and the devices signed in, linking the pages
+/// in `links`.
 #[component]
 pub async fn account_overview<'a>(
     cx: &Cx,
@@ -78,6 +83,7 @@ pub async fn account_overview<'a>(
         .collect();
     Ok(view! {
         page_head(title: "Overview", lead: "Your account at a glance.".to_owned())
+        unread_hint(unread: overview.unread, page: links.notifications)
         <div class="stats">
             <div class="stat">
                 <span class="label">"Active sessions"</span>
@@ -162,7 +168,7 @@ fn sessions_detail(browsers: usize, other: usize) -> String {
 #[component]
 async fn link_hint<'a>(cx: &Cx, provider: Provider, sign_in: &'a str) -> Result<impl View> {
     let name = provider.name();
-    let dismissal = Dismissal::new(cx, format!("piquel-link:{}", provider.as_str()));
+    let dismissal = Dismissal::new(cx, format!("piquel-link:{}", provider.as_str()), false);
     Ok(view! {
         <section class="hint" :hidden=(dismissal.hidden()) @mount=(dismissal.mount())>
             icon(kind: Icon::Link)

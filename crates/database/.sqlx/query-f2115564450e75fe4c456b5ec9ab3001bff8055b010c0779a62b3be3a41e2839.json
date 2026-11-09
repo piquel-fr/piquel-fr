@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id AS \"id: AlertId\", payload, version, raised_at, seen_at,\n                    acknowledged_at, cleared_at\n                FROM alerts\n                WHERE (cleared_at IS NOT NULL) = $1\n                ORDER BY coalesce(cleared_at, raised_at) DESC, id DESC\n                LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: AlertId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "version",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "raised_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "cleared_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "f2115564450e75fe4c456b5ec9ab3001bff8055b010c0779a62b3be3a41e2839"
+}

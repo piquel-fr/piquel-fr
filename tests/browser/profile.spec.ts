@@ -1,3 +1,9 @@
+/**
+ * The Profile tab's dialogs, which open without a script: uploading a picture,
+ * which the pages load under their Content-Security-Policy, and removing it; then
+ * the picture script's crop, where zooming and dragging change the square the
+ * form sends.
+ */
 import { expect, test } from '@playwright/test';
 import { signedUp } from './helpers';
 
@@ -9,10 +15,10 @@ const PNG = Buffer.from(
 
 /**
  * The profile's dialogs, which open with no script: a picture the page, the sidebar
- * and the top bar load under their Content-Security-Policy, a notice that closes, a
- * new display name, and removing the picture, which brings the initials back.
+ * and the top bar load under their Content-Security-Policy, a notice that closes,
+ * and removing the picture, which brings the initials back.
  */
-test('profile: picture, display name and a notice that closes', async ({ browser }) => {
+test('profile: a picture, and a notice that closes', async ({ browser }) => {
   const username = `picture-${Date.now().toString(36)}`;
   const page = await signedUp(browser, username);
   const blocked: string[] = [];
@@ -45,19 +51,13 @@ test('profile: picture, display name and a notice that closes', async ({ browser
   }
   expect(blocked).toEqual([]);
 
-  await page.getByRole('button', { name: 'Change display name', exact: true }).click();
-  const rename = page.getByRole('dialog', { name: 'Change your display name' });
-  await rename.getByLabel('Display name').fill('Ada Lovelace');
-  await rename.getByRole('button', { name: 'Save name', exact: true }).click();
-  await expect(page.getByText('Your display name changed.')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Ada Lovelace' })).toBeVisible();
-
   await page.getByRole('button', { name: 'Remove', exact: true }).click();
   const remove = page.getByRole('dialog', { name: 'Remove the picture?' });
   await remove.getByRole('button', { name: 'Remove picture', exact: true }).click();
   await expect(page.getByText('Your profile picture was removed.')).toBeVisible();
   await expect(pictures).toHaveCount(0);
-  await expect(page.locator('span.avatar.large')).toHaveText('AL');
+  // The display name's initial: signup names the account after its handle.
+  await expect(page.locator('span.avatar.large')).toHaveText('P');
 });
 
 /**

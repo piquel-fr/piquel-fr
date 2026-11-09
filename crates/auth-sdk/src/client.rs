@@ -10,7 +10,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::{
     ClientId,
     protocol::{
-        claims::{LogoutTokenClaims, UserInfo},
+        claims::{IdTokenClaims, LogoutTokenClaims, UserInfo},
         jwt::TokenType,
         oauth::{
             CodeChallengeMethod, ErrorResponse, GrantType, Prompt, ResponseType, Scope, Scopes,
@@ -35,10 +35,10 @@ const RANDOM_BYTES: usize = 32;
 /// An auth endpoint failed or answered with an OAuth error.
 ///
 /// ```no_run
-/// # async fn run(client: piquel_auth::Client, refresh: piquel_auth::RefreshToken) {
+/// # async fn run(client: piquel_auth::Client, refresh: piquel_auth::RefreshToken, signed_in: piquel_auth::IdToken) {
 /// use piquel_auth::{OAuthError, protocol::oauth::ErrorCode};
 ///
-/// match client.refresh(&refresh).await {
+/// match client.refresh(&refresh, signed_in.claims()).await {
 ///     Ok(tokens) => println!("access token valid until {}", tokens.expires_at),
 ///     // The grant is over: sign the user in again.
 ///     Err(OAuthError::Rejected { response, .. }) if response.error == ErrorCode::InvalidGrant => {}
@@ -75,6 +75,15 @@ pub enum OAuthError {
     /// The token endpoint returned an ID token that failed validation.
     #[error("the token endpoint returned an invalid ID token")]
     IdToken(#[source] TokenError),
+    /// `UserInfo` names another user than the ID token (OIDC Core §5.3.2), so its
+    /// claims must not be used.
+    #[error("UserInfo names the user {found:?}, expected {expected:?}")]
+    UserInfoSubject {
+        /// The ID token's `sub`.
+        expected: String,
+        /// `UserInfo`'s `sub`.
+        found: String,
+    },
 }
 
 impl OAuthError {
@@ -87,6 +96,9 @@ impl OAuthError {
             }
             Self::Rejected { .. } => SdkError::category(ErrorCategory::OAuth),
             Self::IdToken(error) => error.code(),
+            Self::UserInfoSubject { .. } => {
+                SdkError::new(ErrorCategory::InvalidToken, ErrorReason::SubjectMismatch)
+            }
         }
     }
 }
@@ -237,6 +249,10 @@ pub struct AuthorizeRequest {
     /// one a step-up challenge names. [`Client::complete`] fails unless the ID token
     /// meets it.
     pub step_up: StepUpRequirement,
+    /// The signed-in user's ID token, sent as `id_token_hint` so auth signs in that
+    /// account only, as a step-up must. [`Client::complete`] fails unless the new ID
+    /// token names the same user.
+    pub id_token_hint: Option<IdToken>,
 }
 
 /// Declares a credential string that is never printed and serializes as itself, so
@@ -312,7 +328,7 @@ credential!(
 );
 
 /// Tokens from a code exchange or refresh.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Tokens {
     /// The access token.
     pub access_token: BearerToken,
@@ -322,14 +338,16 @@ pub struct Tokens {
     pub scopes: Scopes,
     /// The validated ID token, when `openid` was granted.
     pub id_token: Option<IdToken>,
-    /// A refresh token, when `offline_access` was granted. Auth rotates it on every
-    /// refresh, and revokes the whole family if an old one is reused.
+    /// A refresh token, when `offline_access` was granted. A public client's rotates
+    /// on every refresh, and auth revokes the whole family if an old one is reused; a
+    /// confidential client's is kept.
     pub refresh_token: Option<RefreshToken>,
 }
 
-/// A login waiting for its callback. Store it server-side, keyed by [`Self::state`],
-/// and pass it to [`Client::complete`], which consumes it so a callback completes at
-/// most once.
+/// A login waiting for its callback. It holds the PKCE verifier, so keep it
+/// server-side, keyed by [`Self::state`], or seal it into a cookie as the axum login
+/// routes do, and pass it to [`Client::complete`]. Auth redeems a code once, so a
+/// callback completes at most once.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PendingLogin {
     /// Issuer the login was started with.
@@ -346,6 +364,9 @@ pub struct PendingLogin {
     redirect_uri: Url,
     /// The authentication asked for, which the ID token must meet.
     step_up: StepUpRequirement,
+    /// The user the login's `id_token_hint` names, whom the ID token must name too.
+    #[serde(default)]
+    subject: Option<String>,
 }
 
 impl fmt::Debug for PendingLogin {
@@ -508,7 +529,7 @@ struct ClientInner {
 /// });
 ///
 /// // 1. Send the browser to `url`, and keep the pending login server-side under its
-/// //    state, never in the browser: it holds the PKCE verifier.
+/// //    state, never in the browser unsealed: it holds the PKCE verifier.
 /// let (url, pending) = client
 ///     .authorize(&AuthorizeRequest {
 ///         scopes: "profile offline_access".parse()?,
@@ -558,7 +579,7 @@ impl Client {
     }
 
     /// Starts a login: the authorization URL to redirect the browser to, and the
-    /// pending login to store server-side until the callback.
+    /// pending login to keep until the callback.
     ///
     /// When discovery advertises a pushed authorization endpoint, the request is
     /// pushed there (RFC 9126), authenticated as at the token endpoint, and the URL
@@ -588,13 +609,13 @@ impl Client {
             verifier: random()?,
             redirect_uri: self.config().redirect_uri.clone(),
             step_up: request.step_up,
+            subject: request
+                .id_token_hint
+                .as_ref()
+                .map(|hint| hint.claims().sub.clone()),
         };
-        let scopes: Scopes = request
-            .scopes
-            .iter()
-            .chain([Scope::OpenId.as_str()])
-            .map(str::to_owned)
-            .collect();
+        let mut scopes = request.scopes.clone();
+        scopes.insert(Scope::OpenId);
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes()));
         // `audience` is never sent: auth then picks the client's default resource.
         // `client_id` is added where the request goes, as `post` adds it.
@@ -616,6 +637,12 @@ impl Client {
                 .map(|prompt| ("prompt", prompt.as_str().to_owned())),
         );
         parameters.extend(request.step_up.authorize_params());
+        parameters.extend(
+            request
+                .id_token_hint
+                .as_ref()
+                .map(|hint| ("id_token_hint", hint.as_str().to_owned())),
+        );
         let parameters: Vec<_> = parameters
             .iter()
             .map(|(name, value)| (*name, value.as_str()))
@@ -693,36 +720,64 @@ impl Client {
             }
             .into());
         };
-        // A step-up login that fell short would only be asked for again.
+        // A step-up login that fell short would only be asked for again, and one that
+        // signed in another account must not replace the hinted one.
         id_token
             .require_authentication(pending.step_up, self.issuer().now())
             .map_err(OAuthError::IdToken)?;
+        if let Some(subject) = &pending.subject
+            && let Err(error) = id_token.require_subject(subject)
+        {
+            // The code is spent: revoke its grant, which would otherwise live on at
+            // auth unused. The mismatch is the error either way, so a revocation
+            // that fails adds nothing to report.
+            if let Some(refresh_token) = &tokens.refresh_token {
+                let _revoked = self.revoke(refresh_token).await;
+            }
+            return Err(OAuthError::IdToken(error).into());
+        }
         Ok(tokens)
     }
 
-    /// Redeems a refresh token. The response carries a new refresh token; the old one
-    /// must not be used again. A returned ID token is validated, but has no pending
-    /// login to compare with: callers holding the previous ID token must check that
-    /// `sub` is unchanged (OIDC Core §12.2), as the axum login routes do.
+    /// Redeems a refresh token of the sign-in that `signed_in` describes: the claims
+    /// of the sign-in's ID token, or of a session's that passed this check before
+    /// with the sign-in's `nonce` kept, as the axum login routes keep them. For a
+    /// public client, the response carries a new refresh token and the old one must
+    /// not be used again; a confidential client's stays valid, and the response
+    /// carries none. A returned ID token is validated, then must carry over the
+    /// sign-in (OIDC Core §12.2): the same user, `auth_time` and `acr`, and no `nonce`
+    /// but the sign-in's.
     ///
     /// # Errors
-    /// See [`OAuthError`].
+    /// See [`OAuthError`]; [`OAuthError::IdToken`] with
+    /// [`TokenError::SubjectMismatch`] or [`TokenError::AuthenticationChanged`] when
+    /// the new ID token breaks §12.2.
     ///
     /// ```no_run
-    /// # async fn run(client: piquel_auth::Client, stored: piquel_auth::RefreshToken) -> Result<(), Box<dyn std::error::Error>> {
-    /// let tokens = client.refresh(&stored).await?;
-    /// // Store the rotated token in place of the old one, which auth now refuses.
-    /// let rotated = tokens.refresh_token.unwrap_or(stored);
+    /// # async fn run(client: piquel_auth::Client, stored: piquel_auth::RefreshToken, signed_in: piquel_auth::IdToken) -> Result<(), Box<dyn std::error::Error>> {
+    /// let tokens = client.refresh(&stored, signed_in.claims()).await?;
+    /// // A public client stores the rotated token in place of the old one.
+    /// let current = tokens.refresh_token.unwrap_or(stored);
     /// # Ok(()) }
     /// ```
-    pub async fn refresh(&self, refresh: &RefreshToken) -> Result<Tokens, OAuthError> {
+    pub async fn refresh(
+        &self,
+        refresh: &RefreshToken,
+        signed_in: &IdTokenClaims,
+    ) -> Result<Tokens, OAuthError> {
         let response = self
             .token_request(&[
                 ("grant_type", GrantType::RefreshToken.as_str()),
                 ("refresh_token", refresh.expose()),
             ])
             .await?;
-        self.tokens(response, None, None).await
+        let tokens = self.tokens(response, None, None).await?;
+        if let Some(id_token) = &tokens.id_token {
+            id_token
+                .require_refresh_of(signed_in)
+                .map_err(OAuthError::IdToken)?;
+        }
+        Ok(tokens)
     }
 
     /// Revokes a refresh token and its whole family (RFC 7009).
@@ -745,46 +800,63 @@ impl Client {
         Self::read::<serde::de::IgnoredAny>("revocation", &reply, StatusCode::OK).map(|_| ())
     }
 
-    /// Reads the user's claims with an access token.
+    /// Reads the claims of the user `signed_in` names, the claims of their ID token,
+    /// with an access token of the same sign-in. `UserInfo` must name that user (OIDC
+    /// Core §5.3.2).
     ///
     /// # Errors
-    /// See [`OAuthError`].
+    /// See [`OAuthError`]; [`OAuthError::UserInfoSubject`] when `UserInfo` names
+    /// another user.
     ///
     /// ```no_run
-    /// # async fn run(client: piquel_auth::Client, tokens: piquel_auth::Tokens) -> Result<(), piquel_auth::OAuthError> {
-    /// let user = client.userinfo(&tokens.access_token).await?;
+    /// # async fn run(client: piquel_auth::Client, tokens: piquel_auth::Tokens, id_token: piquel_auth::IdToken) -> Result<(), piquel_auth::OAuthError> {
+    /// let user = client.userinfo(&tokens.access_token, id_token.claims()).await?;
     /// println!("{} <{:?}>", user.sub, user.profile.email);
     /// # Ok(()) }
     /// ```
-    pub async fn userinfo(&self, access: &BearerToken) -> Result<UserInfo, OAuthError> {
+    pub async fn userinfo(
+        &self,
+        access: &BearerToken,
+        signed_in: &IdTokenClaims,
+    ) -> Result<UserInfo, OAuthError> {
         let url = &self.issuer().metadata().userinfo_endpoint;
         let reply = self
             .issuer()
             .http()
             .get(url, Authorization::Bearer(access.expose()))
             .await?;
-        Self::read("userinfo", &reply, StatusCode::OK)
+        let user: UserInfo = Self::read("userinfo", &reply, StatusCode::OK)?;
+        let expected = &signed_in.sub;
+        if user.sub != *expected {
+            return Err(OAuthError::UserInfoSubject {
+                expected: expected.clone(),
+                found: user.sub,
+            });
+        }
+        Ok(user)
     }
 
     /// The RP-initiated logout URL: auth ends the browser session, then sends the
     /// browser to `post_logout`, which must be registered for this client. Without
-    /// one, auth shows its own page.
+    /// one, auth shows its own page. `id_token_hint` names the sign-in being ended
+    /// when the app kept its ID token; auth asks the user to confirm either way.
     ///
     /// ```no_run
     /// # fn run(client: piquel_auth::Client, id_token: piquel_auth::IdToken) -> Result<(), url::ParseError> {
     /// // Redirect the browser here once the app's own session is gone.
     /// let after: url::Url = "https://notes.piquel.fr/".parse()?;
-    /// let logout = client.logout_url(&id_token, Some(&after));
+    /// let logout = client.logout_url(Some(&id_token), Some(&after));
     /// # Ok(()) }
     /// ```
     #[must_use]
-    pub fn logout_url(&self, id_token: &IdToken, post_logout: Option<&Url>) -> Url {
+    pub fn logout_url(&self, id_token_hint: Option<&IdToken>, post_logout: Option<&Url>) -> Url {
         let mut url = self.issuer().metadata().end_session_endpoint.clone();
         {
             let mut query = url.query_pairs_mut();
-            query
-                .append_pair("id_token_hint", id_token.as_str())
-                .append_pair("client_id", self.config().client_id.as_str());
+            if let Some(id_token) = id_token_hint {
+                query.append_pair("id_token_hint", id_token.as_str());
+            }
+            query.append_pair("client_id", self.config().client_id.as_str());
             if let Some(post_logout) = post_logout {
                 query.append_pair("post_logout_redirect_uri", post_logout.as_str());
             }

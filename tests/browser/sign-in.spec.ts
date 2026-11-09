@@ -1,3 +1,7 @@
+/**
+ * Signing in with a handle, after a handle no active account has is refused in
+ * the form, before any passkey ceremony.
+ */
 import { expect, test } from '@playwright/test';
 import { addPasskeys, signUp } from './helpers';
 

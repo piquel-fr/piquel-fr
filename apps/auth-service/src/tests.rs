@@ -112,9 +112,11 @@ impl AuthConfig {
                 policies: PolicyLinks::on(&WEB_ORIGIN.parse().expect("web origin")),
             },
             key_encryption_key: Arc::new(key_encryption_key()),
-            audit: AuditConfig {
-                key: Arc::new(NoteKey::generate("auth.piquel.fr/audit").expect("audit key")),
-            },
+            audit: AuditConfig::new(
+                origin,
+                NoteKey::generate("auth.piquel.fr/audit").expect("audit key"),
+            )
+            .expect("audit keys"),
             trusted_proxies: vec![],
             requests_per_minute: REQUESTS_PER_MINUTE,
         }
@@ -141,6 +143,16 @@ impl Replicas {
         }
     }
 
+    /// Builds both replicas from `config` over `database`, such as a schema of
+    /// a fixture's own.
+    pub(crate) async fn over(config: &AuthConfig, database: &Database) -> Self {
+        let peer = Self::peer();
+        Self {
+            a: config.test_router(database.clone(), peer).await,
+            b: config.test_router(database.clone(), peer).await,
+        }
+    }
+
     /// Builds both replicas from `config`, with GitHub sign-in enabled.
     pub(crate) async fn with_github(mut config: AuthConfig) -> Self {
         let secret = std::env::temp_dir().join(format!("piquel-github-secret-{}", TokenId::new()));
@@ -158,8 +170,13 @@ impl Replicas {
     /// The admin listener of `config`'s dashboard, for requests from a client
     /// address of its own.
     pub(crate) async fn dashboard(config: &AuthConfig) -> Router {
+        Self::dashboard_over(config, Self::database().await).await
+    }
+
+    /// The admin listener of `config`'s dashboard over `database`, for requests
+    /// from a client address of its own.
+    pub(crate) async fn dashboard_over(config: &AuthConfig, database: Database) -> Router {
         let dashboard = config.dashboard.as_ref().expect("a dashboard");
-        let database = Self::database().await;
         let keys = config.test_keys(database.clone()).await;
         config
             .admin_router(database, &keys, dashboard)
@@ -178,17 +195,21 @@ impl Replicas {
 
     /// Connects a new pool to the migrated test database.
     pub(crate) async fn database() -> Database {
+        let database = Database::connect(Self::database_config(5))
+            .await
+            .expect("database");
+        database.run_migrations().await.expect("migrations");
+        database
+    }
+
+    /// A pool of up to `connections` to the test database, such as a fixture
+    /// passes to [`Database::isolated`] for a schema of its own.
+    pub(crate) fn database_config(connections: u32) -> DatabaseConfig {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
-        let database = Database::connect(
-            DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5))
-                .expect("database configuration"),
-        )
-        .await
-        .expect("database");
-        database.run_migrations().await.expect("migrations");
-        database
+        DatabaseConfig::new(&url, connections, std::time::Duration::from_secs(5))
+            .expect("database configuration")
     }
 }
 
@@ -320,11 +341,22 @@ impl Browser {
     /// Navigates to `path` on the whole service as this browser, and returns the
     /// whole response.
     pub(crate) async fn visit(&self, router: &Router, path: &str) -> Response {
-        let request = self
-            .request(Method::GET, path)
-            .body(Body::empty())
-            .expect("request");
-        Self::dispatch(router, request).await
+        self.visit_from(router, path, &[]).await
+    }
+
+    /// [`Self::visit`], with `headers` such as the `Sec-Fetch-Site` a navigation
+    /// sends.
+    pub(crate) async fn visit_from(
+        &self,
+        router: &Router,
+        path: &str,
+        headers: &[(&str, &str)],
+    ) -> Response {
+        let mut request = self.request(Method::GET, path);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        Self::dispatch(router, request.body(Body::empty()).expect("request")).await
     }
 
     /// Posts a page's form, `fields`, to `path` on the whole service as this browser,
@@ -489,6 +521,7 @@ pub(crate) fn pending_sign_in(browser: &Secret) -> PendingFederation {
         issuer: "https://github.com".into(),
         subject: TokenId::new().to_string(),
         email: None,
+        email_authoritative: false,
         display_name: "Social account".into(),
         picture_url: None,
         return_to: routes::page::settings::HOME.into(),

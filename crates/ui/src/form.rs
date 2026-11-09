@@ -18,9 +18,9 @@
 
 use crate::{
     AppChange, AppSettingsState, ConnectedAppChange, ConnectedAppsState, DataChange, DataState,
-    DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange, HistoryState, LoginChange,
-    LoginQuery, NewAppChange, ProfileChange, RecoverChange, SecretsChange, SignInChange,
-    SignInState, UndoChange,
+    DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange, HistoryState, InboxChange,
+    LoginChange, LoginQuery, NewAppChange, NotificationState, ProfileChange, RecoverChange,
+    SecretsChange, SignInChange, SignInState, UndoChange,
     browser::{AsyncHandler, Browser, CeremonyRequest, Fill, Refusal},
 };
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -28,9 +28,10 @@ use piquel_common::{
     RecoveryId,
     handle::{MAX_LENGTH, MIN_LENGTH},
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::IgnoredAny};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
+pub use piquel_common::form::Checkbox;
 /// Why a query could not be written as a link: one of its fields is not a name and
 /// a value.
 pub use serde_urlencoded::ser::Error as QueryError;
@@ -147,6 +148,23 @@ pub struct Messages<'a> {
 }
 
 impl<'a> Messages<'a> {
+    /// The page's alert, taken out when a dialog is `shown` again, so the
+    /// dialog says the refusal instead of the page behind its scrim; with no
+    /// dialog open, the page keeps it.
+    #[must_use]
+    pub fn into_dialog(self, shown: bool) -> (Option<&'a str>, Self) {
+        match self.alert {
+            Some(Alert::Page(alert)) if shown => (
+                Some(alert),
+                Self {
+                    alert: None,
+                    ..self
+                },
+            ),
+            _ => (None, self),
+        }
+    }
+
     /// Only an `alert`.
     #[must_use]
     pub const fn alert(alert: Alert<'a>) -> Self {
@@ -255,6 +273,10 @@ fields! {
     HistoryRow(HistoryState),
     /// A row of the connected apps.
     ConnectedRow(ConnectedAppsState),
+    /// A change of the inbox.
+    Inbox(InboxChange),
+    /// A notification's page, as its query opens it.
+    NotificationRow(NotificationState),
     /// A row of an app's settings.
     AppRow(AppSettingsState),
     /// A sign-in page, as its query opens it.
@@ -287,36 +309,6 @@ impl Fields {
         deserializer: D,
     ) -> std::result::Result<T, D::Error> {
         Ok(Self::lenient(deserializer)?.unwrap_or_default())
-    }
-}
-
-/// A checkbox, or a flag a query sets by its name alone: checked when the form
-/// sends its name, whatever the value, since browsers send nothing for an unchecked
-/// one. It decodes from text, as a change's fields must, where a `bool` would not.
-/// It is checked as `on`, as browsers send it; leave it out of a form or link with
-/// `#[serde(default, skip_serializing_if = "Checkbox::is_off")]`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Checkbox(pub bool);
-
-impl Checkbox {
-    /// Whether it is unchecked, so its form sends nothing.
-    #[must_use]
-    pub const fn is_off(&self) -> bool {
-        !self.0
-    }
-}
-
-impl Serialize for Checkbox {
-    /// Writes `on` when checked, as browsers send it.
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        self.0.then_some("on").serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Checkbox {
-    /// Checked, whatever the value: an unchecked box is not sent at all.
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        IgnoredAny::deserialize(deserializer).map(|_| Self(true))
     }
 }
 
@@ -461,6 +453,9 @@ impl Once {
 
 /// A form posting to `action`, or to its page without one, once: its `child`
 /// is its inputs and buttons, and it is of `class`. A `multipart` one sends files.
+/// An `unconfirmed` one is a change the admin dashboard posts without asking for
+/// its passkey confirmation, such as writing a draft, unless the button posting
+/// it is marked `data-confirms`.
 #[component]
 pub(crate) async fn post_form<'a>(
     cx: &Cx,
@@ -471,6 +466,7 @@ pub(crate) async fn post_form<'a>(
     #[default]
     class: Option<&'a str>,
     #[default] multipart: bool,
+    #[default] unconfirmed: bool,
     child: Child<'_>,
 ) -> Result<impl View> {
     let once = Once::new(cx);
@@ -480,6 +476,7 @@ pub(crate) async fn post_form<'a>(
             method="post"
             action=(action)
             enctype=(multipart.then_some("multipart/form-data"))
+            data-unconfirmed=(unconfirmed)
             @submit=(once.submit())
             :aria-busy=(once.busy())
         >
@@ -1019,4 +1016,23 @@ pub(crate) async fn open<'a>(
             </button>
         </form>
     })
+}
+
+/// What a page says, and where.
+#[cfg(test)]
+mod tests {
+    use super::{Alert, Messages};
+
+    /// A dialog shown again says the page's alert instead of the page behind its
+    /// scrim; with no dialog shown, the page keeps it.
+    #[test]
+    fn a_dialog_shown_again_takes_the_page_alert() {
+        let refused = Messages::alert(Alert::Page("Refused"));
+        let (said, page) = refused.into_dialog(true);
+        assert_eq!(said, Some("Refused"));
+        assert!(page.alert.is_none());
+        let (said, page) = refused.into_dialog(false);
+        assert_eq!(said, None);
+        assert!(matches!(page.alert, Some(Alert::Page("Refused"))));
+    }
 }

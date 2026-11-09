@@ -1,8 +1,9 @@
 //! Every read checks its administrator.
 
-use super::*;
+use super::{announcements::announcement, *};
 use crate::AuditKeys;
 use piquel_common::protocol::claims::Acr;
+use piquel_common::{AnnouncementId, alerts::AlertsShown};
 
 /// Production's committed audit keys.
 fn committed_keys() -> AuditKeys {
@@ -14,12 +15,20 @@ impl AdminOperation {
     /// with arguments that need not exist, since a read checks its operator before
     /// anything else. `None` for a change, which checks its operator before it
     /// commits. The match is exhaustive, so a new operation must say which it is.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "One arm per operation, so a new one cannot skip the decision."
+    )]
     async fn read(
         self,
         service: &AdminService,
         operator: &Operator,
     ) -> Option<Vec<Result<(), AdminError>>> {
         let (user, client) = (UserId::new(), "notes");
+        let (id, everyone) = (
+            AnnouncementId::new(),
+            announcement(AnnouncementRecipients::Everyone),
+        );
         Some(match self {
             Self::SearchUsers => vec![service.search_users(operator, "", None).await.map(drop)],
             Self::ViewUser => vec![
@@ -64,8 +73,34 @@ impl AdminOperation {
                     .verify_audit_chain(operator, &committed_keys())
                     .await
                     .map(drop),
+                service.audit_page(operator, None).await.map(drop),
+            ],
+            Self::ListAnnouncements => vec![service.list_announcements(operator).await.map(drop)],
+            Self::ViewAnnouncement => vec![service.view_announcement(operator, id).await.map(drop)],
+            // A draft is the administrators' own, so writing, changing and
+            // discarding one need what a read needs, checked first.
+            Self::DraftAnnouncement => vec![
                 service
-                    .audit_page(operator, &committed_keys(), None)
+                    .draft_announcement(operator, &everyone)
+                    .await
+                    .map(drop),
+            ],
+            Self::EditAnnouncement => {
+                vec![
+                    service
+                        .edit_announcement(operator, id, &everyone)
+                        .await
+                        .map(drop),
+                ]
+            }
+            Self::DiscardAnnouncement => vec![service.discard_announcement(operator, id).await],
+            Self::ListAlerts => vec![
+                service
+                    .alerts(operator, AlertsShown::Current)
+                    .await
+                    .map(drop),
+                service
+                    .alerts(operator, AlertsShown::Previous)
                     .await
                     .map(drop),
             ],
@@ -108,7 +143,9 @@ impl AdminOperation {
             | Self::UndoRecovery
             | Self::RotateSigningKey
             | Self::RevokeSigningKey
-            | Self::ImportSigningKey => return None,
+            | Self::ImportSigningKey
+            | Self::SendAnnouncement
+            | Self::UpdateAlert => return None,
         })
     }
 }

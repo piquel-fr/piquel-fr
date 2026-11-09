@@ -1,4 +1,5 @@
-//! Authorization Code + PKCE, signed tokens, and rotating opaque refresh tokens.
+//! Authorization Code + PKCE, signed tokens, and opaque refresh tokens, rotated for
+//! public clients.
 
 /// Authorization, login continuation and consent.
 mod authorize;
@@ -8,14 +9,18 @@ mod error;
 mod inline;
 /// RP-initiated logout and confirmation.
 mod logout;
-/// Code exchanges, refresh rotation and identity claims.
+/// The check of a client's current policy every authorization step runs.
+mod policy;
+/// Code exchanges, refreshes and identity claims.
 mod token;
 
 use crate::config::{OidcConfig, TokenDigestKeys};
 use crate::keys::SigningKeys;
 use crate::routes;
 use crate::security::{CacheClass, Cached};
-pub(crate) use authorize::{AuthorizationDecision, AuthorizationView, TransactionQuery};
+pub(crate) use authorize::{
+    AuthorizationDecision, AuthorizationView, RecoveryQuestion, TransactionQuery,
+};
 pub use error::OidcConfigError;
 pub(crate) use error::{OAuthCode, OAuthError, Reject};
 pub(crate) use inline::{InlineClaim, InlineResponse};
@@ -68,7 +73,7 @@ const PUSHED_REQUEST_SECONDS: i64 = 60;
 /// How long an authorization code stays redeemable.
 const AUTHORIZATION_CODE_MINUTES: i64 = 2;
 /// Developer documentation advertised in the metadata.
-const SERVICE_DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
+const SERVICE_DOCUMENTATION: &str = "https://docs.piquel.fr/user/reference/oidc.html";
 
 /// The OAuth 2.0 and `OpenID` Connect provider.
 #[derive(Clone)]
@@ -215,8 +220,11 @@ impl Scopes {
     }
 
     /// Rebuilds a scope set read from the database.
-    fn from_stored(scopes: &[String]) -> Self {
-        Self(scopes.iter().cloned().collect())
+    ///
+    /// # Errors
+    /// [`InvalidScope`](oauth::InvalidScope) if a stored scope is corrupt.
+    fn from_stored(scopes: &[String]) -> Result<Self, oauth::InvalidScope> {
+        oauth::Scopes::try_from_iter(scopes.iter().cloned()).map(Self)
     }
 
     /// Wraps the scopes of a token auth signed, which were limited when it was issued.

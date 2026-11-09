@@ -102,5 +102,22 @@ operations! {
         VerifyAuditChain,
         /// Delete the audit history through a checkpoint.
         PruneAuditChain,
+        /// List announcements, drafts and sent ones.
+        ListAnnouncements,
+        /// Show one announcement, with whom its email reaches.
+        ViewAnnouncement,
+        /// Draft an announcement to every account or to chosen ones.
+        DraftAnnouncement,
+        /// Change a draft announcement.
+        EditAnnouncement,
+        /// Delete a draft announcement.
+        DiscardAnnouncement,
+        /// Send a draft announcement: email it, and show it in its recipients'
+        /// settings.
+        SendAnnouncement,
+        /// List the current alerts, or those that cleared, with their updates.
+        ListAlerts,
+        /// Post an update on a current alert, saying where its handling stands.
+        UpdateAlert,
     }
 }

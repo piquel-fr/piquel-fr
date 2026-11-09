@@ -1,21 +1,25 @@
 //! The session extractors handlers take, and the [`StepUp`] response asking for a
 //! stronger or more recent sign-in.
 
-use super::{Login, layer::StepUpRetry};
+use super::{Login, layer::RequestSession};
 use crate::{
-    AuthenticationPolicy, IdToken, StepUpRequirement, TokenError, UserId, axum::StoredLogin,
+    AuthenticationPolicy, SessionId, StepUpRequirement, TokenError, UserId, axum::StoredLogin,
+    protocol::claims::IdTokenClaims,
 };
 use axum::{
     Extension,
-    extract::{FromRequestParts, OriginalUri},
-    http::{Method, StatusCode, request::Parts},
+    extract::FromRequestParts,
+    http::{StatusCode, request::Parts},
     response::{IntoResponse, Redirect, Response},
 };
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
-/// The signed-in user. Without a session, a `GET` is redirected through login and
-/// back; other methods get 401. Needs [`LoginRoutes::layer`](super::LoginRoutes::layer).
+/// The signed-in user. Without a session, a browser navigating to a page
+/// (`Sec-Fetch-Mode: navigate`) is redirected through login and back; any other
+/// request, a `fetch` included, gets 401, since a redirect to auth would fail its
+/// CORS check. When the access token expired and auth could not
+/// renew it, the request gets 503, and the session is kept for the next one. Needs [`LoginRoutes::layer`](super::LoginRoutes::layer).
 ///
 /// A request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` must come from the app's
 /// own pages, or it gets 403 before the session is read: `Sec-Fetch-Site:
@@ -32,7 +36,7 @@ use std::sync::Arc;
 /// ```
 #[derive(Clone, Debug)]
 pub struct SignedIn {
-    /// The stored login, its access token fresh.
+    /// The session, its access token fresh.
     pub(super) login: StoredLogin,
     /// When the session was read, by the issuer's clock.
     pub(super) checked_at: DateTime<Utc>,
@@ -44,7 +48,7 @@ impl SignedIn {
     /// The user's name: the display name, else the username, else the account ID.
     #[must_use]
     pub fn name(&self) -> &str {
-        let claims = self.login.id_token.claims();
+        let claims = self.claims();
         claims
             .profile
             .name
@@ -59,7 +63,7 @@ impl SignedIn {
     /// new URL, at the next sign-in.
     #[must_use]
     pub fn picture(&self) -> Option<&str> {
-        self.login.id_token.claims().profile.picture.as_deref()
+        self.claims().profile.picture.as_deref()
     }
 
     /// The user's account ID.
@@ -67,16 +71,29 @@ impl SignedIn {
     /// # Errors
     /// [`TokenError::InvalidSubject`] if `sub` is not an account ID.
     pub fn user_id(&self) -> Result<UserId, TokenError> {
-        self.login.id_token.user_id()
+        TokenError::account(self.subject())
     }
 
-    /// The ID token of the sign-in.
+    /// The user's `sub`.
     #[must_use]
-    pub const fn id_token(&self) -> &IdToken {
-        &self.login.id_token
+    pub fn subject(&self) -> &str {
+        self.login.subject()
     }
 
-    /// The stored login, with the access token to call APIs for the user.
+    /// Auth's session ID, which a back-channel logout names.
+    #[must_use]
+    pub const fn sid(&self) -> Option<SessionId> {
+        self.login.sid()
+    }
+
+    /// The validated claims of the sign-in's ID token, or of the latest refresh that
+    /// returned one.
+    #[must_use]
+    pub const fn claims(&self) -> &IdTokenClaims {
+        self.login.claims()
+    }
+
+    /// The session, with the access token to call APIs for the user.
     #[must_use]
     pub const fn login(&self) -> &StoredLogin {
         &self.login
@@ -107,10 +124,14 @@ impl SignedIn {
     /// # Errors
     /// The [`StepUp`] asking for `P`'s requirement.
     pub fn require<P: AuthenticationPolicy>(&self) -> Result<(), StepUp> {
-        let signed_in = &self.login.id_token;
-        if signed_in
-            .require_authentication(P::REQUIREMENT, self.checked_at)
-            .is_ok()
+        let authentication = &self.claims().authentication;
+        if TokenError::require_authentication(
+            P::REQUIREMENT,
+            authentication.acr.as_ref(),
+            authentication.auth_time,
+            self.checked_at,
+        )
+        .is_ok()
         {
             Ok(())
         } else {
@@ -130,13 +151,16 @@ impl SignedIn {
     ///
     /// ```no_run
     /// use axum::response::{IntoResponse, Response};
-    /// use piquel_auth::{axum::SignedIn, protocol::challenge::BearerChallenge};
+    /// use piquel_auth::{
+    ///     axum::SignedIn,
+    ///     protocol::challenge::{BearerChallenge, BearerError},
+    /// };
     ///
     /// async fn settings(user: SignedIn) -> Response {
     ///     let http = reqwest::Client::new();
     ///     let Ok(answer) = http
     ///         .get("https://api.example.com/settings")
-    ///         .bearer_auth(user.login().access_token.expose())
+    ///         .bearer_auth(user.login().access_token().expose())
     ///         .send()
     ///         .await
     ///     else {
@@ -148,7 +172,11 @@ impl SignedIn {
     ///         .and_then(|value| value.to_str().ok())
     ///         .and_then(|value| value.parse::<BearerChallenge>().ok());
     ///     match challenge {
-    ///         Some(challenge) if answer.status() == 401 => {
+    ///         // Only this error asks for a stronger sign-in: an `invalid_token`, for
+    ///         // one, would not be cured by another.
+    ///         Some(challenge)
+    ///             if challenge.error == Some(BearerError::InsufficientUserAuthentication) =>
+    ///         {
     ///             user.step_up(challenge.step_up).into_response()
     ///         }
     ///         _ => answer.text().await.unwrap_or_default().into_response(),
@@ -176,9 +204,10 @@ impl<St: Send + Sync> FromRequestParts<St> for SignedIn {
     }
 }
 
-/// The signed-in user, if any. Never rejects, except with 500 when the session
-/// backend fails or [`LoginRoutes::layer`](super::LoginRoutes::layer) is missing, and with 403 when a request
-/// that is not a safe method comes from another origin, as for [`SignedIn`].
+/// The signed-in user, if any. Never rejects, except with 500 when
+/// [`LoginRoutes::layer`](super::LoginRoutes::layer) is missing, with 403 when a
+/// request that is not a safe method comes from another origin, and with 503 when
+/// the access token expired and auth could not renew it, as for [`SignedIn`].
 ///
 /// ```no_run
 /// use piquel_auth::axum::MaybeSignedIn;
@@ -229,22 +258,15 @@ impl<St: Send + Sync> FromRequestParts<St> for CrossOrigin<SignedIn> {
         if let Some(user) = user {
             return Ok(Self(user));
         }
-        if parts.method != Method::GET {
+        if !Login::navigation(&parts.method, &parts.headers) {
             return Err(StatusCode::UNAUTHORIZED.into_response());
         }
-        let login = parts
+        let request = parts
             .extensions
-            .get::<Arc<Login>>()
+            .get::<Arc<RequestSession>>()
             .ok_or_else(|| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
-        // A nested router strips its prefix from `uri`; the original keeps it.
-        let uri = parts
-            .extensions
-            .get::<OriginalUri>()
-            .map_or(&parts.uri, |original| &original.0);
-        let return_to = uri
-            .path_and_query()
-            .and_then(|path| path.as_str().parse().ok());
-        Err(Redirect::to(&login.login_url(return_to.as_ref(), None)).into_response())
+        let return_to = Login::requested(&parts.extensions, &parts.uri).parse().ok();
+        Err(Redirect::to(&request.login.login_url(return_to.as_ref(), None)).into_response())
     }
 }
 
@@ -252,23 +274,23 @@ impl<St: Send + Sync> FromRequestParts<St> for CrossOrigin<MaybeSignedIn> {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, _: &St) -> Result<Self, Response> {
-        let Some(login) = parts.extensions.get::<Arc<Login>>() else {
+        let Some(request) = parts.extensions.get::<Arc<RequestSession>>() else {
             tracing::error!("SignedIn needs LoginRoutes::layer around the route");
             return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         };
-        let retry = parts.extensions.get::<StepUpRetry>().is_some();
-        login
-            .session(&parts.headers, retry)
+        request
+            .user(&parts.headers)
             .await
             .map(|user| Self(MaybeSignedIn(user)))
-            .map_err(|error| Login::store_failure(&error))
+            .map_err(IntoResponse::into_response)
     }
 }
 
 /// A response asking the user to sign in again, more strongly or more recently, from
 /// [`SignedIn::require`] or [`SignedIn::step_up`]. With [`LoginRoutes::layer`](super::LoginRoutes::layer) around
-/// the route, a `GET` is redirected through login with `acr_values` and `max_age`,
-/// and comes back to the same page; other requests get 401. The login fails unless
+/// the route, a browser navigating to a page is redirected through login with
+/// `acr_values` and `max_age`, and comes back to the same page; other requests, a
+/// `fetch` included, get 401. The login fails unless
 /// the new sign-in meets the requirement, and a step-up asked for again on the page's
 /// return is [exhausted](Self::exhausted), so each action signs in again at most once,
 /// as long as the browser returns within a minute ([`SignedIn::step_up`]).

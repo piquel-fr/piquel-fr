@@ -73,7 +73,6 @@ pub async fn administrator_list<'a>(
                 #[key(position)]
                 for (position, row) in rows.iter().enumerate() {
                     let who = Who {
-                        user: None,
                         name: row.administrator.handle.as_str(),
                         handle: row.administrator.handle.as_str(),
                         picture: row.picture.as_deref(),

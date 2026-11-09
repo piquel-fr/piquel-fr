@@ -22,11 +22,7 @@ async fn sdk_login_client_runs_against_the_provider() {
     let origin = format!("https://localhost:{port}");
     let flow = Flow::at(&origin, true, false).await;
     let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
-    let http = reqwest::Client::builder()
-        .add_root_certificate(certificate)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("HTTP client");
+    let http = reqwest::Client::builder().add_root_certificate(certificate);
     let issuer = piquel_auth::Issuer::builder()
         .http_client(http)
         .discover(&origin)
@@ -87,27 +83,29 @@ async fn sdk_login_client_runs_against_the_provider() {
         .validate::<Scopes>(tokens.access_token.expose())
         .await
         .expect("valid access token");
-    assert_eq!(access.subject, Subject::User(flow.user_id));
-    assert!(access.scopes.contains(Scope::OfflineAccess.as_str()));
+    assert_eq!(access.subject(), &Subject::User(flow.user_id));
+    assert!(access.scopes().contains(Scope::OfflineAccess.as_str()));
 
     let user = client
-        .userinfo(&tokens.access_token)
+        .userinfo(&tokens.access_token, id_token.claims())
         .await
         .expect("UserInfo");
     assert_eq!(user.sub, flow.user_id.to_string());
     assert!(user.profile.email.is_some());
 
+    // A confidential client keeps its refresh token, so a refresh returns none. Auth
+    // carries the sign-in over to the refreshed ID token (OIDC Core §12.2), which
+    // the SDK requires.
     let first = tokens.refresh_token.expect("refresh token");
-    let rotated = client
-        .refresh(&first)
+    let refreshed = client
+        .refresh(&first, id_token.claims())
         .await
-        .expect("refresh")
-        .refresh_token
-        .expect("rotated refresh token");
-    assert_ne!(rotated.expose(), first.expose());
-    client.revoke(&rotated).await.expect("revoke");
+        .expect("refresh");
+    assert!(refreshed.id_token.is_some());
+    assert!(refreshed.refresh_token.is_none());
+    client.revoke(&first).await.expect("revoke");
     assert!(matches!(
-        client.refresh(&rotated).await,
+        client.refresh(&first, id_token.claims()).await,
         Err(OAuthError::Rejected { response, .. })
             if response.error == OAuthCode::InvalidGrant
     ));
@@ -116,7 +114,7 @@ async fn sdk_login_client_runs_against_the_provider() {
         .as_str()
         .parse()
         .expect("post-logout URI");
-    let logout = client.logout_url(id_token, Some(&post_logout));
+    let logout = client.logout_url(Some(id_token), Some(&post_logout));
     let confirmation = location(
         &flow
             .request(

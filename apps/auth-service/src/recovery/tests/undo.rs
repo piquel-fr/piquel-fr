@@ -387,7 +387,7 @@ async fn support_undoes_and_takes_the_last_passkey() {
         .start(Some(Revoke::default()))
         .await
         .expect("recovery");
-    let notice = ("recovery_revoked".to_owned(), Some(false));
+    let notice = ("account_secured".to_owned(), Some(false));
     assert_eq!(scenario.messages(address).await, [notice], "nothing kept");
     scenario.enroll(&recovery_token(&link)).await;
     assert_eq!(scenario.passkeys().await.len(), 1, "only the recovery's");

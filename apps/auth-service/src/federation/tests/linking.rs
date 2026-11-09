@@ -18,7 +18,7 @@ impl TestApp {
             .expect("session lookup")
             .expect("signed in");
         account
-            .link_identity(&owner, pending)
+            .link_identity(&owner, &self.email, pending)
             .await
             .map(|(return_to, _)| return_to)
     }

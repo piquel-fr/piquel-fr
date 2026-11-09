@@ -62,6 +62,7 @@ async fn signup_applies_the_handle_rules() {
             origin: AUTH_ORIGIN.parse().expect("origin"),
             invite_required: true,
         },
+        &fixture.app.email,
         None,
         fixture.app.oidc.clone(),
     )
@@ -138,4 +139,56 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
             "signed in by it"
         );
     }
+}
+
+/// An account keeps at most 100 active passkeys: enrolling a 101st is refused as
+/// it starts, before the authenticator creates a passkey, and the database refuses
+/// one that started before the account filled up. Neither stores anything.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn enrollment_refuses_a_101st_passkey() {
+    const REFUSED: &str = "This account already has 100 passkeys, the most it can keep. \
+        Remove one in your account settings, or ask Piquel support.";
+    let mut fixture = Fixture::new().await;
+    let signed_in = fixture.login().await;
+    let (started, browser) = fixture
+        .start("/account/passkeys/enroll/start", &signed_in, json!({}))
+        .await;
+    // The fixture's passkey is the first of 100.
+    for _ in 1..100 {
+        fixture
+            .database()
+            .passkeys()
+            .insert(&crate::tests::unusable_passkey(fixture.user_id))
+            .await
+            .expect("passkey");
+    }
+    let refused = fixture
+        .request(
+            "/account/passkeys/enroll/start",
+            Method::POST,
+            &signed_in,
+            json!({}),
+        )
+        .await;
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    assert_eq!(Fixture::json(refused).await["error"], REFUSED);
+    let credential = fixture.credential(&started);
+    let response = fixture
+        .request(
+            "/account/passkeys/enroll/finish",
+            Method::POST,
+            &format!("{signed_in}; {browser}"),
+            json!({"ceremony_id":started["ceremony_id"],"friendly_name":"One more","credential":credential}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(Fixture::json(response).await["error"], REFUSED);
+    let active = fixture
+        .database()
+        .passkeys()
+        .list_active(fixture.user_id)
+        .await
+        .expect("passkeys");
+    assert_eq!(active.len(), 100);
 }

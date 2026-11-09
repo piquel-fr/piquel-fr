@@ -30,7 +30,13 @@ impl AdminService {
         user: &UserRef,
     ) -> Result<UserId, AdminError> {
         operator.authorize_read(&self.database).await?;
-        let found = match user {
+        self.lookup(user).await?.ok_or(AdminError::UserNotFound)
+    }
+
+    /// The ID of the account `user` names, as [`Self::find_user`] finds it, for an
+    /// operator already authorized to read.
+    pub(super) async fn lookup(&self, user: &UserRef) -> Result<Option<UserId>, AdminError> {
+        Ok(match user {
             UserRef::Id(id) => self
                 .database
                 .users()
@@ -57,8 +63,7 @@ impl AdminService {
                     .map(|email| email.user_id),
                 Err(_) => None,
             },
-        };
-        found.ok_or(AdminError::UserNotFound)
+        })
     }
 
     /// The handle of the account `user_id`, in any status, which names it.
@@ -201,6 +206,7 @@ impl AdminService {
             .map_err(|error| match error {
                 DatabaseError::Conflict(_) => AdminError::EmailClaimed(error),
                 DatabaseError::NotFound
+                | DatabaseError::Refused(_)
                 | DatabaseError::Timeout(_)
                 | DatabaseError::Cancelled(_)
                 | DatabaseError::LockUnavailable(_)

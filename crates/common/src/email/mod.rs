@@ -1,4 +1,4 @@
-//! Conservative email equality policy; see `docs/security/email-normalization.md`.
+//! Conservative email equality policy; see `docs/dev/security/email-normalization.md`.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -67,7 +67,7 @@ pub enum InvalidEmail {
 pub struct NormalizedEmail(String);
 
 impl NormalizedEmail {
-    /// Applies the conservative equality policy documented in `docs/security/email-normalization.md`.
+    /// Applies the conservative equality policy documented in `docs/dev/security/email-normalization.md`.
     /// Provider-specific local-part equivalence never grants account ownership.
     ///
     /// # Errors

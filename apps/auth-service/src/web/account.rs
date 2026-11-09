@@ -15,6 +15,7 @@ use crate::{
     clients::OwnedClientError,
     deletion::{AccountDeleted, AccountExport},
     federation::FlowCookie,
+    notifications::NotificationError,
     routes::{self, page},
     security::{ApiError, BrowserCookie, SessionError},
     web::settings::TABS,
@@ -22,8 +23,8 @@ use crate::{
 use piquel_common::ErrorChain;
 use piquel_telemetry::HttpTelemetry;
 use piquel_ui::{
-    AccountNav, Alert, Crumb, FieldError, LoginQuery, Messages, Notice, Query, Recovery, Section,
-    Tab, Who,
+    AccountNav, Alert, Crumb, FieldError, LoginQuery, Messages, Notice, PasskeySignal, Query,
+    Recovery, Section, Tab, Who,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -244,11 +245,12 @@ pub(super) struct Framed<'a> {
 }
 
 impl From<AccountError> for Failure {
-    /// An app the account does not have is missing. Any other failure to read the
-    /// account is internal.
+    /// An app or notification the account does not have is missing. Any other
+    /// failure to read the account is internal.
     fn from(error: AccountError) -> Self {
         match error {
-            AccountError::Client(OwnedClientError::NotFound) => Self::Missing,
+            AccountError::Client(OwnedClientError::NotFound)
+            | AccountError::Notification(NotificationError::NotFound) => Self::Missing,
             error => Self::Internal(Error::from(error)),
         }
     }
@@ -348,8 +350,10 @@ impl WebApplication {
     }
 
     /// Renders the account page `P` for `reader`, with `row` open, at the status
-    /// and with the messages of `outcome`. When the account has no app by the ID
-    /// its path names, the page says so instead, at `404`.
+    /// and with the messages of `outcome`. When the account has no app or
+    /// notification by the ID its path names, the page says so instead, at `404`;
+    /// a developer page links back to the apps, and the crumb leads back from a
+    /// settings page.
     async fn rendered<P: AccountPage>(
         &self,
         cx: &Cx,
@@ -359,13 +363,18 @@ impl WebApplication {
     ) -> Result<Response, Failure> {
         match P::render(self, cx, reader, row, outcome).await {
             Err(Failure::Missing) => {
-                let head = view! { piquel_ui::back_to_apps(home: page::developers::HOME) };
+                let head = match P::SECTION {
+                    Section::Developers => {
+                        Child::new(view! { piquel_ui::back_to_apps(home: page::developers::HOME) })
+                    }
+                    Section::Account => Child::default(),
+                };
                 let framed = Framed {
                     section: P::SECTION,
                     tab: None,
                     trail: &[],
                     title: P::TITLE.into(),
-                    head: Child::new(head),
+                    head,
                     page: Child::default(),
                 };
                 let missing = Messages::alert(Alert::Page(piquel_ui::MISSING));
@@ -433,6 +442,8 @@ impl WebApplication {
             Err(error) => return Err(error.into()),
         };
         let administrator = self.account.is_administrator(&viewer).await?;
+        let accepted = self.account.accepted_passkeys(reader.owner()).await?;
+        let unread = self.account.unread_notifications(&viewer).await?;
         let session = reader.owner().session_id();
         let confirmed = reader.owner().was_passkey_confirmed();
         // The preference forms come back here by GET, which a page answering a
@@ -451,7 +462,6 @@ impl WebApplication {
         };
         let picture = profile.picture.map(routes::pictures::of);
         let who = Who {
-            user: Some(reader.owner().user()),
             name: &profile.display_name,
             handle: profile.handle.as_str(),
             picture: picture.as_deref(),
@@ -470,11 +480,16 @@ impl WebApplication {
             current: tab,
             developers: page::developers::HOME,
             dashboard: dashboard.as_deref(),
+            unread,
         };
         let page = view! {
             piquel_ui::account(
                 nav: nav,
                 who: who,
+                signal: PasskeySignal {
+                    user: reader.owner().user(),
+                    credentials: &accepted,
+                },
                 trail: trail,
                 title: title,
                 home: page::settings::HOME,

@@ -1,0 +1,8 @@
+# Link checks for `just docs`, which names the files to check and maps this
+# repository's GitHub URLs to the checkout. See docs/dev/documentation.md.
+
+# Links to other websites are not checked, so the check never depends on them.
+offline = true
+# Links to a heading must name one that exists.
+include_fragments = "anchor-only"
+no_progress = true

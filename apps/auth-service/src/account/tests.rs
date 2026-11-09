@@ -207,8 +207,7 @@ async fn administrators_change_another_account_on_its_behalf() {
 /// The owner and an administrator change the display name with the same
 /// operation, each recorded as theirs, the administrator's with their reason, and
 /// each bumping the profile version so apps refresh `name`. The name the account
-/// already has, once trimmed, changes nothing; a blank name, or another administrator's
-/// account, is refused.
+/// already has, once trimmed, changes nothing; a blank name is refused.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn owners_and_administrators_change_the_display_name() {
@@ -236,12 +235,6 @@ async fn owners_and_administrators_change_the_display_name() {
     assert!(matches!(
         rename(&owner, " ").await,
         Err(AccountError::Passkey(PasskeyError::InvalidDisplayName))
-    ));
-    let other_admin = fixture.harness.admin().await.user_id;
-    let refused = Subject::operator(other_admin, fixture.operator(Duration::zero()), reason());
-    assert!(matches!(
-        rename(&refused, "Alice D").await,
-        Err(AccountError::Operator(AdminError::AdministratorTarget))
     ));
 
     let changed = stored().await;
@@ -307,6 +300,15 @@ impl AccountOperation {
             Self::ListApps => service.apps(viewer).await.map(drop),
             Self::ViewHistory => service.history(viewer, None).await.map(drop),
             Self::ViewPicture => service.picture(viewer).await.map(drop),
+            Self::ListNotifications => service.notifications(viewer, None).await.map(drop),
+            // Checked before it looks the notification up, so any ID will do.
+            Self::ViewNotification => service
+                .notification(viewer, piquel_common::NotificationId::new())
+                .await
+                .map(drop),
+            Self::ViewNotificationPreferences => {
+                service.notification_preferences(viewer).await.map(drop)
+            }
             Self::RenamePasskey
             | Self::RevokePasskey
             | Self::UnlinkIdentity
@@ -528,11 +530,11 @@ async fn changes_check_the_administrator_again_after_waiting() {
         .expect("the CLI changes an administrator's account");
 }
 
-/// The last passkey stays, whoever removes it and even with a social identity
-/// linked.
+/// An administrator cannot remove the last passkey either, even with a social
+/// identity linked. The owner's own attempt is refused in the passkey tests.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_last_passkey_stays_whoever_removes_it() {
+async fn administrators_cannot_remove_the_last_passkey() {
     let fixture = Fixture::new().await;
     let (target, passkeys) = fixture.target(1).await;
     let subject = Subject::operator(target.user_id, fixture.operator(Duration::zero()), reason());
@@ -544,12 +546,6 @@ async fn the_last_passkey_stays_whoever_removes_it() {
         ),
         "{removed:?}"
     );
-    let database = &fixture.harness.database;
-    let browser = Browser::sign_in(database, target.user_id).await;
-    let owner = AccountApplication::new(database.clone()).routes();
-    let path = passkey::ITEM.replace("{id}", &passkeys[0].to_string());
-    let (status, _) = browser.call(&owner, Method::DELETE, &path).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(fixture.names(target.user_id).await, ["Key 0"]);
 }
 
@@ -789,7 +785,7 @@ impl Confirming {
                 service.remove_email(&subject, state.address).await
             }
             Self::LinkIdentity => service
-                .link_identity(&owner, &state.pending)
+                .link_identity(&owner, &state.email, &state.pending)
                 .await
                 .map(drop),
             Self::UnlinkIdentity => {

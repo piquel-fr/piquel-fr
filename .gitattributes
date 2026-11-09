@@ -9,3 +9,8 @@ crates/database/.sqlx/** linguist-generated
 tests/sdk-vectors/**/*.json linguist-generated
 # The TypeScript SDK's wire types, written by `just sdk-types`.
 packages/auth/src/protocol.ts linguist-generated
+# The CLI and configuration references, written by `just docs reference`.
+docs/dev/operations/cli-commands.md linguist-generated
+docs/dev/operations/variables/*.md linguist-generated
+# The documentation's screenshots, retaken by `just docs screenshots`.
+docs/images/** linguist-generated

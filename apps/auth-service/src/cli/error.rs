@@ -33,6 +33,9 @@ pub(super) enum CliError {
     /// The audit chain is broken, or the keys to check it against are invalid.
     #[error(transparent)]
     Audit(#[from] crate::AuditError),
+    /// The text given with `--body-file` could not be read.
+    #[error("could not read the announcement's text given with --body-file")]
+    BodyFile(#[source] std::io::Error),
     /// The file given with `--key` could not be read.
     #[error("could not read the verifier keys given with --key")]
     AuditKeyFile(#[source] std::io::Error),

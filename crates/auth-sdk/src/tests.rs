@@ -4,7 +4,7 @@ use super::*;
 use crate::{client::PendingLogin, http::Http};
 use ::axum::{
     Router,
-    http::StatusCode,
+    http::{StatusCode, header},
     routing::{get, post},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -135,7 +135,7 @@ fn issuer_with(case: &Case, metadata: ServerMetadata) -> Issuer {
     Issuer::with_keys(
         metadata,
         KeyCache::fixed(keys),
-        Http::default_client().expect("HTTP client"),
+        Http::plain(reqwest::Client::builder()),
         Arc::new(case.clock()),
     )
 }
@@ -254,75 +254,31 @@ fn challenge_vectors() {
     }
 }
 
-/// The step-up vector's challenge parses back into its requirement, and a token
-/// failing that requirement answers with the same header.
-#[test]
-fn step_up_challenge_round_trips() {
-    let case = Case::all("challenges")
-        .into_iter()
-        .find(|case| case.name.ends_with("insufficient-user-authentication.json"))
-        .expect("step-up vector");
-    let header = case.json["expected"]["ok"]["header"]
-        .as_str()
-        .expect("header");
-    let parsed: BearerChallenge = header.parse().expect("challenge");
-    assert_eq!(parsed.step_up, StepUpRequirement::passkey_within(300));
-    let answer = TokenError::InsufficientUserAuthentication(parsed.step_up)
-        .challenge()
-        .expect("a challenge");
-    let answer = BearerChallenge {
-        error_description: parsed.error_description.clone(),
-        resource_metadata: parsed.resource_metadata.clone(),
-        ..answer
-    };
-    assert_eq!(answer.to_string(), header);
-}
-
 /// A token's authentication meets a requirement as auth judges it: `phr` meets a
 /// social requirement, and `auth_time` gets the leeway.
 #[test]
 fn authentication_requirements_follow_auth() {
     let now = Utc::now();
-    let token = |acr, age: i64| AccessToken {
-        subject: Subject::User(UserId::new()),
-        client_id: "notes-web".parse::<ClientId>().expect("client ID"),
-        scopes: Scopes::default(),
-        token_id: TokenId::new(),
-        session_id: None,
-        auth_time: Some(now - TimeDelta::seconds(age)),
-        amr: Vec::new(),
-        acr: Some(acr),
-        actor: None,
-        confirmation: None,
-        profile: ProfileClaims::default(),
-        issued_at: now,
-        expires_at: now,
-        extra: (),
+    let check = |acr, age: i64, requirement| {
+        TokenError::require_authentication(
+            requirement,
+            Some(&acr),
+            Some(now - TimeDelta::seconds(age)),
+            now,
+        )
     };
     let social = StepUpRequirement {
         acr: Some(Acr::Social),
         max_age: None,
     };
-    assert!(
-        token(Acr::PhishingResistant, 0)
-            .require_authentication(social, now)
-            .is_ok()
-    );
+    assert!(check(Acr::PhishingResistant, 0, social).is_ok());
     let recent = StepUpRequirement::passkey_within(300);
-    assert!(
-        token(Acr::PhishingResistant, 330)
-            .require_authentication(recent, now)
-            .is_ok()
-    );
+    assert!(check(Acr::PhishingResistant, 330, recent).is_ok());
     assert!(matches!(
-        token(Acr::PhishingResistant, 331).require_authentication(recent, now),
+        check(Acr::PhishingResistant, 331, recent),
         Err(TokenError::InsufficientUserAuthentication(requirement)) if requirement == recent
     ));
-    assert!(
-        token(Acr::Social, 0)
-            .require_authentication(recent, now)
-            .is_err()
-    );
+    assert!(check(Acr::Social, 0, recent).is_err());
 }
 
 /// Callbacks are checked before any code exchange.
@@ -409,12 +365,15 @@ pub(crate) async fn serve(router: Router) -> SocketAddr {
 
 /// A token from a vector file.
 pub(crate) fn vector_token(name: &str) -> String {
+    token_case(name).text("token").to_owned()
+}
+
+/// A token vector case by name.
+pub(crate) fn token_case(name: &str) -> Case {
     Case::all("tokens")
         .into_iter()
         .find(|case| case.name.ends_with(&format!("/{name}.json")))
         .expect("token vector")
-        .text("token")
-        .to_owned()
 }
 
 /// Verifies `token`'s signature with `keys`.
@@ -442,7 +401,11 @@ async fn key_rotation_refetches_once_and_survives_outages() {
     };
     let server = KeyServer::start(vec![jwks("rotation-before"), jwks("rotation-during")]).await;
     let clock = ManualClock::at(1_767_225_600);
-    let keys = KeyCache::with_clock(server.url.clone(), reqwest::Client::new(), clock.clone());
+    let keys = KeyCache::fetched(
+        server.url.clone(),
+        Http::plain(reqwest::Client::builder()),
+        Arc::new(clock.clone()),
+    );
     let old = vector_token("access-valid");
     let new = vector_token("access-new-key");
     // The same token with a header naming a key no set has.
@@ -497,6 +460,114 @@ async fn key_rotation_refetches_once_and_survives_outages() {
         Err(TokenError::Keys(KeyError::Unavailable))
     ));
     assert_eq!(server.requests(), 4);
+}
+
+/// Keys served with `no-store` or `no-cache` stay fresh only the 30-second minimum,
+/// not the hour keys without `max-age` get.
+#[tokio::test]
+async fn uncacheable_keys_are_refetched_after_the_minimum() {
+    let jwks = token_case("access-valid").input("jwks").clone();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let served = requests.clone();
+    let router = Router::new().route(
+        "/jwks",
+        get(move || {
+            served.fetch_add(1, Ordering::SeqCst);
+            let jwks = jwks.clone();
+            async move { ([(header::CACHE_CONTROL, "no-store")], ::axum::Json(jwks)) }
+        }),
+    );
+    let url = format!("http://{}/jwks", serve(router).await);
+    let clock = ManualClock::at(1_767_225_600);
+    let keys = KeyCache::fetched(
+        url.parse().expect("URL"),
+        Http::plain(reqwest::Client::builder()),
+        Arc::new(clock.clone()),
+    );
+    let token = vector_token("access-valid");
+    verify(&keys, &token).await.expect("fetched keys");
+    clock.advance(31);
+    verify(&keys, &token).await.expect("refetched keys");
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        2,
+        "no-store keys are not kept"
+    );
+}
+
+/// `Cache-Control` sets how long a response is kept: not at all with `no-store` or
+/// `no-cache`, whatever `max-age` says, and for a quoted `max-age` too.
+#[test]
+fn cache_control_is_read_like_a_cache() {
+    let max_age = |value: &str| {
+        let mut headers = header::HeaderMap::new();
+        headers.insert(header::CACHE_CONTROL, value.parse().expect("header"));
+        crate::http::Reply::max_age(&headers)
+    };
+    assert_eq!(max_age("public, max-age=600"), Some(600));
+    assert_eq!(max_age(r#"Max-Age="60""#), Some(60));
+    assert_eq!(max_age("max-age=600, no-cache"), Some(0));
+    assert_eq!(max_age("no-store"), Some(0));
+    assert_eq!(max_age("public"), None);
+}
+
+/// A server that never answers fails at the SDK's deadline, though the client sets
+/// no timeout of its own.
+#[tokio::test(start_paused = true)]
+async fn hanging_servers_time_out() {
+    // Accepts connections but never answers.
+    let silent = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let url: Url = format!("http://{}/jwks", silent.local_addr().expect("address"))
+        .parse()
+        .expect("URL");
+    let http = Http::plain(reqwest::Client::builder());
+    assert!(matches!(
+        http.get(&url, crate::http::Authorization::None).await,
+        Err(NetworkError::TimedOut { .. })
+    ));
+}
+
+/// A redirect is refused even when the application's client follows them, so a
+/// refresh token is never resent to the new location.
+#[tokio::test]
+async fn redirects_are_refused_whatever_the_client() {
+    let stolen = Arc::new(AtomicUsize::new(0));
+    let reached = stolen.clone();
+    let router = Router::new()
+        .route(
+            "/token",
+            post(|| async {
+                (
+                    StatusCode::TEMPORARY_REDIRECT,
+                    [(header::LOCATION, "/elsewhere")],
+                )
+            }),
+        )
+        .route(
+            "/elsewhere",
+            post(move || {
+                reached.fetch_add(1, Ordering::SeqCst);
+                async { StatusCode::OK }
+            }),
+        );
+    let url: Url = format!("http://{}/token", serve(router).await)
+        .parse()
+        .expect("URL");
+    let following = reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(10));
+    let result = Http::plain(following)
+        .post_form(
+            &url,
+            &[("refresh_token", "prt_v1_secret")],
+            crate::http::Authorization::None,
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(NetworkError::Redirected { status: 307, .. })
+    ));
+    assert_eq!(stolen.load(Ordering::SeqCst), 0, "the token stays here");
 }
 
 /// The public client `id` of the vectors' issuer, which pushes its authorization
@@ -663,10 +734,10 @@ async fn cancelled_fetches_leave_keys_unavailable() {
         .await
         .expect("bind");
     let url = format!("http://{}/jwks", silent.local_addr().expect("address"));
-    let keys = KeyCache::with_clock(
+    let keys = KeyCache::fetched(
         url.parse().expect("URL"),
-        reqwest::Client::new(),
-        ManualClock::at(1_767_225_600),
+        Http::plain(reqwest::Client::builder()),
+        Arc::new(ManualClock::at(1_767_225_600)),
     );
     let token = vector_token("access-valid");
     let cancelled =
@@ -676,4 +747,55 @@ async fn cancelled_fetches_leave_keys_unavailable() {
         verify(&keys, &token).await,
         Err(TokenError::Keys(KeyError::Unavailable))
     ));
+}
+
+/// `UserInfo` is used only when it names the user of the ID token (OIDC Core §5.3.2):
+/// an answer for anyone else is refused.
+#[tokio::test]
+async fn userinfo_must_name_the_signed_in_user() {
+    let case = Case::all("tokens")
+        .into_iter()
+        .find(|case| case.name.ends_with("/id-valid.json"))
+        .expect("ID token vector");
+    let claims = case.json["expected"]["ok"].clone();
+    let user = claims["sub"].as_str().expect("sub").to_owned();
+    let answered = user.clone();
+    let router = Router::new().route(
+        "/userinfo",
+        get(move |headers: ::axum::http::HeaderMap| {
+            let mine = headers[::axum::http::header::AUTHORIZATION] == "Bearer mine";
+            let sub = if mine {
+                answered.clone()
+            } else {
+                "someone-else".into()
+            };
+            async move { ::axum::Json(serde_json::json!({ "sub": sub })) }
+        }),
+    );
+    let address = serve(router).await;
+    let mut metadata = metadata();
+    metadata.userinfo_endpoint = format!("http://{address}/userinfo").parse().expect("URL");
+    let client = issuer_with(&case, metadata).client(ClientConfig {
+        client_id: "notes-web".parse::<ClientId>().expect("client ID"),
+        credentials: Credentials::None,
+        redirect_uri: "https://client.example.com/callback".parse().expect("URL"),
+    });
+    let claims: crate::IdTokenClaims = serde_json::from_value(claims).expect("ID token claims");
+    let info = client
+        .userinfo(&BearerToken::new("mine".into()), &claims)
+        .await
+        .expect("the user's claims");
+    assert_eq!(info.sub, user);
+    let refused = client
+        .userinfo(&BearerToken::new("theirs".into()), &claims)
+        .await
+        .expect_err("another user's claims");
+    assert!(matches!(refused, OAuthError::UserInfoSubject { .. }));
+    assert_eq!(
+        refused.code(),
+        SdkError::new(
+            protocol::sdk::ErrorCategory::InvalidToken,
+            protocol::sdk::ErrorReason::SubjectMismatch
+        )
+    );
 }

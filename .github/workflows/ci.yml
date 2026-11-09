@@ -13,12 +13,19 @@
 #             with the admin dashboard on its own listener and host, piquel.fr's
 #             web server on its own host, Mailpit receiving auth's email, and
 #             the binary's CLI granting administrators and recovering accounts
-#   docker -> the deployment images: auth and piquel.fr's web server
+#   docker -> the deployment images: auth, piquel.fr's web server and the docs
+#   docs   -> the documentation book, built with warnings denied, with every
+#             link and heading anchor in it and in the repository's Markdown
+#             checked offline
 #
-# Pull requests run only the jobs their changes can affect (see `changes`).
-# Pushes to main and manual runs run everything. `ci` is the single status to
-# require: it fails if any job failed and passes when the rest succeeded or
-# were skipped. audit.yml audits new advisories weekly.
+# Pull requests run only the jobs their changes can affect (see `changes`),
+# except `docs`: a change anywhere can break a link to it.
+# The merge queue, pushes to main and manual runs run everything: the queue
+# tests each pull request on top of the latest main before it merges, so two
+# pull requests that pass alone cannot break main together. `ci` is the single
+# status to require, and the queue waits for it: it fails if any job failed
+# and passes when the rest succeeded or were skipped. audit.yml audits new
+# advisories weekly.
 #
 # Rust caches are saved from main only. Pull requests restore main's caches,
 # so a branch never evicts them with copies no other branch can read. pnpm's
@@ -28,6 +35,7 @@ name: CI
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
@@ -309,6 +317,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: docker build --file infra/auth.Dockerfile .
       - run: docker build --file infra/web.Dockerfile .
+      - run: docker build --file infra/docs.Dockerfile .
+
+  # mdBook and lychee at the versions `just install-tools` installs.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
+        with:
+          tool: just,mdbook@0.5.4,lychee@0.24.2
+      - run: just docs
 
   ci:
     name: ci
@@ -320,6 +341,7 @@ jobs:
       - rust
       - e2e
       - docker
+      - docs
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

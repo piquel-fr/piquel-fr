@@ -53,7 +53,7 @@ pub(super) enum KeysCommand {
         id: KeyId,
     },
     /// Print the verifier key of the audit key `AUTH_AUDIT_KEY_PROVIDER` names,
-    /// for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/security/audit-key.pub.
+    /// for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/dev/security/audit-key.pub.
     Audit,
 }
 

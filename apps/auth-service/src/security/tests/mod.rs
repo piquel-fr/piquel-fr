@@ -23,7 +23,7 @@ use piquel_common::{
     events::{Actor, Browser, Platform, RevocationReason, UserAgentFamily},
 };
 use piquel_crypto::Digest;
-use piquel_repository::{Database, DatabaseConfig, SessionScope, StoredSession};
+use piquel_repository::{Database, SessionScope, StoredSession};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -87,22 +87,10 @@ struct SecurityFixture {
     policy: HttpSecurity,
 }
 impl SecurityFixture {
-    /// Connects an isolated test pool with caller-selected acquisition bounds.
-    async fn database(max_connections: u32, timeout: std::time::Duration) -> Database {
-        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
-            .required()
-            .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
-        Database::connect(
-            DatabaseConfig::new(&url, max_connections, timeout).expect("database configuration"),
-        )
-        .await
-        .expect("database")
-    }
     /// Builds a test policy with exact browser origins and unique client buckets.
     /// A public client calls back to `https://external.example`.
     async fn new() -> Self {
-        let database = Self::database(5, std::time::Duration::from_secs(5)).await;
-        database.run_migrations().await.expect("migrations");
+        let database = crate::tests::Replicas::database().await;
         database
             .oidc()
             .create_client(

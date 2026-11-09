@@ -98,6 +98,7 @@ fn thumbprints_match_rfc() {
     let jwk = Jwk {
         alg: None,
         e: "AQAB".to_owned(),
+        key_ops: None,
         kid: "example".to_owned(),
         kty: KeyType::Rsa,
         n: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw".to_owned(),
@@ -262,6 +263,19 @@ fn notes_open_only_with_a_valid_listed_signature() {
         verifiers.open(&note.replace("position 1", "position 2")),
         Err(CryptoError::NoteSignature)
     ));
+    // Garbage under the listed key's ID, of a signature's length or another, is an
+    // invalid signature, not a provider failure.
+    let base64 = base64::engine::general_purpose::STANDARD;
+    let (text, line) = note.split_once("\n\n").expect("split");
+    let (name, signature) = line.trim_end().rsplit_once(' ').expect("signature line");
+    let id = base64.decode(signature).expect("base64")[..4].to_vec();
+    for length in [64, 10] {
+        let garbage = base64.encode([id.clone(), vec![7; length]].concat());
+        assert!(matches!(
+            verifiers.open(&format!("{text}\n\n{name} {garbage}\n")),
+            Err(CryptoError::NoteSignature)
+        ));
+    }
     for malformed in [
         "position 1\n",
         "position 1\n\n",
@@ -306,5 +320,28 @@ fn note_keys_reject_malformed_seeds_and_names() {
     assert!(
         format!("{:?}", NoteKey::from_hex_seed("audit", &seed).expect("key"))
             .starts_with("NoteKey { verifier")
+    );
+}
+
+/// A verifier matches the one `PostgreSQL` 18 derived for the same password and
+/// salt, in the form it stores, and each new one has a salt of its own.
+#[test]
+fn scram_verifiers_match_postgresql() {
+    const DERIVED: &str = "SCRAM-SHA-256$4096:HGPlm+ubr/bvXpBiFegrkQ==$\
+        NEDv+VmjbTTxr+dxm9sg/T4xlN2P4gWRZ38pcY186lk=:\
+        UfRHbtxHcFNIlFKAArF+Ly0FCicrMmo3Y/ZpQdQEnlM=";
+    let salt = base64::engine::general_purpose::STANDARD
+        .decode("HGPlm+ubr/bvXpBiFegrkQ==")
+        .expect("salt")
+        .try_into()
+        .expect("16 bytes");
+    let verifier = ScramVerifier::with_salt("pencil", salt).expect("verifier");
+    assert_eq!(verifier.to_string(), DERIVED);
+    let fresh = ScramVerifier::new("pencil").expect("verifier").to_string();
+    assert!(fresh.starts_with("SCRAM-SHA-256$4096:"));
+    assert_ne!(fresh, DERIVED);
+    assert_ne!(
+        fresh,
+        ScramVerifier::new("pencil").expect("verifier").to_string()
     );
 }

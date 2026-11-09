@@ -58,7 +58,7 @@ export class Resource<S extends string = never, X = undefined> {
       throw new TypeError('a resource metadata URL must be a URL');
     }
     this.identifier = config.identifier;
-    this.scopes = config.scopes ?? Scopes.of([]);
+    this.scopes = config.scopes ?? Scopes.checked([]);
     this.metadata = config.metadata === undefined ? undefined : new URL(config.metadata).href;
     this.#tokens = tokens;
     this.#claims = config.claims ?? (() => undefined as X);
@@ -98,7 +98,7 @@ export class Resource<S extends string = never, X = undefined> {
       ).forResource(this.metadata);
     }
     if (asciiLowercase(scheme) !== 'bearer') {
-      const scope = scopes.length === 0 ? undefined : Scopes.of(scopes).toString();
+      const scope = scopes.length === 0 ? undefined : Scopes.checked(scopes).toString();
       throw new AuthError(
         scope === undefined ? { code: 'missing_token' } : { code: 'missing_token', scope },
         'the request has no bearer token'

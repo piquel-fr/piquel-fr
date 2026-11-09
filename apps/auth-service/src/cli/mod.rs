@@ -9,6 +9,10 @@
 mod account;
 /// Granting, revoking and listing administrators.
 mod admin;
+/// Listing alerts and posting updates on them.
+mod alerts;
+/// Drafting and sending announcements to accounts.
+mod announcement;
 /// The audit history.
 mod audit;
 /// Registering, inspecting and changing OIDC clients.
@@ -25,6 +29,9 @@ mod handle;
 mod invite;
 /// Signing keys and token digest keys.
 mod keys;
+/// The generated command reference.
+#[cfg(test)]
+mod reference;
 /// Serving the public and admin listeners.
 mod serve;
 /// Ending sessions.
@@ -37,6 +44,8 @@ use crate::{
 };
 use account::AccountCommand;
 use admin::AdminCommand;
+use alerts::AlertsCommand;
+use announcement::AnnouncementCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
 use client::{ClientCommand, OriginCommand};
@@ -58,7 +67,7 @@ use user::UserCommand;
 #[derive(Parser)]
 #[command(
     after_help = "Every command uses AUTH_DATABASE_URL, except migrate and audit prune when \
-                  AUTH_DATABASE_OWNER_URL is set. See README.md for configuration and administration."
+                  AUTH_DATABASE_OWNER_URL is set. See https://docs.piquel.fr/dev/operations/administration.html."
 )]
 pub struct Cli {
     /// Defaults to serving when no administrative command is supplied.
@@ -112,6 +121,14 @@ enum Administration {
     /// Inspect, retry and cancel outbound deliveries.
     #[command(subcommand)]
     Deliveries(DeliveriesCommand),
+    /// Draft, send and read announcements to accounts, such as a security
+    /// incident or a change to the privacy policy.
+    #[command(subcommand)]
+    Announcement(AnnouncementCommand),
+    /// List the alerts that need an administrator's attention, and post updates
+    /// on them.
+    #[command(subcommand)]
+    Alerts(AlertsCommand),
     /// Read or change one account's settings on its owner's behalf.
     Account(AccountCommand),
 }
@@ -242,6 +259,18 @@ impl Administration {
                 DeliveriesCommand::Retry { .. } => Op::RetryDelivery,
                 DeliveriesCommand::Cancel { .. } => Op::CancelDelivery,
             },
+            Self::Announcement(command) => match command {
+                AnnouncementCommand::List { .. } => Op::ListAnnouncements,
+                AnnouncementCommand::Show { .. } => Op::ViewAnnouncement,
+                AnnouncementCommand::Draft(_) => Op::DraftAnnouncement,
+                AnnouncementCommand::Edit { .. } => Op::EditAnnouncement,
+                AnnouncementCommand::Discard { .. } => Op::DiscardAnnouncement,
+                AnnouncementCommand::Send { .. } => Op::SendAnnouncement,
+            },
+            Self::Alerts(command) => match command {
+                AlertsCommand::List { .. } => Op::ListAlerts,
+                AlertsCommand::Update { .. } => Op::UpdateAlert,
+            },
         })
     }
 
@@ -263,6 +292,8 @@ impl Administration {
             Self::Admin(command) => command.run(console).await,
             Self::Handle(command) => command.run(console).await,
             Self::Deliveries(command) => command.run(console).await,
+            Self::Announcement(command) => command.run(console).await,
+            Self::Alerts(command) => command.run(console).await,
             Self::Account(command) => command.run(console).await,
         }
     }

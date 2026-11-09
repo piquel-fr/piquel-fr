@@ -195,6 +195,11 @@ impl Scopes {
         !bytes.is_empty()
     }
 
+    /// Adds a standard scope, always a valid one.
+    pub fn insert(&mut self, scope: Scope) {
+        self.0.insert(scope.as_str().to_owned());
+    }
+
     /// Whether the set contains `scope`.
     #[must_use]
     pub fn contains(&self, scope: &str) -> bool {
@@ -223,6 +228,40 @@ impl Scopes {
     pub fn iter(&self) -> impl Iterator<Item = &str> {
         self.0.iter().map(String::as_str)
     }
+
+    /// Collects scope tokens, each of which must be one valid scope, such as a grant
+    /// read back from the database.
+    ///
+    /// ```
+    /// use piquel_common::protocol::oauth::{InvalidScope, Scopes};
+    ///
+    /// let granted = Scopes::try_from_iter(["notes:read", "openid"])?;
+    /// assert_eq!(granted.to_string(), "notes:read openid");
+    /// // Two scopes in one token would serialize as two.
+    /// assert_eq!(Scopes::try_from_iter(["notes:read notes:write"]), Err(InvalidScope));
+    /// # Ok::<(), InvalidScope>(())
+    /// ```
+    ///
+    /// # Errors
+    /// [`InvalidScope`] if any token breaks RFC 6749 §3.3 syntax.
+    pub fn try_from_iter<I>(scopes: I) -> Result<Self, InvalidScope>
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        scopes
+            .into_iter()
+            .map(|scope| {
+                let scope = scope.into();
+                if Self::is_token(&scope) {
+                    Ok(scope)
+                } else {
+                    Err(InvalidScope)
+                }
+            })
+            .collect::<Result<_, _>>()
+            .map(Self)
+    }
 }
 
 impl FromStr for Scopes {
@@ -230,23 +269,7 @@ impl FromStr for Scopes {
     /// Parses a space-separated list. Repeated whitespace is tolerated, as auth always
     /// has; every token must have valid syntax.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        value
-            .split_ascii_whitespace()
-            .map(|scope| {
-                Self::is_token(scope)
-                    .then(|| scope.to_owned())
-                    .ok_or(InvalidScope)
-            })
-            .collect::<Result<_, _>>()
-            .map(Self)
-    }
-}
-
-impl FromIterator<String> for Scopes {
-    /// Collects scopes that were validated when they were stored, such as a grant read
-    /// back from the database. Untrusted text goes through `parse` instead.
-    fn from_iter<I: IntoIterator<Item = String>>(scopes: I) -> Self {
-        Self(scopes.into_iter().collect())
+        Self::try_from_iter(value.split_ascii_whitespace())
     }
 }
 

@@ -22,9 +22,10 @@ pub use frames::{Health, Policies, SOURCE, auth_shell, site_shell};
 pub use html::{PreferenceChange, Preferences, Sidebar, Theme, Title, document};
 pub use parts::{Pager, page_head};
 pub use sections::{AccountNav, Section, account, signed_out};
-pub use signed_in::{Crumb, NavGroup, NavItem, Search, Shell, Who, shell};
+pub use signed_in::{Crumb, NavGroup, NavItem, PasskeySignal, Search, Shell, Who, shell};
 
 pub(crate) use parts::{
-    Dismissal, Label, alert_notice, dialog, navigation, page_messages, pager, private_address,
+    Dismissal, Label, alert_notice, announcement_text, dialog, navigation, page_messages, pager,
+    private_address,
 };
 pub(crate) use signed_in::{AvatarSize, avatar};

@@ -30,6 +30,8 @@ pub struct NavItem<'a> {
     pub current: bool,
     /// Whether something there needs attention, which a dot shows.
     pub warning: bool,
+    /// How many things there are new, such as unread notifications, if any.
+    pub count: Option<u64>,
 }
 
 /// A group of the sidebar's links, under its label, if any.
@@ -44,8 +46,6 @@ pub struct NavGroup<'a> {
 /// Who is signed in, as the sidebar and top bar show them.
 #[derive(Clone, Copy, Debug)]
 pub struct Who<'a> {
-    /// Their account, which the page tells the password manager.
-    pub user: Option<UserId>,
     /// The name shown.
     pub name: &'a str,
     /// Their handle.
@@ -77,6 +77,20 @@ impl Who<'_> {
         }
         initials
     }
+}
+
+/// What the page tells the browser's password manager of the
+/// signed-in account (the `WebAuthn` Signal API): its current handle and name,
+/// from [`Who`], so its passkeys show them after a change, and which of its
+/// passkeys still exist.
+#[derive(Clone, Copy, Debug)]
+pub struct PasskeySignal<'a> {
+    /// The account, the user handle its passkeys carry.
+    pub user: UserId,
+    /// The credential ID of every passkey of the account that still signs in, in
+    /// unpadded base64url. The password manager forgets the account's passkeys
+    /// this does not list, so it must never miss one.
+    pub credentials: &'a [String],
 }
 
 /// A search form the top bar shows, posting `name` to `action` by `GET`.
@@ -140,6 +154,9 @@ pub struct Shell<'a> {
     pub groups: &'a [NavGroup<'a>],
     /// Who is signed in, if the sidebar shows them.
     pub who: Option<Who<'a>>,
+    /// What the password manager is told of the account signed in, on its own
+    /// pages only.
+    pub signal: Option<PasskeySignal<'a>>,
     /// Their own page, which the top bar's avatar links.
     pub me: Option<&'a str>,
     /// The pages between the area and the page in the crumb, each named and
@@ -236,6 +253,8 @@ async fn sidebar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
                             <span class="label">(item.label)</span>
                             if item.warning {
                                 <span class="count warning" title="Needs attention"></span>
+                            } else if let Some(count) = item.count {
+                                <span class="count new" title=(format!("{count} new"))>(count.to_string())</span>
                             }
                         </a>
                     }
@@ -253,9 +272,15 @@ async fn sidebar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
                 }
                 if let Some(who) = frame.who {
                     // The account's passkeys show its current handle and name in the
-                    // browser's password manager, after a change.
-                    let signal = who.user.map(|user| {
-                        Browser::signal_account(&user.to_string(), who.handle, who.name)
+                    // browser's password manager, after a change, which forgets the
+                    // ones that no longer sign in.
+                    let signal = frame.signal.map(|signal| {
+                        Browser::signal_account(
+                            &signal.user.to_string(),
+                            who.handle,
+                            who.name,
+                            signal.credentials,
+                        )
                     });
                     <div
                         class="who"

@@ -3,7 +3,9 @@
 use super::*;
 use piquel_repository::SessionScope;
 
-/// Checks public-client consent, PKCE, scoped claims and one-use authorization codes.
+/// Checks public-client consent, PKCE, scoped claims and one-use authorization codes:
+/// a redemption with the wrong verifier expires its code, so it cannot be tried
+/// again.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn public_consent_pkce_claim_scoping_and_replay() {
@@ -15,11 +17,14 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::ConsentRequired.as_str()
     );
+    let burned = flow.code(Scope::OpenId.as_str()).await;
+    for verifier in ["wrong", Flow::verifier()] {
+        assert_eq!(
+            flow.exchange(&burned, verifier, None).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
     let code = flow.code(Scope::OpenId.as_str()).await;
-    assert_eq!(
-        flow.exchange(&code, "wrong", None).await.status(),
-        StatusCode::BAD_REQUEST
-    );
     let response = flow.exchange(&code, Flow::verifier(), None).await;
     assert_eq!(response.status(), StatusCode::OK);
     let tokens = Flow::json(response).await;
@@ -64,7 +69,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
     assert_eq!(location(&response).path(), "/login");
     let client_id = flow.client.id.clone();
     assert_eq!(
-        flow.events().await[..3],
+        flow.events().await[..4],
         [
             DomainEvent::CodeReplayed {
                 client_id: client_id.clone(),
@@ -74,12 +79,52 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
                 family_id: None,
                 scopes: vec![Scope::OpenId.as_str().into()],
             },
+            DomainEvent::CodeRedemptionFailed {
+                client_id: client_id.clone(),
+                reason: CodeRedemptionFailure::InvalidVerifier,
+            },
             DomainEvent::ConsentGranted {
                 client_id,
                 scopes: vec![Scope::OpenId.as_str().into()],
             },
-        ],
-        "a failed exchange records nothing"
+        ]
+    );
+}
+
+/// A failed redemption uses its code up even for a redemption already waiting on
+/// it: both wait on the account, the failed one decides the code first, and the
+/// valid one then finds it expired.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_failed_redemption_uses_the_code_up_for_one_waiting() {
+    let flow = Flow::new(false, false).await;
+    let code = flow.code(Scope::OpenId.as_str()).await;
+    let database = flow.app.database.clone();
+    let mut holder = database.begin().await.expect("transaction");
+    holder
+        .users()
+        .find_active_by_id_for_update(flow.user_id)
+        .await
+        .expect("lock")
+        .expect("account");
+    let exchange = |verifier: &'static str| {
+        let (flow, code) = (flow.clone(), code.clone());
+        tokio::spawn(async move { flow.exchange(&code, verifier, None).await.status() })
+    };
+    let failed = exchange("wrong");
+    until_blocked(&mut holder, 1).await;
+    let valid = exchange(Flow::verifier());
+    until_blocked(&mut holder, 2).await;
+    holder.commit().await.expect("commit");
+
+    assert_eq!(failed.await.expect("failed"), StatusCode::BAD_REQUEST);
+    assert_eq!(valid.await.expect("valid"), StatusCode::BAD_REQUEST);
+    let events = flow.events().await;
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, DomainEvent::GrantIssued { .. })),
+        "{events:?}"
     );
 }
 

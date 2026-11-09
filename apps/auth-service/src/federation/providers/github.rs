@@ -100,10 +100,12 @@ impl FederationApplication {
             .into_iter()
             .find(|email| email.verified && email.primary)
             .map(|email| email.email);
+        // GitHub hosts no mailbox, so the address may have changed owners since it
+        // verified it.
         VerifiedIdentity::new(
             Provider::GitHub,
             user.id.to_string(),
-            email,
+            (email, false),
             (user.name, user.login),
             user.avatar_url.as_deref(),
         )

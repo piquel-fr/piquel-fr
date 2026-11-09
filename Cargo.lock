@@ -2199,6 +2199,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 name = "piquel-auth"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "axum",
  "base64 0.22.1",
  "chrono",
@@ -2259,6 +2260,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "piquel-common",
+ "piquel-crypto",
  "piquel-telemetry",
  "serde",
  "serde_json",

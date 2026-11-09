@@ -3,7 +3,6 @@ use crate::{
     Database, DatabaseError, InsertUser, connection::MIGRATOR, repositories::UserRepository,
 };
 use piquel_common::{Handle, UserId};
-use sqlx::{Connection, PgConnection};
 
 /// The schema's `handle_skeleton` is the Rust type's skeleton, which the generated
 /// `skeleton` column, and so look-alike uniqueness, relies on.
@@ -71,13 +70,15 @@ async fn concurrent_renames_to_one_handle_let_one_win() {
     assert_eq!(won[0], winner.id == accounts[0].id);
 }
 
-/// An account's current handle is never deleted, but once the account is purged,
-/// its last handle can be, so anyone may claim it.
+/// An account's current handle is never deleted. Once the account is purged its
+/// handles stay without an owner, so no account claims them, until an operator
+/// releases them.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn a_purged_accounts_handle_can_be_released() {
-    let pool = Database::test_pool().await;
-    let database = Database { pool: pool.clone() };
+async fn a_purged_accounts_handle_stays_taken_until_released() {
+    let database = Database {
+        pool: Database::test_pool().await,
+    };
     let account = InsertUser::named("purged");
     database.users().insert(&account).await.expect("user");
     let release = async || {
@@ -87,16 +88,41 @@ async fn a_purged_accounts_handle_can_be_released() {
             .await
             .expect("delete")
     };
+    let reuse = async || {
+        database
+            .users()
+            .insert(&InsertUser {
+                handle: account.handle.clone(),
+                ..InsertUser::named("again")
+            })
+            .await
+    };
     assert!(release().await.is_none(), "a current handle stays");
-    sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(account.id.as_uuid())
-        .execute(&pool)
+    let purge = async || {
+        let mut tx = database.begin().await.expect("transaction");
+        let purged = tx.deletions().purge(account.id).await.expect("purge");
+        tx.commit().await.expect("commit");
+        purged
+    };
+    assert!(purge().await);
+    assert!(!purge().await, "the account is gone");
+    let holder = database
+        .handles()
+        .holder(&account.handle)
         .await
-        .expect("purge");
+        .expect("lookup")
+        .expect("the handle stays");
+    assert_eq!(holder.user_id, None, "without an owner");
+    let refused = reuse().await;
+    assert!(
+        matches!(refused, Err(DatabaseError::Conflict(_))),
+        "{refused:?}"
+    );
     assert!(
         release().await.is_some(),
         "a purged account's handle is freed"
     );
+    reuse().await.expect("a released handle is free");
 }
 
 /// Two accounts asking for each other's handles are both refused, without a
@@ -146,17 +172,17 @@ async fn locked_lookups_read_a_rename_they_waited_for() {
             .await
             .expect("rename")
     );
+    let mut tx = crate::DatabaseTransaction::new(pool.begin().await.expect("lookup transaction"));
+    let backend = Database::backend(&mut tx.inner).await;
     let lookup = tokio::spawn(async move {
-        let database = Database { pool };
-        let mut tx = database.begin().await.expect("lookup transaction");
         tx.users()
             .find_active_by_id_for_update(account.id)
             .await
             .expect("lookup")
             .expect("user")
     });
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert!(!lookup.is_finished(), "the lookup must wait for the rename");
+    // The lookup waits for the rename.
+    Database::wait_for_lock(&pool, backend).await;
     rename.commit().await.expect("commit");
     let user = lookup.await.expect("lookup task");
     assert_eq!((user.handle, user.profile_version), (renamed, 2));
@@ -168,31 +194,13 @@ async fn locked_lookups_read_a_rename_they_waited_for() {
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn the_migration_refuses_usernames_that_are_not_handles() {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-    let mut connection = PgConnection::connect(&url).await.expect("connect");
-    let schema = format!("handles_{}", UserId::new().as_uuid().simple());
-    sqlx::raw_sql(&format!(
-        "CREATE SCHEMA {schema}; SET search_path TO {schema}"
-    ))
-    .execute(&mut connection)
-    .await
-    .expect("schema");
     // Found by name, so renumbering it after another branch's migration needs no
     // change here.
-    let version = MIGRATOR
+    let handles = MIGRATOR
         .iter()
         .find(|migration| migration.description == "handles")
-        .expect("the handles migration")
-        .version;
-    let (earlier, handles): (Vec<_>, Vec<_>) = MIGRATOR
-        .iter()
-        .partition(|migration| migration.version < version);
-    for migration in earlier {
-        sqlx::raw_sql(&migration.sql)
-            .execute(&mut connection)
-            .await
-            .expect("earlier migration");
-    }
+        .expect("the handles migration");
+    let mut connection = Database::scratch_schema(..handles.version).await;
     for username in ["a_b", "piquel", "pique1", "fine"] {
         sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Migration test')")
             .bind(UserId::new().as_uuid())
@@ -201,7 +209,7 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
             .await
             .expect("user");
     }
-    let migration = &handles[0].sql;
+    let migration = &handles.sql;
     let refused = sqlx::raw_sql(migration)
         .execute(&mut connection)
         .await
@@ -233,8 +241,4 @@ async fn the_migration_refuses_usernames_that_are_not_handles() {
         copied,
         ["a-b", "fine", "piquel", "renamed"].map(|handle| (handle.to_owned(), true))
     );
-    sqlx::raw_sql(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&mut connection)
-        .await
-        .expect("drop schema");
 }

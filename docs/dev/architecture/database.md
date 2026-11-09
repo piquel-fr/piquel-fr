@@ -1,0 +1,620 @@
+# PostgreSQL boundary
+
+This page explains how auth uses PostgreSQL: the database crate's boundary, its
+queries, locks and invariants, migrations and roles, and how domain events are
+stored. Read it before writing a query or a migration.
+
+`crates/database` is the only crate that runs SQL. It exposes `Database`, validated
+`DatabaseConfig`, typed repository handles, and `DatabaseTransaction`. Pools,
+connections, rows and raw SQL remain private. Application modules choose policy;
+repository methods enforce atomic persistence and return contextual errors.
+
+`piquel-common` supplies closed string enums, IDs, account status, authentication
+methods, providers and domain events. Its `sqlx` feature,
+enabled only here, lets IDs decode from `UUID` columns (rejecting anything but
+`UUIDv7`) and vocabularies from `TEXT` columns. Cryptographic material
+is generated and hashed in `piquel-crypto`; the repository persists its digests.
+Ceremony kinds and OIDC redirect kinds are typed storage vocabulary. Account and security changes are recorded as typed domain events; see
+[Domain events](#domain-events).
+
+`DatabaseConfig` rejects zero pool bounds, ambiguous TLS/socket options and host
+overrides with actionable `DatabaseConnectionError` variants. TCP requires
+`sslmode=verify-full` or explicit `sslmode=disable`; local Unix sockets use an
+absolute `host` path with `localhost` in the URL. Parser failures retain their
+sources. Client registrations are written only from a `ClientRegistration`, whose
+field types (`ClientId`, `RedirectUri`, `ScopeName`, bounded lists) reject invalid
+values before any SQL runs.
+
+## Repositories and queries
+
+Each repository has its own module under `src/repositories/` (`users`, `handles`, `emails`,
+`sessions`, `events`, `audit`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
+`security`, `maintenance`, `administrators`, `deletions`, `pictures`, `announcements`), holding its methods and the
+records they take and return.
+`repositories/mod.rs` holds only shared plumbing: the executor, the
+`repositories!` macro that declares every handle and its accessors on `Database`,
+`DatabaseTransaction` and `ExclusiveConnection`, the `run!` query macro and the
+column types that queries decode into. `run!(self, fetch_one, query)` (or
+`execute`, `fetch_optional`, `fetch_all`) dispatches to the pool or the bound
+connection and converts SQLx errors once. Dropping an
+unfinished `DatabaseTransaction` rolls it back.
+
+Every query is a checked SQLx macro: `query!`, `query_as!` or `query_scalar!`.
+The compiler checks its SQL, column names, nullability and bind types against the
+schema recorded in `.sqlx/`. `query_as!` decodes straight into the public records,
+with type overrides for typed columns, e.g. `id AS "id: SessionId"`,
+`status AS "status: AccountStatus"`, `scopes AS "scopes: JsonArray<String>"`
+(a JSONB array into a `Vec`) or `profile_version AS "profile_version: Unsigned"`.
+Binds pass the column's own type, e.g. `id.as_uuid()` or `kind.as_str()`, so the
+macro checks them too; JSONB binds use `Json(&value) as _`. A value its Rust type
+rejects, like a non-v7 ID or JSON outside the record's type, becomes
+`DatabaseError::InvalidStoredData` with the column index SQLx reports and the
+decoding error as its source. Uniqueness conflicts, writes a check refused
+(`DatabaseError::Refused`) and deadline failures retain their sources too.
+
+Only `Database::provision` runs unchecked SQL: DDL takes no bind parameters, so a
+checked query renders its script (`src/connection/runtime_role.sql`) with
+`format`, which quotes the values, and `raw_sql` runs it.
+
+Queries only administration reads decode straight into its views from
+`piquel_common::admin`. Records that auth also uses elsewhere convert into those views
+with `From`, leaving out what administrators never see, so no record repeats a view.
+
+The cache in `.sqlx/` is committed, and `.cargo/config.toml` sets
+`SQLX_OFFLINE=true`, so builds, including image builds, never connect to a
+database. After changing a query or migration, run `just db prepare` and commit
+the cache. Stale query text fails the build; `just db prepare-check`, which
+`just db test` and CI run after the database tests, runs
+`cargo sqlx prepare --check` against the migrated schema to catch a migration
+that breaks a cached query, and fails on a cached query the code no longer uses.
+
+Repository tests live in `<module>/tests.rs` or an inline module for small pure
+validation tests.
+
+## Locks and invariants
+
+User, session and credential locks serialize security-sensitive changes. Acquire
+account locks before session and credential locks. Credentials are rechecked under lock before authentication
+updates; a ceremony snapshot cannot override newer counters or revocation.
+
+Important invariants:
+
+- Opaque browser tokens and invitation/OAuth lookup secrets are stored as digests.
+- Ceremonies are browser-bound, expire and are consumed once, even for invalid
+  authentication responses. Their serialized WebAuthn state contains challenges
+  and stays server-side; do not log it.
+- Account, initial credential, optional social identity, invitation redemption and
+  initial session commit in one transaction.
+- A session's passkey confirmation time is rechecked inside the mutation
+  transaction, under the session row lock, against the action's maximum age. It
+  belongs to one session and ends with it.
+- Account locking protects the last-passkey guard from concurrent removals.
+- A deleted client stays as a disabled tombstone (a check constraint keeps it
+  disabled), so its ID, which tokens carry as `aud`, is never reused. Deleting it
+  revokes its refresh families and removes its secrets and consents in the same
+  statement. A suspended client is likewise always disabled. Registering a client
+  for an account locks the account first, then counts its live clients and
+  those it registered that day, deleted ones included, so concurrent
+  registrations cannot exceed the quota, and tombstones stay bounded. Purging
+  an account keeps its tombstones without their owner, but a check constraint
+  refuses it while the account owns a live client: delete those first.
+- Refresh families are locked after their account and session, and before their
+  client: a rotation locks its family, then share-locks the client, so a
+  deletion locks the client's families before the client. A family granted after
+  that is skipped if another transaction holds it, since that is a revocation or
+  a rotation that will find the client disabled. Every statement that
+  locks several families (a deletion's, a logout's, an account-wide, an app
+  removal's or a code-replay revocation) locks them in ID order, so two never
+  wait for each other's families.
+- Removing an app from an account's settings, under the account lock, revokes
+  the app's refresh families of the account, then deletes its consents, as a
+  client's deletion orders them, then expires its outstanding codes. Code
+  exchange locks the account before the code, as rotation does, so it finishes
+  before a removal or finds its code expired, and rereads an untrusted client's
+  consent under that lock, so a code issued from a consent withdrawn meanwhile
+  fails.
+- Grants and revocations of administrator rights, and disabling an account, take
+  `administrators().lock()` first. Revoking, disabling and deleting ask
+  `is_last_active`, which takes the lock's proof, so its answer stays true until
+  they commit, and two of them never leave the instance without an active
+  administrator. An
+  administrator's mutation that changes an account locks it first, as a grant
+  does. Every admin mutation checks its caller after its last write, just before
+  committing: it share-locks the caller's rights, so a revocation waits for it,
+  and reads their session and confirmation without locking either, so it joins
+  no lock cycle.
+- An account scheduled for deletion has status `deleting` and an
+  `account_deletions` row; it keeps its verified emails until it is purged, so
+  restoring it never collides. Scheduling and purging take
+  `administrators().lock()` before the account lock, as grants and disabling do,
+  so the last active administrator's account cannot be deleted. Callers end its sessions and
+  delete the clients it manages first. `deletions().purge` then deletes the rows
+  that reference the account without cascading, the announcements to chosen
+  accounts it was the last recipient of, its clients' related origins
+  from the events about them, the account itself, then the personal data of the
+  events it is the subject or actor of, in the same transaction. Its handles stay in `handles` without an owner, so nobody claims
+  them again. The personal data goes last: storing an event's personal data
+  key-share locks each account the event names (migration `0022`'s trigger), and
+  only deleting the account conflicts with that lock. The account lock's `FOR NO
+  KEY UPDATE` does not, despite what that migration's comment says. So the
+  delete waits for every request that stored personal data while the account
+  existed, and the next statement erases it; a later one waits for the purge,
+  finds the account gone and stores none.
+- A deleted client keeps its row, so its ID is never reused, but a trigger erases
+  its name, redirect URIs and back-channel logout URI, which may name a person or
+  their domain: only its ID, settings that identify nobody and lifecycle dates stay.
+  Its name becomes empty, which the history reads as no name. Operational copies
+  of its URLs go with their own retention: pending authorization requests within
+  minutes, codes about a day later, and logout deliveries after 7 days, or 30 if
+  they failed.
+- An account has at most one profile picture. Setting or removing it bumps the
+  account's `profile_version` in the same statement, and its URL's ID changes with
+  every upload. Only an active account's current picture is served. The row
+  cascades with its account, so a purge by any release removes it.
+- Active provider subjects and active provider-per-account links are unique.
+  Unlink marks the identity revoked and releases both constraints.
+- Verified email ownership is unique across active accounts. Email is optional;
+  explicit provider linking never transfers ownership of another account's email.
+  An unverified address keeps the digest of its verification token in
+  `email_verification_secrets` until it is verified, which deletes the row under
+  the account's lock, or until the token expires, when cleanup deletes the
+  address with it. Verifying runs the ownership trigger, so an address another
+  active account verified fails as a conflict.
+- A session's `acr`, `amr` and `auth_time` are derived from its methods,
+  `authenticated_at` and `passkey_confirmed_at` (`SessionAuthentication`). Codes
+  copy them when issued, and refresh families copy them from the code, so a grant
+  keeps reporting its original authentication.
+- Authorization codes are single-use and bound to client, redirect and PKCE.
+  The exchange checks that binding with the code locked (`lock_code`); a failed
+  check expires the code at `-infinity` instead of consuming it, so it can't be
+  tried again and `oidc_session_clients` never records its client.
+  Refresh tokens remain bound to their client/session. A public client's rotate
+  transactionally and reuse revokes the family; a confidential client keeps its
+  own, and its refresh writes nothing but still holds the rotation's locks.
+- Each refresh family records the code it was redeemed from. Redeeming that code
+  again with its secret, as the same client, revokes the family and records the
+  replay; a wrong secret or client revokes nothing. The browser session stays
+  signed in. Cleanup keeps a redeemed code for at least a day, and for as long as
+  a family it produced is unrevoked and its session live, so a replay is detected
+  while it could still revoke tokens.
+
+## Migrations
+
+The schema starts with the initial migration, `migrations/0001_initial.sql`. The
+prototype schema is disposable and the release requires a fresh database. Released
+migrations are immutable; later schema changes go in new numbered files. Numbers
+count up from `0001` without gaps or repeats, which a unit test enforces, so a
+branch rebased past another migration must renumber its own. Run
+migrations with `just db migrate` (`auth-service migrate` in deployed images); startup does not silently mutate the schema.
+
+Functions pin their `search_path` (`SET search_path = pg_catalog, public,
+pg_temp`), which a session cannot override. Otherwise `pg_temp` comes first, and a
+temporary table could shadow one they read. A test fails for any function without it.
+
+Migrations expand, then contract. A deploy runs `migrate` first, and the previous
+release keeps serving against the new schema until its replacement is healthy, so
+every migration must keep the previous release working. Add tables, and columns
+that are nullable or have a default. Drop or rename a column or table, or add a
+constraint the previous release could violate, only in a later release, once no
+deployed code uses the old shape. A migration that breaks this rule says why in
+its own comments. Migrations take
+`LockKey::Migrations`, waiting up to 30 minutes for another run, and provisioning
+the runtime role takes another lock, so concurrent `migrate` runs take turns.
+
+## Background work
+
+Every five minutes, one replica drains expired ephemeral state in bounded batches
+through `maintenance()`, for up to one minute per pass. The same pass deletes event
+personal data older than 90 days; the events themselves are kept indefinitely. It
+also deletes finished deliveries: succeeded ones after 7 days, failed or cancelled
+ones after 30. Deleting a failed ordered delivery cancels the ones behind it.
+One pass that runs out of its minute is no problem, since the next picks up
+what it leaves, so only the third in a row on one replica raises the
+`cleanup_behind` alert. The passes after it only mark it seen, so it is raised
+once; if another replica clears it meanwhile, the streak starts over. A pass
+that deletes everything due clears it. Likewise, the third pass in a row that
+fails raises `cleanup_failing`, and a pass that works clears it.
+
+Jobs like cleanup that must run on one replica at a time call
+`Database::try_exclusive(LockKey)`, which takes a
+session-level advisory lock on a dedicated connection outside the pool. The lock
+ends with that connection, even when the job is cancelled or the process dies, so
+it needs no lease or expiry, and a lock holder never returns to the pool. Give each
+job its own `LockKey` value and never reuse one. `LockKey::SigningKeys` is instead
+taken per transaction, by `signing_keys().lock()` or `try_lock()`: it serializes
+every change to `signing_keys`, so rotation runs on one replica at a time and never
+races a `keys` command.
+The account purge job (`LockKey::AccountPurge`) also runs every five minutes,
+purging up to 100 due accounts, each in its own transaction. A failure is recorded
+on the `account_deletions` row, with its attempts, error and next attempt, which
+waits 5 minutes, doubling after each failure up to a day. Due accounts are read in
+the order they became due, past their grace period and their next attempt, so
+accounts that keep failing never hold back the others. After each run the job sets
+`piquel.auth.account_purge.failing`, the accounts that failed 3 times in a row,
+and raises the `purges_failing` alert while there are any, clearing it once there
+are none.
+The purge's queries use indexes, including the actor's user ID in
+`domain_events`, so its cost does not grow with everyone's history.
+The audit verifier (`LockKey::AuditVerification`) checks every ten minutes, and
+verifies the whole chain once the newest recorded verification is six hours old
+(see [audit-history.md](../security/audit-history.md)). Its lock is not the
+sealer's, and its read-only snapshot holds no transaction ID, so it never holds
+sealing back.
+
+## Tests
+
+Tests that use `TEST_DATABASE_URL` are explicitly
+marked ignored by the ordinary unit test runner; other crates' tests read stored state
+through helpers behind the `test-util` feature. `just db test` runs them in a
+throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_URL`.
+
+## Time limits
+
+Every connection auth opens, as either role, starts with these limits, set as
+connection options by `DatabaseConfig` (`Limit::DEFAULTS` in
+`src/connection/limits.rs`), so one stuck statement, lock wait or forgotten
+transaction cannot hold connections and locks forever:
+
+| Setting | Default | When it passes |
+| --- | --- | --- |
+| `statement_timeout` | 15 s | The statement is cancelled: `DatabaseError::Cancelled` (`57014`). |
+| `lock_timeout` | 5 s | The lock wait fails: `DatabaseError::LockUnavailable` (`55P03`). |
+| `idle_in_transaction_session_timeout` | 30 s | `PostgreSQL` ends the session, rolling its transaction back. |
+| `transaction_timeout` | off | Never: connection options override a limit the role set for itself, which would cut a seal batch or a verification short. |
+
+The idle limit matters beyond the session itself: event consumers and the audit
+sealer wait for every older transaction to end (see [Consumers](#consumers)), so a
+forgotten one would stop them. Never hold a transaction open across network calls
+or prompts. A person's own `psql` session gets none of these limits.
+
+Work that legitimately takes longer raises only the limit it needs, explicitly,
+with `Limit::set`, never the default:
+
+- **Migrations** (`Database::run_migrations`) run on a dedicated connection. Their
+  statements may run for 30 minutes. They first wait for `LockKey::Migrations` with
+  no lock limit, so only that statement limit bounds the wait, then restore the 5 s lock limit before any DDL, so a migration
+  stuck behind a long transaction fails, and can be rerun, rather than queue every
+  request behind its lock.
+- **Audit prune** (`DatabaseTransaction::prune_audit_chain`): 30 minutes per
+  statement, for its transaction, since it may delete years of history.
+- **The signing key lock** (`signing_keys().lock()`) waits with no lock limit,
+  only the statement limit, then restores the lock limit: its holder may be
+  generating an RSA key, and a replica starting meanwhile must not fail.
+
+Connections opened outside the pool, for migrations, provisioning and exclusive
+jobs, connect within the pool's acquire timeout, since no statement limit bounds
+connecting.
+
+Everything else fits the defaults: cleanup, the audit sealer and audit
+verification work in batches of at most 1,000 rows (100 for events, whose largest
+batch would otherwise not fit in memory), and an account export reads one
+account's rows.
+
+## Roles
+
+Deployments use two roles, so a SQL-level compromise of auth reaches only rows.
+The schema owner, PostgreSQL's superuser, only runs `migrate`. Everything else,
+including `serve`, connects as a restricted runtime role, `piquel_auth`. When `migrate` has an owner connection
+(`AUTH_DATABASE_OWNER_URL`), it then calls `Database::provision`, which creates
+the runtime role or resets its attributes and password, and grants it:
+
+- `CONNECT` on the database and `USAGE` on the schema, but not `TEMPORARY`,
+  which provisioning also revokes from `PUBLIC`;
+- `SELECT, INSERT, UPDATE, DELETE` on every table, except:
+  - `domain_events`: `SELECT`, `INSERT` on the columns auth writes, and `UPDATE`
+    on `chain_position`, `chain_hash` and `chain_format` only, so an event's
+    transaction, time, sequence and chain columns keep their defaults, and
+    history cannot be rewritten (see [Audit chain](#audit-chain)). A migration that adds a column
+    auth writes adds it to the script;
+  - `audit_checkpoints`: `SELECT, INSERT`;
+  - `audit_anchor`: `SELECT`;
+  - `event_personal_data`: `SELECT, DELETE`, `INSERT` on every column but
+    `created_at`, so retention counts from the insert, and `UPDATE` on `details`
+    only. It can be erased but not rewritten: a trigger refuses an insert for an
+    event of another transaction, and an update that does anything but remove
+    values from `details`, as a purge does with its clients' related origins;
+  - `event_consumers`: `SELECT, INSERT, UPDATE`;
+  - `_sqlx_migrations`: nothing.
+
+Grants are reset on every run, so they cover tables that new migrations add. A
+migration that drops a listed table, or a new table that needs an exception,
+updates the script in the same change. Narrowing a grant on an existing table is a
+contract step: the previous release keeps running as the same role during a
+deploy, so revoke only once no deployed release needs the privilege.
+Provisioning refuses a role that is the owner or a superuser, a member of
+another role, whose privileges it would keep, or the owner of anything but large
+objects and default privileges, which any role may create, and a role granted a
+server parameter, directly or through `PUBLIC`. It resets the role's settings,
+such as a `session_replication_role` that would skip every trigger, and its
+privileges on the database, schema and sequences, so only these grants remain.
+It sets the password as a SCRAM-SHA-256 verifier (`ScramVerifier`), so the server
+and its logs never see the password itself, even in a statement that fails.
+The role cannot change the schema, disable triggers, change
+`session_replication_role`, create temporary tables or run programs on the
+server. It still takes the advisory locks `try_exclusive` uses.
+
+Trigger functions run as the role that fires them, except a trigger that reads or
+writes a table its own migration creates: the runtime role is granted that table
+only after the migrations, while the previous release already fires the trigger.
+That function runs as its owner (`SECURITY DEFINER`), like the one migration
+`0013` uses to record redeemed codes in `oidc_session_clients`, or those
+migration `0019` uses to hold account recoveries' rules for every release, and
+only its owner may execute it. A role that could create temporary tables and
+types could otherwise attach the function to a table of its own and have it run
+that type's cast as the owner. The runtime role no longer can, but a test still
+fails for any such function others may execute.
+
+## Domain events
+
+`piquel_common::events` defines `DomainEvent`, one variant per account or security
+change, and `Actor`, the one type every feature uses to say who caused it: a user,
+an administrator, an operator at the CLI (`$USER` and host name), a client, a
+background job, or an anonymous browser. Handlers record an event with
+`tx.record(&context, subject, event)` in the transaction that makes the change, so a
+rolled-back change leaves no event. `record` also creates the outbound deliveries
+the event causes, in the same transaction; see [the delivery queue](delivery-queue.md). Failed sign-ins change nothing, so they record
+theirs in a short transaction of their own. Sessions end early only through
+`DatabaseTransaction::revoke_sessions`, which revokes them with their refresh
+families and records one `SessionRevoked` per session, whose fan-out queues the
+back-channel logout tokens of the clients that received tokens from it
+(`oidc_session_clients`, which a trigger fills whenever any release redeems a
+code). The repository method underneath is private to the crate,
+so no revocation can skip the event. Refreshes are too frequent to be
+events. `Imported` holds the rows of `security_audit_log`, the log events replaced,
+verbatim; only migrations write it, and its fields are private, so it can only be
+read back. `repositories/events/` stores events: the personal data split below,
+`read_after` and `acknowledge`.
+
+Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
+token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
+a person outside auth is wrapped in `Personal<T>`, which any `piquel-common` type
+can use; storage decides how to keep it apart. Adding a variant is a
+compile-time change that every `match` must handle.
+
+Event readers tolerate events they do not know, so adding a variant is safe during a
+rolling deploy or a rollback, when the previous release reads what the next one
+wrote. Reads return `StoredEvent.event` as a `RecordedEvent`: `Known(DomainEvent)`,
+or `Unknown { kind, version, data }` for a kind this release does not know or a
+known kind in a payload version it does not write. Each reader decides
+what to do with it: the security history hides it and refuses to report it, and
+the admin events API lists it with its kind, version and data. `record` takes a
+`DomainEvent`, so a release never writes an unknown event, and delivery fan-out,
+which runs in `record`, only ever sees known ones. A payload of a known kind and
+version that does not decode is still `DatabaseError::InvalidStoredData`, so a
+change an older release could not decode, such as a new variant of an enum inside a
+payload or a renamed field, must be written with a new version of that kind only.
+`DomainEvent::version` decides it per event: every kind starts at
+`DomainEvent::FIRST_VERSION`, and only the events that use the change get the next
+version, so an older release still reads the others. `SessionRevoked` with
+`RevocationReason::UserRevoked` is version 2, and every other `SessionRevoked` is
+still version 1. A release reads an event as known only if it decodes to an event
+whose `version()` is the stored one, so a version it does not write reads as
+unknown. Adding a field is not one, since older releases ignore fields they do not
+know, but the field must be an `Option` or `#[serde(default)]`, so that the new
+release still reads the rows already stored.
+
+Closed vocabularies stored in other columns, such as `AccountStatus` and the
+`JobName` of an `Actor::System`, have no such tolerance: a release fails to decode
+a value it does not know. Add the value in one release that never writes it, and
+start writing it in a later one, so the release a deploy or rollback runs beside
+always reads it.
+
+### Personal data
+
+- `domain_events` holds only non-identifying content: kind, versioned payload,
+  actor, subject, client and session IDs, and timestamps. Operator attribution
+  (`os_user`, `host`) is accountability data and stays there too. This is the
+  content the audit chain covers; see [Audit chain](#audit-chain).
+- `event_personal_data`, one row per event, holds the client IP, the user agent
+  family and every `Personal` payload value, keyed by its JSON pointer. The
+  family's browser is in `user_agent_family`, the one value releases before
+  migration `0010` read there, and its platform in `platform`; older rows have no
+  platform and read it as `other`. On write
+  the repository moves each `Personal` value there and leaves `"$erased"` in the
+  payload; on read it merges them back. Once the row is gone, they and the request
+  origin read as `Personal::Erased`. Deleting it never breaks the event.
+- The cleanup pass deletes personal data after 90 days. Account purge deletes it
+  earlier for every event whose subject or actor is the purged account, and
+  erases the related origins of the clients it owned, whoever's events hold them.
+- A client's related origin, in `related_origin_approved`,
+  `related_origin_removed` and an inline `signed_in`, may be a person's own domain,
+  so it is `Personal` too, in those kinds' second payload version. Events of the
+  first version hold it in the payload, which the audit chain covers, so it stays
+  there until the history is pruned; they read as `RecordedOrigin::Sealed`.
+- `subject_user_id` has no foreign key: history outlives the account. Subject and
+  actor UUIDs are pseudonymous, not anonymous: applications hold the same `sub`.
+
+### Consumers
+
+`events().read_after(consumer, limit)` returns the events after a consumer's cursor,
+and `acknowledge(consumer, cursor)` moves it, in the transaction that applies the
+consumer's effects. A sequence number alone is not a safe cursor: a transaction can
+take sequence 10 and commit after another one took 11, and a reader that saw 11
+would skip 10. Consumers therefore read in `(txid, sequence)` order, and only events
+of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), which
+have all finished. The rule is written once, in the `in_safe_order!` query macro of
+`repositories/mod.rs`, which `read_after` and the audit sealer's `audit().unsealed`
+both build on. A long-running transaction holds back every consumer until it ends,
+so keep transactions short; the idle limit (see [Time limits](#time-limits)) ends
+one that is forgotten. `history_for_user` lists an account's events,
+newest first, in the same `(txid, sequence)` order, so sealed history is listed in
+chain order.
+
+### Sessions
+
+[Sessions](sessions.md) explains sessions as a whole; this section covers their
+storage. `DatabaseTransaction::revoke_sessions` is the only way a session ends
+early.
+`SessionScope` names one session, every other session or all of them, and the
+query always filters on `user_id`, so no scope reaches another account's session.
+It skips expired sessions, which are already over, so the count it returns is what
+the account's session list showed.
+It revokes the refresh token families issued from the revoked sessions in a
+second statement of the same transaction, whose snapshot also sees a family a
+concurrent code exchange committed while the first one waited, and returns the revoked IDs, so the caller records one
+`SessionRevoked` per session.
+
+A session records the coarse browser and platform it signed in with in
+`user_agent_family` (`firefox/linux`), never the raw header, and the IP it signed
+in from in `created_ip` and `last_seen_ip`. `Session::resolve`, which the session
+extractors and authorization requests use, refreshes
+`last_seen_at` and `last_seen_ip` with `touch`, at most once every
+`LAST_SEEN_INTERVAL` (five minutes), so session reads rarely write. The IPs live
+as long as the row: the cleanup pass deletes an expired session, and a revoked one
+a day after revocation, once no refresh family or authorization code references
+it.
+
+The account API lists the caller's active sessions (`GET /account/sessions`),
+signs one other out (`DELETE /account/sessions/{id}`; `404` for an unknown or
+foreign ID, `400` for the caller's own) and signs every other out
+(`POST /account/sessions/revoke-others`, answering the count). Both record
+`RevocationReason::UserRevoked`. They need a session but no passkey confirmation:
+signing out only removes access, and a user who suspects a stolen cookie must be
+able to act at once.
+
+### Handles
+
+`handles` holds every handle an account holds or held, and those of purged accounts,
+whose `user_id` becomes `NULL`. A row is current until `released_at` is set, and a
+partial unique index allows one current row per account. Its primary key and the
+unique `skeleton` column, generated by `handle_skeleton` (which a test pins to
+`Handle::skeleton`), keep handles and their look-alikes unique across all of them,
+so a handle passes to another account only once `delete_released` frees it.
+`users.handle_changed_at` drives the rename cooldown; reclaiming a released row
+keeps its `claimed_at`.
+
+`StoredUser` reads its handle through a join on the current row. The account
+locks take `FOR NO KEY UPDATE` on the account alone, then read it in a new
+statement, so a lock that waited for a rename reads the new handle.
+`users().insert` creates the account and its handle in one statement.
+`DatabaseTransaction::rename_handle` first reads the row sharing the handle's
+skeleton, and answers `false` when it is a look-alike or another account's,
+before releasing anything. Otherwise it releases the current row, then inserts the
+new one, or reactivates the account's own released row (`ON CONFLICT … WHERE`),
+and bumps `profile_version`. A claim racing it is a unique violation; either way,
+callers roll back and look the reason up with `handles().holder`. Two renames to
+one handle conflict on its key: the second waits for the first and fails.
+`delete_released` deletes a released row, the only way a handle returns to the
+pool.
+
+### Audit chain
+
+`repositories/audit/` stores the tamper-evident chain that
+[audit-history.md](../security/audit-history.md) describes. Events are inserted
+unsealed, so recording never waits on the chain head. Auth's sealer job, under
+`LockKey::AuditChain`, reads them with `audit().unsealed`, in the consumers' safe
+order but tracked by `chain_position IS NULL` rather than a cursor, gives each its
+`chain_position`, `chain_hash` and `chain_format` with `seal`, and stores signed checkpoints with
+`insert_checkpoint`. The repository never hashes or signs: auth computes the hashes
+from `EventContent`, whose serialization is the canonical event, so a tampered row
+reads back and fails verification rather than failing to decode. `seal` also
+stores the canonical event's format in `chain_format`, which `unsealed` takes
+from the sealer, and `chain` returns each event's `(txid, sequence)` beside it,
+for verification to check against chain order. `newest_checkpoints` reads
+checkpoints newest first, for the sealer to find the newest that verifies.
+
+The runtime role inserts events with only the columns auth writes, and a check
+refuses one auth could not read back: a payload over 8 KiB or an actor over
+1 KiB of JSON, a number beyond a double's range, nesting 64 levels deep, or a text
+column over 256 bytes. Parsed JSON takes up to about 100 times its text, so a
+batch of 100 such events stays under about 95 MB. An account keeps at most 100
+active passkeys, so a recovery listing them all fits; a 101st fails as
+`DatabaseError::Refused`, and auth refuses to start registering it. It may update only
+`chain_position`, `chain_hash` and `chain_format` of `domain_events`, may only
+read and insert `audit_checkpoints`, and may only read `audit_anchor`. Triggers
+also reject updates and deletes of sealed events, a seal at any position but the
+one after a sealed event or the anchor, or outside a read committed transaction,
+any change to `audit_checkpoints`, and a new checkpoint that is not of a sealed
+event's hash, is dated at an infinite time or more than a minute ahead, or has a
+note over 1 KiB. A forged position or checkpoint time would otherwise stop
+sealing or signing until the owner repaired it. SQL cannot check a checkpoint's
+signature: that is auth's job. Only `DatabaseTransaction::prune_audit_chain`,
+run as the schema owner, deletes sealed events: it sets `piquel.audit_prune` for
+its own transaction, then moves the anchor (`audit_anchor`) to the checkpoint it
+pruned through. The anchor only moves forward, so of two concurrent prunes, the
+one that would move it back fails. Personal data is not covered, so retention
+keeps deleting `event_personal_data` freely. Migration `0006`'s comment says
+nothing deletes events; pruning does. `deliveries.event_id` has no foreign key,
+so a delivery may name an event already pruned.
+
+Verification tests need history no other test shares: `Database::isolated` (behind
+`test-util`) migrates a schema of its own, and `audit().tamper` applies the
+changes an attacker could make, with the triggers disabled. The guards migration
+`0035` adds look tables up in the schema they were migrated into, so they guard
+that schema's chain too.
+
+### Security history
+
+The account API serves each user their own history (`GET /account/history`): the
+events whose subject is the caller, read with `list` filtered on that subject, so
+the query itself excludes other accounts. `DomainEvent::history_entry` decides
+what a user sees. It names every variant, under
+`#[deny(clippy::wildcard_enum_match_arm)]`, so a new event cannot be added without
+that decision. Ceremonies, rejected attempts, token bookkeeping and invitations
+are hidden; admin and CLI changes show with the kind of actor, never the operator.
+An administrator's views of the account are hidden too: a read may be a misclick
+or a confidential inquiry, so the owner sees changes, each with its reason, and
+only the audit keeps the views.
+
+`POST /account/history/{event_id}/report` reports an entry the user caused as not
+theirs. One transaction records `CompromiseReported`, ends the account's other
+sessions with `RevocationReason::CompromiseReported` and revokes every refresh
+family. The answer names the action that undoes the entry, such as removing the
+passkey it added, which still needs a passkey confirmation.
+
+### Notifications
+
+[Notifications](notifications.md) explains the inbox as a whole.
+`DomainEvent::notification` decides which events tell someone something,
+naming every variant as `history_entry` does. `record` writes that notification
+to the inbox (`notifications`) of each account its audience
+(`Notification::audience`) names, in the event's transaction, so a committed
+event has its notifications and a rolled-back one has none. The audience is the
+event's subject, or for a raised alert every active administrator, whose rights
+and accounts stay key-share locked until the event commits, so a purge waits for
+their notifications and emails and deletes them with the account. A subject
+purged while a request was in flight gets none. A notification stores the
+serialized `Notification` and no personal data, and `event_id` is no foreign key:
+it renders the same once its event's personal data is erased or the event is
+pruned. Pages order by `(created_at, id)`, since notifications written in one
+transaction share `now()`. A kind a newer release wrote reads as unknown, as
+events' kinds do, and the inbox skips it. Purging an account deletes its
+notifications by cascade.
+
+### Alerts
+
+An alert is a condition that needs an administrator's attention, such as a
+broken audit chain. Unlike a notification, it concerns no account. Auth's
+`Alerts` says, in a transaction, that a condition holds (`raise`) or no longer
+does (`clear`), and records `AlertRaised` and `AlertCleared` events beside the
+change. `alerts` keeps at most one current alert of each kind, the one not
+cleared yet, under a unique index on its kind. `alerts().current` takes
+`LockKey::Alerts` for the transaction, so whatever changes alerts next waits,
+even while none is current. Raising what the current alert already says
+only marks it seen again (`seen_at`). Raising anything else clears it first.
+Administrators post updates on a current alert (`alert_updates`): a status and
+the administrator or operator as its author, an event's actor. `acknowledge`
+locks the alert, if it is still current, and acknowledges it (`acknowledged_at`)
+on its first update. The update is recorded as `AlertUpdated`, and its row names
+that event (`event_id`), whose reason holds the update's optional note: the
+note is personal data, deleted with the event's after 90 days or when its
+author's account is purged. An acknowledged alert stays current, so finding the
+same condition again raises nothing until the condition changes or clears.
+The payload holds no personal data. Like an event's, it is stored with its
+version (`Alert::version`): a new kind, or a new variant inside one, gets the
+next version, and a kind or version a release does not write reads as an alert
+it cannot show. The events that carry an alert take its version.
+
+Recording a verification of the audit chain raises `audit_chain_broken` when it
+found the chain broken, and clears it when it found the chain intact. A
+verification with keys given with `--key`, such as another environment's,
+changes neither.
+The sealer raises `checkpoint_refused` when it refuses to sign a checkpoint over
+events that no longer match, and clears it once they match again. The account
+purge raises `purges_failing` while accounts keep failing to be purged, and
+cleanup raises `cleanup_behind` once its passes keep running out of time, and
+`cleanup_failing` once they keep failing. The verifier raises
+`verification_failing` once its runs keep failing, and a recorded verification,
+other than one with `--key`, clears it. Cleanup and the verifier count runs in a
+row with `Streak`, on each replica: a streak raises its alert once, and starts
+over when it finds the alert cleared.

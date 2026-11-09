@@ -3,7 +3,7 @@
 # and the admin dashboard's traces, metrics and logs, Prometheus, Tempo and Loki
 # storing them, and Grafana showing them. One environment serves both piquel-fr
 # environments, which `deployment.environment.name` tells apart. See
-# "Telemetry" in infra/README.md.
+# docs/dev/operations/telemetry.md.
 #
 # Grafana never signs in through auth.piquel.fr: it is needed most when auth is
 # down. Its private route and its own admin login keep it to the tailnet.

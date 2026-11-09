@@ -8,6 +8,7 @@ import {
   parseChallenge,
   type BearerChallenge
 } from '../src/index.ts';
+import { CookieKey, Login } from '../src/server.ts';
 import {
   DISCOVERY_URL,
   DOCUMENT,
@@ -134,6 +135,33 @@ describe('callback vectors', () => {
         assert.deepEqual({ ok: { code: sent.form.code } }, vector.expected);
         assert.deepEqual(result, { error: { code: 'oauth' } });
       }
+    });
+  }
+});
+
+describe('session cookie vectors', () => {
+  for (const vector of cases('sessions')) {
+    test(vector.name, async () => {
+      const issuer = await Issuer.discover(ISSUER, {
+        fetch: FakeFetch.issuer().fetch,
+        clock: () => vector.now * 1000
+      });
+      const client = issuer.client({
+        clientId: String(vector.input.client_id),
+        clientSecret: 'secret',
+        redirectUri: REDIRECT_URI
+      });
+      const login = new Login(client, {
+        cookieKey: CookieKey.fromBase64(String(vector.input.cookie_key))
+      });
+      const request = new Request(REDIRECT_URI, {
+        headers: { cookie: String(vector.input.cookie) }
+      });
+      const session = await login.openSession(request);
+      // Read back in the shape the cookie holds, as JSON writes it.
+      const read: unknown =
+        typeof session === 'string' ? null : JSON.parse(JSON.stringify(session.data));
+      assert.deepEqual({ ok: read }, vector.expected);
     });
   }
 });

@@ -433,6 +433,7 @@ img.avatar {
 }
 .events .text small.wrap {
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 .events .fact {
   color: var(--fg);
@@ -576,4 +577,9 @@ img.avatar {
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* An announcement to everyone has no accounts to find or list. */
+form:has(input[name='audience'][value='everyone']:checked) .chosen-accounts {
+  display: none;
 }

@@ -4,7 +4,7 @@ use crate::handles::HandlesError;
 use crate::security::{ApiError, SessionError};
 use piquel_common::{InvalidValue, events::SignInFailure};
 use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
+use piquel_repository::{DatabaseError, PasskeyRepository};
 use std::borrow::Cow;
 use webauthn_rs::prelude::WebauthnError;
 
@@ -18,6 +18,10 @@ pub(crate) enum PasskeyError {
     /// The authenticator's credential is already registered to an account.
     #[error("passkey credential is already registered")]
     PasskeyAlreadyRegistered(#[source] DatabaseError),
+    /// The account already has the most active passkeys it keeps: found as a
+    /// ceremony starts, or refused by the database when two finish at once.
+    #[error("account has the most passkeys it keeps")]
+    TooManyPasskeys(#[source] Option<DatabaseError>),
     /// The account's displayed name is blank, too long or contains controls.
     #[error("invalid display name")]
     InvalidDisplayName,
@@ -70,6 +74,10 @@ pub(crate) enum PasskeyError {
     /// The account, or the credential it signed with, was disabled or removed.
     #[error("active account and credential required")]
     AccountInactive,
+    /// A recovery's passkey in probation signed in to an account scheduled for
+    /// deletion, which only a passkey from before the recovery may restore.
+    #[error("a recovery's passkey cannot restore an account scheduled for deletion")]
+    RestoreInProbation,
     /// The authenticator did not verify the person using it.
     #[error("passkey user verification required")]
     UserVerificationRequired,
@@ -125,6 +133,11 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::PasskeyAlreadyRegistered(_) => {
                 Self::conflict("This passkey is already registered to an account.")
             }
+            PasskeyError::TooManyPasskeys(_) => Self::conflict(format!(
+                "This account already has {} passkeys, the most it can keep. Remove one in \
+                 your account settings, or ask Piquel support.",
+                PasskeyRepository::LIMIT
+            )),
             PasskeyError::InvalidDisplayName => {
                 Self::bad_request("Choose a display name of at most 80 characters.")
             }
@@ -150,6 +163,9 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::AccountInactive => {
                 Self::unauthorized("This account is disabled, or this passkey was removed from it.")
             }
+            PasskeyError::RestoreInProbation => Self::forbidden(
+                "This account is scheduled for deletion. A passkey added by a recovery can't restore it. Use a passkey you had before, or ask Piquel support.",
+            ),
             PasskeyError::UnknownHandle => Self::not_found("No active account has this handle."),
             PasskeyError::PasskeyNotFound => Self::bad_request("Passkey not found."),
             PasskeyError::LastPasskey => {
@@ -199,7 +215,9 @@ impl PasskeyError {
     pub(super) const fn sign_in_failure(&self) -> Option<SignInFailure> {
         match self {
             Self::CounterRegression => Some(SignInFailure::CounterRegression),
-            Self::AccountInactive => Some(SignInFailure::AccountUnavailable),
+            Self::AccountInactive | Self::RestoreInProbation => {
+                Some(SignInFailure::AccountUnavailable)
+            }
             Self::Webauthn(_)
             | Self::SignedForAnotherOrigin
             | Self::ClientData(_)
@@ -209,6 +227,7 @@ impl PasskeyError {
             Self::Handle(_)
             | Self::UnknownHandle
             | Self::PasskeyAlreadyRegistered(_)
+            | Self::TooManyPasskeys(_)
             | Self::InvalidDisplayName
             | Self::InvalidPasskeyName
             | Self::InvitationRequired

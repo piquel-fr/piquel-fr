@@ -5,7 +5,6 @@ use crate::federation::providers::{GoogleClaims, GoogleProtocol};
 use piquel_auth::{KeyCache, KeySet};
 use piquel_common::protocol::jwt::{Algorithm, TokenType};
 use piquel_crypto::Rs256Key;
-use std::collections::HashMap;
 use tracing::Instrument;
 
 impl TestApp {
@@ -18,47 +17,42 @@ impl TestApp {
     }
 }
 
-/// Google evidence requires trusted signatures and claims but does not require email.
+/// A key cache fetching `path` from `router`, served over TLS on localhost, since the
+/// SDK fetches keys only over https.
+async fn tls_keys(router: Router, path: &str) -> KeyCache {
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("mock TLS listener");
+    let url = format!(
+        "https://localhost:{}{path}",
+        tcp.local_addr().expect("address").port()
+    );
+    let certificate = crate::tests::TlsListener::serve(tcp, router);
+    KeyCache::new(
+        url.parse().expect("mock key URL"),
+        reqwest::Client::builder().add_root_certificate(certificate),
+    )
+    .expect("mock key cache")
+}
+
+/// Google's code-exchange response yields the identity its ID token vouches for,
+/// which needs no email. `google_signed_tokens_are_verified` covers the token's
+/// checks.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requiring_email() {
+async fn google_token_responses_yield_identities_without_email() {
     let mut test = TestApp::new().await;
     let rsa = Rs256Key::generate("google-test").expect("RSA test key");
-    let sign = |key: &Rs256Key, claims: &serde_json::Value| {
-        key.sign(TokenType::Id, claims).expect("signed token")
-    };
-    let mut claims = serde_json::json!({"iss":"https://accounts.google.com","sub":"12345","aud":"test-client","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"test-nonce"});
-    let valid = sign(&rsa, &claims);
-    claims["aud"] = serde_json::json!("another-client");
-    let wrong_audience = sign(&rsa, &claims);
-    claims["aud"] = serde_json::json!("test-client");
-    claims["exp"] = serde_json::json!(Utc::now().timestamp() - 120);
-    let expired = sign(&rsa, &claims);
-    let other_rsa = Rs256Key::generate("google-test").expect("untrusted key");
-    claims["exp"] = serde_json::json!(Utc::now().timestamp() + 300);
-    let wrong_signature = sign(&other_rsa, &claims);
-    let keys = rsa.jwks().clone();
-    let tokens = Arc::new(HashMap::from([
-        ("valid".to_owned(), valid),
-        ("wrong-audience".to_owned(), wrong_audience),
-        ("expired".to_owned(), expired),
-        ("wrong-signature".to_owned(), wrong_signature),
-    ]));
-    let mock = Router::new()
-        .route(
-            "/keys",
-            get(move || {
-                let keys = keys.clone();
-                async move { Json(keys) }
-            }),
+    let token = rsa
+        .sign(
+            TokenType::Id,
+            &serde_json::json!({"iss":"https://accounts.google.com","sub":"12345","aud":"test-client","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"test-nonce"}),
         )
-        .route(
-            "/token/{kind}",
-            get(move |Path(kind): Path<String>| {
-                let tokens = tokens.clone();
-                async move { Json(serde_json::json!({"id_token":tokens[&kind]})) }
-            }),
-        );
+        .expect("signed token");
+    let mock = Router::new().route(
+        "/token",
+        get(move || async move { Json(serde_json::json!({"id_token":token})) }),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("mock listener");
@@ -74,9 +68,8 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
         .identity
     {
         IdentityStrategy::Google(protocol) => {
-            protocol.keys = KeyCache::new(
-                format!("{base}/keys").parse().expect("mock key URL"),
-                reqwest::Client::new(),
+            protocol.keys = KeyCache::fixed(
+                KeySet::parse(&serde_json::to_vec(&rsa.jwks()).expect("JWKS")).expect("key set"),
             );
         }
         IdentityStrategy::GitHub(_) => panic!("Google must use signed ID tokens"),
@@ -84,10 +77,10 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
     let response = test
         .app
         .client
-        .get(format!("{base}/token/valid"))
+        .get(format!("{base}/token"))
         .send()
         .await
-        .expect("valid response");
+        .expect("token response");
     let identity = test
         .app
         .google_identity(
@@ -100,27 +93,6 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
         .expect("valid Google identity without email");
     assert_eq!(identity.subject, "12345");
     assert!(identity.email.is_none());
-    for (kind, nonce, expected) in [
-        ("valid", "wrong-nonce", "nonce does not match"),
-        ("wrong-audience", "test-nonce", "not for this client"),
-        ("expired", "test-nonce", "has expired"),
-        ("wrong-signature", "test-nonce", "failed verification"),
-    ] {
-        let response = test
-            .app
-            .client
-            .get(format!("{base}/token/{kind}"))
-            .send()
-            .await
-            .expect("mock response");
-        let error = test
-            .app
-            .google_identity(response, "test-client", nonce, test.google_protocol())
-            .await
-            .err()
-            .expect("rejected");
-        assert!(error.to_string().contains(expected), "{kind}: {error}");
-    }
     task.abort();
 }
 
@@ -135,17 +107,7 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
         .expect("signed token");
     let keys = rsa.jwks().clone();
     let mock = Router::new().route("/keys", get(move || async move { Json(keys) }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("mock listener");
-    let url = format!(
-        "http://{}/keys?client=secret",
-        listener.local_addr().expect("address")
-    );
-    let task = tokio::spawn(async move {
-        axum::serve(listener, mock).await.expect("mock server");
-    });
-    let cache = KeyCache::new(url.parse().expect("mock key URL"), reqwest::Client::new());
+    let cache = tls_keys(mock, "/keys?client=secret").await;
     let jws = piquel_auth::Jws::parse(&token).expect("JWS");
     let request = tracing::info_span!("request");
     cache
@@ -153,7 +115,6 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
         .instrument(request)
         .await
         .expect("verified");
-    task.abort();
 
     let spans = capture.spans();
     let request = spans
@@ -174,7 +135,7 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
     for expected in [
         "http.request.method=GET",
         "http.response.status_code=200",
-        "server.address=127.0.0.1",
+        "server.address=localhost",
     ] {
         assert!(
             attributes.iter().any(|a| a == expected),
@@ -199,14 +160,15 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
     );
 }
 
-/// ID-token verification rejects malformed claims, untrusted issuers and additional audiences.
+/// ID-token verification rejects untrusted signatures, malformed claims, untrusted
+/// issuers, other or additional audiences, another nonce, and tokens expired or
+/// issued in the future.
 #[tokio::test]
-async fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
+async fn google_signed_tokens_are_verified() {
     let rsa = Rs256Key::generate("google-test").expect("RSA key");
-    let IdentityStrategy::Google(mut protocol) =
-        ProviderEndpoints::new(Provider::Google, &reqwest::Client::new())
-            .expect("Google facts")
-            .identity
+    let IdentityStrategy::Google(mut protocol) = ProviderEndpoints::new(Provider::Google)
+        .expect("Google facts")
+        .identity
     else {
         panic!("Google must use signed ID tokens");
     };
@@ -219,6 +181,46 @@ async fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
         GoogleClaims::verify(&token, &protocol, "client", "nonce").await
     };
     assert!(verify(&valid).await.is_ok());
+    let untrusted = Rs256Key::generate("google-test").expect("untrusted key");
+    let token = untrusted.sign(TokenType::Id, &valid).expect("signed token");
+    assert_eq!(
+        GoogleClaims::verify(&token, &protocol, "client", "nonce")
+            .await
+            .map_err(|error| error.to_string())
+            .err()
+            .as_deref(),
+        Some("Google ID token failed verification")
+    );
+    for (field, value, error) in [
+        (
+            "nonce",
+            serde_json::json!("other"),
+            "Google ID token nonce does not match this sign-in attempt",
+        ),
+        (
+            "iat",
+            serde_json::json!(Utc::now().timestamp() + 3600),
+            "Google ID token is issued in the future",
+        ),
+        // Expiry has no leeway: a token that expired a second ago is refused.
+        (
+            "exp",
+            serde_json::json!(Utc::now().timestamp() - 1),
+            "Google ID token has expired",
+        ),
+    ] {
+        let mut claims = valid.clone();
+        claims[field] = value;
+        assert_eq!(
+            verify(&claims)
+                .await
+                .map_err(|error| error.to_string())
+                .err()
+                .as_deref(),
+            Some(error),
+            "{field}"
+        );
+    }
     for field in ["iss", "aud", "exp", "sub"] {
         let mut claims = valid.clone();
         claims.as_object_mut().expect("object").remove(field);
@@ -251,6 +253,35 @@ async fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
     claims = valid;
     claims["azp"] = serde_json::json!("other");
     assert!(verify(&claims).await.is_err());
+}
+
+/// Google vouches only for the addresses it hosts, Gmail's and its Workspace
+/// domain's, and only once it verified them.
+#[test]
+fn google_is_authoritative_only_for_verified_addresses_it_hosts() {
+    let authoritative = |email: &str, verified: bool, hd: Option<&str>| {
+        serde_json::from_value::<GoogleClaims>(serde_json::json!({
+            "iss": "https://accounts.google.com", "aud": "client", "sub": "subject",
+            "iat": 0, "exp": 0, "nonce": "nonce",
+            "email": email, "email_verified": verified, "hd": hd,
+        }))
+        .expect("claims")
+        .authoritative()
+    };
+    assert!(authoritative("ada@gmail.com", true, None));
+    assert!(authoritative("ada@Example.com", true, Some("example.com")));
+    assert!(!authoritative("ada@gmail.com", false, None));
+    assert!(!authoritative("ada@example.com", true, None));
+    assert!(!authoritative(
+        "ada@example.com",
+        true,
+        Some("other.example")
+    ));
+    assert!(!authoritative(
+        "ada@sub.example.com",
+        true,
+        Some("example.com")
+    ));
 }
 
 /// Resolved credentials fail at startup with variable context and the original source.

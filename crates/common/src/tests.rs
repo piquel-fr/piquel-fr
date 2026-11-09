@@ -14,7 +14,6 @@ str_enum! {
 /// Closed vocabularies round-trip every spelling and reject unknown values.
 #[test]
 fn vocabulary_round_trips() {
-    assert_eq!(Example::ALL.len(), 2);
     for value in Example::ALL {
         assert_eq!(value.as_str().parse::<Example>(), Ok(value));
         assert_eq!(value.to_string(), value.as_str());
@@ -52,7 +51,7 @@ fn open_vocabulary_keeps_unknown_values() {
         serde_json::to_string(&other).expect("serialize"),
         "\"later\""
     );
-    assert_eq!(OpenExample::KNOWN.len(), 1);
+    assert_eq!(OpenExample::KNOWN, [OpenExample::Known]);
 }
 
 /// IDs accept only canonical `UUIDv7`, preserving syntax diagnostics on malformed text.
@@ -87,7 +86,8 @@ fn trace_ids_are_lower_case_hex() {
     }
 }
 
-/// `DomainEvent::kind` is the serde tag each variant is stored under.
+/// `DomainEvent::kind` is the serde tag each variant is stored under, for every
+/// variant: a variant serde knows that this list doesn't build fails the test.
 #[cfg(feature = "events")]
 #[test]
 #[expect(
@@ -95,13 +95,39 @@ fn trace_ids_are_lower_case_hex() {
     reason = "one literal per event kind, so it grows with `DomainEvent`"
 )]
 fn event_kinds_match_their_serde_tags() {
-    use events::{DomainEvent, GrantRevocation, RevocationReason, SignInFailure};
+    use events::{
+        CodeRedemptionFailure, DomainEvent, GrantRevocation, RevocationReason, SignInFailure,
+        SigningKeyChange,
+    };
+    use serde::Deserialize;
     use serde_json::json;
+
+    /// Captures the variant names serde expects when it reads an unknown tag.
+    #[derive(Debug)]
+    struct Tags(&'static [&'static str]);
+    impl std::fmt::Display for Tags {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "{:?}", self.0)
+        }
+    }
+    impl std::error::Error for Tags {}
+    impl serde::de::Error for Tags {
+        fn custom<T: std::fmt::Display>(message: T) -> Self {
+            panic!("expected an unknown variant, not: {message}")
+        }
+        fn unknown_variant(_: &str, expected: &'static [&'static str]) -> Self {
+            Self(expected)
+        }
+    }
 
     let session_id = SessionId::new();
     let passkey_id = PasskeyId::new();
     let client_id: ClientId = "client".parse().expect("client ID");
     let origin: clients::RelatedOrigin = "https://app.example".parse().expect("origin");
+    let alert = alerts::Alert::AuditChainBroken(admin::ChainBreak {
+        position: 1,
+        problem: admin::ChainProblem::EventChanged,
+    });
     let imported = serde_json::from_value(json!({
         "action": "passkey.login", "outcome": "success", "metadata": {}
     }))
@@ -154,6 +180,10 @@ fn event_kinds_match_their_serde_tags() {
         },
         DomainEvent::CodeReplayed {
             client_id: client_id.clone(),
+        },
+        DomainEvent::CodeRedemptionFailed {
+            client_id: client_id.clone(),
+            reason: CodeRedemptionFailure::InvalidVerifier,
         },
         DomainEvent::InvitationCreated {
             expires_at: chrono::Utc::now(),
@@ -235,10 +265,105 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::RecoveryUndone {
             recovery_id: RecoveryId::new(),
         },
+        DomainEvent::EmailAdded {
+            email_id: EmailId::new(),
+            address: Personal::Value(
+                email::NormalizedEmail::parse("a@example.com").expect("email"),
+            ),
+            provider: None,
+        },
+        DomainEvent::EmailVerified {
+            email_id: EmailId::new(),
+        },
+        DomainEvent::PrimaryEmailChanged {
+            email_id: EmailId::new(),
+            previous_email_id: None,
+        },
+        DomainEvent::EmailRemoved {
+            email_id: EmailId::new(),
+        },
+        DomainEvent::PictureChanged {
+            picture_id: PictureId::new(),
+        },
+        DomainEvent::PictureRemoved {},
+        DomainEvent::DeliveryRetried {
+            delivery_id: DeliveryId::new(),
+        },
+        DomainEvent::DeliveryCancelled {
+            delivery_id: DeliveryId::new(),
+        },
+        DomainEvent::SigningKeyChanged {
+            key_id: "key".parse().expect("key ID"),
+            change: SigningKeyChange::Generated,
+        },
+        DomainEvent::AccountExported {},
+        DomainEvent::AccountDeletionScheduled {
+            purge_after: chrono::Utc::now(),
+        },
+        DomainEvent::AccountRestored {},
+        DomainEvent::AccountPurged {},
+        DomainEvent::AuditHistoryPruned {
+            through: 1,
+            deleted: 1,
+        },
+        DomainEvent::AuditChainVerified(admin::AuditVerification {
+            broken: None,
+            events_checked: 0,
+            checkpoints_checked: 0,
+            unsealed: 0,
+            anchor: None,
+            newest: None,
+            latest_checkpoint: None,
+            keys: admin::VerificationKeys::Committed,
+        }),
+        DomainEvent::AnnouncementSent {
+            announcement_id: AnnouncementId::new(),
+            recipients: 2,
+            essential: true,
+        },
+        DomainEvent::AlertRaised {
+            alert_id: AlertId::new(),
+            alert: alert.clone(),
+        },
+        DomainEvent::AlertUpdated {
+            alert_id: AlertId::new(),
+            alert: alert.clone(),
+            status: alerts::AlertStatus::Fixing,
+        },
+        DomainEvent::AlertCleared {
+            alert_id: AlertId::new(),
+            alert,
+        },
+        DomainEvent::NotificationPreferenceChanged(crate::notifications::NotificationPreference {
+            category: crate::notifications::EmailCategory::Announcements,
+            email: false,
+        }),
         DomainEvent::Imported(imported),
     ];
+    let mut kinds: Vec<&str> = events.iter().map(DomainEvent::kind).collect();
     for event in events {
         let tagged = serde_json::to_value(&event).expect("serialize");
         assert_eq!(tagged["kind"], event.kind(), "{event:?}");
     }
+    let unknown = serde::de::value::MapDeserializer::<_, Tags>::new([("kind", "")].into_iter());
+    let Tags(tags) = DomainEvent::deserialize(unknown).expect_err("no variant is tagged \"\"");
+    let mut tags = tags.to_vec();
+    kinds.sort_unstable();
+    tags.sort_unstable();
+    assert_eq!(kinds, tags, "one event per variant");
+}
+
+/// An announcement's text splits into paragraphs at blank lines, even ones of
+/// spaces, and keeps each paragraph's lines, without their trailing spaces.
+#[cfg(feature = "admin")]
+#[test]
+fn announcements_split_into_paragraphs_of_lines() {
+    assert_eq!(
+        admin::Announcement::paragraphs("\nFirst,  \nstill first.\n \n\n\tSecond.\n"),
+        [vec!["First,", "still first."], vec!["\tSecond."]]
+    );
+    assert_eq!(
+        admin::Announcement::paragraphs(" \n"),
+        Vec::<Vec<&str>>::new()
+    );
 }

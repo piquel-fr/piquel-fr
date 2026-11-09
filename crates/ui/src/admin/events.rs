@@ -4,11 +4,12 @@
 use super::moment;
 use crate::layout::{Pager, page_head, pager};
 use piquel_common::{
-    AuthenticationMethod, Personal,
+    AlertId, AuthenticationMethod, Personal, Provider,
     admin::Event,
+    alerts::Alert,
     events::{
-        Actor, DomainEvent, GrantRevocation, JobName, RecordedOrigin, RevocationReason,
-        SignInFailure,
+        Actor, CodeRedemptionFailure, DomainEvent, GrantRevocation, JobName, RecordedOrigin,
+        RevocationReason, SignInFailure,
     },
 };
 use serde_json::Value;
@@ -207,11 +208,14 @@ impl EventRow<'_> {
             DomainEvent::IdentityUnlinked { provider } => {
                 Description::new(format!("{} sign-in unlinked", provider.name()))
             }
-            DomainEvent::EmailAdded { email_id, address } => {
-                Description::new("Email address added, unverified")
-                    .personal("address", &address)
-                    .with("email", email_id)
-            }
+            DomainEvent::EmailAdded {
+                email_id,
+                address,
+                provider,
+            } => Description::new("Email address added")
+                .personal("address", &address)
+                .with("email", email_id)
+                .maybe("from", provider.map(Provider::name)),
             DomainEvent::EmailVerified { email_id } => {
                 Description::new("Email address confirmed").with("email", email_id)
             }
@@ -254,6 +258,16 @@ impl EventRow<'_> {
             }
             DomainEvent::CodeReplayed { client_id } => {
                 Description::new(format!("{client_id} redeemed an authorization code twice"))
+            }
+            DomainEvent::CodeRedemptionFailed { client_id, reason } => {
+                let why = match reason {
+                    CodeRedemptionFailure::WrongClient => "it was issued to another app",
+                    CodeRedemptionFailure::RedirectMismatch => "the redirect URI differed",
+                    CodeRedemptionFailure::InvalidVerifier => "the PKCE verifier was wrong",
+                };
+                Description::new(format!(
+                    "{client_id} failed to redeem an authorization code: {why}"
+                ))
             }
             DomainEvent::InvitationCreated { expires_at } => {
                 Description::new("Invitation created").with("valid until", expires_at.to_rfc3339())
@@ -387,9 +401,59 @@ impl EventRow<'_> {
             DomainEvent::AuditHistoryPruned { through, deleted } => Description::new(format!(
                 "Audit history pruned through position {through}: {deleted} events deleted"
             )),
+            DomainEvent::AuditChainVerified(verification) => {
+                Description::new(match &verification.broken {
+                    None => "Audit chain verified: intact".to_owned(),
+                    Some(broken) => format!(
+                        "Audit chain verified: broken at position {}: {}",
+                        broken.position, broken.problem
+                    ),
+                })
+                .with("events checked", verification.events_checked)
+            }
+            DomainEvent::AnnouncementSent {
+                announcement_id,
+                recipients,
+                essential,
+            } => Description::new(if essential {
+                format!("Essential announcement sent to {recipients} accounts")
+            } else {
+                format!("Announcement sent to {recipients} accounts")
+            })
+            .with("announcement", announcement_id),
+            DomainEvent::NotificationPreferenceChanged(preference) => {
+                Description::new(preference.change())
+            }
+            DomainEvent::AlertRaised { alert_id, alert } => {
+                Self::alert("Alert raised", alert_id, &alert)
+            }
+            DomainEvent::AlertUpdated {
+                alert_id,
+                alert,
+                status,
+            } => Self::alert("Alert updated", alert_id, &alert).with("status", status),
+            DomainEvent::AlertCleared { alert_id, alert } => {
+                Self::alert("Alert cleared", alert_id, &alert)
+            }
             DomainEvent::Imported(audit) => {
                 Description::new(format!("{} ({})", audit.action(), audit.outcome()))
             }
+        }
+    }
+
+    /// What happened to the alert `id`, which says `alert`, with where it found the
+    /// chain broken, for a broken chain.
+    fn alert(what: &str, id: AlertId, alert: &Alert) -> Description {
+        let description =
+            Description::new(format!("{what}: {}", alert.subject())).with("alert", id);
+        match alert {
+            Alert::AuditChainBroken(broken) | Alert::CheckpointRefused(broken) => description
+                .with("position", broken.position)
+                .with("problem", broken.problem),
+            Alert::PurgesFailing {}
+            | Alert::CleanupBehind {}
+            | Alert::VerificationFailing {}
+            | Alert::CleanupFailing {} => description,
         }
     }
 

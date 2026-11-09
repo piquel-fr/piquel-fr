@@ -53,30 +53,33 @@ impl AdminService {
         Ok(EventPage { events, paging })
     }
 
-    /// Recomputes the audit chain and checks every checkpoint against `keys`. A
-    /// broken chain is a result, naming where it breaks.
+    /// Recomputes the audit chain and checks every checkpoint against `keys`, and
+    /// records what it found, which the dashboard's audit page shows. A broken
+    /// chain is a result, naming where it breaks.
     pub(crate) async fn verify_audit_chain(
         &self,
         operator: &Operator,
         keys: &AuditKeys,
     ) -> Result<AuditVerification, AdminError> {
         operator.authorize_read(&self.database).await?;
-        Ok(AuditChain::new(self.database.clone()).verify(keys).await?)
+        let verification = AuditChain::new(self.database.clone()).verify(keys).await?;
+        let mut tx = self.database.begin().await?;
+        operator.hold_rights(&mut tx).await?;
+        AuditChain::record(tx, &operator.context(), &verification).await?;
+        Ok(verification)
     }
 
-    /// [`Self::verify_audit_chain`], with up to 100 checkpoints after `after`, or
-    /// after the anchor, and whether the chain may be pruned through each, by the
-    /// rules [`Self::prune_audit_chain`] applies.
+    /// The chain as stored, the newest verification [`Self::verify_audit_chain`]
+    /// recorded, and up to 100 checkpoints after `after`, or after the anchor, with
+    /// whether the chain may be pruned through each, by the rules
+    /// [`Self::prune_audit_chain`] applies to that verification. Verifies nothing.
     pub(crate) async fn audit_page(
         &self,
         operator: &Operator,
-        keys: &AuditKeys,
         after: Option<u64>,
     ) -> Result<AuditPage, AdminError> {
         operator.authorize_read(&self.database).await?;
-        Ok(AuditChain::new(self.database.clone())
-            .page(keys, after)
-            .await?)
+        Ok(AuditChain::new(self.database.clone()).page(after).await?)
     }
 
     /// Deletes every event through the checkpoint at `through`, which becomes the

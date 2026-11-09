@@ -23,28 +23,30 @@ pub use exclusive::{ExclusiveConnection, LockKey};
 #[cfg(any(test, feature = "test-util"))]
 pub use repositories::audit::Tamper;
 pub use repositories::{
-    AccountDeletionRepository, AdministratorRepository, AuditRepository, DashboardRepository,
-    DeliveryRepository, EmailRepository, EventRepository, FederationRepository, HandleRepository,
-    MaintenanceRepository, OidcRepository, PasskeyRepository, PictureRepository,
-    RecoveryRepository, SecurityRepository, SessionRepository, SigningKeyRepository,
-    TokenRepository, UserRepository,
+    AccountDeletionRepository, AdministratorRepository, AlertRepository, AnnouncementRepository,
+    AuditRepository, DashboardRepository, DeliveryRepository, EmailRepository, EventRepository,
+    FederationRepository, HandleRepository, MaintenanceRepository, NotificationRepository,
+    OidcRepository, PasskeyRepository, PictureRepository, RecoveryRepository, SecurityRepository,
+    SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
-    audit::{ChainLink, Checkpoint, EventContent, SealedEvent},
+    announcements::{DraftedAnnouncement, Recipients, SentAnnouncement},
+    audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},
     deliveries::{
-        BackchannelLogout, Channel, Delivery, DeliveryBacklog, DeliveryOutcome, DeliveryStatus,
-        DeliverySummary, Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress,
-        PendingRecovery,
+        Announcement, AnnouncementEmail, BackchannelLogout, Channel, Delivery, DeliveryBacklog,
+        DeliveryOutcome, DeliveryStatus, DeliverySummary, Email, EmailMessage, LogoutRecipient,
+        NewDelivery, PendingAddress, PendingRecovery,
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
-    events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},
+    events::{EventCursor, EventFilter, RecordedEvent, StoredEvent, Verifications},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,
     },
     handles::{StoredHandle, StoredReservation},
     maintenance::{DigestUsage, DigestedSecret},
+    notifications::{Notified, StoredNotification},
     oidc::{
         CodeRedemptionError, ConsumedAuthorizationCode, InsertAuthorizationCode,
         InsertAuthorizationRequest, OidcRedirectKind, OwnedClientCounts, StoredApp,
@@ -58,8 +60,8 @@ pub use repositories::{
     },
     signing_keys::{InsertSigningKey, SigningKeyState, SigningKeyType, StoredSigningKey},
     tokens::{
-        InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
-        RotatedRefreshToken, StoredGrant,
+        InsertRefreshFamily, InsertRefreshToken, RedeemedRefreshToken, RefreshRedemption,
+        RefreshRedemptionError, RevokedFamily, StoredGrant,
     },
     users::{InsertUser, StoredUser},
 };

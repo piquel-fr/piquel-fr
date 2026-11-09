@@ -1,5 +1,5 @@
 // Generated from piquel_common::protocol by `just sdk-types`. Do not edit.
-// The wire types auth and every SDK share; docs/architecture/sdk.md describes them.
+// The wire types auth and every SDK share; docs/dev/architecture/sdk.md describes them.
 
 /**
  * Claims of an access token (RFC 9068), signed with `typ: at+jwt`. `X` holds
@@ -523,6 +523,11 @@ alg?: Algorithm,
  */
 e: string,
 /**
+ * Operations the key is for (RFC 7517 §4.3). Auth never sends it; other issuers
+ * may, instead of `use`.
+ */
+key_ops?: Array<KeyOperation>,
+/**
  * Key identifier, matching the token header's `kid`.
  */
 kid: string,
@@ -542,6 +547,8 @@ use?: KeyUse, };
 export type KeyType = "RSA";
 
 export type KeyUse = "sig";
+
+export type KeyOperation = "sign" | "verify" | "encrypt" | "decrypt" | "wrapKey" | "unwrapKey" | "deriveKey" | "deriveBits" | (string & Record<never, never>);
 
 export type GrantType = "authorization_code" | "refresh_token";
 
@@ -621,4 +628,4 @@ reason?: ErrorReason, };
 
 export type ErrorCategory = "discovery" | "keys" | "invalid_token" | "insufficient_scope" | "insufficient_user_authentication" | "callback" | "oauth" | "network";
 
-export type ErrorReason = "issuer_mismatch" | "invalid_document" | "pkce_unsupported" | "duplicate_key_id" | "malformed" | "unsupported_critical_header" | "wrong_type" | "unsupported_algorithm" | "unknown_key" | "bad_signature" | "wrong_audience" | "expired" | "not_yet_valid" | "issued_in_future" | "lifetime_too_long" | "invalid_claims" | "nonce_mismatch" | "wrong_authorized_party" | "authentication_too_old" | "state_mismatch" | "missing_issuer" | "missing_code";
+export type ErrorReason = "issuer_mismatch" | "invalid_document" | "pkce_unsupported" | "duplicate_key_id" | "unusable_key" | "malformed" | "unsupported_critical_header" | "wrong_type" | "unsupported_algorithm" | "unknown_key" | "bad_signature" | "wrong_audience" | "expired" | "not_yet_valid" | "issued_in_future" | "lifetime_too_long" | "invalid_claims" | "nonce_mismatch" | "wrong_authorized_party" | "authentication_too_old" | "subject_mismatch" | "authentication_changed" | "state_mismatch" | "missing_issuer" | "missing_code";

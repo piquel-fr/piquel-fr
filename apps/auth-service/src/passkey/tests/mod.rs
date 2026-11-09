@@ -22,7 +22,7 @@ use piquel_common::{
     protocol::claims::Acr,
 };
 use piquel_crypto::Secret;
-use piquel_repository::{DatabaseConfig, InsertUser, SessionAuthentication, StoredSession};
+use piquel_repository::{InsertUser, SessionAuthentication, StoredSession};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
@@ -62,15 +62,7 @@ pub(crate) struct Fixture {
 impl Fixture {
     /// Seeds an account and passkey in the explicitly configured isolated database.
     pub(crate) async fn new() -> Self {
-        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
-            .required()
-            .expect("isolated test database");
-        let database = Database::connect(
-            DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5)).expect("configuration"),
-        )
-        .await
-        .expect("database");
-        database.run_migrations().await.expect("migrations");
+        let database = Replicas::database().await;
         let origin = Url::parse(AUTH_ORIGIN).expect("origin");
         let config = crate::AuthConfig::test(&AUTH_ORIGIN.parse().expect("origin"));
         let keys = crate::KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key))
@@ -78,8 +70,8 @@ impl Fixture {
             .await
             .expect("signing keys");
         let oidc = OidcApplication::new(database.clone(), &config.oidc, keys).expect("OIDC app");
-        let app =
-            PasskeyApplication::new(database, &config.passkey, None, oidc).expect("passkey app");
+        let app = PasskeyApplication::new(database, &config.passkey, &config.email, None, oidc)
+            .expect("passkey app");
         let user_id = UserId::new();
         let username = format!("key-{}", &TokenId::new().to_string()[24..]);
         app.database

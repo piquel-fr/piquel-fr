@@ -97,7 +97,7 @@ pub(crate) struct WebApplication {
     dashboard: Option<DashboardSignIn>,
     /// Whether creating an account needs an invitation.
     invite_required: bool,
-    /// Whether email is sent, which adding an address needs.
+    /// Whether email is sent, which adding or importing an address needs.
     email: EmailConfig,
     /// The `OpenID` Connect issuer, which the console tells apps to discover.
     issuer: Origin,
@@ -207,10 +207,10 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 22] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 25] {
         use routes::page::{
             ADMIN, CONSENT, LOGIN, LOGOUT, PREFERENCES, RECOVER, RECOVER_UNDO, REGISTER,
-            settings::VERIFY,
+            UNSUBSCRIBE, settings::VERIFY,
         };
         [
             page!(
@@ -250,6 +250,8 @@ impl WebApplication {
                 Self::prefer
             ),
             Self::entry::<settings::Overview>(),
+            Self::entry::<settings::Inbox>(),
+            Self::entry::<settings::NotificationPage>(),
             Self::entry::<settings::SignInMethods>(),
             Self::entry::<settings::Profile>(),
             Self::entry::<settings::Addresses>(),
@@ -279,6 +281,12 @@ impl WebApplication {
                 Title::UndoRecovery.as_str(),
                 Self::undo_recovery,
                 Self::undo_recovery_change,
+            ),
+            page!(
+                UNSUBSCRIBE,
+                Title::Unsubscribe.as_str(),
+                Self::unsubscription,
+                Self::unsubscribe,
             ),
         ]
     }

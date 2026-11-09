@@ -4,7 +4,7 @@
 use super::{Actor, DomainEvent, GrantRevocation, RevocationReason};
 use crate::{
     AuthenticationMethod, EmailId, EventId, PasskeyId, Personal, Provider, clients::RelatedOrigin,
-    email::NormalizedEmail,
+    email::NormalizedEmail, notifications::NotificationPreference,
 };
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -60,8 +60,13 @@ impl DomainEvent {
             Self::IdentityUnlinked { provider } => HistoryEntry::IdentityUnlinked {
                 provider: *provider,
             },
-            Self::EmailAdded { email_id, address } => HistoryEntry::EmailAdded {
+            Self::EmailAdded {
+                email_id,
+                address,
+                provider,
+            } => HistoryEntry::EmailAdded {
                 email_id: *email_id,
+                provider: *provider,
                 address: match address {
                     Personal::Value(address) => Some(address.clone()),
                     Personal::Erased => None,
@@ -106,6 +111,9 @@ impl DomainEvent {
                 event_id: *event_id,
             },
             Self::AccountExported {} => HistoryEntry::AccountExported,
+            Self::NotificationPreferenceChanged(preference) => {
+                HistoryEntry::NotificationPreferenceChanged(*preference)
+            }
             Self::AccountDeletionScheduled { purge_after } => HistoryEntry::DeletionScheduled {
                 purge_after: *purge_after,
             },
@@ -119,6 +127,9 @@ impl DomainEvent {
             | Self::GrantIssued { .. }
             | Self::InvitationCreated { .. }
             | Self::InvitationRevoked { .. }
+            // The app's own mistake, or a stolen code's failed use: either way, the
+            // account's owner has nothing to do about it.
+            | Self::CodeRedemptionFailed { .. }
             // The handle was the account's no more.
             | Self::HandleReleased { .. }
             // Reservations concern names, not an account.
@@ -140,9 +151,16 @@ impl DomainEvent {
             | Self::DeliveryCancelled { .. }
             | Self::SigningKeyChanged { .. }
             | Self::AuditHistoryPruned { .. }
+            | Self::AuditChainVerified(_)
+            // Alerts are the administrators', about the service.
+            | Self::AlertRaised { .. }
+            | Self::AlertUpdated { .. }
+            | Self::AlertCleared { .. }
             // A read may be a misclick or a confidential inquiry; the owner sees
             // changes, each with its reason, not what an administrator looked at.
             | Self::AccountViewed {}
+            // Recipients read announcements in their inbox.
+            | Self::AnnouncementSent { .. }
             // Nobody can read the history of an account that no longer exists.
             | Self::AccountPurged {} => return None,
         })
@@ -212,13 +230,15 @@ pub enum HistoryEntry {
         /// Its provider.
         provider: Provider,
     },
-    /// An email address was added, unverified.
+    /// An email address was added.
     #[serde(rename = "email.added")]
     EmailAdded {
         /// The address's ID.
         email_id: EmailId,
         /// The address, until retention deletes it.
         address: Option<NormalizedEmail>,
+        /// The provider it was imported from, if any.
+        provider: Option<Provider>,
     },
     /// An email address was verified.
     #[serde(rename = "email.verified")]
@@ -296,6 +316,9 @@ pub enum HistoryEntry {
     /// The user downloaded their data.
     #[serde(rename = "account.exported")]
     AccountExported,
+    /// The user turned a category of notifications' email on or off.
+    #[serde(rename = "notifications.preference_changed")]
+    NotificationPreferenceChanged(NotificationPreference),
     /// The account was scheduled for deletion.
     #[serde(rename = "account.deletion_scheduled")]
     DeletionScheduled {
@@ -355,6 +378,7 @@ impl HistoryEntry {
             | Self::PictureChanged
             | Self::PictureRemoved
             | Self::AccountExported
+            | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
             | Self::Legacy { .. } => true,
@@ -404,6 +428,7 @@ impl HistoryEntry {
             | Self::RecoveryUndone
             | Self::CompromiseReported { .. }
             | Self::AccountExported
+            | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
             | Self::Legacy { .. } => None,

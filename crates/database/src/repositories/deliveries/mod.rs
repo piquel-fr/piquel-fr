@@ -4,10 +4,10 @@
 //! Delivery is at least once. A worker claims a delivery with a lease, sends it
 //! outside any transaction, then records the outcome only if it still holds the
 //! lease. Deliveries sharing an ordering key are sent one at a time, in the order
-//! their transactions committed. See `docs/architecture/delivery-queue.md`.
+//! their transactions committed. See `docs/dev/architecture/delivery-queue.md`.
 
 use super::{DeliveryRepository, RepositoryExecutor, Unsigned};
-use crate::{DatabaseError, DatabaseTransaction};
+use crate::{DatabaseError, DatabaseTransaction, repositories::notifications::Notified};
 use chrono::{DateTime, Utc};
 pub use piquel_common::admin::{DeliveryStatus, DeliverySummary};
 use piquel_common::{DeliveryId, EventId, UserId, events::DomainEvent};
@@ -33,13 +33,15 @@ pub trait Channel: Sized + Send + Sync + 'static {
     /// The message. Never a plaintext secret: payloads are stored as they are.
     type Payload: Serialize + DeserializeOwned + Send + Sync;
 
-    /// The deliveries `event`, concerning `subject`, causes. Runs inside the
-    /// event's transaction, which sees the rows as the change left them, or as they
-    /// were for an event recorded before its change, such as `EmailRemoved`. A
+    /// The deliveries `event`, concerning `subject`, causes, with the
+    /// notifications it just wrote, `notified`. Runs inside the event's
+    /// transaction, which sees the rows as the change left them, or as they were
+    /// for an event recorded before its change, such as `EmailRemoved`. A
     /// committed event has all its deliveries and a rolled-back one has none.
     fn deliveries(
         event: &DomainEvent,
         subject: Option<UserId>,
+        notified: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send;
 }
@@ -54,11 +56,12 @@ pub(crate) trait Channels {
         event_id: EventId,
         subject: Option<UserId>,
         event: &DomainEvent,
+        notified: &[Notified],
     ) -> impl Future<Output = Result<(), DatabaseError>> + Send;
 }
 
 /// Every channel `record` fans out to. Add a channel here once it is implemented.
-pub(crate) type Registered = (BackchannelLogout, (Email, ()));
+pub(crate) type Registered = (BackchannelLogout, (Email, (Announcement, ())));
 
 impl Channels for () {
     /// The end of the list.
@@ -67,6 +70,7 @@ impl Channels for () {
         _: EventId,
         _: Option<UserId>,
         _: &DomainEvent,
+        _: &[Notified],
     ) -> impl Future<Output = Result<(), DatabaseError>> + Send {
         std::future::ready(Ok(()))
     }
@@ -79,11 +83,12 @@ impl<C: Channel, Rest: Channels> Channels for (C, Rest) {
         event_id: EventId,
         subject: Option<UserId>,
         event: &DomainEvent,
+        notified: &[Notified],
     ) -> Result<(), DatabaseError> {
-        for delivery in C::deliveries(event, subject, tx).await? {
+        for delivery in C::deliveries(event, subject, notified, tx).await? {
             tx.deliveries().insert(Some(event_id), delivery).await?;
         }
-        Rest::fan_out(tx, event_id, subject, event).await
+        Rest::fan_out(tx, event_id, subject, event, notified).await
     }
 }
 
@@ -619,7 +624,10 @@ impl DeliveryRepository<'_> {
     }
 }
 
-/// Back-channel logout tokens for the clients of revoked sessions.
+/// Announcements' emails.
+mod announcement;
+pub use announcement::{Announcement, AnnouncementEmail};
+/// Back-channel logout tokens.
 mod backchannel;
 pub use backchannel::{BackchannelLogout, LogoutRecipient};
 /// Messages to account holders.

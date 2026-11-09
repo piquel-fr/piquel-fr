@@ -7,7 +7,7 @@ import type {
   StepUpRequirement
 } from './protocol.ts';
 
-/** Why a token failed validation, in the order of the checks (docs/architecture/sdk.md). */
+/** Why a token failed validation, in the order of the checks (docs/dev/architecture/sdk.md). */
 export type TokenReason = Extract<
   ErrorReason,
   | 'malformed'
@@ -26,6 +26,8 @@ export type TokenReason = Extract<
   | 'wrong_authorized_party'
   | 'authentication_too_old'
   | 'lifetime_too_long'
+  | 'subject_mismatch'
+  | 'authentication_changed'
 >;
 
 /**
@@ -41,7 +43,8 @@ export type AuthErrorDetail =
     }
   | {
       code: Extract<ErrorCategory, 'keys'>;
-      reason: Extract<ErrorReason, 'invalid_document' | 'duplicate_key_id'>;
+      /** Absent when the key set URL does not use `https`. */
+      reason?: Extract<ErrorReason, 'invalid_document' | 'duplicate_key_id' | 'unusable_key'>;
     }
   | { code: Extract<ErrorCategory, 'invalid_token'>; reason: TokenReason }
   /** `scope` is every scope the request needs, space-separated. */
@@ -107,6 +110,14 @@ export class AuthError extends Error {
   /** @internal A token that failed the check `reason` names. */
   static invalidToken(reason: TokenReason, message: string, cause?: unknown): AuthError {
     return new AuthError({ code: 'invalid_token', reason }, message, { cause });
+  }
+
+  /** @internal `named` (a token, or `UserInfo`) names the user `found`, not `expected`. */
+  static subjectMismatch(named: string, found: string, expected: string): AuthError {
+    return AuthError.invalidToken(
+      'subject_mismatch',
+      `${named} names the user ${JSON.stringify(found)}, expected ${JSON.stringify(expected)}`
+    );
   }
 
   /** @internal Names the resource that failed, so its challenge carries `resource_metadata`. */

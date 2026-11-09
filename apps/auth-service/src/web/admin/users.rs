@@ -103,6 +103,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         href!(settings::emails, Account(id)).resolve(cx),
         href!(settings::apps, Account(id)).resolve(cx),
         href!(settings::history, Account(id)).resolve(cx),
+        href!(settings::notifications, Account(id)).resolve(cx),
         href!(settings::handle, Account(id)).resolve(cx),
         href!(settings::display_name, Account(id)).resolve(cx),
     ];
@@ -114,6 +115,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         addresses,
         connected,
         happened,
+        told,
         renaming,
         naming,
     ] = links.each_ref().map(String::as_str);
@@ -136,6 +138,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             emails: addresses,
             apps: connected,
             history: happened,
+            notifications: told,
             handle: renaming,
             display_name: naming,
         })

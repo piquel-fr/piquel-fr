@@ -12,14 +12,14 @@ use crate::web::{Failure, WebApplication};
 use crate::{
     account::{AccountError, Owner, Viewer},
     deletion::{RestoreOffer, RestoreSettled},
-    federation::{FederationError, PendingKind, PendingView, ReturnTo},
-    oidc::{AuthorizationView, OAuthError, OidcApplication, TransactionQuery},
+    federation::{FederationError, FlowCookie, PendingKind, PendingView, ReturnTo},
+    oidc::{AuthorizationView, OAuthError, OidcApplication, RecoveryQuestion, TransactionQuery},
     passkey::PasskeyApplication,
     routes,
     security::{ApiError, SessionError},
 };
 use axum::extract::Query as UriQuery;
-use piquel_common::{events::RevocationReason, protocol::claims::Acr};
+use piquel_common::{Provider, events::RevocationReason, protocol::claims::Acr};
 use piquel_ui::{
     CallbackError, LinkKind, LoginChange, LoginQuery, Onward, Query, QueryError, SignedIn, Step,
     Title,
@@ -171,6 +171,23 @@ impl PendingKind {
     }
 }
 
+impl From<&LoginChange> for RecoveryQuestion {
+    /// Answered by the sign-in page's own form for it, and by no other change.
+    fn from(change: &LoginChange) -> Self {
+        match change {
+            LoginChange::RecoveryRecognized { recovery } => Self::Answered(*recovery),
+            LoginChange::SignedIn {}
+            | LoginChange::Registered {}
+            | LoginChange::Social { .. }
+            | LoginChange::Link {}
+            | LoginChange::CancelLink {}
+            | LoginChange::SwitchAccount {}
+            | LoginChange::Restore {}
+            | LoginChange::KeepScheduled {} => Self::Unanswered,
+        }
+    }
+}
+
 /// What a sign-in page knows of the browser it serves.
 struct Visit {
     /// The page's query.
@@ -277,6 +294,7 @@ impl WebApplication {
         visit: Visit,
         change: LoginChange,
     ) -> Result<Response, Refusal> {
+        let recovery = RecoveryQuestion::from(&change);
         let (mut response, cookie) = match change {
             // The browser signed in with a passkey before posting, unless its
             // passkey's account is scheduled for deletion: then it left an offer to
@@ -285,7 +303,11 @@ impl WebApplication {
                 if self.restore_offer(cx).await?.is_some() {
                     return Ok(see_other(Self::here(cx, page)).into_response(cx)?);
                 }
-                return Ok(self.go_on(cx, page, visit.continuation).await?);
+                return Ok(self.go_on(cx, page, visit.continuation, recovery).await?);
+            }
+            // The signed-in browser answered the question, whatever offer it holds.
+            LoginChange::RecoveryRecognized { .. } => {
+                return Ok(self.go_on(cx, page, visit.continuation, recovery).await?);
             }
             // Restored, the browser is signed in by this response's cookie, so it
             // goes on by a redirect, which the next request carries it on.
@@ -308,28 +330,8 @@ impl WebApplication {
                 return Ok(response);
             }
             LoginChange::Social { provider } => {
-                let authorization = visit
-                    .continuation
-                    .authorization(&self.oidc)
-                    .await
-                    .map_err(Failure::from)?;
-                let return_to = visit.continuation.return_to()?;
-                let (to, cookie) = self
-                    .federation
-                    .start_sign_in(provider, &return_to)
-                    .await
-                    .map_err(ApiError::from)?;
-                // A provider the user already allowed sends the browser straight back,
-                // and on to the application, which this form's `form-action` may not
-                // name: then the browser follows a link to the provider instead.
-                let response = match authorization {
-                    Some(authorization) if Self::source(&authorization.redirect_uri).is_none() => {
-                        self.link(cx, page.title(), &to, Onward::Provider(provider))
-                            .await?
-                    }
-                    _ => see_other(to.as_str()).into_response(cx)?,
-                };
-                (response, cookie)
+                self.start_social(cx, page, &visit.continuation, provider)
+                    .await?
             }
             LoginChange::Link {} => {
                 let owner = self
@@ -338,11 +340,11 @@ impl WebApplication {
                     .ok_or_else(|| ApiError::from(SessionError::Missing))?;
                 let (return_to, cookie) = self
                     .account
-                    .link_identity(&owner, headers(cx))
+                    .link_identity(&owner, &self.email, headers(cx))
                     .await
                     .map_err(ApiError::from)?;
                 let continuation = Continuation::new(&visit.query, Some(&return_to));
-                (self.go_on(cx, page, continuation).await?, cookie)
+                (self.go_on(cx, page, continuation, recovery).await?, cookie)
             }
             // An explicit link goes back to where it started; an email match offers
             // to sign in before going on.
@@ -357,7 +359,9 @@ impl WebApplication {
                     .await
                     .map_err(ApiError::from)?;
                 let response = match pending.kind {
-                    PendingKind::ExplicitLink => self.go_on(cx, page, visit.continuation).await?,
+                    PendingKind::ExplicitLink => {
+                        self.go_on(cx, page, visit.continuation, recovery).await?
+                    }
                     PendingKind::Link | PendingKind::Signup => {
                         let sign_in = visit
                             .continuation
@@ -384,43 +388,107 @@ impl WebApplication {
         Ok(response)
     }
 
+    /// Starts signing in at `provider`, from `page`, to go on to `continuation`.
+    /// A provider the user already allowed sends the browser straight back, and
+    /// on to the application, which the form's `form-action` may not name: then
+    /// the browser follows a link to the provider instead.
+    async fn start_social(
+        &self,
+        cx: &Cx,
+        page: SignInPage,
+        continuation: &Continuation,
+        provider: Provider,
+    ) -> Result<(Response, FlowCookie), Refusal> {
+        let authorization = continuation
+            .authorization(&self.oidc)
+            .await
+            .map_err(Failure::from)?;
+        let return_to = continuation.return_to()?;
+        let (to, cookie) = self
+            .federation
+            .start_sign_in(provider, &return_to)
+            .await
+            .map_err(ApiError::from)?;
+        let response = match authorization {
+            Some(authorization) if Self::source(&authorization.redirect_uri).is_none() => {
+                self.link(cx, page.title(), &to, Onward::Provider(provider))
+                    .await?
+            }
+            _ => see_other(to.as_str()).into_response(cx)?,
+        };
+        Ok((response, cookie))
+    }
+
     /// Sends the browser on to `continuation` from `page`, once it signed in: to
     /// the path, or on through the authorization, which the page continues
     /// in-process, so that its `form-action` governs the redirect to the
     /// application, or links there when it cannot. Before an application, an
     /// account with a recovery that can still be undone asks whether it was its
-    /// owner's, going on through the path resuming the authorization; a path on
-    /// auth asks on the account's pages.
+    /// owner's, unless `recovery` says this page's question was answered; a path
+    /// on auth asks on the account's pages.
     async fn go_on(
         &self,
         cx: &Cx,
         page: SignInPage,
         continuation: Continuation,
+        recovery: RecoveryQuestion,
     ) -> Result<Response, Failure> {
         match &continuation {
             Continuation::Authorization(transaction) => {
-                if let Some(owner) = self.owner(cx).await?
-                    && let Some(recovery) = self.recovery(&owner).await?
-                {
-                    let resume = continuation.return_to()?;
-                    let prompt = view! {
-                        piquel_ui::recovery_prompt(
-                            recovery: &recovery,
-                            continue_href: &resume,
-                            undo: routes::page::RECOVER_UNDO,
-                        )
-                    };
-                    let title = Title::SignIn.as_str();
-                    return Ok(self.render(cx, StatusCode::OK, title, &[], prompt).await?);
-                }
                 let next = self
                     .oidc
-                    .continue_authorization(Self::context(cx)?, headers(cx), transaction.clone())
+                    .continue_authorization(
+                        Self::context(cx)?,
+                        headers(cx),
+                        transaction.clone(),
+                        recovery,
+                    )
                     .await?;
                 Ok(self.onward(cx, page.title(), &next).await?)
             }
             Continuation::Path(path) => Ok(see_other(path.as_str()).into_response(cx)?),
         }
+    }
+
+    /// The question `page` asks, when its `query` says a sign-in for the
+    /// authorization `continuation` resumes asked it, of the signed-in account's
+    /// recovery that can still be undone: was it the owner's? Its form posts back
+    /// here, and goes on to the application that `targets` name. `None` when there
+    /// is nothing to ask, as once the recovery is undone or settled: the page then
+    /// offers to go on as usual.
+    async fn recovery_question(
+        &self,
+        cx: &Cx,
+        page: SignInPage,
+        query: &LoginQuery,
+        continuation: &Continuation,
+        targets: &[url::Url],
+    ) -> Result<Option<Response>, Failure> {
+        let Continuation::Authorization(_) = continuation else {
+            return Ok(None);
+        };
+        if !query.recovery.0 {
+            return Ok(None);
+        }
+        let Some(owner) = self.owner(cx).await? else {
+            return Ok(None);
+        };
+        let Some(recovery) = self.recovery(&owner).await? else {
+            return Ok(None);
+        };
+        let here = continuation.on(query.clone()).on(page.path())?;
+        let question = view! {
+            piquel_ui::recovery_prompt(
+                recovery: &recovery,
+                action: &here,
+                undo: routes::page::RECOVER_UNDO,
+            )
+        };
+        let title = Title::SignIn.as_str();
+        Ok(Some(
+            self.render(cx, StatusCode::OK, title, targets, question)
+                .await?,
+        ))
     }
 
     /// The sign-in page `cx` requests, as requested: what a change that keeps the
@@ -486,6 +554,12 @@ impl WebApplication {
             }
             None => query.acr,
         };
+        if let Some(question) = self
+            .recovery_question(cx, page, &query, &continuation, &targets)
+            .await?
+        {
+            return Ok(question);
+        }
         let (pending, unavailable) = match pending {
             Some(Ok(pending)) => (Some(pending), None),
             Some(Err(error)) => (None, Some(ApiError::from(error))),

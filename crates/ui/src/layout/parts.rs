@@ -1,12 +1,13 @@
 //! The parts of a page within its frame: its opening and messages, its
-//! navigations, the pager below a list, and a private address.
+//! navigations, the pager below a list, a private address, and an
+//! announcement's text.
 
 use crate::{
     Alert, Messages,
     browser::Browser,
     icons::{Icon, icon},
 };
-use piquel_common::admin::Paging;
+use piquel_common::admin::{Announcement, Paging};
 use topcoat::{
     Result,
     context::Cx,
@@ -14,9 +15,11 @@ use topcoat::{
     view::{Child, View, component, view},
 };
 
-/// Something a page offers until this browser dismisses it, by its key: it starts
-/// hidden, and shows unless dismissed. Where the browser keeps no local storage,
-/// it shows on every page, and dismissing it hides it on that page only.
+/// Something a page offers until this browser dismisses it, by its key: it shows
+/// unless dismissed, whether it renders hidden, as a hint does, so it never
+/// flashes once dismissed, or shown, as a security question does, so it asks
+/// without scripts too. Where the browser keeps no local storage, it shows on
+/// every page, and dismissing it hides it on that page only.
 pub(crate) struct Dismissal {
     /// The key this browser keeps it dismissed under.
     key: String,
@@ -25,11 +28,11 @@ pub(crate) struct Dismissal {
 }
 
 impl Dismissal {
-    /// The one dismissed under `key`.
-    pub(crate) fn new(cx: &Cx, key: String) -> Self {
+    /// The one dismissed under `key`, rendered `shown` or hidden.
+    pub(crate) fn new(cx: &Cx, key: String, shown: bool) -> Self {
         Self {
             key,
-            shown: signal(cx, || false),
+            shown: signal(cx, || shown),
         }
     }
 
@@ -155,6 +158,25 @@ pub async fn page_head(
             </div>
             <div class="row">(actions)</div>
         </div>
+    })
+}
+
+/// A text, `body`, as paragraphs, keeping its line breaks: an announcement's as
+/// its administrators wrote it, or any notification's.
+#[component]
+pub(crate) async fn announcement_text<'a>(cx: &Cx, body: &'a str) -> Result<impl View> {
+    let paragraphs = Announcement::paragraphs(body);
+    Ok(view! {
+        for lines in &paragraphs {
+            <p>
+                for (index, line) in lines.iter().enumerate() {
+                    if index > 0 {
+                        <br>
+                    }
+                    (*line)
+                }
+            </p>
+        }
     })
 }
 

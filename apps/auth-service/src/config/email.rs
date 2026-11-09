@@ -4,23 +4,33 @@
 #[cfg(test)]
 use super::LinkKeys;
 use super::TokenDigestKeys;
-use crate::{emails::VerificationKeys, recovery::RecoveryLinks};
+use crate::{emails::VerificationKeys, notifications::UnsubscribeLinks, recovery::RecoveryLinks};
 use lettre::{
     AsyncSmtpTransport, Tokio1Executor,
     message::Mailbox,
     transport::smtp::{authentication::Credentials, extension::ClientId},
 };
-use piquel_common::config::{ConfigurationError, Origin, SecretReference, Variable};
+use piquel_common::config::{ConfigurationError, Origin, SecretReference};
 use std::{net::IpAddr, time::Duration};
 
-/// SMTP relay: `smtps://user@host:465`, or `smtp://user@host:587` with STARTTLS.
-/// Unset, email is disabled.
-pub(super) const SMTP_URL: Variable = Variable::new("AUTH_SMTP_URL");
-/// Reference to the SMTP password of the URL's user.
-const SMTP_PASSWORD: Variable = Variable::new("AUTH_SMTP_PASSWORD");
-/// The sender of every message.
-const EMAIL_FROM: Variable = Variable::new("AUTH_EMAIL_FROM");
-/// The sender when none is configured.
+piquel_common::variables! {
+    /// Email's variables, in the configuration reference's order.
+    #[cfg(test)]
+    pub(crate) const VARIABLES;
+
+    /// The SMTP relay auth sends through: `smtps://USER@HOST:465`, with implicit
+    /// TLS, or `smtp://USER@HOST:587`, which requires STARTTLS. Only a loopback
+    /// host, such as a local Mailpit, may be reached without TLS. Unset, email is
+    /// off: adding an address is refused and queued messages are dropped.
+    pub(super) const SMTP_URL = "AUTH_SMTP_URL";
+    /// Where to read the password of the URL's user, through `env://NAME` or
+    /// `file:///path`. Required when the URL names a user; never put it in the
+    /// URL.
+    const SMTP_PASSWORD = "AUTH_SMTP_PASSWORD";
+    /// The sender of every message.
+    const EMAIL_FROM = "AUTH_EMAIL_FROM", default DEFAULT_EMAIL_FROM;
+}
+/// [`EMAIL_FROM`] when none is configured.
 const DEFAULT_EMAIL_FROM: &str = "Piquel <security@piquel.fr>";
 /// Port of `smtps://` URLs without one: SMTP submission over implicit TLS.
 const SMTPS_PORT: u16 = 465;
@@ -43,6 +53,8 @@ pub(crate) struct EmailConfig {
     pub verification_keys: VerificationKeys,
     /// Derives recovery links from recovery IDs.
     pub recovery_links: RecoveryLinks,
+    /// Derives and checks the unsubscribe links of announcements' emails.
+    pub unsubscribe_links: UnsubscribeLinks,
 }
 
 impl EmailConfig {
@@ -65,6 +77,7 @@ impl EmailConfig {
             origin: origin.clone(),
             verification_keys: digest_keys.verification_keys(),
             recovery_links: digest_keys.recovery_links(origin),
+            unsubscribe_links: digest_keys.unsubscribe_links(origin),
         })
     }
 
@@ -161,6 +174,7 @@ impl EmailConfig {
             origin: origin.clone(),
             verification_keys: VerificationKeys::new(LinkKeys::generate()),
             recovery_links: RecoveryLinks::new(origin.clone(), LinkKeys::generate()),
+            unsubscribe_links: UnsubscribeLinks::new(origin.clone(), LinkKeys::generate()),
         }
     }
 }

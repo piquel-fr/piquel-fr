@@ -13,7 +13,7 @@ use super::{
         BACKCHANNEL_LOGOUT_EVENT, Confirmation, IdTokenClaims, LogoutEvents, LogoutTokenClaims,
         ProfileClaims, UserInfo,
     },
-    jwt::{Algorithm, Claim, Jwk, JwkSet, KeyId, KeyType, KeyUse, TokenType},
+    jwt::{Algorithm, Claim, Jwk, JwkSet, KeyId, KeyOperation, KeyType, KeyUse, TokenType},
     metadata::ServerMetadata,
     oauth::{
         ClientAuthMethod, CodeChallengeMethod, ErrorCode, ErrorDescription, ErrorResponse,
@@ -29,7 +29,7 @@ use ts_rs::{Config, TS};
 /// Opens the generated file.
 const HEADER: &str = "\
 // Generated from piquel_common::protocol by `just sdk-types`. Do not edit.
-// The wire types auth and every SDK share; docs/architecture/sdk.md describes them.
+// The wire types auth and every SDK share; docs/dev/architecture/sdk.md describes them.
 ";
 
 /// Implements `TS` for a type declared in the generated file.
@@ -111,7 +111,7 @@ closed!(
     ErrorCategory,
     ErrorReason,
 );
-open!(ErrorCode, BearerError);
+open!(ErrorCode, BearerError, KeyOperation);
 builtin!(
     "string" =>
     ClientId,
@@ -212,7 +212,7 @@ impl Declarations {
     }
 }
 
-/// Every type the TypeScript SDK reads, grouped as in `docs/architecture/sdk.md`.
+/// Every type the TypeScript SDK reads, grouped as in `docs/dev/architecture/sdk.md`.
 fn generate() -> String {
     Declarations::new()
         // claims
@@ -240,6 +240,7 @@ fn generate() -> String {
         .add::<Jwk>()
         .add::<KeyType>()
         .add::<KeyUse>()
+        .add::<KeyOperation>()
         // oauth
         .add::<GrantType>()
         .add::<ResponseType>()

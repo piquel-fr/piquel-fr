@@ -1,5 +1,5 @@
 {
-  "description": "a token signed with a 1024-bit RSA key is rejected",
+  "description": "a 1024-bit RSA key verifies nothing: the key set is at fault",
   "now": 1767225600,
   "input": {
     "audience": "https://notes.example.com",
@@ -21,8 +21,8 @@
   },
   "expected": {
     "error": {
-      "code": "invalid_token",
-      "reason": "bad_signature"
+      "code": "keys",
+      "reason": "unusable_key"
     }
   }
 }

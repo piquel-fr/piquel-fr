@@ -36,7 +36,7 @@ webauthn-rs.workspace = true
 webauthn-rs-proto.workspace = true
 
 [dev-dependencies]
-piquel-auth = { workspace = true, features = ["axum", "test-util"] }
+piquel-auth = { workspace = true, features = ["axum"] }
 rcgen.workspace = true
 tokio-rustls.workspace = true
 piquel-repository = { workspace = true, features = ["test-util"] }
