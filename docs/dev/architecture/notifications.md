@@ -36,7 +36,8 @@ name no account, rather than the `Alert`, so an older release's inbox never
 meets an alert it cannot decode. Today the variants are a replaced primary
 address, a removed address, a recovery that secured the account, enrolled a
 passkey or was undone, an account disabled, enabled, scheduled for deletion or restored,
-support changing the handle or display name or removing the picture,
+support changing the handle or display name, renaming a passkey or removing the
+picture,
 [administrators' announcements](../operations/administration.md#send-an-announcement)
 and messages, and, in administrators' inboxes, each
 [alert](../operations/administration.md#respond-to-an-alert) when it is raised,

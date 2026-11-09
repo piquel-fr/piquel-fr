@@ -27,8 +27,8 @@ You need an Origin Account. To receive alerts by email, you need a
   its link to add a passkey. Both reach every confirmed address, so one lost
   mailbox can't hide them. You're also told when a recovery is undone.
 - **SourceOrigin support changed your account**: disabled, enabled, scheduled
-  for deletion or restored it, changed your handle or display name, removed your
-  picture, or signed your devices out.
+  for deletion or restored it, changed your handle or display name, renamed one
+  of your passkeys, removed your picture, or signed your devices out.
 - **A copy of one of your passkeys was refused.** Its signature showed it may
   have been copied.
 - **A sign-in to your disabled account was refused**, which means someone holds

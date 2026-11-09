@@ -1,7 +1,7 @@
 //! Which events notify their subject, and how a notification is stored.
 use super::Notification;
 use crate::{
-    EmailId, Personal, SessionId, UserId,
+    EmailId, PasskeyId, Personal, SessionId, UserId,
     events::{Actor, DomainEvent},
 };
 
@@ -21,8 +21,8 @@ fn admin() -> Actor {
     }
 }
 
-/// Support renaming an account, or removing its picture, tells its owner; the
-/// owner doing so does not.
+/// Support renaming an account or one of its passkeys, or removing its picture,
+/// tells its owner; the owner doing so does not.
 #[test]
 fn only_support_renames_notify() {
     let renamed = DomainEvent::DisplayNameChanged {
@@ -41,6 +41,18 @@ fn only_support_renames_notify() {
     assert_eq!(
         renamed.notification(&cli),
         Some(Notification::DisplayNameChanged)
+    );
+    let passkey = DomainEvent::PasskeyRenamed {
+        passkey_id: PasskeyId::new(),
+    };
+    assert_eq!(passkey.notification(&owner()), None);
+    assert_eq!(
+        passkey.notification(&admin()),
+        Some(Notification::PasskeyRenamed)
+    );
+    assert_eq!(
+        passkey.notification(&cli),
+        Some(Notification::PasskeyRenamed)
     );
     let removed = DomainEvent::PictureRemoved {};
     assert_eq!(removed.notification(&owner()), None);

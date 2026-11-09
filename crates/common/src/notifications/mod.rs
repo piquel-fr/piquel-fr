@@ -45,6 +45,8 @@ pub enum Notification {
     HandleChanged,
     /// Support changed the account's display name.
     DisplayNameChanged,
+    /// Support renamed one of the account's passkeys.
+    PasskeyRenamed,
     /// Support removed the account's profile picture.
     PictureRemoved,
     /// The account was disabled.
@@ -179,6 +181,7 @@ impl DomainEvent {
             Self::RecoveryUndone { .. } => Notification::RecoveryUndone,
             Self::HandleChanged { .. } if by_support => Notification::HandleChanged,
             Self::DisplayNameChanged { .. } if by_support => Notification::DisplayNameChanged,
+            Self::PasskeyRenamed { .. } if by_support => Notification::PasskeyRenamed,
             Self::PictureRemoved {} if by_support => Notification::PictureRemoved,
             Self::AccountDisabled { .. } => Notification::AccountDisabled,
             Self::AccountEnabled {} => Notification::AccountEnabled,
@@ -231,6 +234,7 @@ impl DomainEvent {
             Self::HandleChanged { .. }
             | Self::NotificationPreferenceChanged(_)
             | Self::DisplayNameChanged { .. }
+            | Self::PasskeyRenamed { .. }
             | Self::PictureRemoved {}
             | Self::PictureChanged { .. }
             // The account's first verified address: nothing was replaced.
@@ -255,7 +259,6 @@ impl DomainEvent {
             // Nothing that adds a way in: a confirmation, a name, a verified
             // address the owner already heard of, or an app's grants.
             | Self::PasskeyConfirmed { .. }
-            | Self::PasskeyRenamed { .. }
             | Self::EmailVerified { .. }
             | Self::ConsentGranted { .. }
             | Self::ConsentRevoked { .. }
@@ -399,6 +402,7 @@ impl Notification {
             | Self::RecoveryUndone
             | Self::HandleChanged
             | Self::DisplayNameChanged
+            | Self::PasskeyRenamed
             | Self::PictureRemoved
             | Self::AccountDisabled
             | Self::AccountEnabled
@@ -461,6 +465,7 @@ impl Notification {
             Self::RecoveryUndone
             | Self::HandleChanged
             | Self::DisplayNameChanged
+            | Self::PasskeyRenamed
             | Self::PictureRemoved
             | Self::AccountDisabled
             | Self::AccountEnabled
@@ -499,6 +504,7 @@ impl Notification {
             Self::RecoveryUndone => "A recovery of your account was undone",
             Self::HandleChanged => "SourceOrigin support changed your handle",
             Self::DisplayNameChanged => "SourceOrigin support changed your display name",
+            Self::PasskeyRenamed => "SourceOrigin support renamed one of your passkeys",
             Self::PictureRemoved => "SourceOrigin support removed your profile picture",
             Self::AccountDisabled => "Your account was disabled",
             Self::AccountEnabled => "Your account was enabled again",
@@ -540,6 +546,7 @@ impl Notification {
             Self::RecoveryUndone => "The recovery SourceOrigin support started no longer works: any passkey it added was removed, and every device and app was signed out.".to_owned(),
             Self::HandleChanged => "You now sign in with your new handle, and apps see it the next time they refresh your profile. Your security history says why it changed.".to_owned(),
             Self::DisplayNameChanged => "Apps see your new name the next time they refresh your profile. Your security history says why it changed.".to_owned(),
+            Self::PasskeyRenamed => "It signs in as before: only its name in your settings changed. Your security history says which passkey, and why.".to_owned(),
             Self::PictureRemoved => "Apps stop showing it the next time they refresh your profile. You can choose another in your settings, and your security history says why it was removed.".to_owned(),
             Self::AccountDisabled => "Nobody can sign in to it, and every device was signed out. Contact SourceOrigin support to find out why.".to_owned(),
             Self::AccountEnabled => "You can sign in to it again.".to_owned(),
