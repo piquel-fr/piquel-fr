@@ -13,8 +13,8 @@ use crate::{
     },
 };
 use chrono::{DateTime, Utc};
-use sourceorigin_common::{Provider, RecoveryId, TokenId, protocol::claims::Acr};
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::{Provider, RecoveryId, TokenId, protocol::claims::Acr};
 use topcoat::{
     Result,
     view::{View, component, view},

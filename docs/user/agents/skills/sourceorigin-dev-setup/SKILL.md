@@ -1,13 +1,13 @@
 ---
 name: sourceorigin-dev-setup
 description: >
-  Run an app that signs in with sourceorigin.dev on this machine, against the real
+  Run an app that signs in with Origin Auth on this machine, against the real
   auth.sourceorigin.dev: a development registration with loopback redirect URIs, the
   environment variables, and a check of the sign-in from end to end. Use when
-  the person wants to run, try or test their sourceorigin.dev sign-in locally.
+  the person wants to run, try or test their Origin Auth sign-in locally.
 ---
 
-# Run a sourceorigin.dev app locally
+# Run an Origin Auth app locally
 
 The app runs on this machine and signs in with auth.sourceorigin.dev itself. The
 sign-in code comes from the sourceorigin-sign-in skill: `/auth/login`,

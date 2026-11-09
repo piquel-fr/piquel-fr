@@ -11,7 +11,7 @@ api_version = "piqueld.dev/v1alpha1"
 kind = "Application"
 
 [metadata]
-name = "telemetry"
+name = "sourceorigin-observability"
 
 [spec.manifest]
 path = "infra/telemetry.toml"
@@ -210,7 +210,7 @@ port = 3000
 visibility = "private"
 
 # sourceorigin's staging and production send telemetry here, as
-# `http://collector.telemetry:4318`. Previews do not.
+# `http://collector.sourceorigin-observability:4318`. Previews do not.
 [[spec.exports]]
 service = "collector"
 applications = ["sourceorigin"]

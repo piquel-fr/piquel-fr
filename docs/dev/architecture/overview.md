@@ -1,6 +1,6 @@
 # Overview
 
-This page is the map of sourceorigin.dev: the processes that run it, what each crate
+This page is the map of SourceOrigin: the processes that run it, what each crate
 owns, and which page to read next. Start here before changing anything that
 crosses a crate or a process.
 
@@ -61,7 +61,7 @@ Auth renders every page itself, sign-in included, and the account settings at
 | Location | Responsibility |
 | --- | --- |
 | `apps/auth-service` | The auth authority: browser ceremonies, social sign-in, OIDC, the server-rendered pages, the settings API, the admin dashboard and the CLI. `assets/passkey.js` runs the WebAuthn ceremonies and the form hooks that start them, and `assets/picture.js` lets the picture form choose its crop |
-| `apps/web` | `sourceorigin-web`, sourceorigin.dev's own web server, with Origin Auth's policies in `assets/policies/` |
+| `apps/web` | `sourceorigin-web`, sourceorigin.dev's own web server, with SourceOrigin's policies in `assets/policies/` |
 | `packages/auth` | `@sourceorigin/auth`, the TypeScript SDK, not yet published: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `sourceorigin_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [SDK design](sdk.md#test-vectors) |
 | `tests/browser` | Playwright tests, and the documentation's screenshots |

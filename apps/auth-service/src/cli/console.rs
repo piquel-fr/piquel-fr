@@ -5,9 +5,9 @@
 use super::CliError;
 use crate::{AdminService, AuthConfig, Operator, UserRef, account::AccountService};
 use clap::{Args, ValueEnum};
+use serde::Serialize;
 use sourceorigin_common::{UserId, admin::Paging};
 use sourceorigin_repository::Database;
-use serde::Serialize;
 use std::io::{BufRead, IsTerminal};
 
 /// Administrative commands' view of auth: every operation, run by the operator at

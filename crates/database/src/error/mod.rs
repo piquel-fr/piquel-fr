@@ -56,9 +56,14 @@ pub enum DatabaseError {
 /// Why a stored value did not decode, without the value: a decoder's message can
 /// quote it, as `serde_json`'s `invalid type: string "alice@example.com"` does.
 /// Only `serde_json`'s category and position are kept; query the column to see
-/// the value itself.
+/// the value itself. Boxed, so [`DatabaseError`] stays small.
 #[derive(Debug, Error)]
-pub enum DecodeFailure {
+#[error(transparent)]
+pub struct DecodeFailure(Box<Decode>);
+
+/// What [`DecodeFailure`] keeps.
+#[derive(Debug, Error)]
+enum Decode {
     /// A JSON column that does not parse, or does not match its type.
     #[error("{category} at line {line} column {column}")]
     Json {
@@ -69,9 +74,21 @@ pub enum DecodeFailure {
         /// Where, on that line.
         column: usize,
     },
+    /// A value that decodes but breaks a rule, such as an alert update whose
+    /// author is neither an administrator nor an operator. The rule is a
+    /// `&'static str`, so it cannot quote the value.
+    #[error("{0}")]
+    Rule(&'static str),
     /// Any other decoder's failure.
     #[error("the stored value does not decode")]
     Other,
+}
+
+impl From<&'static str> for DecodeFailure {
+    /// The rule the value breaks.
+    fn from(rule: &'static str) -> Self {
+        Self(Box::new(Decode::Rule(rule)))
+    }
 }
 
 impl From<serde_json::Error> for DecodeFailure {
@@ -83,20 +100,21 @@ impl From<serde_json::Error> for DecodeFailure {
             serde_json::error::Category::Data => "JSON that does not match its type",
             serde_json::error::Category::Eof => "JSON that ends early",
         };
-        Self::Json {
+        Self(Box::new(Decode::Json {
             category,
             line: error.line(),
             column: error.column(),
-        }
+        }))
     }
 }
 
 impl From<Source> for DecodeFailure {
     /// Keeps what a `serde_json` error would, and nothing of any other error.
     fn from(error: Source) -> Self {
-        error
-            .downcast::<serde_json::Error>()
-            .map_or(Self::Other, |error| Self::from(*error))
+        error.downcast::<serde_json::Error>().map_or_else(
+            |_| Self(Box::new(Decode::Other)),
+            |error| Self::from(*error),
+        )
     }
 }
 

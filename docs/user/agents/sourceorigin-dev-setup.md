@@ -1,7 +1,7 @@
 # Running your app locally
 
 The `sourceorigin-dev-setup` skill teaches an agent to run an app that signs in with
-sourceorigin.dev on your machine, against auth.sourceorigin.dev. Use it once the sign-in
+Origin Auth on your machine, against auth.sourceorigin.dev. Use it once the sign-in
 code is written, to try it before you deploy.
 
 The agent asks you for a separate development registration, with a loopback

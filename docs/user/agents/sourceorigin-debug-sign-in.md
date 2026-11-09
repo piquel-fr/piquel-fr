@@ -1,7 +1,7 @@
 # Debugging a sign-in
 
 The `sourceorigin-debug-sign-in` skill teaches an agent to find out why a sign-in
-with sourceorigin.dev fails. Use it when your app answers an error during sign-in,
+with Origin Auth fails. Use it when your app answers an error during sign-in,
 when sign-in loops, or when sessions end too soon.
 
 The agent reads the error your app answered, checks auth's discovery, asks

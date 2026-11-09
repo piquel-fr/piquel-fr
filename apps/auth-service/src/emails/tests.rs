@@ -12,9 +12,9 @@ use axum::{
     http::{Method, Request, header},
     response::Response,
 };
+use serde_json::{Value, json};
 use sourceorigin_common::{AuthenticationMethod, Handle};
 use sourceorigin_repository::{DeliverySummary, InsertUser};
-use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv6Addr};
 use tower::ServiceExt;
 

@@ -12,6 +12,7 @@ use crate::{
     },
 };
 use axum::http::header;
+use serde_json::json;
 use sourceorigin_common::{
     AuthenticationMethod, Provider, TokenId,
     clients::{ClientKind, ClientOwner},
@@ -20,7 +21,6 @@ use sourceorigin_common::{
 use sourceorigin_repository::{
     Database, InsertExternalIdentity, InsertPasskey, RefreshRedemption, RefreshRedemptionError,
 };
-use serde_json::json;
 
 /// The scenario database, and the operations under test.
 struct Fixture {

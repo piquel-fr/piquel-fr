@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT set_config('sourceorigin.audit_prune', 'on', true)",
+  "query": "SELECT set_config('sourceorigin.audit_prune', 'off', true)",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       null
     ]
   },
-  "hash": "dd819bf1713fcf040faba5d5d33a71e990924821b3c0c513dcee8eb8e052c8fd"
+  "hash": "45e983401ce66752126d428c6cbeabdfb933c2459aa9b80a5b382a4712716621"
 }

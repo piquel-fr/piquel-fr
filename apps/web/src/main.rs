@@ -7,9 +7,9 @@ mod pages;
 /// The router.
 mod site;
 
+use site::Site;
 use sourceorigin_common::config::{ConfigurationError, Origin};
 use sourceorigin_telemetry::{Export, Telemetry, TelemetryError};
-use site::Site;
 use std::{net::SocketAddr, process::ExitCode};
 use tokio::{net::TcpListener, signal::unix::SignalKind};
 

@@ -12,8 +12,8 @@ use crate::{
     },
 };
 use chrono::{DateTime, Utc};
-use sourceorigin_common::{PasskeyId, RecoveryId, SessionId};
 use serde::{Deserialize, Serialize};
+use sourceorigin_common::{PasskeyId, RecoveryId, SessionId};
 use topcoat::{
     Result,
     view::{View, component, view},

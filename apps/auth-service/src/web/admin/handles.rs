@@ -3,9 +3,11 @@
 
 use super::{AdminApplication as App, settings, users::Account};
 use crate::{Reason, handles::HandlesError};
-use sourceorigin_common::{Handle, handle::RESERVED};
-use sourceorigin_ui::{Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
+use sourceorigin_common::{Handle, handle::RESERVED};
+use sourceorigin_ui::{
+    Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder,
+};
 use topcoat::{
     Result,
     context::Cx,

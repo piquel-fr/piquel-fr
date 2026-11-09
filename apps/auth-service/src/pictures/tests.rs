@@ -16,8 +16,8 @@ use axum::{
     http::{Method, Request, StatusCode, header},
     routing::get,
 };
-use sourceorigin_common::events::Actor;
 use serde_json::Value;
+use sourceorigin_common::events::Actor;
 use tower::ServiceExt;
 
 /// `PUT /account/picture` makes the raw body the owner's picture, lifting the API's

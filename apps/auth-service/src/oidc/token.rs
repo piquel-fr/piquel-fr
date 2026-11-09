@@ -14,6 +14,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
 };
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     ClientId, SessionId, TokenId, UserId,
     events::{CodeRedemptionFailure, DomainEvent, EventContext, GrantRevocation},
@@ -31,7 +32,6 @@ use sourceorigin_repository::{
     StoredOidcClient,
 };
 use sourceorigin_telemetry::{Counter, Label};
-use serde::{Deserialize, Serialize};
 
 /// Untrusted grant parameters; parse grant type after authenticating the client.
 #[derive(Deserialize)]

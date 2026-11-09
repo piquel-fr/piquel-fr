@@ -1,8 +1,8 @@
 error[E0277]: the trait bound `sourceorigin_auth::IdToken: serde::Deserialize<'de>` is not satisfied
- --> tests/ui/forged_id_token.rs:2:46
+ --> tests/ui/forged_id_token.rs:2:52
   |
 2 |     let _: Result<sourceorigin_auth::IdToken, _> = serde_json::from_str("{}");
-  |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `serde_core::de::Deserialize<'_>` is not implemented for `sourceorigin_auth::IdToken`
+  |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `serde_core::de::Deserialize<'_>` is not implemented for `sourceorigin_auth::IdToken`
   |
   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `sourceorigin_auth::IdToken` type
   = note: for types from other crates check whether the crate offers a `serde` feature flag

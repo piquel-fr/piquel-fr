@@ -7,13 +7,13 @@ use crate::{
     tests::{Browser, Replicas},
 };
 use axum::http::{Method, StatusCode};
+use serde_json::{Value, json};
 use sourceorigin_common::{
     PasskeyId, TokenId,
     clients::{ClientKind, ClientOwner},
     events::{EventContext, JobName},
 };
 use sourceorigin_repository::{RefreshRedemption, RefreshRedemptionError};
-use serde_json::{Value, json};
 
 /// The history routes over the test database.
 struct Harness {

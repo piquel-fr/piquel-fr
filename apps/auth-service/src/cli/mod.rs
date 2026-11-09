@@ -55,15 +55,15 @@ use error::CliError;
 use handle::HandleCommand;
 use invite::InviteCommand;
 use keys::KeysCommand;
+use session::SessionCommand;
 use sourceorigin_common::ErrorChain;
 use sourceorigin_repository::Database;
 use sourceorigin_telemetry::{Export, Telemetry};
-use session::SessionCommand;
 use std::process::ExitCode;
 use tracing::Instrument;
 use user::UserCommand;
 
-/// Origin Auth authentication service. Runs `serve` when no command is given.
+/// The Origin Auth service. Runs `serve` when no command is given.
 #[derive(Parser)]
 #[command(
     after_help = "Every command uses AUTH_DATABASE_URL, except migrate and audit prune when \

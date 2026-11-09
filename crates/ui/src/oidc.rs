@@ -94,7 +94,7 @@ pub async fn logout<'a>(
     Ok(view! {
         <div>
             <h1>"Ready to sign out?"</h1>
-            <p class="lead">"This will end your SourceOrigin sign-in session in this browser."</p>
+            <p class="lead">"This will end your Origin Account session in this browser."</p>
         </div>
         <form method="post" action=(action)>
             for (name, value) in fields {

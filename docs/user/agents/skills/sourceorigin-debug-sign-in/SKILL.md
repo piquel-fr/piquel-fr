@@ -1,14 +1,14 @@
 ---
 name: sourceorigin-debug-sign-in
 description: >
-  Find out why a sign-in with sourceorigin.dev fails: read the error the app or SDK
+  Find out why a sign-in with Origin Auth fails: read the error the app or SDK
   got, check auth.sourceorigin.dev's discovery and the app's registration (client ID,
   secret, redirect URIs, scopes), and fix the common causes. Use when signing
-  in with sourceorigin.dev fails, loops, ends too soon, or answers an error such as
+  in with Origin Auth fails, loops, ends too soon, or answers an error such as
   invalid_client, invalid_scope or "Sign-in could not start".
 ---
 
-# Debug a sourceorigin.dev sign-in
+# Debug an Origin Auth sign-in
 
 Work from the error the person or the app saw. Most failures come from a
 registration that doesn't match the app's configuration: `SOURCEORIGIN_CLIENT_ID`,
