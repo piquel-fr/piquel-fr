@@ -121,8 +121,10 @@ impl fmt::Debug for DatabaseError {
     /// driver's own `Debug` would add `PostgreSQL`'s diagnostic fields, whose
     /// `detail` quotes the rejected values, e.g. `Key (address)=(…) already
     /// exists`: an address in a log line. Only the messages remain, which name a
-    /// constraint but no value. Every error wrapping this one, and every `?error`
-    /// log field holding it, is then safe too.
+    /// constraint rather than its values, though a failed cast in SQL, such as
+    /// of a text bind to a UUID, quotes its input. Every
+    /// error wrapping this one, and every `?error` log field holding it, is then
+    /// as safe as its `Display`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", ErrorChain(self))
     }
