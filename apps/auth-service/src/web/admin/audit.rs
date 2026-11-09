@@ -39,7 +39,7 @@ pub(super) async fn verify(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     .await?;
     let page = &app.service.audit_page(&admin.operator, query.after).await?;
     let later = page.next.map(|after| format!("{here}?after={after}"));
-    let view = view! { cx =>
+    let view = view! {
         sourceorigin_ui::audit_page(
             page: page,
             keys: keys.source,

@@ -7,15 +7,19 @@
 
 use crate::{
     LoginChange, Notice, Title,
+    browser::Browser,
     form::{
         Ceremony, Fields, Precision, change_form, fragment_form, new_passkey, passkey_form, time,
     },
+    layout::Dismissal,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{PasskeyId, RecoveryId, SessionId};
 use topcoat::{
     Result,
+    context::Cx,
+    runtime::Event,
     view::{View, component, view},
 };
 
@@ -151,7 +155,7 @@ pub enum RecoverChange {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
     },
-    /// Shows that the passkey script just added the passkey, which signed the
+    /// Shows that the browser just added the passkey, which signed the
     /// browser in: this changes nothing.
     Recovered {},
 }
@@ -171,11 +175,11 @@ pub enum UndoChange {
         )]
         recovery: Option<RecoveryId>,
     },
-    /// Shows that the passkey script just undid the recovery, cancelling its link
+    /// Shows that the browser just undid the recovery, cancelling its link
     /// and taking back what the link did, if it was used: this changes nothing.
     Undone {
         /// Whether the undo signed the browser in, as its finish answered, which
-        /// the passkey script fills in. An undo on a disabled account signs nobody
+        /// the browser fills in. An undo on a disabled account signs nobody
         /// in.
         #[serde(default, deserialize_with = "Fields::lenient_or_default")]
         signed_in: bool,
@@ -195,7 +199,7 @@ pub enum RecoverStep<'a> {
         display_name: &'a str,
         /// When the link stops working.
         expires_at: DateTime<Utc>,
-        /// The link's token, which the passkey script starts the ceremony with.
+        /// The link's token, which the passkey ceremony starts with.
         token: &'a str,
         /// How many days the new passkey can't confirm changes, and the recovery
         /// can be undone.
@@ -212,6 +216,7 @@ pub enum RecoverStep<'a> {
 /// never posts the link's form again.
 #[component]
 pub async fn recover<'a>(
+    cx: &Cx,
     action: &'a str,
     step: RecoverStep<'a>,
     #[default] alert: Option<&'a str>,
@@ -238,7 +243,15 @@ pub async fn recover<'a>(
                 missing: view! { incomplete() },
             ),
             RecoverStep::Enroll { expires_at, token, probation_days, android, .. } => {
-                <div class="stack" data-replace-url=(action)>
+                // The link's address keeps its fragment out of the history: reloading
+                // gets the page by `GET`, without it.
+                let replaced = Browser::replace_url(action);
+                <div
+                    class="stack"
+                    @mount=$(|_e: Event| {
+                        let _replaced = replaced;
+                    })
+                >
                     <p class="lead">"This link works until " time(at: expires_at, precision: Precision::Minute) "."</p>
                     <p class="notice warning">
                         (format!(
@@ -288,6 +301,7 @@ pub enum UndoStep<'a> {
 /// post to `action`, and `alert` says why the link's form was refused.
 #[component]
 pub async fn undo_recovery<'a>(
+    cx: &Cx,
     action: &'a str,
     step: UndoStep<'a>,
     #[default] alert: Option<&'a str>,
@@ -333,10 +347,11 @@ pub async fn undo_recovery<'a>(
 }
 
 /// Undoing `recovery` of the account `handle` names, or of "your account", by
-/// posting to `action` once the passkey script ran its ceremony with a passkey from
+/// posting to `action` once the browser ran its ceremony with a passkey from
 /// before it. Without one, only support can.
 #[component]
 async fn undoing<'a>(
+    cx: &Cx,
     action: &'a str,
     recovery: &'a Recovery,
     handle: Option<&'a str>,
@@ -400,7 +415,7 @@ async fn undoing<'a>(
 
 /// What a recovery's page shows when its link lacks what it names.
 #[component]
-async fn incomplete() -> Result<impl View> {
+async fn incomplete(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <h2>"This link is incomplete"</h2>
         <p>"Open it again from the email, or ask SourceOrigin support for a new one."</p>
@@ -409,24 +424,25 @@ async fn incomplete() -> Result<impl View> {
 
 /// What the account's pages ask of its `recovery` that can still be undone, until
 /// `session` answers: whether it was the owner's, shown without scripts too,
-/// which the passkey script hides once this browser said yes to it at this
-/// stage, and since a passkey `confirmed` the session, if one did, with a link
-/// to undo it on the undo page, `undo`. In probation, a notice, shown without scripts, says what the recovery
+/// which hides once this browser said yes to it at this stage, and since a passkey
+/// `confirmed` the session, if one did, with a link to undo it on the undo page,
+/// `undo`. In probation, a notice, shown without scripts, says what the recovery
 /// holds back meanwhile, and who can undo it.
 #[component]
 pub async fn recovery_banner<'a>(
+    cx: &Cx,
     recovery: &'a Recovery,
     session: SessionId,
     confirmed: bool,
     undo: &'a str,
 ) -> Result<impl View> {
-    let key = recovery.dismiss_key(session, confirmed);
+    let dismissal = Dismissal::new(cx, recovery.dismiss_key(session, confirmed), true);
     let href = recovery.undo_href(undo);
     Ok(view! {
-        <section class="notice warning stack" data-dismiss=(key.as_str())>
+        <section class="notice warning stack" :hidden=(dismissal.hidden()) @mount=(dismissal.mount())>
             <p>(recovery.question())</p>
             <div class="row">
-                <button type="button" class="secondary small" data-dismisses=(key.as_str())>"Yes, it was me"</button>
+                <button type="button" class="secondary small" @click=(dismissal.dismiss())>"Yes, it was me"</button>
                 <a class="button danger small" href=(href.as_str())>(recovery.refusal())</a>
             </div>
         </section>
@@ -452,6 +468,7 @@ pub async fn recovery_banner<'a>(
 /// pages still ask.
 #[component]
 pub async fn recovery_prompt<'a>(
+    cx: &Cx,
     recovery: &'a Recovery,
     action: &'a str,
     undo: &'a str,

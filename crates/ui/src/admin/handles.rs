@@ -6,6 +6,7 @@ use crate::{clients::choice, layout::page_head};
 use sourceorigin_common::admin::{ReleasedHandle, ReservedHandle};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -61,7 +62,7 @@ pub struct HandlesPage<'a> {
 /// The handles page: the reserved list, with the built-in names, the accounts
 /// holding a reserved handle, and the released handles, each with its change.
 #[component]
-pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
+pub async fn handle_list<'a>(cx: &Cx, page: HandlesPage<'a>) -> Result<impl View> {
     Ok(view! {
         page_head(
             title: "Handles",
@@ -75,7 +76,8 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
                 <p class="empty">"No handle reserved yet."</p>
             } else {
                 <ul class="list">
-                    for row in page.reserved {
+                    #[key(position)]
+                    for (position, row) in page.reserved.iter().enumerate() {
                         let handle = format!("@{}", row.reservation.handle);
                         <li>
                             <div class="text">
@@ -90,6 +92,7 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
             <div class="body">
                 <p class="help">
                     "Built into the handle rules, with their look-alikes: "
+                    #[key(index)]
                     for (index, name) in page.built_in.iter().enumerate() {
                         if index > 0 { ", " }
                         <code>(*name)</code>
@@ -104,7 +107,8 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
                 <p class="empty">"No account has a reserved handle."</p>
             } else {
                 <ul class="list">
-                    for row in page.holders {
+                    #[key(position)]
+                    for (position, row) in page.holders.iter().enumerate() {
                         <li>
                             <div class="text">
                                 <a href=(row.account.as_str())><strong>(format!("@{}", row.handle))</strong></a>
@@ -123,7 +127,8 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
                 <p class="empty">"No released handle."</p>
             } else {
                 <ul class="list">
-                    for row in page.released {
+                    #[key(position)]
+                    for (position, row) in page.released.iter().enumerate() {
                         let handle = format!("@{}", row.released.handle);
                         <li>
                             <div class="text">
@@ -149,7 +154,7 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
 
 /// The choice letting a rename take a reserved handle, `checked` or not.
 #[component]
-pub async fn reserved_handle_choice(checked: bool) -> Result<impl View> {
+pub async fn reserved_handle_choice(cx: &Cx, checked: bool) -> Result<impl View> {
     Ok(view! {
         choice(
             name: "allow_reserved",

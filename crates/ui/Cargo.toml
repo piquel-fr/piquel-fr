@@ -12,7 +12,7 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
-topcoat = { workspace = true, features = ["view"] }
+topcoat = { workspace = true, features = ["view", "asset", "runtime"] }
 url.workspace = true
 
 [dev-dependencies]

@@ -4,6 +4,7 @@
 use sourceorigin_ui::{Policies, SOURCE};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, ViewHandle, class, component, view},
 };
 
@@ -59,7 +60,7 @@ const DOCUMENTATION: &str = "https://docs.sourceorigin.dev";
 
 /// The body of `page`; the homepage links auth's pages at `links`.
 #[component]
-pub(crate) async fn page_body(page: Page, links: HomeLinks<'_>) -> Result<impl View> {
+pub(crate) async fn page_body(cx: &Cx, page: Page, links: HomeLinks<'_>) -> Result<impl View> {
     Ok(view! {
         match page {
             Page::Home => home(links: links),
@@ -72,7 +73,7 @@ pub(crate) async fn page_body(page: Page, links: HomeLinks<'_>) -> Result<impl V
 /// A policy, whose `text` is a fragment of trusted HTML, embedded at compile time
 /// so it reads and diffs as a document.
 #[component]
-async fn policy(text: &'static str) -> Result<impl View> {
+async fn policy(cx: &Cx, text: &'static str) -> Result<impl View> {
     Ok(view! {
         <article class="policy">
             (ViewHandle::unescaped_unchecked(text))
@@ -82,7 +83,7 @@ async fn policy(text: &'static str) -> Result<impl View> {
 
 /// The homepage: what Origin Auth, SourceOrigin's sign-in, is, and each part of it.
 #[component]
-async fn home(links: HomeLinks<'_>) -> Result<impl View> {
+async fn home(cx: &Cx, links: HomeLinks<'_>) -> Result<impl View> {
     Ok(view! {
         <section class="hero">
             <p class="eyebrow">"SourceOrigin"</p>
@@ -107,6 +108,7 @@ async fn home(links: HomeLinks<'_>) -> Result<impl View> {
 /// its link, labelled `label`, to `href`. A `wide` card spans the grid.
 #[component]
 async fn feature<'a>(
+    cx: &Cx,
     title: &'a str,
     text: &'a str,
     label: &'a str,

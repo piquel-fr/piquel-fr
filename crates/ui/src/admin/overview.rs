@@ -9,6 +9,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -144,7 +145,7 @@ pub struct AdminOverview<'a> {
 
 /// The overview page.
 #[component]
-pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View> {
+pub async fn admin_overview<'a>(cx: &Cx, overview: AdminOverview<'a>) -> Result<impl View> {
     Ok(view! {
         page_head(
             title: "Overview",
@@ -153,11 +154,13 @@ pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View
                 overview.accounts, overview.administrators
             ),
         )
-        for problem in overview.problems {
+        #[key(position)]
+        for (position, problem) in overview.problems.iter().enumerate() {
             problem_notice(problem: problem)
         }
         <div class="stats">
-            for measure in overview.measures {
+            #[key(position)]
+            for (position, measure) in overview.measures.iter().enumerate() {
                 let warning = measure.warning(overview.problems);
                 <div class=(class!("stat", "warning" if warning))>
                     <span class="label">(measure.label())</span>
@@ -183,7 +186,8 @@ pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View
                     <p class="empty">"No account yet."</p>
                 } else {
                     <ul class="list">
-                        for row in overview.newest {
+                        #[key(position)]
+                        for (position, row) in overview.newest.iter().enumerate() {
                             <li>
                                 avatar(who: row.who(), size: AvatarSize::Small)
                                 <div class="text">
@@ -206,7 +210,7 @@ pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View
 
 /// What a `problem` says, and where to look.
 #[component]
-async fn problem_notice<'a>(problem: &'a Problem<'a>) -> Result<impl View> {
+async fn problem_notice<'a>(cx: &Cx, problem: &'a Problem<'a>) -> Result<impl View> {
     Ok(view! {
         match problem {
             Problem::OpenAlerts { count, alerts } => {

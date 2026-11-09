@@ -84,6 +84,6 @@ pub(super) async fn overview(cx: &Cx) -> Result<Response> {
         all_events: &events_page,
         all_users: &all_users,
     };
-    let view = view! { cx => sourceorigin_ui::admin_overview(overview: page) };
+    let view = view! { sourceorigin_ui::admin_overview(overview: page) };
     App::render(cx, StatusCode::OK, "Overview", view).await
 }

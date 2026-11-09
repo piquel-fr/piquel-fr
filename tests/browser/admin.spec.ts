@@ -44,7 +44,7 @@ async function administrator(browser: Browser, handle: string): Promise<Page> {
 
 /**
  * Confirms the dashboard with a passkey on auth's handoff page, where a change's
- * page opened without the dashboard's script sends the browser: auth asks for one,
+ * page opened directly sends the browser: auth asks for one,
  * for the dashboard only, then the dashboard shows the change's form.
  */
 async function confirmThroughAuth(admin: Page): Promise<void> {
@@ -55,7 +55,7 @@ async function confirmThroughAuth(admin: Page): Promise<void> {
 
 /**
  * Follows the dashboard's `link` to a change, which its first change asks to
- * confirm: the dashboard's script asks for a passkey, for the dashboard only, in a
+ * confirm: the dashboard asks for a passkey, for the dashboard only, in a
  * dialog on the page. The page then goes on to the change's form, never leaving
  * the dashboard.
  */
@@ -411,7 +411,7 @@ test('a handle support renames signs in at once, while the owner waits a month',
   const signIn = owner.getByRole('button', { name: 'Sign in with a passkey', exact: true });
   await field.fill(`old-${suffix}`);
   await signIn.click();
-  await expect(owner.locator('form[data-passkey-sign-in]').getByRole('alert')).toHaveText(
+  await expect(owner.locator('form', { has: signIn }).getByRole('alert')).toHaveText(
     'No active account has this handle.'
   );
   await field.fill(`new-${suffix}`);

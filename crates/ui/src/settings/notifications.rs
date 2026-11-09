@@ -3,7 +3,7 @@
 
 use super::{Audience, HistoryRow, Holdings, timeline::report_form};
 use crate::{
-    form::{Checkbox, Precision, Query, change_form, open, time},
+    form::{Checkbox, Precision, Query, change_form, open, post_form, time},
     icons::{Icon, icon},
     layout::{announcement_text, dialog, page_head},
 };
@@ -15,6 +15,7 @@ use sourceorigin_common::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -119,7 +120,11 @@ impl InboxPage<'_> {
 /// marked, with marking every one read; or, for an administrator, each one's
 /// text, read or not.
 #[component]
-pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<impl View> {
+pub async fn inbox<'a>(
+    cx: &Cx,
+    rows: &'a [InboxRow<'a>],
+    page: InboxPage<'a>,
+) -> Result<impl View> {
     let owner = page.audience.owns();
     let before = page.shown.before;
     let older = page
@@ -205,7 +210,7 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
 /// The button opening the email preferences dialog: in the page's head for the
 /// owner, in the inbox's for an administrator.
 #[component]
-async fn email_button() -> Result<impl View> {
+async fn email_button(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <button type="button" class="secondary small" popovertarget=(EMAIL_DIALOG)>
             icon(kind: Icon::Mail)
@@ -218,7 +223,7 @@ async fn email_button() -> Result<impl View> {
 /// button turning its email on or off for the owner, read-only for an
 /// administrator. A change reopens it, showing what changed.
 #[component]
-async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
+async fn email_preferences<'a>(cx: &Cx, page: InboxPage<'a>) -> Result<impl View> {
     let owner = page.audience.owns();
     Ok(view! {
         dialog(id: EMAIL_DIALOG, title: "Email preferences", shown: page.shown.email, back: page.page, alert: page.alert, focus_close: true,
@@ -230,7 +235,8 @@ async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
                 })
             </p>
             <ul class="list">
-                for preference in page.preferences {
+                #[key(position)]
+                for (position, preference) in page.preferences.iter().enumerate() {
                     <li>
                         <div class="text">
                             <strong>(preference.category.label())</strong>
@@ -285,7 +291,7 @@ pub enum UnsubscribeStep<'a> {
 
 /// The page an announcement's unsubscribe link opens, at `step`.
 #[component]
-pub async fn unsubscribe(step: UnsubscribeStep<'_>) -> Result<impl View> {
+pub async fn unsubscribe(cx: &Cx, step: UnsubscribeStep<'_>) -> Result<impl View> {
     Ok(view! {
         match step {
             UnsubscribeStep::Confirm { action } => {
@@ -293,9 +299,9 @@ pub async fn unsubscribe(step: UnsubscribeStep<'_>) -> Result<impl View> {
                 <p class="lead">
                     "You will still find SourceOrigin’s announcements in your notifications, and receive by email those about a security incident or a change to the privacy policy or terms. Emails about your account itself keep coming."
                 </p>
-                <form method="post" action=(action) data-submit-once="true">
+                post_form(action: action,
                     <button type="submit">"Stop announcement emails"</button>
-                </form>
+                )
             }
             UnsubscribeStep::Done { notifications } => {
                 <h1>"Announcement emails stopped"</h1>
@@ -317,7 +323,7 @@ pub async fn unsubscribe(step: UnsubscribeStep<'_>) -> Result<impl View> {
 /// What the overview says while `unread` notifications are unread, linking the
 /// inbox at `page`; nothing once every one is read.
 #[component]
-pub(crate) async fn unread_hint(unread: u64, page: &str) -> Result<impl View> {
+pub(crate) async fn unread_hint(cx: &Cx, unread: u64, page: &str) -> Result<impl View> {
     let said = match unread {
         1 => "You have an unread notification".to_owned(),
         unread => format!("You have {unread} unread notifications"),
@@ -364,7 +370,11 @@ pub struct NotificationPage<'a> {
 /// allows, the recovery's undo page when it is about one, the dashboard's
 /// alerts for an alert's, and marking it unread.
 #[component]
-pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> Result<impl View> {
+pub async fn notification<'a>(
+    cx: &Cx,
+    row: InboxRow<'a>,
+    page: NotificationPage<'a>,
+) -> Result<impl View> {
     let reportable = page.entry.filter(|entry| entry.reportable);
     Ok(view! {
         <article class="card" aria-labelledby="notification-heading">

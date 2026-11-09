@@ -2,7 +2,10 @@
 //! form of its settings, its secrets and the one just made. The developer console
 //! shows an account's own apps with these, and the admin dashboard every client.
 
-use crate::form::{Checkbox, Fields, Lines, Precision, change_form, time};
+use crate::{
+    browser::Browser,
+    form::{Checkbox, Fields, Lines, Precision, change_form, time},
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
@@ -13,6 +16,8 @@ use sourceorigin_common::{
 use std::{borrow::Cow, fmt};
 use topcoat::{
     Result,
+    context::Cx,
+    runtime::{Event, signal},
     view::{Child, View, component, view},
 };
 
@@ -366,7 +371,7 @@ const fn scope_description(scope: Scope) -> &'static str {
 
 /// A client's kind, then a warning when it does not sign users in, as badges.
 #[component]
-pub(crate) async fn client_status<'a>(client: ClientRow<'a>) -> Result<impl View> {
+pub(crate) async fn client_status<'a>(cx: &Cx, client: ClientRow<'a>) -> Result<impl View> {
     Ok(view! {
         <span class="badge neutral">(client.kind_name())</span>
         if let ClientStatus::Suspended { .. } = client.status {
@@ -378,14 +383,42 @@ pub(crate) async fn client_status<'a>(client: ClientRow<'a>) -> Result<impl View
 }
 
 /// A button copying the text of the element whose ID is `target`, named `label` for
-/// screen readers, after the status saying whether it did. It starts hidden; the
-/// passkey script shows it once it can write to the clipboard.
+/// screen readers, after the status saying, for a moment, whether it did. It starts
+/// hidden, and shows once the browser can write to the clipboard.
 #[component]
-pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl View> {
+pub(crate) async fn copy<'a>(cx: &Cx, target: &'a str, label: &'a str) -> Result<impl View> {
+    let (usable, status) = (signal(cx, || false), signal(cx, String::new));
+    // Each copy's status clears a moment after it, unless another one followed.
+    let clicks = signal(cx, || 0usize);
+    let (clipboard, copied, moment) = (
+        Browser::clipboard(),
+        Browser::copy(target),
+        Browser::moment(),
+    );
     Ok(view! {
         <span class="copy">
-            <span class="help" role="status"></span>
-            <button type="button" class="text-button small" data-copy=(target) aria-label=(format!("Copy {label}")) hidden="">
+            <span class="help" role="status">$(status.get())</span>
+            <button
+                type="button"
+                class="text-button small"
+                aria-label=(format!("Copy {label}"))
+                :hidden=$(!usable.get())
+                @mount=$(|_e: Event| usable.set(clipboard))
+                @click=$(async |_e: Event| {
+                    clicks.increment();
+                    let click = clicks.get();
+                    let done = raw!("await ${copied}", false);
+                    status.set(if done {
+                        "Copied".to_owned()
+                    } else {
+                        "Could not copy: select the text instead".to_owned()
+                    });
+                    let _waited = raw!("await ${moment}", ());
+                    if clicks.get() == click {
+                        status.set("".to_owned());
+                    }
+                })
+            >
                 "Copy"
             </button>
         </span>
@@ -394,7 +427,12 @@ pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl Vie
 
 /// `value` as code, the element `id`, beside a button copying it, named `label`.
 #[component]
-pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
+pub(crate) async fn copyable<'a>(
+    cx: &Cx,
+    id: &'a str,
+    label: &'a str,
+    value: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         <div class="code-line">
             <code id=(id)>(value)</code>
@@ -407,6 +445,7 @@ pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) ->
 /// `connection`, each value with a button copying it, then its redirect URIs.
 #[component]
 pub(crate) async fn client_facts<'a>(
+    cx: &Cx,
     client: ClientRow<'a>,
     connection: Connection<'a>,
 ) -> Result<impl View> {
@@ -432,13 +471,15 @@ pub(crate) async fn client_facts<'a>(
     );
     Ok(view! {
         <dl class="facts">
-            for (id, label, value) in facts {
+            #[key(position)]
+            for (position, (id, label, value)) in facts.into_iter().enumerate() {
                 <dt>(label)</dt>
                 <dd>copyable(id: id, label: label, value: &value)</dd>
             }
             <dt>"Redirect URIs"</dt>
             <dd>
-                for uri in client.redirect_uris {
+                #[key(position)]
+                for (position, uri) in client.redirect_uris.iter().enumerate() {
                     <div><code>(uri.as_str())</code></div>
                 }
             </dd>
@@ -448,7 +489,7 @@ pub(crate) async fn client_facts<'a>(
 
 /// Help with the input `of`, below it.
 #[component]
-async fn help<'a>(of: &'a Described<'a>, child: Child<'_>) -> Result<impl View> {
+async fn help<'a>(cx: &Cx, of: &'a Described<'a>, child: Child<'_>) -> Result<impl View> {
     Ok(view! {
         <small class="field-help" id=(of.help())>(child)</small>
     })
@@ -456,7 +497,7 @@ async fn help<'a>(of: &'a Described<'a>, child: Child<'_>) -> Result<impl View> 
 
 /// Why the service refused the setting of the input `of`, if it did, below it.
 #[component]
-async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
+async fn refusal<'a>(cx: &Cx, of: &'a Described<'a>) -> Result<impl View> {
     Ok(view! {
         if let Some(message) = of.refusal {
             <p class="field-error" id=(of.error())>(message)</p>
@@ -469,6 +510,7 @@ async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
 /// its `label` beside it, then its `detail` below, which describes it.
 #[component]
 pub(crate) async fn choice<'a>(
+    cx: &Cx,
     name: &'a str,
     #[default] value: Option<&'a str>,
     checked: bool,
@@ -497,7 +539,7 @@ pub(crate) async fn choice<'a>(
 
 /// The question of a new client's kind, `chosen` checked.
 #[component]
-async fn kind_question(chosen: ClientKind) -> Result<impl View> {
+async fn kind_question(cx: &Cx, chosen: ClientKind) -> Result<impl View> {
     Ok(view! {
         <fieldset>
             <legend>"Does your app have a backend that can keep a secret?"</legend>
@@ -528,7 +570,11 @@ async fn kind_question(chosen: ClientKind) -> Result<impl View> {
 /// A checkbox for each standard scope, those of `chosen` checked, and why the
 /// service refused them, as `scopes` says, if it did.
 #[component]
-async fn scope_choices<'a>(chosen: ScopeChoice, scopes: &'a Described<'a>) -> Result<impl View> {
+async fn scope_choices<'a>(
+    cx: &Cx,
+    chosen: ScopeChoice,
+    scopes: &'a Described<'a>,
+) -> Result<impl View> {
     Ok(view! {
         <fieldset aria-describedby=(scopes.refused().then(|| scopes.error()))>
             <legend>"Scopes"</legend>
@@ -551,11 +597,12 @@ async fn scope_choices<'a>(chosen: ScopeChoice, scopes: &'a Described<'a>) -> Re
 /// kind, `kind` chosen. Each input is named by its label alone, and described by
 /// its help. The service's `error` shows beside the input of its setting, which
 /// takes the focus, or above the inputs for a setting with no place for one (see
-/// [`FieldError::placed`]). With `confirm`, the passkey script confirms with a
-/// passkey first. The admin dashboard adds the inputs only operators fill in:
+/// [`FieldError::placed`]). With `confirm`, the browser confirms with a passkey
+/// first. The admin dashboard adds the inputs only operators fill in:
 /// `head` after the name, and `child` after the rest.
 #[component]
 pub(crate) async fn client_form<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into] change: Fields,
     draft: &'a ClientDraft,
@@ -659,7 +706,7 @@ pub(crate) async fn client_form<'a>(
 /// The input of a client's back-channel logout URI, showing `uri`, described as
 /// `of` says.
 #[component]
-async fn backchannel_input<'a>(uri: &'a str, of: &'a Described<'a>) -> Result<impl View> {
+async fn backchannel_input<'a>(cx: &Cx, uri: &'a str, of: &'a Described<'a>) -> Result<impl View> {
     Ok(view! {
         <label>
             "Back-channel logout URI"
@@ -685,12 +732,14 @@ async fn backchannel_input<'a>(uri: &'a str, of: &'a Described<'a>) -> Result<im
 /// made, and when it stops or stopped working.
 #[component]
 pub(crate) async fn secrets_list<'a>(
+    cx: &Cx,
     secrets: &'a [SecretRow],
     now: DateTime<Utc>,
 ) -> Result<impl View> {
     Ok(view! {
         <ul class="list">
-            for secret in secrets {
+            #[key(position)]
+            for (position, secret) in secrets.iter().enumerate() {
                 <li>
                     <div class="text">
                         <strong>"Created " time(at: secret.created_at, precision: Precision::Minute)</strong>
@@ -715,18 +764,24 @@ pub(crate) async fn secrets_list<'a>(
 }
 
 /// A client `secret` Origin Auth just made, shown once, with a button copying it, on
-/// `page`, whose address the passkey script, where the page loads it, puts back
-/// so that reloading it gets the page without the secret; saving it leads on to
-/// `next`. The admin dashboard loads no passkey script, so its copy button stays
-/// hidden.
+/// `page`, whose address the browser puts back so that reloading it gets the page
+/// without the secret; saving it leads on to `next`.
 #[component]
 pub(crate) async fn secret_panel<'a>(
+    cx: &Cx,
     secret: &'a Revealed,
     page: &'a str,
     next: &'a str,
 ) -> Result<impl View> {
+    let replaced = Browser::replace_url(page);
     Ok(view! {
-        <section class="card" aria-labelledby="secret-heading" data-replace-url=(page)>
+        <section
+            class="card"
+            aria-labelledby="secret-heading"
+            @mount=$(|_e: Event| {
+                let _replaced = replaced;
+            })
+        >
             <header><h2 id="secret-heading" tabindex="-1" autofocus="">"Your client secret"</h2></header>
             <div class="body">
                 <p class="notice warning" role="alert">

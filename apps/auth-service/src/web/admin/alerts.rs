@@ -16,7 +16,7 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub alert: AlertId, error = not_found);
+path_param!(pub alert: AlertId else not_found);
 
 /// The form of [`update`].
 #[derive(Clone, Deserialize)]
@@ -50,8 +50,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let cleared = href!(previous).resolve(cx);
-    let view =
-        view! { cx => sourceorigin_ui::alert_list(cards: &cards, previous: cleared.as_str()) };
+    let view = view! { sourceorigin_ui::alert_list(cards: &cards, previous: cleared.as_str()) };
     App::render(cx, StatusCode::OK, "Alerts", view).await
 }
 
@@ -73,7 +72,7 @@ pub(super) async fn previous(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let current = href!(list).resolve(cx);
-    let view = view! { cx =>
+    let view = view! {
         sourceorigin_ui::previous_alerts(cards: &cards, current: current.as_str(), limit: ALERTS_SHOWN)
     };
     App::render(cx, StatusCode::OK, "Previous alerts", view).await
@@ -115,7 +114,7 @@ pub(super) async fn update(cx: &Cx, form: Option<Form<UpdateForm>>) -> Result<Re
         (Some(refused.form.status), refused.form.note.as_str())
     });
     let refusal = refused.as_deref();
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::UpdateAlert,
             back: back.as_str(),

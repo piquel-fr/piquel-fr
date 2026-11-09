@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use sourceorigin_common::admin::{SigningKey, SigningKeyState};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -32,6 +33,7 @@ const fn state_badge(state: SigningKeyState) -> (&'static str, &'static str) {
 /// `rotate`.
 #[component]
 pub async fn signing_key_list<'a>(
+    cx: &Cx,
     rows: &'a [SigningKeyRow<'a>],
     rotate: &'a str,
 ) -> Result<impl View> {
@@ -59,7 +61,8 @@ pub async fn signing_key_list<'a>(
                             </tr>
                         </thead>
                         <tbody>
-                            for row in rows {
+                            #[key(position)]
+                            for (position, row) in rows.iter().enumerate() {
                                 let key = row.key;
                                 let (tone, label) = state_badge(key.state);
                                 <tr>
@@ -85,7 +88,7 @@ pub async fn signing_key_list<'a>(
 
 /// A moment, or a dash before it happens.
 #[component]
-async fn when(#[into] at: Option<DateTime<Utc>>) -> Result<impl View> {
+async fn when(cx: &Cx, #[into] at: Option<DateTime<Utc>>) -> Result<impl View> {
     Ok(view! {
         match at {
             Some(at) => moment(at: at),
@@ -99,6 +102,7 @@ async fn when(#[into] at: Option<DateTime<Utc>>) -> Result<impl View> {
 /// to `back`.
 #[component]
 pub async fn signing_key_rotation<'a>(
+    cx: &Cx,
     back: &'a str,
     #[into]
     #[default]

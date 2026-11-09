@@ -3,6 +3,8 @@
 
 /// Connected apps.
 mod connected;
+/// Choosing which square of a new picture auth keeps.
+mod cropper;
 /// Downloading the account's data, and deleting the account.
 mod data;
 /// Email addresses, and confirming one.
@@ -44,6 +46,7 @@ use crate::{
 use sourceorigin_common::events::{Browser, Platform, UserAgentFamily};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -167,7 +170,11 @@ impl Label for Tab {
 /// The settings pages an administrator changes for an account, as tabs within
 /// the account's page: `current` among them, linking each tab's page in `tabs`.
 #[component]
-pub async fn settings_tabs<'a>(tabs: &'a [(Tab, &'a str)], current: Tab) -> Result<impl View> {
+pub async fn settings_tabs<'a>(
+    cx: &Cx,
+    tabs: &'a [(Tab, &'a str)],
+    current: Tab,
+) -> Result<impl View> {
     Ok(view! {
         navigation(label: "Account settings", class: "tabs", links: tabs, current: current)
     })

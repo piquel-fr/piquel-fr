@@ -98,7 +98,7 @@ export async function recordAcceptedCredentials(context: BrowserContext): Promis
 
 /**
  * Expects the page `page` shows to have told the password manager, once its
- * passkey script ran, that the passkeys the authenticators `authenticatorIds`
+ * runtime ran, that the passkeys the authenticators `authenticatorIds`
  * hold, and only those, still sign in, under their own RP ID and user handle.
  */
 export async function expectAccepted(
@@ -114,7 +114,7 @@ export async function expectAccepted(
     )
   ).flatMap(({ credentials }) => credentials);
   const base64url = (value: string) => Buffer.from(value, 'base64').toString('base64url');
-  // Waits for the call, which the page makes once its passkey script runs.
+  // Waits for the call, which the page makes once its runtime runs.
   const told = await (
     await page.waitForFunction(() =>
       (window as unknown as { told?: AcceptedCredentials[] }).told?.at(-1)

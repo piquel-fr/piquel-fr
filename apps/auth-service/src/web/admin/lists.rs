@@ -65,7 +65,7 @@ pub(super) async fn events(cx: &Cx) -> Result<Response> {
         filter.kind.as_deref(),
         &pager,
     );
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::event_list(
             action: action.as_str(),
             user: user,

@@ -91,7 +91,7 @@ pub(super) async fn check(cx: &Cx) -> Result<Response> {
         holders: &holders,
         released: &released,
     };
-    let view = view! { cx => sourceorigin_ui::handle_list(page: page) };
+    let view = view! { sourceorigin_ui::handle_list(page: page) };
     App::render(cx, StatusCode::OK, "Handles", view).await
 }
 
@@ -114,7 +114,7 @@ pub(super) async fn reserve(cx: &Cx, form: Option<Form<Reservation>>) -> Result<
         (refused.form.handle.as_str(), refused.form.reason.as_str())
     });
     let refusal = refused.as_deref();
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::ReserveHandle,
             back: back.as_str(),
@@ -164,7 +164,7 @@ impl App {
             }
         })
         .await?;
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::dashboard_change(
                 change: change,
                 back: back.as_str(),

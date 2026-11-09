@@ -46,7 +46,7 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub client: ClientId, error = not_found);
+path_param!(pub client: ClientId else not_found);
 
 /// `/clients`: every OIDC client, deleted ones included, each linking its page.
 #[route(GET "/clients")]
@@ -61,7 +61,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let (rows, new) = (&rows, &href!(create).resolve(cx));
-    let page = view! { cx => sourceorigin_ui::client_list(rows: rows, new: new) };
+    let page = view! { sourceorigin_ui::client_list(rows: rows, new: new) };
     App::render(cx, StatusCode::OK, "Clients", page).await
 }
 
@@ -75,7 +75,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let id = path_param::<Client>(cx)?.clone();
     if let Some(secret) = App::revealed(cx, admin).map(Revealed::new) {
         let (secret, page) = (&secret, &href!(detail, Client(id)).resolve(cx));
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::client_created(secret: secret, page: page.as_str())
         };
         return App::render(cx, StatusCode::OK, "Client registered", page).await;
@@ -146,7 +146,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         changes,
     };
     let shown = &shown;
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::client_page(page: shown, now: Utc::now())
     };
     // A large page: its future is boxed, off the handler's stack.
@@ -283,7 +283,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
         &state,
         refusal.as_deref(),
     );
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::client_secrets(
             page: here.as_str(),
             name: name,
@@ -293,7 +293,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
             refusal: refusal,
         )
     };
-    App::render(cx, StatusCode::OK, "Client secrets", page).await
+    Box::pin(App::render(cx, StatusCode::OK, "Client secrets", page)).await
 }
 
 /// A change to a client that only needs confirming, as its `client` command
@@ -357,7 +357,7 @@ impl Toggle {
             App::submit(cx, form, done, |_| self.make(service, &admin.operator, &id)).await?;
         let change = self.change();
         let which = format!("Client {id}.");
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::dashboard_change(
                 change: change,
                 back: back.as_str(),
@@ -498,7 +498,7 @@ impl App {
     ) -> Result<Response> {
         let here = uri(cx).path().to_owned();
         let (title, here) = (registration.title(), &here);
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::client_registration(
                 registration: registration,
                 settings: settings,

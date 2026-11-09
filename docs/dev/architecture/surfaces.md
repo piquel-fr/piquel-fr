@@ -29,9 +29,9 @@ policy layer per listener. Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see [running several replicas](../operations/replicas.md)). Every page it
 serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
-never cached. Their scripts are the passkey script, which runs the passkey
-ceremonies their forms need and keeps a form from posting twice, and the picture
-script, which lets the picture form choose its crop.
+never cached. What they do in the browser, the passkey ceremonies their forms need
+and keeping a form from posting twice, runs on Topcoat's runtime, from the
+components that render them.
 
 Passkeys are bound to the `auth.sourceorigin.dev` RP ID, so passkey ceremonies always
 run on auth. A settings change that needs a recent passkey confirmation asks for
@@ -105,7 +105,7 @@ session confirms in a dialog on the list page itself, which the browser opens
 and closes with no script (`popovertarget`), posting to the change's own page;
 a dashboard not confirmed yet links that page instead, which confirms first.
 
-The dashboard's script spares the browser that trip: before following a link to a
+The frame's dialog spares the browser that trip: before following a link to a
 page that confirms first, or posting a change once the confirmation is too old, it
 asks for a passkey in a dialog on the page, then goes on to the change. Each page's
 frame says how long its confirmation lasts. The dialog runs the ceremony for auth's
@@ -113,8 +113,8 @@ RP ID on the dashboard's own origin, which auth's `/.well-known/webauthn` lists 
 a related origin (`WebAuthn` Level 3 §5.11), against the dashboard's `/confirm`
 routes. The proof is the handoff's kind: started by the dashboard session's auth
 session, bound to the browser, signed for the dashboard's origin, which the
-handoff refuses, and kept as the dashboard's confirmation only. Without the
-script, or in a browser without related origins, the browser goes to the handoff
+handoff refuses, and kept as the dashboard's confirmation only. Without scripts,
+or in a browser without related origins, the browser goes to the handoff
 page and back as before.
 
 Lists page by number, with their totals, as the CLI's `--page` does.
@@ -259,10 +259,10 @@ views of accounts and administrators (`sourceorigin_common::admin`), which the d
 shows and the CLI prints as JSON, carry its ID. The owner sets it on the settings' Profile tab, which
 shows the account as apps do, with its handle, display name and picture, each
 changed in a dialog the popover API opens with no script; the picture's is a
-`multipart/form-data` form. There the picture script shows the chosen image under
-a circle, as apps show it, to drag and zoom; the form sends the square under the
+`multipart/form-data` form. There the browser shows the chosen image under a
+circle, as apps show it, to drag and zoom; the form sends the square under the
 circle in the image's upright pixels (`crop_x`, `crop_y`, `crop_size`), and
-without the script auth keeps the centred square. `PUT /account/picture` sets it
+without scripts auth keeps the centred square. `PUT /account/picture` sets it
 too, taking the square as `?x=…&y=…&size=…`. Administrators
 may view and remove it, with a reason, such as one that impersonates someone,
 but never set one; their Profile tab links the dashboard's own pages for the

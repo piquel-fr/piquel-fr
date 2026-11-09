@@ -4,12 +4,16 @@
 
 use super::{Health, Policies, Preferences, Sidebar, frames::status_bar};
 use crate::{
+    browser::Browser,
     clients::copyable,
+    form::post_form,
     icons::{Icon, icon},
 };
 use sourceorigin_common::{TraceId, UserId};
 use topcoat::{
     Result,
+    context::Cx,
+    runtime::Event,
     view::{Child, View, class, component, view},
 };
 
@@ -75,7 +79,7 @@ impl Who<'_> {
     }
 }
 
-/// What the passkey script tells the browser's password manager of the
+/// What the page tells the browser's password manager of the
 /// signed-in account (the `WebAuthn` Signal API): its current handle and name,
 /// from [`Who`], so its passkeys show them after a change, and which of its
 /// passkeys still exist.
@@ -184,7 +188,7 @@ pub struct Shell<'a> {
 /// page as `child`, and the status bar. The browser's `preferences` pick the
 /// theme switch shown.
 #[component]
-pub async fn shell<'a>(frame: &'a Shell<'a>, child: Child<'_>) -> Result<impl View> {
+pub async fn shell<'a>(cx: &Cx, frame: &'a Shell<'a>, child: Child<'_>) -> Result<impl View> {
     let reference = frame.reference.map(|reference| reference.to_string());
     Ok(view! {
         <div class="shell">
@@ -214,7 +218,7 @@ pub async fn shell<'a>(frame: &'a Shell<'a>, child: Child<'_>) -> Result<impl Vi
 /// The sidebar of [`shell`]: the brand and the width toggle, the groups of
 /// links, then the theme switch, signing out and who is signed in.
 #[component]
-async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
+async fn sidebar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
         <aside class="sidebar">
             <div class="top">
@@ -232,12 +236,14 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
                     icon(kind: Icon::Close)
                 </label>
             </div>
-            for group in frame.groups {
+            #[key(position)]
+            for (position, group) in frame.groups.iter().enumerate() {
                 if let Some(label) = group.label {
                     <div class="group">(label)</div>
                 }
                 <nav aria-label=(group.label.unwrap_or(frame.area))>
-                    for item in group.items {
+                    #[key(position)]
+                    for (position, item) in group.items.iter().enumerate() {
                         <a
                             href=(item.href)
                             title=(item.label)
@@ -257,20 +263,32 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
             <div class="end">
                 theme_toggle(action: frame.preferences_action, here: frame.here)
                 if let Some(sign_out) = frame.sign_out {
-                    <form method="post" action=(sign_out) data-submit-once="">
+                    post_form(action: sign_out,
                         <button type="submit" title="Sign out">
                             icon(kind: Icon::SignOut)
                             <span class="label">"Sign out"</span>
                         </button>
-                    </form>
+                    )
                 }
                 if let Some(who) = frame.who {
+                    // The account's passkeys show its current handle and name in the
+                    // browser's password manager, after a change, which forgets the
+                    // ones that no longer sign in.
+                    let signal = frame.signal.map(|signal| {
+                        Browser::signal_account(
+                            &signal.user.to_string(),
+                            who.handle,
+                            who.name,
+                            signal.credentials,
+                        )
+                    });
                     <div
                         class="who"
-                        data-passkey-user=(frame.signal.map(|signal| signal.user.to_string()))
-                        data-passkey-name=(frame.signal.map(|_| who.handle))
-                        data-passkey-display-name=(frame.signal.map(|_| who.name))
-                        data-passkey-credentials=(frame.signal.map(|signal| signal.credentials.join(" ")))
+                        if let Some(signal) = signal {
+                            @mount=$(|_e: Event| {
+                                let _signalled = signal;
+                            })
+                        }
                     >
                         avatar(who: who)
                         <div>
@@ -287,7 +305,7 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
 /// The top bar of [`shell`]: the menu button of the drawer, the crumb, the search
 /// form, if the area has one, and the avatar.
 #[component]
-async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
+async fn topbar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
         <header class="topbar">
             <label class="menu-button" for="menu" aria-hidden="true">
@@ -296,7 +314,8 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
             <div class="crumb">
                 <a href=(frame.area_home)>(frame.area.to_lowercase())</a>
                 <span aria-hidden="true">"/"</span>
-                for (name, href) in frame.trail {
+                #[key(position)]
+                for (position, (name, href)) in frame.trail.iter().enumerate() {
                     <a href=(*href)>(name.text())</a>
                     <span aria-hidden="true">"/"</span>
                 }
@@ -331,7 +350,12 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
 /// to `action` and coming back to `here`. The stylesheet turns its chevron
 /// around once collapsed, and hides it on phones, where the sidebar is a drawer.
 #[component]
-async fn sidebar_toggle<'a>(action: &'a str, here: &'a str, collapsed: bool) -> Result<impl View> {
+async fn sidebar_toggle<'a>(
+    cx: &Cx,
+    action: &'a str,
+    here: &'a str,
+    collapsed: bool,
+) -> Result<impl View> {
     let (value, title) = if collapsed {
         (Sidebar::Expanded, "Expand the sidebar")
     } else {
@@ -350,7 +374,7 @@ async fn sidebar_toggle<'a>(action: &'a str, here: &'a str, collapsed: bool) -> 
 /// The form choosing the theme, posting to `action` and coming back to `here`:
 /// a button for each theme, of which the stylesheet shows the one not in use.
 #[component]
-async fn theme_toggle<'a>(action: &'a str, here: &'a str) -> Result<impl View> {
+async fn theme_toggle<'a>(cx: &Cx, action: &'a str, here: &'a str) -> Result<impl View> {
     Ok(view! {
         <form class="theme-toggle" method="post" action=(action)>
             <input type="hidden" name="return_to" value=(here)>
@@ -382,7 +406,11 @@ pub(crate) enum AvatarSize {
 /// for an administrator. It is decorative beside their name, so it has no text of
 /// its own.
 #[component]
-pub(crate) async fn avatar<'a>(who: Who<'a>, #[default] size: AvatarSize) -> Result<impl View> {
+pub(crate) async fn avatar<'a>(
+    cx: &Cx,
+    who: Who<'a>,
+    #[default] size: AvatarSize,
+) -> Result<impl View> {
     let class = class!(
         "avatar",
         "admin" if who.administrator,

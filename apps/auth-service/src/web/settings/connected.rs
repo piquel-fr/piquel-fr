@@ -66,7 +66,7 @@ impl AccountPage for ConnectedApps {
     ) -> Result<Response, Failure> {
         let apps = web.account.apps(&reader.viewer()).await?;
         let rows: Vec<_> = apps.iter().map(ConnectedAppRow::from).collect();
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             sourceorigin_ui::connected_apps(
                 page: settings::APPS,
                 rows: &rows,

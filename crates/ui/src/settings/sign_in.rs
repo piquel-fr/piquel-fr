@@ -13,6 +13,7 @@ use sourceorigin_common::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -44,7 +45,7 @@ pub enum SignInChange {
         /// The provider.
         provider: Provider,
     },
-    /// Shows that the passkey script just added a passkey, through the account API:
+    /// Shows that the browser just added a passkey, through the account API:
     /// this changes nothing.
     Enrolled {},
 }
@@ -87,6 +88,7 @@ pub struct ProviderRow<'a> {
 /// `recovery` that can still be undone, only its passkey can be removed.
 #[component]
 pub async fn sign_in_methods<'a>(
+    cx: &Cx,
     page: &'a str,
     passkeys: &'a [Passkey],
     providers: &'a [ProviderRow<'a>],
@@ -117,6 +119,7 @@ pub async fn sign_in_methods<'a>(
 /// The passkeys section of [`sign_in_methods`].
 #[component]
 async fn passkey_list<'a>(
+    cx: &Cx,
     page: &'a str,
     passkeys: &'a [Passkey],
     state: &'a SignInState,
@@ -132,7 +135,8 @@ async fn passkey_list<'a>(
                 <h2 id="passkeys-heading">"Passkeys " <span class="count">(count.to_string())</span></h2>
             </header>
             <ul class="list">
-                for passkey in passkeys {
+                #[key(position)]
+                for (position, passkey) in passkeys.iter().enumerate() {
                     let recovered = added == Some(passkey.id);
                     passkey_row(
                         page: page,
@@ -187,6 +191,7 @@ async fn passkey_list<'a>(
 /// removal row, even from a hand-made link.
 #[component]
 async fn passkey_row<'a>(
+    cx: &Cx,
     page: &'a str,
     passkey: &'a Passkey,
     recovered: bool,
@@ -274,10 +279,10 @@ async fn passkey_row<'a>(
     })
 }
 
-/// Adding a passkey, which the passkey script runs, then posts the form to `page`,
+/// Adding a passkey, which the browser runs, then posts the form to `page`,
 /// which says so. On Android, it offers Google Password Manager.
 #[component]
-async fn enroll(page: &str, android: bool) -> Result<impl View> {
+async fn enroll(cx: &Cx, page: &str, android: bool) -> Result<impl View> {
     Ok(view! {
         passkey_form(
             action: page,
@@ -293,6 +298,7 @@ async fn enroll(page: &str, android: bool) -> Result<impl View> {
 /// The social sign-in section of [`sign_in_methods`].
 #[component]
 async fn social<'a>(
+    cx: &Cx,
     page: &'a str,
     providers: &'a [ProviderRow<'a>],
     state: &'a SignInState,
@@ -311,7 +317,8 @@ async fn social<'a>(
                 </h2>
             </header>
             <ul class="list">
-                for row in providers {
+                #[key(position)]
+                for (position, row) in providers.iter().enumerate() {
                     provider_row(
                         page: page,
                         row: *row,
@@ -336,6 +343,7 @@ async fn social<'a>(
 /// The open unlinking row takes the focus.
 #[component]
 async fn provider_row<'a>(
+    cx: &Cx,
     page: &'a str,
     row: ProviderRow<'a>,
     unlinking: bool,

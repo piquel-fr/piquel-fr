@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sourceorigin_common::ClientId;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -54,6 +55,7 @@ pub struct ConnectedAppRow<'a> {
 /// as `state` opens it, for `audience`. Its changes post to `page`.
 #[component]
 pub async fn connected_apps<'a>(
+    cx: &Cx,
     page: &'a str,
     rows: &'a [ConnectedAppRow<'a>],
     state: &'a ConnectedAppsState,
@@ -71,7 +73,8 @@ pub async fn connected_apps<'a>(
                 <h2 id="apps-heading">"Connected apps " <span class="count">(rows.len().to_string())</span></h2>
             </header>
             <ul class="list">
-                for row in rows {
+                #[key(position)]
+                for (position, row) in rows.iter().enumerate() {
                     app_row(
                         page: page,
                         row: *row,
@@ -93,6 +96,7 @@ pub async fn connected_apps<'a>(
 /// removal row takes the focus.
 #[component]
 async fn app_row<'a>(
+    cx: &Cx,
     page: &'a str,
     row: ConnectedAppRow<'a>,
     removing: bool,

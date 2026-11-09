@@ -102,7 +102,7 @@ impl AccountPage for Overview {
             history: settings::HISTORY,
             notifications: settings::NOTIFICATIONS,
         };
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             sourceorigin_ui::account_overview(overview: overview, links: links)
         });
         // Linking a provider goes on at the provider, so the page's forms may

@@ -26,7 +26,7 @@ use sourceorigin_ui::{
 };
 use topcoat::{
     Error,
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{
         Body, Method, StatusCode, parse_query_params, path_param,
         request::{headers, method, uri},
@@ -120,7 +120,7 @@ impl AccountPage for Inbox {
             preferences: &inbox.preferences,
             alert,
         };
-        let page = Child::new(view! { cx => sourceorigin_ui::inbox(rows: &rows, page: page) });
+        let page = Child::new(view! { sourceorigin_ui::inbox(rows: &rows, page: page) });
         web.settings_page(
             cx,
             Tab::Notifications,
@@ -229,7 +229,7 @@ impl AccountPage for NotificationPage {
             shown,
         };
         let row = InboxRow::from(&view.item);
-        let page = Child::new(view! { cx => sourceorigin_ui::notification(row: row, page: page) });
+        let page = Child::new(view! { sourceorigin_ui::notification(row: row, page: page) });
         // Under the inbox in the crumb, named by its subject.
         let framed = Framed {
             section: Section::Account,
@@ -253,7 +253,7 @@ impl WebApplication {
     /// the link names. Opening it changes nothing, so a mail scanner that follows
     /// links does not unsubscribe anyone.
     pub(in crate::web) async fn unsubscription(cx: &Cx) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let here = uri(cx).to_string();
         match web.unsubscriber(cx)? {
             Some(_) => {
@@ -272,7 +272,7 @@ impl WebApplication {
     /// (RFC 8058). The body, `List-Unsubscribe=One-Click` from a client, is not
     /// read: the link is all it needs.
     pub(in crate::web) async fn unsubscribe(cx: &Cx, _: Body) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let Some(user) = web.unsubscriber(cx)? else {
             return web
                 .unsubscribe_page(cx, StatusCode::NOT_FOUND, UnsubscribeStep::Invalid)
@@ -305,7 +305,7 @@ impl WebApplication {
         status: StatusCode,
         step: UnsubscribeStep<'_>,
     ) -> Result<Response, Failure> {
-        let view = view! { cx => sourceorigin_ui::unsubscribe(step: step) };
+        let view = view! { sourceorigin_ui::unsubscribe(step: step) };
         let title = Title::Unsubscribe.as_str();
         Ok(self.render(cx, status, title, &[], view).await?)
     }

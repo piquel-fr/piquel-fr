@@ -11,7 +11,7 @@ use sourceorigin_ui::{LoginQuery, Query, Title};
 use std::slice;
 use topcoat::{
     Error,
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{Body, StatusCode, request::headers, response::Response},
     view::view,
 };
@@ -22,7 +22,7 @@ impl WebApplication {
     /// it sends the browser, who registered it and who is signed in, and the
     /// buttons deciding on it.
     pub(in crate::web) async fn consent(cx: &Cx) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let TransactionQuery { transaction } = Self::query(cx)?;
         let consent = web
             .oidc
@@ -32,7 +32,7 @@ impl WebApplication {
         let redirect = Url::parse(&consent.request.redirect_uri).map_err(OAuthError::from)?;
         let host = redirect.host_str().unwrap_or_default().to_owned();
         let sign_in = LoginQuery::continuing(&transaction).on(routes::page::LOGIN)?;
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::consent(
                 client: &consent.request.client_display_name,
                 host: &host,
@@ -58,7 +58,7 @@ impl WebApplication {
     /// `POST /authorize`: records the decision and sends the browser to the
     /// application, with a code or the refusal.
     pub(in crate::web) async fn decide(cx: &Cx, body: Body) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let context = Self::context(cx)?;
         let decision: AuthorizationDecision = Self::form(cx, body).await?;
         let transaction = decision.transaction().to_owned();
@@ -73,11 +73,11 @@ impl WebApplication {
     /// `GET /logout?…`: asks to confirm an application's logout request, which
     /// `GET /oidc/logout` sends here once it is valid.
     pub(in crate::web) async fn logout(cx: &Cx) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let request: LogoutQuery = Self::query(cx)?;
         let (destination, _) = web.oidc.logout_destination(&request).await?;
         let fields: Vec<_> = request.fields().collect();
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::logout(action: routes::page::LOGOUT, fields: &fields, keep: routes::page::LOGIN)
         };
         Ok(web
@@ -94,7 +94,7 @@ impl WebApplication {
     /// `POST /logout`: ends the session and sends the browser where the application
     /// asked, or to sign-in.
     pub(in crate::web) async fn end_session(cx: &Cx, body: Body) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let context = Self::context(cx)?;
         let request: LogoutQuery = Self::form(cx, body).await?;
         let (destination, signed_out) =

@@ -67,7 +67,7 @@ impl AccountPage for Overview {
             discovery: &discovery,
         };
         let row = ClientRow::from(client);
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::overview(client: row, connection: connection, secrets: secrets.as_deref())
         };
         web.app_page(
@@ -151,7 +151,7 @@ impl AccountPage for AppSettings {
         let client = app.client();
         let page = developers::of(APP_SETTINGS, &client.id);
         let row = ClientRow::from(client);
-        let view = view! { cx =>
+        let view = view! {
             sourceorigin_ui::app_settings(
                 page: &page,
                 client: row,
@@ -227,7 +227,7 @@ impl AccountPage for AppSecrets {
             })
             .collect();
         let page = developers::of(APP_SECRETS, &client.id);
-        let view = view! { cx =>
+        let view = view! {
             sourceorigin_ui::app_secrets(
                 page: &page,
                 secrets: &rows,

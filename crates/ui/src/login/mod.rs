@@ -2,8 +2,8 @@
 //! sign-in to an existing account.
 //!
 //! Every link and form of these pages keeps their [`LoginQuery`], which says where
-//! the browser goes once signed in. A passkey ceremony runs in the passkey script,
-//! which then posts the form, and the page sends the browser on.
+//! the browser goes once signed in. A passkey ceremony runs in the browser, which
+//! then posts the form, and the page sends the browser on.
 
 use crate::{
     Policies, Title,
@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sourceorigin_common::{Provider, RecoveryId, TokenId, protocol::claims::Acr};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -132,15 +133,15 @@ impl LoginQuery {
 }
 
 /// A change a sign-in page posts, named by its `action` field. A ceremony's form
-/// posts once the passkey script has run it, with what the ceremony read, which no
+/// posts once the browser has run it, with what the ceremony read, which no
 /// change keeps.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum LoginChange {
-    /// Shows that the passkey script just signed the browser in with a passkey:
+    /// Shows that the browser just signed in with a passkey:
     /// this changes nothing, and the browser goes on.
     SignedIn {},
-    /// Shows that the passkey script just created the account, signed in: this
+    /// Shows that the browser just created the account, signed in: this
     /// changes nothing, and the browser goes on.
     Registered {},
     /// Starts signing in at the provider.
@@ -305,6 +306,7 @@ impl<'a> Step<'a> {
 /// which it agrees to.
 #[component]
 pub async fn sign_in<'a>(
+    cx: &Cx,
     step: Step<'a>,
     page: &'a str,
     query: &'a LoginQuery,
@@ -414,6 +416,7 @@ pub async fn sign_in<'a>(
 /// `signed_in`, signing it out first.
 #[component]
 async fn sign_in_forms<'a>(
+    cx: &Cx,
     action: &'a str,
     page: &'a str,
     query: &'a LoginQuery,
@@ -433,7 +436,8 @@ async fn sign_in_forms<'a>(
         )
         if !passkey_only && !providers.is_empty() {
             <div class="divider">"or continue with"</div>
-            for provider in providers {
+            #[key(position)]
+            for (position, provider) in providers.iter().enumerate() {
                 change_form(
                     action: action,
                     change: LoginChange::Social { provider: *provider },
@@ -448,12 +452,13 @@ async fn sign_in_forms<'a>(
     })
 }
 
-/// The form of [`Step::SignUp`], posting to `action` once the passkey script
-/// created the account. It names the `social` evidence the account gets, if any,
+/// The form of [`Step::SignUp`], posting to `action` once the browser created the
+/// account. It names the `social` evidence the account gets, if any,
 /// and asks for an invitation, starting with `invitation`, when one is required. On
 /// Android, it offers Google Password Manager.
 #[component]
 async fn sign_up_form<'a>(
+    cx: &Cx,
     action: &'a str,
     social: Option<(Provider, TokenId)>,
     invitation: Option<&'a str>,
@@ -485,7 +490,7 @@ async fn sign_up_form<'a>(
 /// The forms of [`Step::Restore`], posting to `action`: restoring the account and
 /// signing in, or leaving it scheduled for deletion.
 #[component]
-async fn restore_forms<'a>(action: &'a str) -> Result<impl View> {
+async fn restore_forms<'a>(cx: &Cx, action: &'a str) -> Result<impl View> {
     Ok(view! {
         change_form(
             action: action,
@@ -508,6 +513,7 @@ async fn restore_forms<'a>(action: &'a str) -> Result<impl View> {
 /// cancelling. Signing in opens `page` with `query` to ask for a handle.
 #[component]
 async fn link_forms<'a>(
+    cx: &Cx,
     action: &'a str,
     page: &'a str,
     query: &'a LoginQuery,
@@ -553,6 +559,7 @@ async fn link_forms<'a>(
 /// `class`. The consent page offers it too.
 #[component]
 pub(crate) async fn switch_account<'a>(
+    cx: &Cx,
     action: &'a str,
     label: &'a str,
     class: &'a str,
@@ -573,6 +580,7 @@ pub(crate) async fn switch_account<'a>(
 /// opens `page` with `query` asking for it.
 #[component]
 async fn passkey_sign_in<'a>(
+    cx: &Cx,
     action: &'a str,
     page: &'a str,
     query: &'a LoginQuery,

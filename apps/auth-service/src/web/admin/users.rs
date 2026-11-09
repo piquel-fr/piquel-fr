@@ -21,8 +21,8 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub account: UserId, error = not_found);
-path_param!(pub session: SessionId, error = not_found);
+path_param!(pub account: UserId else not_found);
+path_param!(pub session: SessionId else not_found);
 
 /// Why the dashboard changes no administrator's account.
 const ADMINISTRATOR_TARGET: &str =
@@ -70,7 +70,7 @@ pub(super) async fn search(cx: &Cx) -> Result<Response> {
         .invitations
         .then(|| href!(invitations::create).resolve(cx));
     let (q, rows, pager, invite) = (&q, &rows, &pager, invite.as_deref());
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::user_search(q: q.as_str(), rows: rows, pages: pager, invite: invite)
     };
     App::render(cx, StatusCode::OK, "Users", page).await
@@ -160,7 +160,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     // The page names only references: a view moves what it names.
     let picture = App::picture(cx, detail.user.picture);
     let (detail, sessions, events, all_events) = (&detail, &sessions, &events, &all_events);
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::user_page(
             detail: detail,
             picture: picture.as_deref(),
@@ -197,7 +197,7 @@ pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<
     .await?;
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::Disable,
             back: back.as_str(),
@@ -220,7 +220,7 @@ pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.enable_user(&admin.operator, id)
     })
     .await?;
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::Enable,
             back: back.as_str(),
@@ -248,7 +248,7 @@ pub(super) async fn delete(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Re
     .await?;
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::Delete,
             back: back.as_str(),
@@ -276,7 +276,7 @@ pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     .await?;
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::Restore,
             back: back.as_str(),
@@ -299,7 +299,7 @@ pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> 
         service.revoke_user_sessions(&admin.operator, id)
     })
     .await?;
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::RevokeSessions,
             back: back.as_str(),
@@ -322,7 +322,7 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
         service.revoke_session(&admin.operator, session)
     })
     .await?;
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::RevokeSession,
             back: back.as_str(),
@@ -364,7 +364,7 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::Recover,
             back: back.as_str(),
@@ -396,7 +396,7 @@ pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<ReasonForm>>) -> Re
     let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
     let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::UndoRecovery,
             back: back.as_str(),

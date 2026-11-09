@@ -16,10 +16,10 @@
 //! back. A page that changes something needs the dashboard's own passkey
 //! confirmation, recent enough that the service still accepts it once the form
 //! is submitted; without one, it sends the browser to confirm on auth's handoff
-//! page, and back to the page. The dashboard's script spares the page that trip:
-//! before following a link to such a page or posting a change, as the frame says
-//! it must (see `sourceorigin_ui::DashboardConfirmation`), it asks for a passkey in a
-//! dialog on the page itself, [`start_confirmation`] and [`finish_confirmation`]
+//! page, and back to the page. The frame's dialog spares the page that trip:
+//! before following a link to such a page or posting a change, once too little
+//! of the confirmation is left (see `sourceorigin_ui::DashboardConfirmation`), the
+//! browser asks for a passkey in it, on the page itself, [`start_confirmation`] and [`finish_confirmation`]
 //! running the ceremony for the dashboard's origin, which auth lists as a related
 //! origin of its RP ID. Every page still works without it.
 
@@ -85,7 +85,7 @@ use std::{
 };
 use topcoat::{
     Error, Result,
-    context::{Cx, app_context, memoize},
+    context::{Cx, context, memoize},
     router::{
         Body, BodyLimit, HeaderValue, Method, Next, OriginPolicy, Route, Router, StatusCode,
         content::{Form, Json},
@@ -307,15 +307,13 @@ impl AdminApplication {
         let auth = config.passkey.origin.clone();
         // A form's answer may send the browser on to auth's handoff page, to sign
         // in or confirm again: browsers apply `form-action` to its redirects too.
-        // The script fetches only the passkey ceremonies of the dashboard's own.
+        // The pages fetch only the passkey ceremonies of the dashboard's own.
         // Profile pictures are served by auth.
         let policy = format!(
             "default-src 'none'; script-src {}; style-src {}; font-src 'self'; img-src {}; \
              connect-src 'self'; form-action 'self' {}; frame-ancestors 'none'; \
              base-uri 'none'",
-            dashboard
-                .origin
-                .join(&EmbeddedAssets::DASHBOARD_SCRIPT.path()),
+            EmbeddedAssets::script_src(&dashboard.origin),
             dashboard.origin.join(&EmbeddedAssets::STYLESHEET.path()),
             auth.serialized(),
             auth.join(routes::page::ADMIN),
@@ -341,12 +339,12 @@ impl AdminApplication {
     /// every path below, and its stylesheet.
     pub(crate) fn routes(self) -> axum::Router {
         let pages = Router::builder()
-            .app_context(self)
+            .with(self)
             // The security layer already accepts forms only from the dashboard's own
             // pages, by a stricter rule: Topcoat's also takes `Sec-Fetch-Site: none`.
-            .origin_policy(OriginPolicy::dangerous_disable())
+            .with(OriginPolicy::dangerous_disable())
             // axum's body limit does not reach Topcoat, whose own default is 2 MiB.
-            .layer(BodyLimit::max(MAX_DASHBOARD_BODY_BYTES))
+            .with(BodyLimit::max(MAX_DASHBOARD_BODY_BYTES))
             .layer(answers)
             .route(overview::overview)
             .route(preferences)
@@ -383,12 +381,9 @@ impl AdminApplication {
                         }
                     }
                 });
-        // The stylesheet, the fonts it links and the script, the dashboard's
-        // only files.
-        let assets = EmbeddedAssets::SHARED
-            .iter()
-            .chain([&EmbeddedAssets::DASHBOARD_SCRIPT]);
-        assets.fold(router, |router, asset| {
+        // The stylesheet, the fonts it links and the scripts, the dashboard's only
+        // files.
+        EmbeddedAssets::all().iter().fold(router, |router, asset| {
             router.route(
                 &asset.path(),
                 axum::routing::get(|uri: axum::http::Uri| {
@@ -485,7 +480,7 @@ impl AdminApplication {
 
     /// The dashboard's application context.
     fn of(cx: &Cx) -> &Self {
-        app_context::<Self>(cx)
+        context::<Self>(cx)
     }
 
     /// The administrator signed in to the dashboard. A browser without a session
@@ -583,7 +578,7 @@ impl AdminApplication {
         }
     }
 
-    /// The answer of a JSON route the dashboard's script calls: `answered`, or its
+    /// The answer of a JSON route the dashboard's dialog calls: `answered`, or its
     /// refusal in JSON, as auth's own JSON routes answer.
     fn json(answered: Result<axum::response::Response, ApiError>) -> Response {
         answered
@@ -813,9 +808,8 @@ impl AdminApplication {
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
-        let (stylesheet, script, home, leave, search, prefer) = (
+        let (stylesheet, home, leave, search, prefer) = (
             &EmbeddedAssets::STYLESHEET.path(),
-            &EmbeddedAssets::DASHBOARD_SCRIPT.path(),
             &tabs[0].1,
             &href!(sign_out).resolve(cx),
             &href!(users::search).resolve(cx),
@@ -881,12 +875,11 @@ impl AdminApplication {
             }),
         };
         let page = Child::new(page);
-        let scripts = [script.as_str()];
-        let html = view! { cx =>
+        let html = view! {
             sourceorigin_ui::document(
                 title: title.as_str(),
                 stylesheet: stylesheet,
-                scripts: &scripts,
+                runtime: true,
                 preferences: dashboard.preferences,
                 admin: true,
                 sourceorigin_ui::dashboard_frame(dashboard: &dashboard, (page))
@@ -926,7 +919,7 @@ impl AdminApplication {
             refused.log_refusal();
             if let AdminError::NotAdministrator = refused {
                 let home = &Self::of(cx).auth.join(routes::page::settings::HOME);
-                let page = view! { cx => sourceorigin_ui::no_access(home: home.as_str()) };
+                let page = view! { sourceorigin_ui::no_access(home: home.as_str()) };
                 return Self::render(cx, StatusCode::FORBIDDEN, "No access", page).await;
             }
         }
@@ -940,7 +933,7 @@ impl AdminApplication {
             },
         };
         let (status, detail) = refused.public();
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::dashboard_failure(title: "That did not work", detail: Self::sentence(detail))
         };
         Self::render(cx, status, "Refused", page).await
@@ -956,7 +949,7 @@ impl AdminApplication {
             return Ok(answered);
         }
         ApiError::log_error(&*error);
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::dashboard_failure(
                 title: "That did not work",
                 detail: "Something went wrong on our side. Please try again.",
@@ -1000,7 +993,7 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
         Err(refused @ AdminError::InvalidHandoff) => {
             refused.log_refusal();
             let retry = href!(overview::overview).resolve(cx);
-            let page = view! { cx =>
+            let page = view! {
                 sourceorigin_ui::dashboard_failure(
                     title: "Sign-in did not work",
                     detail: "The sign-in link expired, was used already, or was opened in another browser.",
@@ -1013,7 +1006,7 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
     }
 }
 
-/// `POST /confirm/start`: starts the passkey ceremony the dashboard's script runs,
+/// `POST /confirm/start`: starts the passkey ceremony the dashboard's dialog runs,
 /// in its dialog, to confirm the dashboard on the page itself, for the auth
 /// session it rests on. It answers as auth's own ceremonies do, in JSON.
 #[route(POST "/confirm/start")]
@@ -1027,10 +1020,10 @@ async fn start_confirmation(cx: &Cx) -> Result<Response> {
     Ok(AdminApplication::json(started))
 }
 
-/// `POST /confirm/finish`: verifies the passkey assertion the dashboard's script
+/// `POST /confirm/finish`: verifies the passkey assertion the dashboard's dialog
 /// posts, signed for the dashboard's origin in the ceremony
 /// [`start_confirmation`] started, and confirms the dashboard's session with it.
-/// The script then goes on to the change it was for.
+/// The browser then goes on to the change it was for.
 #[route(POST "/confirm/finish")]
 async fn finish_confirmation(cx: &Cx, Json(input): Json<AuthenticationFinish>) -> Result<Response> {
     let admin = AdminApplication::admin(cx).await?;
@@ -1071,7 +1064,7 @@ async fn sign_out(cx: &Cx) -> Result<Response> {
         &href!(overview::overview).resolve(cx),
         &app.auth.join(routes::page::LOGOUT),
     );
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_signed_out(sign_in: again, auth_sign_out: auth_sign_out)
     };
     AdminApplication::render(cx, StatusCode::OK, "Signed out", page).await

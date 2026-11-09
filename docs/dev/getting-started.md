@@ -40,8 +40,8 @@ JavaScript.
 The executables are `target/release/auth-service` and
 `target/release/sourceorigin-web`. Both embed the stylesheet (`crates/ui/assets/style/`,
 its parts joined into one file) and its typefaces (`crates/ui/assets/fonts`,
-under the SIL Open Font License). Auth also embeds its pages' scripts
-(`apps/auth-service/assets/`), and sourceorigin-web the policies
+under the SIL Open Font License). Auth also embeds Topcoat's runtime and
+the expressions its pages use, and sourceorigin-web the policies
 (`apps/web/assets/policies/`). Rebuild after changing them.
 
 ## Run your changes

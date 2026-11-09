@@ -142,8 +142,8 @@ the account lock, with `Owner::lock_confirmed` or `Subject::lock_confirmed`.
 The page only asks for it first:
 
 - the component passes `confirm: audience.confirms()` to `change_form`, which
-  marks the form `data-passkey-confirm` while the session has no recent
-  confirmation, so the passkey script confirms before it posts;
+  has the form confirm with a passkey before it posts while the session has no
+  recent confirmation;
 - a change posted anyway fails with `step_up_required`, and
   `WebApplication::submit` renders the page again with the row open, asking
   once more.

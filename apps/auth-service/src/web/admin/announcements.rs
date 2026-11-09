@@ -33,7 +33,7 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub announcement: AnnouncementId, error = not_found);
+path_param!(pub announcement: AnnouncementId else not_found);
 
 /// `/announcements`: the latest announcements, drafts and sent ones.
 #[route(GET "/announcements")]
@@ -51,7 +51,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let create = &href!(draft).resolve(cx);
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::announcement_list(rows: &rows, create: create.as_str())
     };
     App::render(cx, StatusCode::OK, "Announcements", page).await
@@ -93,7 +93,7 @@ pub(super) async fn show(cx: &Cx) -> Result<Response> {
             },
         }),
     };
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::announcement_page(
             detail: detail,
             accounts: &accounts,
@@ -167,7 +167,7 @@ pub(super) async fn send(cx: &Cx, form: Option<Form<SendAnnouncement>>) -> Resul
     };
     let mailed = &format!("{} {}", detail.mailed, announcement.emailed());
     let revision = &checked.revision.to_string();
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::SendAnnouncement,
             back: back.as_str(),
@@ -195,7 +195,7 @@ pub(super) async fn discard(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<R
     })
     .await?;
     let back = &href!(show, Announcement(id)).resolve(cx);
-    let page = view! { cx =>
+    let page = view! {
         sourceorigin_ui::dashboard_change(
             change: Change::DiscardAnnouncement,
             back: back.as_str(),
@@ -328,7 +328,7 @@ impl App {
             Some(_) => (Change::EditAnnouncement, "Edit the draft"),
             None => (Change::DraftAnnouncement, "New announcement"),
         };
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::announcement_form(
                 change: change,
                 back: back,

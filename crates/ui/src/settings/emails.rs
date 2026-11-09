@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sourceorigin_common::EmailId;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -72,6 +73,7 @@ pub struct EmailRow<'a> {
 /// email.
 #[component]
 pub async fn addresses<'a>(
+    cx: &Cx,
     page: &'a str,
     emails: &'a [EmailRow<'a>],
     state: &'a EmailsState,
@@ -93,7 +95,8 @@ pub async fn addresses<'a>(
                 <h2 id="emails-heading">"Your addresses " <span class="count">(emails.len().to_string())</span></h2>
             </header>
             <ul class="list">
-                for email in emails {
+                #[key(position)]
+                for (position, email) in emails.iter().enumerate() {
                     address_row(
                         page: page,
                         email: *email,
@@ -144,6 +147,7 @@ pub async fn addresses<'a>(
 /// a new link only when SourceOrigin `sends` email.
 #[component]
 async fn address_row<'a>(
+    cx: &Cx,
     page: &'a str,
     email: EmailRow<'a>,
     replaceable: bool,
@@ -238,12 +242,12 @@ async fn address_row<'a>(
 
 /// Confirming an address from its verification link, which posts to `action`.
 /// The link carries its token in the fragment, which never reaches a server: the
-/// passkey script copies it into the form when it is posted, enabling the button
-/// once it finds one, and shows instead that the link is incomplete when it has
-/// none, as after a confirmation that failed, whose `alert` says why. Its links
+/// browser copies it into the form when it is posted, enabling the button once it
+/// finds one, and shows instead that the link is incomplete when it has none, as after a confirmation that failed, whose `alert` says why. Its links
 /// lead to the addresses at `emails`.
 #[component]
 pub async fn verify<'a>(
+    cx: &Cx,
     action: &'a str,
     emails: &'a str,
     #[default] alert: Option<&'a str>,
@@ -272,7 +276,12 @@ pub async fn verify<'a>(
 /// The address now confirmed, and whether it became the `primary` one; its link
 /// leads to the addresses at `emails`.
 #[component]
-pub async fn verified<'a>(address: &'a str, primary: bool, emails: &'a str) -> Result<impl View> {
+pub async fn verified<'a>(
+    cx: &Cx,
+    address: &'a str,
+    primary: bool,
+    emails: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         <h1>"Address confirmed"</h1>
         <p class="lead">

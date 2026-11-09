@@ -1,10 +1,11 @@
 //! The audit chain's state and its checkpoints.
 
 use super::moment;
-use crate::layout::page_head;
+use crate::{form::post_form, layout::page_head};
 use sourceorigin_common::admin::{AuditPage, ChainPoint, Pruning, VerificationKeys};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -15,6 +16,7 @@ use topcoat::{
 /// verification from here checks against.
 #[component]
 pub async fn audit_page<'a>(
+    cx: &Cx,
     page: &'a AuditPage,
     keys: VerificationKeys,
     #[into]
@@ -58,7 +60,8 @@ pub async fn audit_page<'a>(
                             <tr><th>"position"</th><th>"signed"</th><th>"pruning"</th></tr>
                         </thead>
                         <tbody>
-                            for checkpoint in &page.checkpoints {
+                            #[key(position)]
+                            for (position, checkpoint) in page.checkpoints.iter().enumerate() {
                                 <tr>
                                     <td><code title=(checkpoint.point.hash.as_str())>(checkpoint.point.position.to_string())</code></td>
                                     <td>moment(at: checkpoint.signed_at)</td>
@@ -92,7 +95,7 @@ pub async fn audit_page<'a>(
 /// with the form that verifies it again, warning of keys a compromised server
 /// could hold if they are `uncommitted`.
 #[component]
-async fn chain_card<'a>(page: &'a AuditPage, uncommitted: bool) -> Result<impl View> {
+async fn chain_card<'a>(cx: &Cx, page: &'a AuditPage, uncommitted: bool) -> Result<impl View> {
     let chain = &page.chain;
     let point = |point: &Option<ChainPoint>| {
         point
@@ -156,7 +159,7 @@ async fn chain_card<'a>(page: &'a AuditPage, uncommitted: bool) -> Result<impl V
                     <dt>"Pruned through"</dt><dd><code>(point(&chain.anchor))</code></dd>
                     <dt>"Newest"</dt><dd><code>(point(&chain.newest))</code></dd>
                 </dl>
-                <form class="stack" method="post" data-submit-once="">
+                post_form(class: "stack",
                     <p class="help">
                         "This is the newest verification the audit log records, not a check made now: \
                          events sealed since were not checked, and someone with auth's database role could \
@@ -165,7 +168,7 @@ async fn chain_card<'a>(page: &'a AuditPage, uncommitted: bool) -> Result<impl V
                          what it finds."
                     </p>
                     <div class="row actions"><button class="secondary">"Verify now"</button></div>
-                </form>
+                )
             </div>
         </section>
     })

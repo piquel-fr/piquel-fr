@@ -3,12 +3,13 @@
 
 use super::{Action, Change, confirm, moment};
 use crate::icons::{Icon, icon};
-use crate::{clients::choice, layout::page_head};
+use crate::{clients::choice, form::post_form, layout::page_head};
 use sourceorigin_common::admin::{
     Announcement, AnnouncementAudience, AnnouncementDetail, DraftAnnouncement, User,
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -51,6 +52,7 @@ fn audience(announcement: &Announcement) -> String {
 /// `create`.
 #[component]
 pub async fn announcement_list<'a>(
+    cx: &Cx,
     rows: &'a [AdminAnnouncementRow<'a>],
     create: &'a str,
 ) -> Result<impl View> {
@@ -96,6 +98,7 @@ pub async fn announcement_list<'a>(
 /// its emails fared and how many recipients read it.
 #[component]
 pub async fn announcement_page<'a>(
+    cx: &Cx,
     detail: &'a AnnouncementDetail,
     accounts: &'a [(&'a User, String)],
     preview: &'a str,
@@ -214,6 +217,7 @@ pub struct FoundAccount<'a> {
 /// as saved, after the dashboard's passkey confirmation; "Save draft" needs none.
 #[component]
 pub async fn announcement_form<'a>(
+    cx: &Cx,
     change: Change,
     back: &'a str,
     form: &'a DraftAnnouncement,
@@ -229,7 +233,7 @@ pub async fn announcement_form<'a>(
             <p class="notice error" role="alert">(refusal)</p>
         }
         <section class="card">
-            <form class="stack" method="post" data-submit-once="" data-unconfirmed="">
+            post_form(class: "stack", unconfirmed: true,
                 <label>
                     "Subject"
                     <input name="subject" required="" maxlength="150" value=(form.subject.as_str())>
@@ -273,7 +277,7 @@ pub async fn announcement_form<'a>(
                     <button class="secondary" name="intent" value="save">"Save draft"</button>
                     <a class="button secondary" href=(back)>"Cancel"</a>
                 </div>
-            </form>
+            )
         </section>
     })
 }
@@ -283,6 +287,7 @@ pub async fn announcement_form<'a>(
 /// chooses everyone.
 #[component]
 async fn chosen_accounts<'a>(
+    cx: &Cx,
     form: &'a DraftAnnouncement,
     found: &'a [FoundAccount<'a>],
 ) -> Result<impl View> {

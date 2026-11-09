@@ -10,6 +10,7 @@ use sourceorigin_common::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -53,6 +54,7 @@ pub struct SessionRow<'a> {
 /// inviting someone, while signup needs invitations.
 #[component]
 pub async fn user_search<'a>(
+    cx: &Cx,
     q: &'a str,
     rows: &'a [UserRow<'a>],
     pages: &'a Pager,
@@ -87,7 +89,8 @@ pub async fn user_search<'a>(
                             <tr><th>"handle"</th><th>"name"</th><th>"role"</th><th>"status"</th><th>"created"</th></tr>
                         </thead>
                         <tbody>
-                            for row in rows {
+                            #[key(position)]
+                            for (position, row) in rows.iter().enumerate() {
                                 <tr>
                                     <td><a class="mono" href=(row.href.as_str())>(format!("@{}", row.user.handle))</a></td>
                                     <td>
@@ -154,6 +157,7 @@ pub struct AccountPages<'a> {
 /// events, linking `all_events`.
 #[component]
 pub async fn user_page<'a>(
+    cx: &Cx,
     detail: &'a UserDetail,
     picture: Option<&'a str>,
     pages: Result<AccountPages<'a>, &'a str>,
@@ -207,7 +211,8 @@ pub async fn user_page<'a>(
                 <p class="empty">"No remembered consent."</p>
             } else {
                 <ul class="list">
-                    for consent in &detail.consents {
+                    #[key(position)]
+                    for (position, consent) in detail.consents.iter().enumerate() {
                         <li>
                             <div class="text">
                                 <strong>(consent.client_id.as_str())</strong>
@@ -232,6 +237,7 @@ pub async fn user_page<'a>(
 /// them all, or why the `pages` offer none.
 #[component]
 async fn session_list<'a>(
+    cx: &Cx,
     sessions: &'a [SessionRow<'a>],
     pages: Result<AccountPages<'a>, &'a str>,
 ) -> Result<impl View> {
@@ -259,7 +265,8 @@ async fn session_list<'a>(
                         <tr><th>"signed in"</th><th>"methods"</th><th>"last seen"</th><th>"expires"</th><th></th></tr>
                     </thead>
                     <tbody>
-                        for row in sessions {
+                        #[key(position)]
+                        for (position, row) in sessions.iter().enumerate() {
                             <tr>
                                 <td>moment(at: row.session.authenticated_at)</td>
                                 <td>(row.methods())</td>
@@ -283,6 +290,7 @@ async fn session_list<'a>(
 /// What may be done to `user`, by its `pages`, or why nothing may.
 #[component]
 async fn account_actions<'a>(
+    cx: &Cx,
     user: &'a User,
     pages: Result<AccountPages<'a>, &'a str>,
 ) -> Result<impl View> {
@@ -325,7 +333,7 @@ async fn account_actions<'a>(
 /// when each was added, never by name: a recovery's passkey was named by whoever
 /// used its link.
 #[component]
-async fn credentials<'a>(detail: &'a UserDetail) -> Result<impl View> {
+async fn credentials<'a>(cx: &Cx, detail: &'a UserDetail) -> Result<impl View> {
     Ok(view! {
         <section class="card">
             <header><h2>"Emails " <span class="count">(detail.emails.len().to_string())</span></h2></header>
@@ -333,7 +341,8 @@ async fn credentials<'a>(detail: &'a UserDetail) -> Result<impl View> {
                 <p class="empty">"No email address."</p>
             } else {
                 <ul class="list">
-                    for email in &detail.emails {
+                    #[key(position)]
+                    for (position, email) in detail.emails.iter().enumerate() {
                         <li>
                             <div class="text">
                                 private_address(address: email.address.as_str())
@@ -353,7 +362,8 @@ async fn credentials<'a>(detail: &'a UserDetail) -> Result<impl View> {
         <section class="card">
             <header><h2>"Sign-in methods"</h2></header>
             <ul class="list">
-                for passkey in &detail.passkeys {
+                #[key(position)]
+                for (position, passkey) in detail.passkeys.iter().enumerate() {
                     <li>
                         <div class="text">
                             <strong>"Passkey"</strong>
@@ -361,7 +371,8 @@ async fn credentials<'a>(detail: &'a UserDetail) -> Result<impl View> {
                         </div>
                     </li>
                 }
-                for identity in &detail.identities {
+                #[key(position)]
+                for (position, identity) in detail.identities.iter().enumerate() {
                     <li>
                         <div class="text">
                             <strong>(identity.provider.to_string())</strong>

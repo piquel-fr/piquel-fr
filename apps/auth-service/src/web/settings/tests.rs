@@ -2,11 +2,14 @@
 
 use crate::{
     AuthConfig,
-    routes::page::{self, settings},
+    routes::{
+        self,
+        page::{self, settings},
+    },
     security::BrowserCookie,
     tests::{
-        AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, cookie, detailed_png, html,
-        parameter, policy, redirect, verified_address,
+        AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, ceremonies, cookie,
+        detailed_png, html, parameter, policy, redirect, verified_address,
     },
     web::tests::value_after,
 };
@@ -138,8 +141,8 @@ async fn connected_apps_are_listed_and_removed() {
     assert!(html(again).await.contains("may already be removed"));
 }
 
-/// A change that needs a recent passkey confirmation asks the passkey script for
-/// one while the session has none. Posted anyway, it is refused, and its row opens
+/// A change that needs a recent passkey confirmation asks the browser for one
+/// while the session has none. Posted anyway, it is refused, and its row opens
 /// again, with what was typed, to ask once more. A confirmed session makes it at
 /// once.
 #[tokio::test]
@@ -159,7 +162,10 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
         email: address.clone(),
     };
     let page = html(social.visit(&replicas.a, settings::EMAILS).await).await;
-    assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(
+        ceremonies(&page, routes::passkey::CONFIRM_START) > 0,
+        "{page}"
+    );
     let refused = social.post(&replicas, settings::EMAILS, &add).await;
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     let page = html(refused).await;
@@ -168,10 +174,17 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
         "{page}"
     );
     assert!(page.contains(&format!(r#"value="{address}""#)), "{page}");
-    assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(
+        ceremonies(&page, routes::passkey::CONFIRM_START) > 0,
+        "{page}"
+    );
 
     let page = html(confirmed.visit(&replicas.a, settings::EMAILS).await).await;
-    assert!(!page.contains("data-passkey-confirm"), "{page}");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::CONFIRM_START),
+        0,
+        "{page}"
+    );
     let added = confirmed.post(&replicas, settings::EMAILS, &add).await;
     assert_eq!(cookie(&added, BrowserCookie::Notice).0, "email_added");
     let page = html(confirmed.visit(&replicas.a, settings::EMAILS).await).await;
@@ -719,7 +732,7 @@ async fn verification_links_are_confirmed_by_their_form() {
     let page = browser.visit(&replicas.a, settings::VERIFY).await;
     assert_eq!(page.status(), StatusCode::OK);
     let page = html(page).await;
-    assert!(page.contains("data-fragment-form"), "{page}");
+    assert!(page.contains(r#"data-fragment="token""#), "{page}");
     let refused = browser
         .submit(
             &replicas.b,
@@ -783,7 +796,10 @@ async fn data_page_downloads_the_data_and_deletes_the_account() {
     let social =
         Browser::sign_in_with(&database, browser.user_id, AuthenticationMethod::Federation).await;
     let page = html(social.visit(&replicas.a, settings::DATA).await).await;
-    assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(
+        ceremonies(&page, routes::passkey::CONFIRM_START) > 0,
+        "{page}"
+    );
 
     let download = browser
         .post(&replicas, settings::DATA, &DataChange::Export)

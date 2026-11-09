@@ -8,7 +8,7 @@ mod account;
 mod admin;
 /// Conditions that need an administrator's attention, raised and cleared.
 mod alerts;
-/// The stylesheet and passkey script of auth's pages, embedded at compile time.
+/// The stylesheet, typefaces and scripts of auth's pages, embedded at compile time.
 mod assets;
 /// The tamper-evident audit chain: sealing, checkpoints, verification and pruning.
 mod audit;

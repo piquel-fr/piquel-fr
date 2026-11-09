@@ -19,3 +19,7 @@ exceptions = [
     { crate = "sourceorigin-telemetry", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-ui", allow = ["PolyForm-Noncommercial-1.0.0"] },
 ]
+
+[sources]
+# Topcoat's fork, until Topcoat has what it adds (see the workspace Cargo.toml).
+allow-git = ["https://github.com/PiquelChips/topcoat"]

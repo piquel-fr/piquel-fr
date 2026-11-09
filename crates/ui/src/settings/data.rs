@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -43,6 +44,7 @@ impl Query for DataState {}
 /// confirmation for them.
 #[component]
 pub async fn account_data<'a>(
+    cx: &Cx,
     page: &'a str,
     handle: &'a str,
     grace_days: i64,
@@ -114,6 +116,7 @@ pub async fn account_data<'a>(
 /// unless its owner signs in at `sign_in` with their passkey before then.
 #[component]
 pub async fn account_deleted<'a>(
+    cx: &Cx,
     purge_after: DateTime<Utc>,
     sign_in: &'a str,
 ) -> Result<impl View> {

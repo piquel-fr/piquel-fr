@@ -7,6 +7,7 @@ use sourceorigin_common::alerts::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -54,7 +55,11 @@ fn author(update: &AlertUpdate) -> String {
 /// The current alerts, `cards`, newest first, each with posting an update on
 /// it, and a link to the alerts that cleared, at `previous`.
 #[component]
-pub async fn alert_list<'a>(cards: &'a [AlertCard<'a>], previous: &'a str) -> Result<impl View> {
+pub async fn alert_list<'a>(
+    cx: &Cx,
+    cards: &'a [AlertCard<'a>],
+    previous: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         page_head(
             title: "Alerts",
@@ -64,7 +69,8 @@ pub async fn alert_list<'a>(cards: &'a [AlertCard<'a>], previous: &'a str) -> Re
         if cards.is_empty() {
             <section class="card"><p class="empty">"No alert needs attention."</p></section>
         }
-        for card in cards {
+        #[key(position)]
+        for (position, card) in cards.iter().enumerate() {
             alert_card(card: card)
         }
     })
@@ -74,6 +80,7 @@ pub async fn alert_list<'a>(cards: &'a [AlertCard<'a>], previous: &'a str) -> Re
 /// `limit`, and a link back to the current ones, at `current`.
 #[component]
 pub async fn previous_alerts<'a>(
+    cx: &Cx,
     cards: &'a [AlertCard<'a>],
     current: &'a str,
     limit: u32,
@@ -88,7 +95,8 @@ pub async fn previous_alerts<'a>(
         if cards.is_empty() {
             <section class="card"><p class="empty">"No alert has cleared yet."</p></section>
         }
-        for card in cards {
+        #[key(position)]
+        for (position, card) in cards.iter().enumerate() {
             alert_card(card: card)
         }
         if full {
@@ -100,7 +108,7 @@ pub async fn previous_alerts<'a>(
 /// One alert: what it says, when it was raised, last seen and cleared, the
 /// updates posted on it, newest first, and posting one while it is current.
 #[component]
-async fn alert_card<'a>(card: &'a AlertCard<'a>) -> Result<impl View> {
+async fn alert_card<'a>(cx: &Cx, card: &'a AlertCard<'a>) -> Result<impl View> {
     let detail = card.detail;
     let alert = &detail.alert;
     let (tone, label) = badge(detail);
@@ -154,6 +162,7 @@ async fn alert_card<'a>(card: &'a AlertCard<'a>) -> Result<impl View> {
 /// holding `status` and `note` as a refused update posted them.
 #[component]
 pub async fn alert_update_fields<'a>(
+    cx: &Cx,
     #[into]
     #[default]
     status: Option<AlertStatus>,

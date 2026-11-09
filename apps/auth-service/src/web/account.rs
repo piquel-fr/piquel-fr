@@ -29,7 +29,7 @@ use sourceorigin_ui::{
 };
 use topcoat::{
     Error,
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{
         Body, Method, RouteHandlerFn, StatusCode,
         content::Form,
@@ -266,7 +266,7 @@ impl WebApplication {
     /// once, the notice of the change just made, or sign-in. A query that does not
     /// parse, from an edited or old link, opens nothing.
     async fn show<P: AccountPage>(cx: &Cx) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let Some(owner) = web.owner(cx).await? else {
             return web
                 .signed_out(cx, P::SECTION, P::TITLE, StatusCode::OK)
@@ -293,7 +293,7 @@ impl WebApplication {
     /// answers as [`Applied`] says, or renders the page again with why it failed.
     /// A form from an older page that does not decode changes nothing.
     async fn submit<P: AccountPage>(cx: &Cx, body: Body) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let Some(owner) = web.owner(cx).await? else {
             return web
                 .signed_out(cx, P::SECTION, P::TITLE, StatusCode::UNAUTHORIZED)
@@ -365,7 +365,7 @@ impl WebApplication {
             Err(Failure::Missing) => {
                 let head = match P::SECTION {
                     Section::Developers => Child::new(
-                        view! { cx => sourceorigin_ui::back_to_apps(home: page::developers::HOME) },
+                        view! { sourceorigin_ui::back_to_apps(home: page::developers::HOME) },
                     ),
                     Section::Account => Child::default(),
                 };
@@ -482,7 +482,7 @@ impl WebApplication {
             dashboard: dashboard.as_deref(),
             unread,
         };
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::account(
                 nav: nav,
                 who: who,
@@ -537,7 +537,7 @@ impl WebApplication {
             ..LoginQuery::default()
         }
         .on(page::LOGIN)?;
-        let page = view! { cx => sourceorigin_ui::signed_out(section: section, sign_in: &sign_in) };
+        let page = view! { sourceorigin_ui::signed_out(section: section, sign_in: &sign_in) };
         Ok(self.render(cx, status, title, &[], page).await?)
     }
 }

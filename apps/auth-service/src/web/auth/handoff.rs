@@ -19,7 +19,7 @@ use crate::{
 use sourceorigin_common::protocol::claims::Acr;
 use sourceorigin_ui::{Checkbox, HandoffProof, HandoffQuery, LoginQuery, Query, Title};
 use topcoat::{
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{
         Body, StatusCode,
         error::see_other,
@@ -62,7 +62,7 @@ impl WebApplication {
     /// `GET /admin`: goes on to the dashboard, or asks for the passkey proof the
     /// dashboard asked for.
     pub(in crate::web) async fn admin(cx: &Cx) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let sign_in = web.dashboard_sign_in()?;
         let query: HandoffQuery = Self::query(cx)?;
         let Some(owner) = web.owner(cx).await? else {
@@ -82,7 +82,7 @@ impl WebApplication {
     /// `POST /admin`: verifies the passkey proof its form posted, for the browser's
     /// session only, then goes on to the dashboard, confirmed now.
     pub(in crate::web) async fn admin_proof(cx: &Cx, body: Body) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let sign_in = web.dashboard_sign_in()?;
         let posted: HandoffProof = Self::form(cx, body).await?;
         let query = HandoffQuery {
@@ -143,8 +143,7 @@ impl WebApplication {
                 Ok(see_other(login).into_response(cx)?)
             }
             Refusal::NoAccess => {
-                let page =
-                    view! { cx => sourceorigin_ui::no_access(home: routes::page::settings::HOME) };
+                let page = view! { sourceorigin_ui::no_access(home: routes::page::settings::HOME) };
                 Ok(self
                     .render_as(
                         cx,
@@ -175,10 +174,10 @@ impl WebApplication {
             (status, Some(message))
         });
         let action = uri(cx).path();
-        let page = view! { cx =>
+        let page = view! {
             sourceorigin_ui::handoff_proof(
                 action: action,
-                proof: routes::passkey::ADMIN_PROOF,
+                proof: routes::passkey::ADMIN_PROOF_START,
                 query: query,
                 alert: alert,
             )

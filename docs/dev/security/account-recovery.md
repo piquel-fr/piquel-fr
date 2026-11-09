@@ -194,7 +194,7 @@ link is only mailed, so `--revoke` stays at the terminal.
   says that until `settles_at` its passkey confirms nothing, and, with no
   passkey from before, that only support can undo it; the passkey list says
   which passkeys can't be removed meanwhile. The question shows without scripts
-  too, and the passkey script hides it once answered. Every sign-in that continues
+  too, and the page hides it once answered. Every sign-in that continues
   to an app asks the same question before going on, whichever way it signed in:
   a passkey or a link on the sign-in page, a provider, or a restore all go on
   through the pending authorization (`OidcApplication::continue_authorization`),

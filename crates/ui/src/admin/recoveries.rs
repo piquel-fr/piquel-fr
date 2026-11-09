@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use sourceorigin_common::PasskeyId;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -56,7 +57,7 @@ pub struct RecoveryRow {
 
 /// An account's recoveries of the last 15 days, newest first.
 #[component]
-pub async fn recovery_list<'a>(rows: &'a [RecoveryRow]) -> Result<impl View> {
+pub async fn recovery_list<'a>(cx: &Cx, rows: &'a [RecoveryRow]) -> Result<impl View> {
     Ok(view! {
         if rows.is_empty() {
             <p class="empty">"No recovery in the last 15 days."</p>
@@ -66,7 +67,8 @@ pub async fn recovery_list<'a>(rows: &'a [RecoveryRow]) -> Result<impl View> {
                     <tr><th>"started"</th><th>"state"</th><th>"passkey"</th></tr>
                 </thead>
                 <tbody>
-                    for row in rows {
+                    #[key(position)]
+                    for (position, row) in rows.iter().enumerate() {
                         <tr>
                             <td>moment(at: row.started_at)</td>
                             <td>

@@ -10,6 +10,7 @@ use crate::{Messages, icons::Icon, settings::Tab};
 use sourceorigin_common::TraceId;
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -68,7 +69,7 @@ pub struct AccountNav<'a> {
 }
 
 /// A signed-in page of `section`, in the account's shell: the sidebar of `nav`
-/// for `who`, whose passkey script tells the password manager `signal`, signing
+/// for `who`, which tells the password manager `signal`, signing
 /// out by posting to `sign_out`, the preference forms posting to
 /// `preferences_action`, reversing `preferences`, and coming back to `here`,
 /// the page named `title` in the crumb after `trail`, the pages it is under,
@@ -78,6 +79,7 @@ pub struct AccountNav<'a> {
 /// `head`, such as an app's tabs, its `messages`, and the page as `child`.
 #[component]
 pub async fn account<'a>(
+    cx: &Cx,
     nav: AccountNav<'a>,
     who: Who<'a>,
     signal: PasskeySignal<'a>,
@@ -185,7 +187,7 @@ pub async fn account<'a>(
 /// What `section`'s pages show a browser that is not signed in: a link to sign
 /// in, at `sign_in`, which comes back to the page.
 #[component]
-pub async fn signed_out(section: Section, sign_in: &str) -> Result<impl View> {
+pub async fn signed_out(cx: &Cx, section: Section, sign_in: &str) -> Result<impl View> {
     let (title, why) = section.sign_in();
     Ok(view! {
         <h1>(title)</h1>

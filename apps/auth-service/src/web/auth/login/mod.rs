@@ -26,7 +26,7 @@ use sourceorigin_ui::{
 };
 use topcoat::{
     Error,
-    context::{Cx, app_context},
+    context::{Cx, context},
     router::{
         Body, StatusCode, Uri,
         error::see_other,
@@ -260,9 +260,8 @@ impl From<QueryError> for Refusal {
 impl WebApplication {
     /// `GET` of the sign-in page `page`: the step the browser is at.
     pub(in crate::web) async fn sign_in(cx: &Cx, page: SignInPage) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
-        web.sign_in_page(cx, page, Visit::new(web, cx).await, None)
-            .await
+        let web = context::<Self>(cx);
+        Box::pin(web.sign_in_page(cx, page, Visit::new(web, cx).await, None)).await
     }
 
     /// `POST` of the sign-in page `page`: makes the change its form names, then
@@ -273,7 +272,7 @@ impl WebApplication {
         page: SignInPage,
         body: Body,
     ) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
+        let web = context::<Self>(cx);
         let visit = Visit::new(web, cx).await;
         let refused = match Self::change::<LoginChange>(cx, body).await {
             Some(change) => match web.make(cx, page, visit, change).await {
@@ -283,8 +282,7 @@ impl WebApplication {
             },
             None => ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE),
         };
-        web.sign_in_page(cx, page, Visit::new(web, cx).await, Some(refused))
-            .await
+        Box::pin(web.sign_in_page(cx, page, Visit::new(web, cx).await, Some(refused))).await
     }
 
     /// Makes `change`, posted to `page` on the `visit`, and answers where the
@@ -298,7 +296,7 @@ impl WebApplication {
     ) -> Result<Response, Refusal> {
         let recovery = RecoveryQuestion::from(&change);
         let (mut response, cookie) = match change {
-            // The passkey script signed the browser in before posting, unless its
+            // The browser signed in with a passkey before posting, unless its
             // passkey's account is scheduled for deletion: then it left an offer to
             // restore it instead, which the page shows.
             LoginChange::SignedIn {} | LoginChange::Registered {} => {
@@ -479,7 +477,7 @@ impl WebApplication {
             return Ok(None);
         };
         let here = continuation.on(query.clone()).on(page.path())?;
-        let question = view! { cx =>
+        let question = view! {
             sourceorigin_ui::recovery_prompt(
                 recovery: &recovery,
                 action: &here,
@@ -615,7 +613,7 @@ impl WebApplication {
             error: None,
             ..query.clone()
         });
-        let view = view! { cx =>
+        let view = view! {
             sourceorigin_ui::sign_in(
                 step: step,
                 page: page.path(),
@@ -626,8 +624,6 @@ impl WebApplication {
                 alert: alert,
             )
         };
-        Ok(self
-            .render(cx, status, step.title().as_str(), &targets, view)
-            .await?)
+        Ok(Box::pin(self.render(cx, status, step.title().as_str(), &targets, view)).await?)
     }
 }

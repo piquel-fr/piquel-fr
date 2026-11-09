@@ -138,7 +138,7 @@ expressions included.
 | Format, or check formatting | `just fmt` / `just fmt-check` |
 | Clippy and ESLint with warnings denied, and `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
 | Unused Rust dependencies (cargo-machete), and unused web files, exports and dependencies (knip) | `just unused` (`just rust unused` / `just web unused`) |
-| Type-check Rust, and TypeScript with the pages' scripts | `just check` (`just rust check` / `just web check`) |
+| Type-check Rust and TypeScript | `just check` (`just rust check` / `just web check`) |
 | Rust unit tests, or one package's | `just test` / `just test -p auth-service` |
 | Rust docs with warnings denied, and the doc tests | `just doc` / `just doc-test` |
 | TypeScript SDK tests with coverage, and the runtime smoke test | `just web test` / `just web smoke` |

@@ -1,7 +1,7 @@
 /**
  * The Profile tab's dialogs, which open without a script: uploading a picture,
  * which the pages load under their Content-Security-Policy, and removing it; then
- * the picture script's crop, where zooming and dragging change the square the
+ * the picture's crop, where zooming and dragging change the square the
  * form sends.
  */
 import { expect, test } from '@playwright/test';
@@ -61,7 +61,7 @@ test('profile: a picture, and a notice that closes', async ({ browser }) => {
 });
 
 /**
- * The picture script's crop: a chosen image shows under a circle, at its centred
+ * The picture form's crop: a chosen image shows under a circle, at its centred
  * square, and zooming in and dragging it choose the square the form sends, which
  * auth keeps.
  */

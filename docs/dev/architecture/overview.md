@@ -60,7 +60,7 @@ Auth renders every page itself, sign-in included, and the account settings at
 
 | Location | Responsibility |
 | --- | --- |
-| `apps/auth-service` | The auth authority: browser ceremonies, social sign-in, OIDC, the server-rendered pages, the settings API, the admin dashboard and the CLI. `assets/passkey.js` runs the WebAuthn ceremonies and the form hooks that start them, and `assets/picture.js` lets the picture form choose its crop |
+| `apps/auth-service` | The auth authority: browser ceremonies, social sign-in, OIDC, the server-rendered pages, the settings API, the admin dashboard and the CLI |
 | `apps/web` | `sourceorigin-web`, sourceorigin.dev's own web server, with SourceOrigin's policies in `assets/policies/` |
 | `packages/auth` | `@sourceorigin/auth`, the TypeScript SDK, not yet published: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `sourceorigin_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [SDK design](sdk.md#test-vectors) |
@@ -84,7 +84,7 @@ explains how applications, routes and services fit together.
 | `sourceorigin-crypto` (`crates/crypto`) | Every cryptographic primitive: secrets, digests, HMAC, PKCE, RS256 signing and key sets, AES-256-GCM sealing, Ed25519 signed notes and SCRAM verifiers |
 | `sourceorigin-repository` (`crates/database`) | The only crate that runs SQL: connections, migrations, repositories, transactions, events and the delivery queue's storage |
 | `sourceorigin-telemetry` (`crates/telemetry`) | Logs, traces and metrics, and the HTTP layer every router uses |
-| `sourceorigin-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, which know nothing of the database or HTTP |
+| `sourceorigin-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, which know nothing of the database or HTTP. What they do in the browser is Rust too, run by Topcoat's runtime: `browser.rs` holds what the runtime cannot name, such as the WebAuthn ceremonies |
 | `sourceorigin-auth` (`crates/auth-sdk`) | The Rust SDK, which depends only on `sourceorigin-common` |
 
 [Rust conventions](../rust-conventions.md#crates) describes each crate in full.
@@ -103,10 +103,10 @@ sourceorigin.dev subdomains.
 Every task runs through `just`: see [getting started](../getting-started.md) and
 [testing](../testing.md). Prettier and type-aware ESLint cover all web code from
 the root configuration, as rustfmt and Clippy cover Rust; `just fmt`, `just lint`
-and `just check` run both. `tsc` checks the pages' scripts' JSDoc types as
-strictly as TypeScript's. The TypeScript SDK is the one package that builds
+and `just check` run both. The TypeScript SDK is the one package that builds
 JavaScript, and the pnpm workspace's only member besides the root; auth's
-executable embeds its stylesheet and scripts and builds none.
+executable embeds its stylesheet and Topcoat's runtime and expressions scripts,
+which Cargo builds.
 
 ## Read next
 

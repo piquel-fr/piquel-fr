@@ -184,8 +184,12 @@
 .refused small {
   font-size: 0.76rem;
 }
+/* The dashboard's page, wrapped for its click handler, lays out as if it were not. */
+.gate {
+  display: contents;
+}
 /* A confirmation the browser opens over the page, with no script or from the
-   dashboard's, and closes on a click outside or Escape. */
+   dashboard, and closes on a click outside or Escape. */
 .dialog {
   margin: auto;
   inset: 0;

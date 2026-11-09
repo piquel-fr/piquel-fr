@@ -472,6 +472,25 @@ pub(crate) fn policy(response: &Response) -> &str {
         .expect("CSP is text")
 }
 
+/// How many of `page`'s forms run the passkey ceremony that starts at `start`:
+/// their handlers carry it, as data, in the page's runtime expressions.
+pub(crate) fn ceremonies(page: &str, start: &str) -> usize {
+    page.matches(&format!(r"\&quot;start\&quot;:\&quot;{start}\&quot;"))
+        .count()
+}
+
+/// Whether one of `page`'s passkey ceremonies sends `value` as `name`, besides
+/// what its form's inputs hold.
+pub(crate) fn sends(page: &str, name: &str, value: &str) -> bool {
+    page.contains(&format!(r"\&quot;{name}\&quot;:\&quot;{value}\&quot;"))
+}
+
+/// Whether one of `page`'s runtime expressions captured the text `value`, such
+/// as the address the page puts back once it loads.
+pub(crate) fn captures(page: &str, value: &str) -> bool {
+    page.contains(&format!("{{&quot;v&quot;:&quot;{value}&quot;}}"))
+}
+
 /// `response`'s body, as text.
 pub(crate) async fn html(response: Response) -> String {
     let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
