@@ -106,8 +106,9 @@ struct Records {
     /// recently active first, with their devices, IP addresses and apps. The one
     /// that downloaded the export is `current`.
     sessions: Vec<Session>,
-    /// The browsers that signed in within the last 400 days, most recently seen
-    /// first, signed in now or not. A sign-in from any other one alerts the owner.
+    /// The browsers the account knows, most recently seen first, signed in now or
+    /// not, those unused for 400 days included until cleanup deletes them. A
+    /// sign-in from any other one alerts the owner.
     known_devices: Vec<KnownDevice>,
     /// The scopes approved for each application.
     consents: Vec<Consent>,
@@ -464,7 +465,7 @@ impl AccountExport {
                     record,
                 })
                 .collect(),
-            known_devices: tx.sessions().known_devices(user_id).await?,
+            known_devices: tx.exports().known_devices(user_id).await?,
             consents: tx.oidc().list_consents(user_id).await?,
             grants: tx.tokens().list_for_user(user_id).await?,
             recoveries: (tx

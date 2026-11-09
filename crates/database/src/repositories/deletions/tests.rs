@@ -178,6 +178,8 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         VALUES ('{session}', '{user}', '[\"passkey\"]', now(), now() + interval '1 day', now());
         INSERT INTO browser_session_secrets (session_id, secret_digest)
         VALUES ('{session}', uuid_send('{session}'));
+        INSERT INTO known_devices (user_id, device_digest, user_agent_family)
+        VALUES ('{user}', sha256(uuid_send('{user}')), 'firefox/linux');
         INSERT INTO federation_transactions (
             id, provider_name, state_digest, browser_digest, nonce, pkce_verifier, return_to,
             link_user_id, link_session_id, expires_at

@@ -84,9 +84,11 @@ device's: `SignedIn` records `new_device: true`, which gives the owner a
 `NewDeviceSignIn` security notification (see
 [notifications](notifications.md#security-alerts)). `sign_in_anew` remembers the
 browser without the flag. Maintenance deletes a known device unused for 400
-days, by which time its cookie expired too. The data export, `GET
-/account/devices`, `auth-service account <user> sessions known`, the
-**Devices** settings tab and the dashboard's account page list them.
+days, by which time its cookie expired too. `GET /account/devices`,
+`auth-service account <user> sessions known`, the **Devices** settings tab and
+the dashboard's account page list those seen within 400 days. The data export
+holds every stored one, as it holds every ended record, until maintenance
+deletes it.
 
 ## Re-authenticating and confirming
 

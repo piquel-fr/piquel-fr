@@ -9,7 +9,9 @@ use serde::Serialize;
 use serde_json::Value;
 use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, ClientId, EventId, NotificationId, PasskeyId, Provider,
-    SessionId, UserId, admin::DashboardSession, events::UserAgentFamily,
+    SessionId, UserId,
+    admin::{DashboardSession, KnownDevice},
+    events::UserAgentFamily,
 };
 use std::net::IpAddr;
 
@@ -169,6 +171,31 @@ impl ExportRepository<'_> {
                 FROM sessions s
                 WHERE s.user_id = $1
                 ORDER BY s.last_seen_at DESC, s.id DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
+    /// Every browser the account knows, those unused for 400 days included until
+    /// cleanup deletes them, most recently seen first. Never their digests.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn known_devices(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<KnownDevice>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                KnownDevice,
+                r#"SELECT user_agent_family AS "device: UserAgentFamily",
+                    first_seen_at, last_seen_at
+                FROM known_devices
+                WHERE user_id = $1
+                ORDER BY last_seen_at DESC, first_seen_at DESC"#,
                 user_id.as_uuid(),
             )
         )

@@ -1589,6 +1589,7 @@ auth-service account <USER> sessions known [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 
 ## `auth-service account apps`
 
