@@ -243,8 +243,7 @@ async fn cleanup_that_keeps_falling_behind_raises_its_alert() {
     // Out of time as soon as it deletes anything.
     let cleanup = Cleanup {
         budget: Duration::ZERO,
-        overruns: AtomicU32::new(0),
-        raised: AtomicBool::new(false),
+        overruns: Streak::new(Cleanup::BEHIND_AFTER),
     };
     let current = async || {
         let mut tx = database.begin().await.expect("transaction");
@@ -285,4 +284,37 @@ async fn cleanup_that_keeps_falling_behind_raises_its_alert() {
     cleanup.run(&mut lock, &shutdown).await.expect("run");
     assert_eq!(current().await, None);
     lock.release().await.expect("release");
+}
+
+/// A streak raises its alert once it is long enough, and only once, then marks
+/// it seen. Once the alert cleared meanwhile, the run that found it so starts a
+/// new streak, which takes as many runs to raise it again; so does a reset.
+#[test]
+fn a_streak_raises_its_alert_once() {
+    let streak = Streak::new(3);
+    assert_eq!(streak.extend(), None);
+    assert_eq!(streak.extend(), None);
+    assert_eq!(
+        streak.extend(),
+        Some(Due::Raise),
+        "the third in a row raises it"
+    );
+    assert_eq!(streak.extend(), Some(Due::Raise), "until raising it worked");
+    streak.settle(true);
+    assert_eq!(streak.extend(), Some(Due::Seen), "then marks it seen");
+    streak.settle(false);
+    assert_eq!(
+        streak.extend(),
+        None,
+        "the run that found it cleared counts"
+    );
+    assert_eq!(streak.extend(), Some(Due::Raise), "as the first of 3");
+    streak.reset();
+    assert_eq!(streak.extend(), None);
+    assert_eq!(streak.extend(), None);
+    assert_eq!(
+        streak.extend(),
+        Some(Due::Raise),
+        "a new streak raises it again"
+    );
 }

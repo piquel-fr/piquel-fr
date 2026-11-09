@@ -22,6 +22,8 @@ crate::str_enum! {
         PurgesFailing = "purges_failing",
         /// See [`Alert::CleanupBehind`].
         CleanupBehind = "cleanup_behind",
+        /// See [`Alert::VerificationFailing`].
+        VerificationFailing = "verification_failing",
     }
 }
 
@@ -46,6 +48,9 @@ pub enum Alert {
     /// Cleanup passes keep running out of time with expired state, personal
     /// data past retention or finished deliveries left to delete.
     CleanupBehind {},
+    /// Auth's verifier keeps failing to verify the audit chain, finding it
+    /// neither broken nor intact, so nothing checks the history meanwhile.
+    VerificationFailing {},
 }
 
 impl Alert {
@@ -60,6 +65,7 @@ impl Alert {
             Self::CheckpointRefused(_) => AlertKind::CheckpointRefused,
             Self::PurgesFailing {} => AlertKind::PurgesFailing,
             Self::CleanupBehind {} => AlertKind::CleanupBehind,
+            Self::VerificationFailing {} => AlertKind::VerificationFailing,
         }
     }
 
@@ -67,13 +73,15 @@ impl Alert {
     /// [`ChainProblem`], is one older releases cannot decode, so it fails to
     /// compile here until it is given the next version: [`Self::CheckpointRefused`]
     /// came in the second, [`Self::PurgesFailing`] in the third and
-    /// [`Self::CleanupBehind`] in the fourth.
+    /// [`Self::CleanupBehind`] in the fourth and [`Self::VerificationFailing`] in
+    /// the fifth.
     #[must_use]
     pub const fn version(&self) -> i16 {
         match self {
             Self::CheckpointRefused(_) => 2,
             Self::PurgesFailing {} => 3,
             Self::CleanupBehind {} => 4,
+            Self::VerificationFailing {} => 5,
             Self::AuditChainBroken(ChainBreak { problem, .. }) => match problem {
                 ChainProblem::MissingEvent
                 | ChainProblem::EventBeforeAnchor
@@ -95,6 +103,7 @@ impl Alert {
             Self::CheckpointRefused(_) => "The audit chain's checkpoints stopped",
             Self::PurgesFailing {} => "Accounts keep failing to be purged",
             Self::CleanupBehind {} => "Cleanup is falling behind",
+            Self::VerificationFailing {} => "The audit chain can't be verified",
         }
     }
 
@@ -131,6 +140,13 @@ impl Alert {
                 to delete, so personal data is kept longer than it should be. The \
                 piquel.auth.cleanup metrics show how much each pass deletes. It clears once \
                 a pass deletes everything due."
+                .to_owned(),
+            Self::VerificationFailing {} => "Auth's verifier keeps failing to verify the audit \
+                chain, without finding it broken or intact, so nothing checks the history \
+                until it is fixed. Its logs say why, such as an event that cannot be read, or \
+                the database failing. auth-service audit verify shows the same error. It \
+                clears once a verification, other than one with keys given with --key, is \
+                recorded."
                 .to_owned(),
         }
     }
