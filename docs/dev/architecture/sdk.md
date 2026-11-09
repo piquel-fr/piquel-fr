@@ -1,5 +1,8 @@
 # SDK design
 
+This page sets out how piquel.fr's SDKs behave, from discovery to sessions, so
+that every SDK accepts and rejects the same things.
+
 Applications integrate with auth.piquel.fr through its Rust SDK, `piquel-auth`, its
 TypeScript SDK, `@piquel/auth`, or any OpenID Connect library. Both SDKs follow this
 document and pass the shared vectors in

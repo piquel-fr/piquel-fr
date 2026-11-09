@@ -462,7 +462,8 @@ for the owner (S3), and the administrator rules (A1).
 
 **For the user to review.** Support recovers and undoes recoveries, at the
 terminal or from the dashboard, only on evidence. No single item below is
-enough on its own, and the items under "never enough" must not count at all.
+enough on its own, and the items under "Never counts as evidence" must not count
+at all, alone or together.
 
 **Write every reason without the evidence.** Every reason an operator or
 administrator records with a recovery, an undo or a cleanup shows in the
@@ -522,7 +523,7 @@ Before disabling an account that has a recovery in probation, at its user's
 request: treat it like an undo request, and prefer `user undo-recovery`.
 Disabling does not stop the owner's undo (U4a).
 
-Never enough on its own:
+Never counts as evidence, alone or together:
 
 - A request from the account's own email address, or a reply to it: it may be
   the compromised channel, and the link goes there.

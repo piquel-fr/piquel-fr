@@ -7,6 +7,9 @@
         "apps/auth-service/assets/picture.js",
         "apps/auth-service/assets/dashboard.js"
       ]
+    },
+    "packages/auth": {
+      "entry": ["examples/browser.ts", "examples/resource.ts"]
     }
   }
 }

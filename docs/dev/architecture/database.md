@@ -1,5 +1,9 @@
 # PostgreSQL boundary
 
+This page explains how auth uses PostgreSQL: the database crate's boundary, its
+queries, locks and invariants, migrations and roles, and how domain events are
+stored. Read it before writing a query or a migration.
+
 `crates/database` is the only crate that runs SQL. It exposes `Database`, validated
 `DatabaseConfig`, typed repository handles, and `DatabaseTransaction`. Pools,
 connections, rows and raw SQL remain private. Application modules choose policy;
@@ -20,6 +24,8 @@ absolute `host` path with `localhost` in the URL. Parser failures retain their
 sources. Client registrations are written only from a `ClientRegistration`, whose
 field types (`ClientId`, `RedirectUri`, `ScopeName`, bounded lists) reject invalid
 values before any SQL runs.
+
+## Repositories and queries
 
 Each repository has its own module under `src/repositories/` (`users`, `handles`, `emails`,
 `sessions`, `events`, `audit`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
@@ -64,6 +70,8 @@ that breaks a cached query, and fails on a cached query the code no longer uses.
 
 Repository tests live in `<module>/tests.rs` or an inline module for small pure
 validation tests.
+
+## Locks and invariants
 
 User, session and credential locks serialize security-sensitive changes. Acquire
 account locks before session and credential locks. Credentials are rechecked under lock before authentication
@@ -170,6 +178,8 @@ Important invariants:
   a family it produced is unrevoked and its session live, so a replay is detected
   while it could still revoke tokens.
 
+## Migrations
+
 The schema starts with the initial migration, `migrations/0001_initial.sql`. The
 prototype schema is disposable and the release requires a fresh database. Released
 migrations are immutable; later schema changes go in new numbered files. Numbers
@@ -191,12 +201,22 @@ its own comments. Migrations take
 `LockKey::Migrations`, waiting up to 30 minutes for another run, and provisioning
 the runtime role takes another lock, so concurrent `migrate` runs take turns.
 
+## Background work
+
 Every five minutes, one replica drains expired ephemeral state in bounded batches
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
 personal data older than 90 days; the events themselves are kept indefinitely. It
 also deletes finished deliveries: succeeded ones after 7 days, failed or cancelled
-ones after 30. Deleting a failed ordered delivery cancels the ones behind it. Jobs like it that must run
-on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
+ones after 30. Deleting a failed ordered delivery cancels the ones behind it.
+One pass that runs out of its minute is no problem, since the next picks up
+what it leaves, so only the third in a row on one replica raises the
+`cleanup_behind` alert. The passes after it only mark it seen, so it is raised
+once; if another replica clears it meanwhile, the streak starts over. A pass
+that deletes everything due clears it. Likewise, the third pass in a row that
+fails raises `cleanup_failing`, and a pass that works clears it.
+
+Jobs like cleanup that must run on one replica at a time call
+`Database::try_exclusive(LockKey)`, which takes a
 session-level advisory lock on a dedicated connection outside the pool. The lock
 ends with that connection, even when the job is cancelled or the process dies, so
 it needs no lease or expiry, and a lock holder never returns to the pool. Give each
@@ -210,7 +230,9 @@ on the `account_deletions` row, with its attempts, error and next attempt, which
 waits 5 minutes, doubling after each failure up to a day. Due accounts are read in
 the order they became due, past their grace period and their next attempt, so
 accounts that keep failing never hold back the others. After each run the job sets
-`piquel.auth.account_purge.failing`, the accounts that failed 3 times in a row.
+`piquel.auth.account_purge.failing`, the accounts that failed 3 times in a row,
+and raises the `purges_failing` alert while there are any, clearing it once there
+are none.
 The purge's queries use indexes, including the actor's user ID in
 `domain_events`, so its cost does not grow with everyone's history.
 The audit verifier (`LockKey::AuditVerification`) checks every ten minutes, and
@@ -218,6 +240,9 @@ verifies the whole chain once the newest recorded verification is six hours old
 (see [audit-history.md](../security/audit-history.md)). Its lock is not the
 sealer's, and its read-only snapshot holds no transaction ID, so it never holds
 sealing back.
+
+## Tests
+
 Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-util` feature. `just db test` runs them in a
@@ -340,13 +365,6 @@ events. `Imported` holds the rows of `security_audit_log`, the log events replac
 verbatim; only migrations write it, and its fields are private, so it can only be
 read back. `repositories/events/` stores events: the personal data split below,
 `read_after` and `acknowledge`.
-Migration `0005` imported the log but kept the table, which the previous release
-wrote to during a deploy; `0018` imports the rows written since and drops it.
-Migration `0008` likewise kept `oidc_clients.client_secret_hash` for the previous
-release, with a trigger mirroring its writes into `oidc_client_secrets`, and left
-the origins of older redirect URIs for `run_migrations` to fill in. `0018` drops
-the trigger and makes `oidc_redirect_uris.origin` NOT NULL, and `0025` drops the
-column once no deployed release wrote it.
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
@@ -374,9 +392,7 @@ still version 1. A release reads an event as known only if it decodes to an even
 whose `version()` is the stored one, so a version it does not write reads as
 unknown. Adding a field is not one, since older releases ignore fields they do not
 know, but the field must be an `Option` or `#[serde(default)]`, so that the new
-release still reads the rows already stored. The tolerance only protects a release
-that has it: ship a new variant in a later deploy than #149, so that a rollback
-never lands on a release without it.
+release still reads the rows already stored.
 
 Closed vocabularies stored in other columns, such as `AccountStatus` and the
 `JobName` of an `Actor::System`, have no such tolerance: a release fails to decode
@@ -427,7 +443,9 @@ chain order.
 
 ### Sessions
 
-`SessionRepository::revoke(user_id, scope)` is the only way a session ends early.
+[Sessions](sessions.md) explains sessions as a whole; this section covers their
+storage. `DatabaseTransaction::revoke_sessions` is the only way a session ends
+early.
 `SessionScope` names one session, every other session or all of them, and the
 query always filters on `user_id`, so no scope reaches another account's session.
 It skips expired sessions, which are already over, so the count it returns is what
@@ -547,10 +565,15 @@ passkey it added, which still needs a passkey confirmation.
 
 ### Notifications
 
-`DomainEvent::notification` decides which events tell their subject something,
+[Notifications](notifications.md) explains the inbox as a whole.
+`DomainEvent::notification` decides which events tell someone something,
 naming every variant as `history_entry` does. `record` writes that notification
-to the subject's inbox (`notifications`) in the event's transaction, so a
-committed event has its notification and a rolled-back one has none; an account
+to the inbox (`notifications`) of each account its audience
+(`Notification::audience`) names, in the event's transaction, so a committed
+event has its notifications and a rolled-back one has none. The audience is the
+event's subject, or for a raised alert every active administrator, whose rights
+and accounts stay key-share locked until the event commits, so a purge waits for
+their notifications and emails and deletes them with the account. A subject
 purged while a request was in flight gets none. A notification stores the
 serialized `Notification` and no personal data, and `event_id` is no foreign key:
 it renders the same once its event's personal data is erased or the event is
@@ -570,6 +593,14 @@ cleared yet, under a unique index on its kind. `alerts().current` takes
 `LockKey::Alerts` for the transaction, so whatever changes alerts next waits,
 even while none is current. Raising what the current alert already says
 only marks it seen again (`seen_at`). Raising anything else clears it first.
+Administrators post updates on a current alert (`alert_updates`): a status and
+the administrator or operator as its author, an event's actor. `acknowledge`
+locks the alert, if it is still current, and acknowledges it (`acknowledged_at`)
+on its first update. The update is recorded as `AlertUpdated`, and its row names
+that event (`event_id`), whose reason holds the update's optional note: the
+note is personal data, deleted with the event's after 90 days or when its
+author's account is purged. An acknowledged alert stays current, so finding the
+same condition again raises nothing until the condition changes or clears.
 The payload holds no personal data. Like an event's, it is stored with its
 version (`Alert::version`): a new kind, or a new variant inside one, gets the
 next version, and a kind or version a release does not write reads as an alert
@@ -579,3 +610,12 @@ Recording a verification of the audit chain raises `audit_chain_broken` when it
 found the chain broken, and clears it when it found the chain intact. A
 verification with keys given with `--key`, such as another environment's,
 changes neither.
+The sealer raises `checkpoint_refused` when it refuses to sign a checkpoint over
+events that no longer match, and clears it once they match again. The account
+purge raises `purges_failing` while accounts keep failing to be purged, and
+cleanup raises `cleanup_behind` once its passes keep running out of time, and
+`cleanup_failing` once they keep failing. The verifier raises
+`verification_failing` once its runs keep failing, and a recorded verification,
+other than one with `--key`, clears it. Cleanup and the verifier count runs in a
+row with `Streak`, on each replica: a streak raises its alert once, and starts
+over when it finds the alert cleared.

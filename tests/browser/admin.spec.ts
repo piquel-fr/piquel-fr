@@ -1,3 +1,14 @@
+/**
+ * The admin dashboard, on an origin of its own: signing in through auth's handoff
+ * page, confirming changes with a passkey, and what administrators change from it,
+ * on accounts, rights, invitations, clients, origins, signing keys and handles,
+ * and an announcement drafted, sent and read in the recipient's inbox. CI
+ * serves the dashboard on auth's host, `localhost`, so its passkey dialog needs no
+ * list of related origins; a preview's dashboard has a host of its own, so there
+ * the browser reads auth's `/.well-known/webauthn` first. Skipped without
+ * `E2E_ADMIN_URL` and `E2E_GRANT_ADMIN`; the invitation test also needs
+ * `E2E_INVITE`, and the tests that read email `E2E_MAIL_URL`.
+ */
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import {
   addPasskeys,

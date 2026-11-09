@@ -207,10 +207,10 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 24] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 25] {
         use routes::page::{
             ADMIN, CONSENT, LOGIN, LOGOUT, PREFERENCES, RECOVER, RECOVER_UNDO, REGISTER,
-            settings::VERIFY,
+            UNSUBSCRIBE, settings::VERIFY,
         };
         [
             page!(
@@ -281,6 +281,12 @@ impl WebApplication {
                 Title::UndoRecovery.as_str(),
                 Self::undo_recovery,
                 Self::undo_recovery_change,
+            ),
+            page!(
+                UNSUBSCRIBE,
+                Title::Unsubscribe.as_str(),
+                Self::unsubscription,
+                Self::unsubscribe,
             ),
         ]
     }

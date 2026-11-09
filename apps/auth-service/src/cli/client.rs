@@ -20,7 +20,7 @@ pub(super) enum ClientCommand {
     /// Register a client. A confidential client's secret is printed once.
     Create(CreateClient),
     /// Register a client, or update it to match, with the secret its deployment
-    /// generated: for clients a deployment manages, such as the admin dashboard.
+    /// generated: for clients a deployment manages, from its deployment job.
     /// Records nothing when the client already matches.
     Apply(ApplyClient),
     /// List every client, deleted ones included.

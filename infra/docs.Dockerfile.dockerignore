@@ -2,3 +2,7 @@
 *
 !book.toml
 !docs
+!crates/auth-sdk/examples/notes.rs
+!packages/auth/examples/server.ts
+!packages/auth/examples/browser.ts
+!packages/auth/examples/resource.ts

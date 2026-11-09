@@ -9,8 +9,9 @@ use crate::{
     telemetry::Committed,
 };
 use piquel_common::{
-    UserId,
+    EventId, UserId,
     events::{Actor, DomainEvent, EventContext, HistoryActor},
+    notifications::{Audience, Notification},
 };
 use sqlx::{Postgres, Transaction};
 
@@ -40,6 +41,7 @@ impl<'a> DatabaseTransaction<'a> {
     /// changes nothing, such as a failed sign-in, records its event in a
     /// transaction of its own. Once the transaction commits, each event is logged
     /// and counted in telemetry, with the current trace ID it is also stored with.
+    /// Returns the event's ID, for a row that refers to it.
     ///
     /// # Errors
     ///
@@ -50,7 +52,7 @@ impl<'a> DatabaseTransaction<'a> {
         context: &EventContext,
         subject: Option<UserId>,
         event: DomainEvent,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<EventId, DatabaseError> {
         self.record_to::<Registered>(context, subject, event).await
     }
 
@@ -60,17 +62,13 @@ impl<'a> DatabaseTransaction<'a> {
         context: &EventContext,
         subject: Option<UserId>,
         event: DomainEvent,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<EventId, DatabaseError> {
         let id = self.events().insert(context, subject, &event).await?;
-        let notified = match subject.zip(event.notification(&context.actor)) {
-            Some((user, notification)) => self
-                .notifications()
-                .insert(user, Some(id), &notification)
-                .await?
-                .map(|id| Notified { id, notification }),
-            None => None,
+        let notified = match event.notification(&context.actor) {
+            Some(notification) => self.notify(id, subject, notification).await?,
+            None => Vec::new(),
         };
-        C::fan_out(self, id, subject, &event, notified.as_ref()).await?;
+        C::fan_out(self, id, subject, &event, &notified).await?;
         self.recorded.push(Committed {
             id,
             actor: HistoryActor::from(&context.actor),
@@ -81,7 +79,36 @@ impl<'a> DatabaseTransaction<'a> {
             subject,
             event,
         });
-        Ok(())
+        Ok(id)
+    }
+
+    /// Writes `notification`, from the event `event_id` about `subject`, to the
+    /// inbox of each account of its audience, and returns what it wrote.
+    async fn notify(
+        &mut self,
+        event_id: EventId,
+        subject: Option<UserId>,
+        notification: Notification,
+    ) -> Result<Vec<Notified>, DatabaseError> {
+        let accounts = match notification.audience() {
+            Audience::Subject => subject.into_iter().collect(),
+            Audience::Administrators => self.administrators().active().await?,
+        };
+        let mut notified = Vec::new();
+        for user_id in accounts {
+            let written = self
+                .notifications()
+                .insert(user_id, Some(event_id), &notification)
+                .await?;
+            if let Some(id) = written {
+                notified.push(Notified {
+                    user_id,
+                    id,
+                    notification: notification.clone(),
+                });
+            }
+        }
+        Ok(notified)
     }
 
     /// Counts the other transactions waiting for a lock this one holds, directly

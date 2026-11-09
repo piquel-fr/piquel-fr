@@ -74,6 +74,12 @@ pub(super) struct DraftArgs {
     /// 1,000 accounts.
     #[arg(long)]
     to: Vec<UserRef>,
+    /// Email it to every recipient with a primary verified address, even those
+    /// who turned announcements' email off: for a security incident, or a change
+    /// to the privacy policy or terms. Without it, they only find it in their
+    /// inbox.
+    #[arg(long)]
+    essential: bool,
 }
 
 impl DraftArgs {
@@ -93,7 +99,12 @@ impl DraftArgs {
         } else {
             AnnouncementRecipients::Accounts(self.to)
         };
-        Ok(AnnouncementDraft::new(&self.subject, &body, recipients)?)
+        Ok(AnnouncementDraft::new(
+            &self.subject,
+            &body,
+            recipients,
+            self.essential,
+        )?)
     }
 }
 
@@ -133,7 +144,8 @@ impl AnnouncementCommand {
                     println!("SUBJECT\t{}", announcement.subject);
                     println!("REVISION\t{}", announcement.revision);
                     println!("TO\t{to}: {} accounts", announcement.recipients);
-                    println!("EMAILED\t{} with a primary verified address", detail.mailed);
+                    println!("ESSENTIAL\t{}", announcement.essentiality());
+                    println!("EMAILED\t{} {}", detail.mailed, announcement.emailed());
                     match announcement.sent_at {
                         Some(at) => {
                             let emails = detail.emails;
@@ -172,9 +184,17 @@ impl AnnouncementCommand {
             } => {
                 let detail = service.view_announcement(operator, id).await?;
                 let announcement = &detail.announcement;
+                let essential = if announcement.essential {
+                    "essential "
+                } else {
+                    ""
+                };
                 confirm.ask(&format!(
-                    "Send \"{}\" to {} accounts, emailing the {} with a primary verified address",
-                    announcement.subject, announcement.recipients, detail.mailed
+                    "Send the {essential}announcement \"{}\" to {} accounts, emailing the {} {}",
+                    announcement.subject,
+                    announcement.recipients,
+                    detail.mailed,
+                    announcement.emailed()
                 ))?;
                 let recipients = service.send_announcement(operator, id, revision).await?;
                 println!("Sent to {recipients} accounts");

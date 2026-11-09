@@ -9,6 +9,8 @@
 mod account;
 /// Granting, revoking and listing administrators.
 mod admin;
+/// Listing alerts and posting updates on them.
+mod alerts;
 /// Drafting and sending announcements to accounts.
 mod announcement;
 /// The audit history.
@@ -44,6 +46,7 @@ use crate::{
 };
 use account::AccountCommand;
 use admin::AdminCommand;
+use alerts::AlertsCommand;
 use announcement::AnnouncementCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
@@ -129,6 +132,10 @@ enum Administration {
     /// incident or a change to the privacy policy.
     #[command(subcommand)]
     Announcement(AnnouncementCommand),
+    /// List the alerts that need an administrator's attention, and post updates
+    /// on them.
+    #[command(subcommand)]
+    Alerts(AlertsCommand),
     /// Read or change one account's settings on its owner's behalf.
     Account(AccountCommand),
 }
@@ -268,6 +275,10 @@ impl Administration {
                 AnnouncementCommand::Discard { .. } => Op::DiscardAnnouncement,
                 AnnouncementCommand::Send { .. } => Op::SendAnnouncement,
             },
+            Self::Alerts(command) => match command {
+                AlertsCommand::List { .. } => Op::ListAlerts,
+                AlertsCommand::Update { .. } => Op::UpdateAlert,
+            },
         })
     }
 
@@ -290,6 +301,7 @@ impl Administration {
             Self::Handle(command) => command.run(console).await,
             Self::Deliveries(command) => command.run(console).await,
             Self::Announcement(command) => command.run(console).await,
+            Self::Alerts(command) => command.run(console).await,
             Self::Account(command) => command.run(console).await,
         }
     }

@@ -10,6 +10,7 @@ use crate::{
     AccountStatus, AnnouncementId, AuthenticationMethod, ClientId, DeliveryId, EventId, Handle,
     PictureId, SessionId, TokenId, TraceId, UserId,
     clients::RelatedOrigin,
+    form::Checkbox,
     protocol::{jwt::KeyId, oauth::ClientAuthMethod},
 };
 use chrono::{DateTime, Utc};
@@ -420,6 +421,10 @@ pub struct Announcement {
     pub body: String,
     /// Whether it goes to every account, rather than to chosen ones.
     pub everyone: bool,
+    /// Whether it is emailed to every recipient with a primary verified address,
+    /// whatever their preference, as a security incident or a change to the
+    /// privacy policy or terms must be.
+    pub essential: bool,
     /// Counts its draft's changes: sending names the one its sender checked.
     pub revision: u64,
     /// How many accounts it goes to: the chosen ones, or every account, as of
@@ -435,6 +440,27 @@ pub struct Announcement {
 }
 
 impl Announcement {
+    /// Whom its email reaches, after how many: e.g. "12 with a primary verified
+    /// address".
+    #[must_use]
+    pub const fn emailed(&self) -> &'static str {
+        if self.essential {
+            "with a primary verified address"
+        } else {
+            "with a primary verified address who receive announcements by email"
+        }
+    }
+
+    /// Whether it is essential, as its pages and the CLI say it.
+    #[must_use]
+    pub const fn essentiality(&self) -> &'static str {
+        if self.essential {
+            "Yes: emailed whatever the recipient's preference"
+        } else {
+            "No: recipients who turned announcement emails off only find it in their inbox"
+        }
+    }
+
     /// The paragraphs of an announcement's text `body`, split at blank lines, each
     /// a list of its lines, so every page and email shows the line breaks it was
     /// written with.
@@ -524,6 +550,9 @@ pub struct DraftAnnouncement {
     /// handle, verified email or ID.
     #[serde(default)]
     pub accounts: String,
+    /// Whether it is emailed to every recipient, whatever their preference.
+    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
+    pub essential: Checkbox,
     /// What the button pressed asks for.
     #[serde(default)]
     pub intent: DraftIntent,

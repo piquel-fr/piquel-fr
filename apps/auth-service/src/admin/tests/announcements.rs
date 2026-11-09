@@ -6,7 +6,7 @@ use piquel_repository::{EventFilter, InsertVerifiedEmail};
 
 /// An announcement's draft to `recipients`.
 pub(super) fn announcement(recipients: AnnouncementRecipients) -> AnnouncementDraft {
-    AnnouncementDraft::new("Incident", "What happened.", recipients).expect("draft")
+    AnnouncementDraft::new("Incident", "What happened.", recipients, false).expect("draft")
 }
 
 /// A draft needs no recent confirmation, and changes until it is sent, which
@@ -137,6 +137,7 @@ async fn announcements_change_until_a_confirmed_administrator_sends_them() {
                 == Some(&DomainEvent::AnnouncementSent {
                     announcement_id: id,
                     recipients: 2,
+                    essential: false,
                 })
         })
         .expect("recorded");

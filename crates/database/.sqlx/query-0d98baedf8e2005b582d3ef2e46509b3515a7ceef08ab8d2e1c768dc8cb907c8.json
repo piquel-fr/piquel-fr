@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE announcements\n                SET subject = $2, body = $3, everyone = $4, essential = $5,\n                    revision = revision + 1, updated_at = now()\n                WHERE id = $1 AND sent_at IS NULL\n                RETURNING revision AS \"revision: Unsigned\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision: Unsigned",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0d98baedf8e2005b582d3ef2e46509b3515a7ceef08ab8d2e1c768dc8cb907c8"
+}

@@ -195,3 +195,102 @@ async fn notifications_outlive_their_event() {
     assert_eq!(shown["body"], "It is no longer scheduled for deletion.");
     assert!(shown["history"].is_null());
 }
+
+/// The owner turns a category's email off and on through the API, each change
+/// recorded once, and anyone who may read the inbox reads the preferences. An
+/// unsubscribe link works only for its own account, and turns the email off as
+/// the owner, without a session.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn owners_choose_which_notifications_are_emailed() {
+    let harness = Harness::new().await;
+    let alice = Browser::new_account(&harness.database).await;
+    let bob = Browser::new_account(&harness.database).await;
+    let preferences = async |account: &Browser| {
+        let path = routes::notifications::PREFERENCES;
+        let (status, preferences) = account.call(&harness.router, Method::GET, path).await;
+        assert_eq!(status, StatusCode::OK, "{preferences}");
+        preferences
+    };
+    let announcements = |email| serde_json::json!([{"category": "announcements", "email": email}]);
+    assert_eq!(
+        preferences(&alice).await,
+        announcements(true),
+        "on by default"
+    );
+    for email in [false, false, true] {
+        let preference = serde_json::json!({"category": "announcements", "email": email});
+        let (status, _) = alice
+            .send(
+                &harness.router,
+                Method::PUT,
+                routes::notifications::PREFERENCES,
+                Some(preference),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+    let changes = async |user: UserId| -> Vec<(bool, Actor)> {
+        harness
+            .database
+            .events()
+            .history_for_user(user, 20)
+            .await
+            .expect("history")
+            .into_iter()
+            .filter_map(|stored| match stored.event.known() {
+                Some(DomainEvent::NotificationPreferenceChanged(preference)) => {
+                    Some((preference.email, stored.actor))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let emails: Vec<_> = changes(alice.user_id)
+        .await
+        .into_iter()
+        .map(|(email, _)| email)
+        .collect();
+    assert_eq!(emails, [true, false], "a repeat changes nothing");
+
+    let links = UnsubscribeLinks::new(
+        "https://auth.piquel.fr".parse().expect("origin"),
+        crate::config::LinkKeys::generate(),
+    );
+    let link = url::Url::parse(&links.link(alice.user_id).expect("link")).expect("URL");
+    assert_eq!(link.path(), routes::page::UNSUBSCRIBE);
+    let query = |name: &str| {
+        link.query_pairs()
+            .find_map(|(key, value)| (key == name).then(|| value.into_owned()))
+            .expect("query")
+    };
+    let token = query("token");
+    assert_eq!(query("account"), alice.user_id.to_string());
+    let checked = |account, token: &str| {
+        links
+            .check(&Unsubscribe {
+                account,
+                token: token.to_owned(),
+            })
+            .expect("check")
+    };
+    assert_eq!(checked(alice.user_id, &token), Some(alice.user_id));
+    assert_eq!(checked(bob.user_id, &token), None, "another account's");
+    assert_eq!(checked(alice.user_id, "garbage"), None);
+
+    let service = AccountService::new(harness.database.clone());
+    service
+        .unsubscribe(alice.user_id, crate::security::RequestContext::TEST)
+        .await
+        .expect("unsubscribe");
+    assert_eq!(preferences(&alice).await, announcements(false));
+    let (_, actor) = changes(alice.user_id).await.remove(0);
+    assert_eq!(
+        actor,
+        Actor::User {
+            user_id: alice.user_id,
+            session_id: None
+        }
+    );
+    assert_eq!(preferences(&bob).await, announcements(true));
+}

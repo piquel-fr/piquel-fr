@@ -28,8 +28,7 @@ invite_required = "true"
 # Previews sign audit checkpoints with a generated key. Staging and production
 # use stored keys whose verifier keys are committed in docs/dev/security/audit-key.pub.
 audit_key = "audit-key"
-# See "Running several replicas" in docs/dev/operations/deploying.md before
-# raising it.
+# See docs/dev/operations/replicas.md before raising it.
 auth_replicas = 1
 # Where auth, with the admin dashboard it serves, and piquel.fr's web server
 # send telemetry: the `telemetry` application's collector, imported below.
@@ -174,7 +173,7 @@ generate = { type = "random", bytes = 32, encoding = "base64url" }
 
 # The current token digest key: it digests refresh tokens, codes and pending
 # logins, and email verification and recovery links derive from it. Change it
-# only as "Changing the token digest key" in docs/dev/operations/signing-keys.md
+# only as "Change the token digest key" in docs/dev/operations/signing-keys.md
 # describes.
 [[spec.secrets]]
 name = "token-digest-key"

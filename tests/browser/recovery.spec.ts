@@ -1,3 +1,10 @@
+/**
+ * Recovering an account as support does: `user recover` prints the link, a second
+ * browser adds a passkey with it and lands in settings under the probation's
+ * restriction and its "Was this you?" question; the owner signs in with the
+ * passkey from before and undoes the recovery, which signs the second browser
+ * out. Skipped without `E2E_RECOVER`.
+ */
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { signedUp, withPasskeys } from './helpers';
