@@ -39,9 +39,9 @@ const REVOKE_URL = `${ISSUER}/oauth/revoke`;
 const ATTRIBUTES = 'Path=/; Secure; HttpOnly; SameSite=Lax';
 const USER = '01936f3e-8c00-7000-8000-000000000001';
 const OTHER_USER = '01936f3e-8c00-7000-8000-000000000002';
-const SESSION_COOKIE = '__Host-piquel-notes-web-session';
-const PENDING_COOKIE = '__Host-piquel-notes-web-login-';
-const STEP_UP_COOKIE = '__Host-piquel-notes-web-step-up';
+const SESSION_COOKIE = '__Host-sourceorigin-notes-web-session';
+const PENDING_COOKIE = '__Host-sourceorigin-notes-web-login-';
+const STEP_UP_COOKIE = '__Host-sourceorigin-notes-web-step-up';
 
 /**
  * `Sec-Fetch-Site` and `Origin` headers, and whether they show the app's own pages:
@@ -169,7 +169,7 @@ class Auth {
         nonce,
         sid: uuid(1),
         auth_time: this.authTime,
-        acr: 'urn:piquel:acr:social',
+        acr: 'urn:sourceorigin:acr:social',
         ...signed
       });
     }

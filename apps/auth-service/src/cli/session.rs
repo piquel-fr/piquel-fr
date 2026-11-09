@@ -3,7 +3,7 @@
 use super::{CliError, Confirm, Console};
 use crate::UserRef;
 use clap::Subcommand;
-use piquel_common::SessionId;
+use sourceorigin_common::SessionId;
 
 /// Ending sessions, with the refresh tokens their applications hold.
 #[derive(Subcommand)]

@@ -35,7 +35,7 @@ Then decide how the provider proves who the user is:
 - **OpenID Connect**, as Google does: take the identity only from a signed ID
   token. Verify its signature against the provider's published keys, then its
   issuer, exclusive audience, nonce and expiry. Cache the keys:
-  `GoogleProtocol` holds the Rust SDK's `piquel_auth::KeyCache`, which keeps them
+  `GoogleProtocol` holds the Rust SDK's `sourceorigin_auth::KeyCache`, which keeps them
   for the response's `max-age`, refetches once when a token names an unknown
   key, and fetches at most once every 30 seconds.
 - **OAuth only**, as GitHub does: fetch the profile with the access token.
@@ -75,10 +75,10 @@ previous release never writes the new value.
 ## 3. Declare its variables
 
 In `apps/auth-service/src/config/federation.rs`, add two variables to the
-`piquel_common::variables!` block, then map them in `ProviderConfig::variables`:
+`sourceorigin_common::variables!` block, then map them in `ProviderConfig::variables`:
 
 ```rust
-piquel_common::variables! {
+sourceorigin_common::variables! {
     // ...
     /// The client ID of auth's GitLab OAuth app, as `AUTH_GITHUB_CLIENT_ID` is
     /// GitHub's.
@@ -172,7 +172,7 @@ flows, which need a database. See [testing](../testing.md).
    ```
 
 2. In
-   [`infra/piqueld.toml`](https://github.com/piquel-fr/piquel-fr/blob/main/infra/piqueld.toml),
+   [`infra/piqueld.toml`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/infra/piqueld.toml),
    add `gitlab_client_id = ""` and `gitlab_secret = "no-provider-secret"` to
    `[spec.variables]`, set `AUTH_GITLAB_CLIENT_ID` and
    `AUTH_GITLAB_CLIENT_SECRET` in the `auth` service's environment, and mount the
@@ -195,7 +195,7 @@ flows, which need a database. See [testing](../testing.md).
    [sign-in providers](../operations/sign-in-providers.md).
 3. Name the provider where the others are named: the user guide's
    [introduction](../../user/introduction.md), and the privacy policy and terms
-   in `apps/web/assets/policies/`, which say what each provider tells Piquel.
+   in `apps/web/assets/policies/`, which say what each provider tells SourceOrigin.
 
 The settings, the dashboard and the CLI list providers from `Provider::ALL`, so
 every surface gets the provider without more work; see

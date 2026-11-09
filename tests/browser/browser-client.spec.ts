@@ -20,7 +20,7 @@ const client =
   new URL(authUrl).hostname === 'localhost' ? 'https://localhost:4443' : 'https://related-e2e.test';
 const clientId = 'browser-e2e-inline';
 
-/** The built SDK, which the client's page imports from `/sdk/`: `pnpm --filter @piquel/auth build`. */
+/** The built SDK, which the client's page imports from `/sdk/`: `pnpm --filter @sourceorigin/auth build`. */
 const dist = new URL('../../packages/auth/dist/', import.meta.url);
 const sdk = Object.fromEntries(
   readdirSync(dist)
@@ -175,7 +175,7 @@ test('the browser client signs in with a passkey without leaving the page', asyn
   expect(navigations).toEqual([]);
   await expectNoStoredTokens(page, signedIn?.tokens ?? []);
   expect(
-    (await context.cookies(authUrl)).filter((cookie) => cookie.name === '__Host-piquel_session')
+    (await context.cookies(authUrl)).filter((cookie) => cookie.name === '__Host-sourceorigin_session')
   ).toEqual([]);
 });
 

@@ -1,14 +1,14 @@
 /**
- * Server-side login for `@piquel/auth`, over standard `Request` and `Response`, so
+ * Server-side login for `@sourceorigin/auth`, over standard `Request` and `Response`, so
  * it runs as is in Node, Bun, Workers, Hono, SvelteKit and the like. Sessions live in
  * the browser, in a cookie sealed with the app's {@link CookieKey}: the app stores
  * nothing.
  *
  * ```ts
- * import { Issuer } from '@piquel/auth';
- * import { CookieKey, Login } from '@piquel/auth/server';
+ * import { Issuer } from '@sourceorigin/auth';
+ * import { CookieKey, Login } from '@sourceorigin/auth/server';
  *
- * const issuer = await Issuer.discover('https://auth.piquel.fr');
+ * const issuer = await Issuer.discover('https://auth.sourceorigin.dev');
  * const login = new Login(issuer.client({ clientId, clientSecret, redirectUri }), {
  *   cookieKey: CookieKey.fromBase64(process.env.NOTES_COOKIE_KEY ?? ''), // openssl rand -base64 32
  *   scopes: ['profile']

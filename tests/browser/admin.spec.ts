@@ -87,7 +87,7 @@ function entry(page: Page, change: string, reason: string) {
   return page
     .getByRole('listitem')
     .filter({ hasText: change })
-    .filter({ hasText: `By a Piquel administrator: “${reason}”` })
+    .filter({ hasText: `By a SourceOrigin administrator: “${reason}”` })
     .first();
 }
 
@@ -168,7 +168,7 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(user.getByText(`@user-${suffix}`, { exact: true })).toHaveCount(0);
 
   // The dashboard sends no referrer, so its sign-out form posts with `Origin: null`.
-  // Signing out of the dashboard keeps the Piquel session, but signing in again
+  // Signing out of the dashboard keeps the SourceOrigin session, but signing in again
   // still asks for the passkey.
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Signed out of the dashboard' })).toBeVisible();
@@ -176,10 +176,10 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await confirmThroughAuth(admin);
   await expect(admin.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 
-  // Signed out of Piquel too, the administrator signs in with a passkey on auth,
+  // Signed out of SourceOrigin too, the administrator signs in with a passkey on auth,
   // whose sign-in form then goes on through the handoff to the dashboard.
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await admin.getByRole('link', { name: 'Sign out of Piquel', exact: true }).click();
+  await admin.getByRole('link', { name: 'Sign out of SourceOrigin', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Ready to sign out?' })).toBeVisible();
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await admin.goto(`${adminUrl}/users`);
@@ -244,7 +244,7 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   await revoke.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/administrators`);
   await expect(row(`grantee-${suffix}`)).toHaveCount(0);
-  // The account keeps its Piquel session, but its dashboard session ended with
+  // The account keeps its SourceOrigin session, but its dashboard session ended with
   // its rights, and it no longer reaches the dashboard.
   await user.goto(`${adminUrl}/users`);
   await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();

@@ -1,32 +1,32 @@
-# @piquel/auth
+# @sourceorigin/auth
 
-The TypeScript SDK for [auth.piquel.fr](https://auth.piquel.fr). It signs users in
-to your app with their piquel.fr account, and validates the access tokens auth
+The TypeScript SDK for [auth.sourceorigin.dev](https://auth.sourceorigin.dev). It signs users in
+to your app with their Origin Account, and validates the access tokens auth
 issues. It is ESM only and has no runtime dependencies: it uses `fetch` and
 WebCrypto, so it runs in browsers, Node 22+, Bun and Cloudflare Workers.
 
 ## Install
 
 The package is not on npm yet. Build it from a checkout of
-[the repository](https://github.com/piquel-fr/piquel-fr), then install it from
+[the repository](https://github.com/sourceorigin-dev/sourceorigin), then install it from
 there:
 
 ```console
 pnpm install --frozen-lockfile
-pnpm --filter @piquel/auth build
+pnpm --filter @sourceorigin/auth build
 npm install <checkout>/packages/auth
 ```
 
 ## Sign users in
 
-On a server, `@piquel/auth/server` serves the login routes under `/auth` and keeps
+On a server, `@sourceorigin/auth/server` serves the login routes under `/auth` and keeps
 each user's session in a sealed cookie, so your app stores nothing:
 
 ```ts
-import { Issuer } from '@piquel/auth';
-import { CookieKey, Login } from '@piquel/auth/server';
+import { Issuer } from '@sourceorigin/auth';
+import { CookieKey, Login } from '@sourceorigin/auth/server';
 
-const issuer = await Issuer.discover('https://auth.piquel.fr');
+const issuer = await Issuer.discover('https://auth.sourceorigin.dev');
 const login = new Login(
   issuer.client({
     clientId: 'notes-web',
@@ -47,25 +47,25 @@ export async function fetch(request: Request): Promise<Response> {
 }
 ```
 
-[Signing in with TypeScript](https://docs.piquel.fr/user/apps/sign-in-typescript.html)
+[Signing in with TypeScript](https://docs.sourceorigin.dev/user/apps/sign-in-typescript.html)
 explains it, and what to register first.
 
 ## Browser apps
 
-`@piquel/auth/browser` signs users in to a page with no server, keeping their
+`@sourceorigin/auth/browser` signs users in to a page with no server, keeping their
 tokens in memory: see
-[browser apps](https://docs.piquel.fr/user/apps/browser-apps.html).
+[browser apps](https://docs.sourceorigin.dev/user/apps/browser-apps.html).
 
 ## APIs
 
 `issuer.resource()` validates the access tokens an API receives, with its scopes
 declared as types: see
-[protecting an API](https://docs.piquel.fr/user/apps/protect-an-api.html).
+[protecting an API](https://docs.sourceorigin.dev/user/apps/protect-an-api.html).
 
 ## Learn more
 
-- [How sign-in works](https://docs.piquel.fr/user/apps/how-sign-in-works.html)
-- [Step-up authentication](https://docs.piquel.fr/user/apps/step-up.html)
-- [Back-channel logout](https://docs.piquel.fr/user/apps/back-channel-logout.html)
-- [The SDK's design](https://docs.piquel.fr/dev/architecture/sdk.html), to change
+- [How sign-in works](https://docs.sourceorigin.dev/user/apps/how-sign-in-works.html)
+- [Step-up authentication](https://docs.sourceorigin.dev/user/apps/step-up.html)
+- [Back-channel logout](https://docs.sourceorigin.dev/user/apps/back-channel-logout.html)
+- [The SDK's design](https://docs.sourceorigin.dev/dev/architecture/sdk.html), to change
   it

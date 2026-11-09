@@ -1,6 +1,6 @@
 # Summary
 
-[piquel.fr](README.md)
+[SourceOrigin](README.md)
 
 # User guide
 
@@ -38,10 +38,10 @@
 - [Deploying with piqueld](user/apps/deploying-with-piqueld.md)
 - [Troubleshooting sign-in](user/apps/troubleshooting.md)
 - [Building with coding agents](user/agents/overview.md)
-  - [Adding sign-in](user/agents/piquel-sign-in.md)
-  - [Running your app locally](user/agents/piquel-dev-setup.md)
-  - [Deploying on piqueld](user/agents/piquel-deploy.md)
-  - [Debugging a sign-in](user/agents/piquel-debug-sign-in.md)
+  - [Adding sign-in](user/agents/sourceorigin-sign-in.md)
+  - [Running your app locally](user/agents/sourceorigin-dev-setup.md)
+  - [Deploying on piqueld](user/agents/sourceorigin-deploy.md)
+  - [Debugging a sign-in](user/agents/sourceorigin-debug-sign-in.md)
 
 # Reference
 

@@ -39,14 +39,14 @@ use crate::{
 };
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     Handle, PictureId, SessionId, UserId,
     config::Origin,
     events::{Actor, DomainEvent},
 };
-use piquel_crypto::Secret;
-use piquel_repository::{Database, DatabaseTransaction, InsertHandoff};
-use piquel_ui::{HandoffQuery, LegacyConfirm, Query};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{Database, DatabaseTransaction, InsertHandoff};
+use sourceorigin_ui::{HandoffQuery, LegacyConfirm, Query};
 use url::Url;
 
 /// How long a handoff code works: the redirect from auth to the dashboard.
@@ -366,7 +366,7 @@ impl DashboardSignIn {
         context: RequestContext,
         user_id: UserId,
         session_id: SessionId,
-    ) -> piquel_common::events::EventContext {
+    ) -> sourceorigin_common::events::EventContext {
         context.actor(Actor::User {
             user_id,
             session_id: Some(session_id),

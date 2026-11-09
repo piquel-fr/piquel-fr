@@ -1,23 +1,23 @@
 # Signing in
 
-Sign in to your piquel.fr account with a passkey, or with a GitHub or Google
+Sign in to your Origin Account with a passkey, or with a GitHub or Google
 account you linked. This page also explains passkey confirmations, which
 sensitive changes ask for even while you are signed in.
 
 ## Before you start
 
-You need a piquel.fr account. If you don't have one yet, see
+You need an Origin Account. If you don't have one yet, see
 [creating an account](creating-an-account.md).
 
 ## Sign in with a passkey
 
-1. Open `auth.piquel.fr/login`. Opening your settings, or an app that signs
-   in with Piquel, while signed out brings you here too.
+1. Open `auth.sourceorigin.dev/login`. Opening your settings, or an app that signs
+   in with Origin Auth, while signed out brings you here too.
 2. Select **Sign in with a passkey**.
 3. Your browser lists the passkeys it can use. Choose your account, then
    unlock the passkey with your fingerprint, face or PIN.
 
-Piquel signs you in and goes on to where you were headed: the app, or your
+Origin Auth signs you in and goes on to where you were headed: the app, or your
 settings.
 
 If your browser doesn't list your passkey, as with a passkey on a security key
@@ -65,7 +65,7 @@ If you haven't used your passkey in the last five minutes, your browser asks
 for it as soon as you select the change's button, which says **Waiting for
 your passkey…** meanwhile. Once you unlock it, the change goes ahead. The
 confirmation lasts five minutes from then, and only in this browser: using
-Piquel doesn't extend it.
+SourceOrigin doesn't extend it.
 
 Renaming a passkey, changing your display name or profile picture, signing out
 devices and removing an app's access need no confirmation.
@@ -79,8 +79,8 @@ devices and removing an app's access need no confirmation.
 - **"You last confirmed this session with a passkey. Use your passkey to sign
   in again."** This browser's session was confirmed with a passkey, so signing
   in again with GitHub or Google would weaken it. Sign in with your passkey.
-- **"The Piquel account linked to this provider account is disabled or has no
+- **"The Origin Account linked to this provider account is disabled or has no
   passkey."** The account can't be signed in to. Write to
-  [contact@piquel.fr](mailto:contact@piquel.fr).
+  [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev).
 - **The passkey button stays disabled.** Your browser can't use passkeys here.
   Open the page in a browser that supports them, with scripts allowed.

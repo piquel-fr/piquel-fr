@@ -18,8 +18,8 @@ const NONCE_BYTES = 12;
  * same, so their cookies interoperate.
  */
 const PURPOSES = {
-  session: 'piquel-auth session v1',
-  pending: 'piquel-auth pending login v1'
+  session: 'sourceorigin-auth session v1',
+  pending: 'sourceorigin-auth pending login v1'
 } as const;
 
 /**

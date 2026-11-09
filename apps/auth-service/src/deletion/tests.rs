@@ -12,12 +12,12 @@ use crate::{
     },
 };
 use axum::http::header;
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, Provider, TokenId,
     clients::{ClientKind, ClientOwner},
     events::{JobName, RequestOrigin},
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     Database, InsertExternalIdentity, InsertPasskey, RefreshRedemption, RefreshRedemptionError,
 };
 use serde_json::json;
@@ -619,6 +619,6 @@ async fn the_cli_purges_disabled_accounts_at_once() {
     assert!(
         stored
             .iter()
-            .all(|event| event.origin == piquel_common::Personal::<RequestOrigin>::Erased)
+            .all(|event| event.origin == sourceorigin_common::Personal::<RequestOrigin>::Erased)
     );
 }

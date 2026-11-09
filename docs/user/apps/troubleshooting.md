@@ -61,7 +61,7 @@ Only a page that [signs users in with passkeys itself](passkey-sign-in.md) sees
 this, from `/webauthn/related/start` or `/webauthn/related/finish`:
 
 ```json
-{"error":"This sign-in request needs Piquel's own pages.","code":"interaction_required"}
+{"error":"This sign-in request needs Origin Auth's own pages.","code":"interaction_required"}
 ```
 
 The sign-in needs auth's own pages, for example because the request sent
@@ -86,14 +86,14 @@ categories a reason naming the check that failed. Rust errors return both from
 
 | Category | What failed | What to do |
 | --- | --- | --- |
-| `discovery` | Fetching or checking auth's metadata. | Configure the issuer exactly as the app's **Overview** tab shows it: `https://auth.piquel.fr`. |
+| `discovery` | Fetching or checking auth's metadata. | Configure the issuer exactly as the app's **Overview** tab shows it: `https://auth.sourceorigin.dev`. |
 | `keys` | Fetching or reading auth's signing keys. | Usually temporary: the SDKs keep the last good keys. |
 | `invalid_token` | A token failed validation. The reason names the check, such as `expired`, `wrong_audience` or `bad_signature`. | For `expired`, `not_yet_valid` or `issued_in_future`, check your server's clock ([below](#clock-skew)). |
 | `insufficient_scope` | A valid token lacks a scope the API requires. | Request the scope at sign-in, and allow it on the app. |
 | `insufficient_user_authentication` | A valid token's sign-in is too weak or too old. | [Step up](#step-up-challenges). |
 | `callback` | The redirect back to your app failed its checks before the code was exchanged: `state_mismatch`, `issuer_mismatch`, `missing_issuer` or `missing_code`. | For `state_mismatch`, the callback belongs to another sign-in attempt: start again from your app. |
 | `oauth` | Auth answered with an OAuth error. | Look up its `error` on this page. |
-| `network` | Auth couldn't be reached, or answered outside its protocol. The SDKs also fail a request that takes over 10 seconds, or that answers with a redirect, which they never follow. | Check your server can reach `https://auth.piquel.fr` directly, not through a proxy that redirects, then retry. |
+| `network` | Auth couldn't be reached, or answered outside its protocol. The SDKs also fail a request that takes over 10 seconds, or that answers with a redirect, which they never follow. | Check your server can reach `https://auth.sourceorigin.dev` directly, not through a proxy that redirects, then retry. |
 
 The SDKs' login routes also answer `400` themselves, before any of these:
 
@@ -112,7 +112,7 @@ Keep your servers' clocks synchronized, for example with NTP.
 
 ## Getting help
 
-Write to contact@piquel.fr with the `error` and `error_description`, your app's
+Write to contact@sourceorigin.dev with the `error` and `error_description`, your app's
 client ID, and when it happened. Never send the client secret or a token.
 
-To report a vulnerability, write to security@piquel.fr instead.
+To report a vulnerability, write to security@sourceorigin.dev instead.

@@ -14,7 +14,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, SessionId, TokenId, UserId,
     events::{CodeRedemptionFailure, DomainEvent, EventContext, GrantRevocation},
     protocol::{
@@ -25,12 +25,12 @@ use piquel_common::{
         oauth,
     },
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, InsertRefreshFamily,
     InsertRefreshToken, RefreshRedemption, RefreshRedemptionError, SessionAuthentication,
     StoredOidcClient,
 };
-use piquel_telemetry::{Counter, Label};
+use sourceorigin_telemetry::{Counter, Label};
 use serde::{Deserialize, Serialize};
 
 /// Untrusted grant parameters; parse grant type after authenticating the client.
@@ -75,7 +75,7 @@ impl TokenForm {
                     .reject("redirect_uri must match the one sent with the authorization request"),
             ));
         }
-        piquel_crypto::Pkce::verify(
+        sourceorigin_crypto::Pkce::verify(
             self.code_verifier.as_deref().unwrap_or_default(),
             &code.pkce_challenge,
         )
@@ -140,7 +140,7 @@ impl TokenResponse {
 
 /// Tokens issued by the token endpoint, by grant and token type.
 static TOKENS_ISSUED: Counter<[Label; 2]> = Counter::new(
-    "piquel.auth.tokens.issued",
+    "sourceorigin.auth.tokens.issued",
     "{token}",
     "Tokens issued by the token endpoint, by grant type and token type.",
 );
@@ -166,7 +166,7 @@ impl TokenGrant<'_> {
     fn issue(
         &self,
         app: &OidcApplication,
-        user: &piquel_repository::StoredUser,
+        user: &sourceorigin_repository::StoredUser,
         email: Option<&str>,
     ) -> Result<TokenResponse, OAuthError> {
         let Self {

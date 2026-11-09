@@ -4,8 +4,8 @@
 
 use super::{OAuthCode, OidcApplication, policy::ClientPolicy};
 use crate::security::ApiError;
-use piquel_common::{ClientId, TokenId, UserId, clients::RelatedOrigin};
-use piquel_repository::{DatabaseTransaction, StoredSession};
+use sourceorigin_common::{ClientId, TokenId, UserId, clients::RelatedOrigin};
+use sourceorigin_repository::{DatabaseTransaction, StoredSession};
 use serde::{Deserialize, Serialize};
 
 /// A pushed request an inline sign-in claimed, kept in its ceremony. It holds the
@@ -49,7 +49,7 @@ impl OidcApplication {
             .await?;
         if request.interaction.forces_consent() || request.interaction.is_silent() {
             return Err(ApiError::interaction_required(
-                "This sign-in request needs Piquel's own pages.",
+                "This sign-in request needs Origin Auth's own pages.",
             ));
         }
         Ok(InlineClaim {
@@ -98,7 +98,7 @@ impl OidcApplication {
             .is_some()
         {
             return Err(ApiError::interaction_required(
-                "This account has a recovery that can still be undone. Sign in on Piquel's pages to continue.",
+                "This account has a recovery that can still be undone. Sign in on Origin Auth's pages to continue.",
             ));
         }
         let code = self.issue_code(tx, &request, session).await?;

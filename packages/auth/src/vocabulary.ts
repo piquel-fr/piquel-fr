@@ -26,7 +26,7 @@ function spellings<T extends string>(record: Record<T, true>): readonly T[] {
 }
 
 export const AMR = spellings<Amr>({ pop: true, mfa: true, user: true, fed: true });
-export const ACR = spellings<Acr>({ phr: true, 'urn:piquel:acr:social': true });
+export const ACR = spellings<Acr>({ phr: true, 'urn:sourceorigin:acr:social': true });
 export const ALGORITHMS = spellings<Algorithm>({ RS256: true });
 export const KEY_TYPES = spellings<KeyType>({ RSA: true });
 export const KEY_USES = spellings<KeyUse>({ sig: true });

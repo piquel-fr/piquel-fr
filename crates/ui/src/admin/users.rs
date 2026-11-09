@@ -4,7 +4,7 @@ use super::{
     Action, Change, EventRow, account_status, confirm, event_rows, moment, refused_action,
 };
 use crate::layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address};
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, AuthenticationMethod,
     admin::{Session, User, UserDetail},
 };
@@ -18,7 +18,7 @@ use topcoat::{
 pub struct UserRow<'a> {
     /// The account.
     pub user: &'a User,
-    /// Whether it administers Piquel.
+    /// Whether it administers Origin Auth.
     pub administrator: bool,
     /// Its page.
     pub href: String,
@@ -117,7 +117,7 @@ pub async fn user_search<'a>(
 }
 
 /// The changes to an account, which the dashboard has only for an account that
-/// does not administer Piquel: the short ones confirm on the account's page, the
+/// does not administer Origin Auth: the short ones confirm on the account's page, the
 /// rest have pages of their own.
 #[derive(Clone, Copy, Debug)]
 pub struct AccountPages<'a> {

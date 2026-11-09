@@ -5,7 +5,7 @@ use super::{
     ProviderError, ProviderRejection, VerifiedIdentity,
 };
 use axum::http::StatusCode;
-use piquel_telemetry::SendTraced;
+use sourceorigin_telemetry::SendTraced;
 use serde::Deserialize;
 use thiserror::Error;
 

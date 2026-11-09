@@ -2,7 +2,7 @@
 
 use super::PasskeyError;
 use axum::Json;
-use piquel_common::{RecoveryId, TokenId, clients::RelatedOrigin};
+use sourceorigin_common::{RecoveryId, TokenId, clients::RelatedOrigin};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 

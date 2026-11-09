@@ -4,13 +4,13 @@
 use super::AdminError;
 use crate::security::{CONFIRMATION_MAX_AGE, RequestContext};
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     SessionId, UserId,
     config::{ConfigurationError, Variable},
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, SessionAuthentication, StoredSession, StoredUser,
 };
 

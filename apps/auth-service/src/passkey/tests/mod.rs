@@ -17,12 +17,12 @@ use axum::{
     body::{Body, to_bytes},
     http::{Method, Request},
 };
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, TokenId, events::SignInFailure,
     protocol::claims::Acr,
 };
-use piquel_crypto::Secret;
-use piquel_repository::{InsertUser, SessionAuthentication, StoredSession};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{InsertUser, SessionAuthentication, StoredSession};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
@@ -186,7 +186,7 @@ impl Fixture {
             .oneshot(
                 request
                     .extension(crate::security::RequestContext::TEST)
-                    .header("x-piquel-csrf", "1")
+                    .header("x-sourceorigin-csrf", "1")
                     .body(Body::from(body))
                     .expect("request"),
             )

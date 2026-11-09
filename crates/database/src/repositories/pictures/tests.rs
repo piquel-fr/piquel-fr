@@ -1,7 +1,7 @@
 //! A picture's lifecycle against the schema: what its URL serves, and the profile
 //! version every change bumps.
 use crate::{Database, InsertUser};
-use piquel_common::{AccountStatus, PictureId};
+use sourceorigin_common::{AccountStatus, PictureId};
 
 /// A replaced picture's ID serves nothing and the new one serves its bytes; a
 /// disabled account serves none, and its records name none; removing it clears

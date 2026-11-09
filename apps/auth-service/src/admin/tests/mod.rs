@@ -5,11 +5,11 @@ use super::*;
 use crate::security::RequestContext;
 use crate::tests::{AUTH_ORIGIN, Browser, Replicas, until_blocked};
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, Personal, SessionId, TokenId, UserId,
     admin::EventSearch, config::Origin, events::DomainEvent, protocol::step_up::StepUpRequirement,
 };
-use piquel_repository::{Database, DatabaseTransaction, InsertUser};
+use sourceorigin_repository::{Database, DatabaseTransaction, InsertUser};
 use std::mem::discriminant;
 
 /// The operator of CLI-side changes.

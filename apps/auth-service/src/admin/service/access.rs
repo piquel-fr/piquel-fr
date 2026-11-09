@@ -8,14 +8,14 @@ use crate::{
     routes,
 };
 use chrono::Utc;
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, TokenId, UserId,
     admin::{Administrator, CreatedInvitation, Invitation},
     config::Origin,
     events::DomainEvent,
 };
-use piquel_crypto::Secret;
-use piquel_ui::{LoginQuery, Query};
+use sourceorigin_crypto::Secret;
+use sourceorigin_ui::{LoginQuery, Query};
 
 impl AdminService {
     /// Lists invitations that have not been purged yet, newest first.

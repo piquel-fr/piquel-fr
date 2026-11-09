@@ -1,7 +1,7 @@
 # Adding a feature to the SDKs
 
-This guide adds a feature to both SDKs, the Rust SDK `piquel-auth` and the
-TypeScript SDK `@piquel/auth`, such as a claim apps can read. The SDKs share
+This guide adds a feature to both SDKs, the Rust SDK `sourceorigin-auth` and the
+TypeScript SDK `@sourceorigin/auth`, such as a claim apps can read. The SDKs share
 their wire types with auth, and pass the same test vectors, so every SDK accepts
 and rejects the same inputs. [SDK design](../architecture/sdk.md) describes
 what they do; this page is the order you change them in.
@@ -11,7 +11,7 @@ The examples follow the `picture` claim, which apps read as
 
 ## What you'll have at the end
 
-- The wire type in `piquel_common::protocol`, which auth serializes and the Rust
+- The wire type in `sourceorigin_common::protocol`, which auth serializes and the Rust
   SDK reads, and its TypeScript declaration, generated from it.
 - The feature in both SDKs, under the same names and with the same behavior.
 - Vectors in `tests/sdk-vectors` that both SDKs pass.
@@ -85,7 +85,7 @@ pub fn picture(&self) -> Option<&str> {
 }
 ```
 
-`piquel_auth::protocol` re-exports the shared modules by name, in
+`sourceorigin_auth::protocol` re-exports the shared modules by name, in
 `crates/auth-sdk/src/lib.rs`: that list is the SDK's contract, so a new
 protocol module joins it.
 
@@ -119,7 +119,7 @@ just sdk-vectors
 It rewrites `tests/sdk-vectors`, which both SDKs' tests read. A new category of
 cases also needs its method called from `sdk_vectors_are_current`, its directory
 in `Vectors::finish`, its row in the
-[vectors' README](https://github.com/piquel-fr/piquel-fr/blob/main/tests/sdk-vectors/README.md),
+[vectors' README](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/sdk-vectors/README.md),
 and a runner in each SDK: `crates/auth-sdk/src/tests.rs` and
 `packages/auth/test/vectors.test.ts`.
 
@@ -143,7 +143,7 @@ binary; extend it when the feature changes the login flow.
    every SDK follows: its wire types, checks, order of checks and errors.
 2. Show how to use it in each SDK's own documentation: the Rust SDK's crate
    documentation, in `crates/auth-sdk/src/lib.rs`, and the TypeScript SDK's
-   [README](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/README.md),
+   [README](https://github.com/sourceorigin-dev/sourceorigin/blob/main/packages/auth/README.md),
    which is also its page on npm.
 3. If apps see something new, such as a claim, describe it in the user guide's
    [OpenID Connect reference](../../user/reference/oidc.md), or the guide of the

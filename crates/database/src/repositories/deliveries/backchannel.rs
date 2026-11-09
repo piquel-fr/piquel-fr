@@ -4,7 +4,7 @@
 
 use super::{Channel, NewDelivery};
 use crate::{DatabaseError, DatabaseTransaction, Notified};
-use piquel_common::{ClientId, SessionId, UserId, events::DomainEvent};
+use sourceorigin_common::{ClientId, SessionId, UserId, events::DomainEvent};
 use serde::{Deserialize, Serialize};
 
 /// Logout tokens for the clients of revoked sessions. Every revocation records a

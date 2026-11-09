@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::tests::OWN_PAGE;
-use piquel_common::protocol::claims::Amr;
+use sourceorigin_common::protocol::claims::Amr;
 
 /// Handles are public, so handle sign-in refuses a handle without an active
 /// account, and text that is no handle, before starting any ceremony.

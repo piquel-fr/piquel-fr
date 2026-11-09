@@ -62,7 +62,7 @@ export type IssuerOptions = {
  * one per process: resources and clients share its key cache.
  *
  * ```ts
- * const issuer = await Issuer.discover('https://auth.piquel.fr');
+ * const issuer = await Issuer.discover('https://auth.sourceorigin.dev');
  * const notes = issuer.resource({ identifier: 'notes-api', scopes: defineScopes('notes:read') });
  * ```
  */

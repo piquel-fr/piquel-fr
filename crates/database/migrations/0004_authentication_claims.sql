@@ -15,7 +15,7 @@ ALTER TABLE refresh_token_families ADD COLUMN authentication JSONB;
 -- ignored, and the class follows the sign-in method.
 CREATE FUNCTION pg_temp.sign_in_authentication(s sessions) RETURNS JSONB LANGUAGE SQL AS $$
     SELECT jsonb_build_object(
-        'acr', CASE WHEN s.authentication_methods ? 'passkey' THEN 'phr' ELSE 'urn:piquel:acr:social' END,
+        'acr', CASE WHEN s.authentication_methods ? 'passkey' THEN 'phr' ELSE 'urn:sourceorigin:acr:social' END,
         'auth_time', to_jsonb(s.authenticated_at),
         'amr', (
             SELECT COALESCE(jsonb_agg(DISTINCT amr.value), '[]'::jsonb)

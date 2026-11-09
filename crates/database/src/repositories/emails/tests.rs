@@ -2,7 +2,7 @@
 use super::InsertUnverifiedEmail;
 use crate::{Database, InsertUser};
 use chrono::{Duration, Utc};
-use piquel_common::{EmailId, Handle, UserId};
+use sourceorigin_common::{EmailId, Handle, UserId};
 /// Verified email ownership follows active account status and verification changes.
 #[expect(
     clippy::too_many_lines,

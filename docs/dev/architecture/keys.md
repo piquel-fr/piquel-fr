@@ -13,7 +13,7 @@ revoking and changing them are in [signing keys](../operations/signing-keys.md).
 | Audit key | `AUTH_AUDIT_KEY_PROVIDER` | the audit chain's checkpoints | by hand |
 
 Every replica must run with the same keys. The keys are read in
-`apps/auth-service/src/config/keys.rs`; the cryptography is in `piquel-crypto`.
+`apps/auth-service/src/config/keys.rs`; the cryptography is in `sourceorigin-crypto`.
 
 ## Signing keys
 
@@ -23,7 +23,7 @@ Auth signs tokens with RS256 keys. `apps/auth-service/src/keys` holds two types:
   them, and seals and opens their private keys. The `keys` commands use it
   without the HTTP service.
 - `SigningKeys` is the key set one replica signs and verifies with: a
-  `piquel_crypto::KeySet` shared by every clone, which a reload replaces for all
+  `sourceorigin_crypto::KeySet` shared by every clone, which a reload replaces for all
   of them at once. A request keeps the set it started with.
 
 ### Storage

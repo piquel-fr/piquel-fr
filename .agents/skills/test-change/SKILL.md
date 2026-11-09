@@ -22,8 +22,8 @@ Fix failures before deploying: a preview build costs minutes.
 ## 2. Deploy a preview
 
 Follow the `preview` skill: `just preview` in the background, then note the
-URLs it prints. Below, `$auth` is `https://auth-<slug>.dev.piquel.fr`, which
-serves the settings at `/settings`. `$web`, `https://<slug>.dev.piquel.fr`, only
+URLs it prints. Below, `$auth` is `https://auth-<slug>.dev.sourceorigin.dev`, which
+serves the settings at `/settings`. `$web`, `https://<slug>.dev.sourceorigin.dev`, only
 redirects to it.
 
 ## 3. Smoke-test the deployment
@@ -32,7 +32,7 @@ redirects to it.
 curl -fsS "$auth/health/ready"
 curl -fsS -o /dev/null -D - "$auth/settings"   # content-security-policy: default-src 'none'; ...; connect-src 'self'; ...
 curl -sSI "$web/settings?x=1"                  # 307, location: $auth/settings?x=1
-piquelctl preview logs piquel-fr "$(git branch --show-current)" --tail 200
+piquelctl preview logs sourceorigin "$(git branch --show-current)" --tail 200
 ```
 
 Look for errors and panics in the logs even when everything answers.
@@ -55,7 +55,7 @@ settings are always worth one pass.
   Set `CHROMIUM_EXECUTABLE` (or `executablePath`) to a Chromium binary; on
   NixOS, `$(nix build --no-link --print-out-paths nixpkgs#chromium)/bin/chromium`.
 - **APIs:** `curl` the auth API directly. State-changing requests need
-  `origin: $auth`, `content-type: application/json` and `x-piquel-csrf: 1`; any
+  `origin: $auth`, `content-type: application/json` and `x-sourceorigin-csrf: 1`; any
   other origin is refused. A settings form's post needs only `origin: $auth`.
   Account endpoints and settings also need a session cookie, so those checks are
   usually simpler from Playwright.

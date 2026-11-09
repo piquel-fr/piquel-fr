@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::tests::{Browser, Replicas, until_blocked};
-use piquel_crypto::Secret;
-use piquel_repository::InsertSession;
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::InsertSession;
 
 /// A session lookup failure stays a server error rather than becoming an anonymous session.
 #[tokio::test]
@@ -26,7 +26,7 @@ async fn optional_session_preserves_database_failure_instead_of_reporting_signed
     headers.insert(
         header::COOKIE,
         HeaderValue::from_str(&format!(
-            "__Host-piquel_session={}",
+            "__Host-sourceorigin_session={}",
             Secret::generate().expect("browser secret").encoded()
         ))
         .expect("cookie"),

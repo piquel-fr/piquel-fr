@@ -48,8 +48,8 @@ use crate::{
     routes::page::settings,
     sessions::SessionItem,
 };
-use piquel_common::protocol::api::Identity;
-use piquel_ui::{
+use sourceorigin_common::protocol::api::Identity;
+use sourceorigin_ui::{
     ConnectedAppRow, DeviceRow, EmailRow, HistoryRow, InboxRow, Messages, ProviderRow, Section, Tab,
 };
 use topcoat::{

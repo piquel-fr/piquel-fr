@@ -12,7 +12,7 @@ Every command also accepts `-h` and `--help`.
 
 ## `auth-service`
 
-Piquel authentication service. Runs `serve` when no command is given.
+Origin Auth authentication service. Runs `serve` when no command is given.
 
 ```text
 auth-service [COMMAND]
@@ -166,7 +166,7 @@ Arguments:
 Options:
 
 - `--page <PAGE>`: The page to list, counting from 1.
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service user show`
 
@@ -182,7 +182,7 @@ Arguments:
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service user disable`
 
@@ -364,7 +364,7 @@ auth-service invite list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service invite revoke`
 
@@ -461,7 +461,7 @@ auth-service client list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service client show`
 
@@ -642,7 +642,7 @@ auth-service client origin list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service audit`
 
@@ -672,7 +672,7 @@ Options:
 - `--kind <KIND>`: Only events of this kind, e.g. `session_revoked`.
 - `--views`: List administrators' and operators' views of accounts too, which are left out unless `--kind account_viewed` asks for them.
 - `--page <PAGE>`: The page to list, counting from 1 at the newest events.
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service audit verify`
 
@@ -685,7 +685,7 @@ auth-service audit verify [OPTIONS]
 Options:
 
 - `--key <KEY>`: A file of verifier keys, one per line, to use instead of the keys committed to the repository for `AUTH_PUBLIC_BASE_URL`'s host, e.g. a preview's, as `keys audit` prints it.
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service audit prune`
 
@@ -755,7 +755,7 @@ auth-service admin list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service handle`
 
@@ -936,7 +936,7 @@ auth-service announcement list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service announcement show`
 
@@ -952,7 +952,7 @@ Arguments:
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service announcement draft`
 
@@ -965,7 +965,7 @@ auth-service announcement draft [OPTIONS] --subject <SUBJECT> --body-file <BODY_
 Options:
 
 - `--subject <SUBJECT>`: The email's subject: one line of up to 150 characters. Required.
-- `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
+- `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "SourceOrigin". Required.
 - `--everyone`: Send it to every account, as of its sending.
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
 - `--essential`: Email it to every recipient with a primary verified address, even those who turned announcements' email off: for a security incident, or a change to the privacy policy or terms. Without it, they only find it in their inbox.
@@ -985,7 +985,7 @@ Arguments:
 Options:
 
 - `--subject <SUBJECT>`: The email's subject: one line of up to 150 characters. Required.
-- `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "Piquel". Required.
+- `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "SourceOrigin". Required.
 - `--everyone`: Send it to every account, as of its sending.
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
 - `--essential`: Email it to every recipient with a primary verified address, even those who turned announcements' email off: for a security incident, or a change to the privacy policy or terms. Without it, they only find it in their inbox.
@@ -1043,7 +1043,7 @@ auth-service alerts list [OPTIONS]
 Options:
 
 - `--previous`: List the alerts that cleared instead, the most recently cleared first, at most 100.
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service alerts update`
 
@@ -1138,7 +1138,7 @@ auth-service account <USER> passkeys list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account passkeys rename`
 
@@ -1197,7 +1197,7 @@ auth-service account <USER> identities list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account identities unlink`
 
@@ -1240,7 +1240,7 @@ auth-service account <USER> emails list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account emails primary`
 
@@ -1298,7 +1298,7 @@ auth-service account <USER> sessions list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account sessions revoke`
 
@@ -1352,7 +1352,7 @@ auth-service account <USER> apps list [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account apps remove`
 
@@ -1393,7 +1393,7 @@ auth-service account <USER> picture show [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account picture remove`
 
@@ -1418,7 +1418,7 @@ auth-service account <USER> history [OPTIONS]
 Options:
 
 - `--before <BEFORE>`: Continue with entries older than this one, the last one listed.
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account notifications`
 
@@ -1445,7 +1445,7 @@ auth-service account <USER> notifications list [OPTIONS]
 Options:
 
 - `--before <BEFORE>`: Continue with notifications older than this one, the last one listed.
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account notifications show`
 
@@ -1461,7 +1461,7 @@ Arguments:
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account notifications preferences`
 
@@ -1473,4 +1473,4 @@ auth-service account <USER> notifications preferences [OPTIONS]
 
 Options:
 
-- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `piquel_common`'s, as its `admin` and `alerts` modules define it).
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).

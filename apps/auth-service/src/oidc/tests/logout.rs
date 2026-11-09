@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
-use piquel_common::clients::{ClientOwner, RedirectUri};
-use piquel_common::protocol::claims::BACKCHANNEL_LOGOUT_EVENT;
-use piquel_repository::BackchannelLogout;
+use sourceorigin_common::clients::{ClientOwner, RedirectUri};
+use sourceorigin_common::protocol::claims::BACKCHANNEL_LOGOUT_EVENT;
+use sourceorigin_repository::BackchannelLogout;
 use std::{collections::HashMap, sync::Mutex};
 
 /// A client's back-channel logout endpoint on a local HTTPS port: its URI, a client

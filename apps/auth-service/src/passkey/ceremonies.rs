@@ -11,11 +11,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, Handle, RecoveryId, SessionId, TokenId, UserId, clients::RelatedOrigin,
 };
-use piquel_crypto::{Digest, Secret};
-use piquel_repository::{CeremonyKind, DatabaseTransaction, InsertCeremony};
+use sourceorigin_crypto::{Digest, Secret};
+use sourceorigin_repository::{CeremonyKind, DatabaseTransaction, InsertCeremony};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{
     DiscoverableAuthentication, PasskeyAuthentication, PasskeyRegistration,

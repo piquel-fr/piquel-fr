@@ -2,8 +2,8 @@
 //! the admin operations share.
 use crate::account::{AccountError, AccountService, Owner};
 use chrono::{Duration, Utc};
-use piquel_common::{Handle, HandleError, Personal, UserId, events::DomainEvent};
-use piquel_repository::{Database, DatabaseError, DatabaseTransaction, StoredUser};
+use sourceorigin_common::{Handle, HandleError, Personal, UserId, events::DomainEvent};
+use sourceorigin_repository::{Database, DatabaseError, DatabaseTransaction, StoredUser};
 
 /// Refusals and their response mapping.
 mod error;

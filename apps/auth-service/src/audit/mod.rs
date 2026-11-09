@@ -19,7 +19,7 @@ mod verifier;
 /// Chain verification, and the checks before pruning.
 mod verify;
 
-pub(crate) use piquel_common::admin::{
+pub(crate) use sourceorigin_common::admin::{
     AuditCheckpoint, AuditPage, AuditVerification, ChainBreak, ChainPoint, ChainProblem, Pruning,
     RecordedVerification, StoredChain, VerificationKeys,
 };
@@ -30,9 +30,9 @@ pub(crate) use verify::TrustedCheckpoint;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::{DateTime, SecondsFormat, Utc};
-use piquel_common::config::Origin;
-use piquel_crypto::{CryptoError, Digest, NoteVerifier, NoteVerifiers};
-use piquel_repository::{ChainLink, Database, DatabaseError, EventContent};
+use sourceorigin_common::config::Origin;
+use sourceorigin_crypto::{CryptoError, Digest, NoteVerifier, NoteVerifiers};
+use sourceorigin_repository::{ChainLink, Database, DatabaseError, EventContent};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -162,7 +162,7 @@ impl Chain for ChainLink {
 /// The text a checkpoint note signs, in the C2SP signed-note format:
 ///
 /// ```text
-/// auth.piquel.fr/audit
+/// auth.sourceorigin.dev/audit
 /// position 48211
 /// head 3q2+7w…
 /// time 2026-10-13T12:00:00Z

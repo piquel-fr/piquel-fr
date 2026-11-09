@@ -2,7 +2,7 @@
 
 A handle names an account in public. It is the account's login name, relying
 parties receive it as `preferred_username`, and published profiles will live at
-`piquel.fr/@handle` ([#101](https://github.com/piquel-fr/piquel-fr/issues/101)).
+`sourceorigin.dev/@handle` ([#101](https://github.com/sourceorigin-dev/sourceorigin/issues/101)).
 Auth doesn't hide which handles have an account:
 
 - Handle sign-in refuses a handle without an active account at once: "No active
@@ -10,7 +10,7 @@ Auth doesn't hide which handles have an account:
 - Signup and renames say why a handle can't be taken, naming the look-alike
   that blocks it (`Handles::claimable` in `apps/auth-service/src/handles/mod.rs`).
 
-This was decided in [#255](https://github.com/piquel-fr/piquel-fr/issues/255).
+This was decided in [#255](https://github.com/sourceorigin-dev/sourceorigin/issues/255).
 
 ## Why handles aren't hidden
 
@@ -27,7 +27,7 @@ This was decided in [#255](https://github.com/piquel-fr/piquel-fr/issues/255).
   shapes, so accounts with other passkeys stand out. A disabled account would
   visibly switch to decoys, and every change of the key changes them, so anyone
   comparing responses from before and after learns which handles exist
-  ([#181](https://github.com/piquel-fr/piquel-fr/issues/181)).
+  ([#181](https://github.com/sourceorigin-dev/sourceorigin/issues/181)).
 
 ## What a handle reveals
 
@@ -57,7 +57,7 @@ Knowing that a handle has an account gives an attacker little:
   are useless without the passkey's private key.
 
 The cost is privacy: anyone can check whether a person, by the username they use
-elsewhere, has a Piquel account. For the sign-in of piquel.fr's own apps, that
+elsewhere, has an Origin Account. For the sign-in of SourceOrigin's own apps, that
 is accepted.
 
 ## Limits
@@ -70,5 +70,5 @@ is accepted.
   sources. The failures change nothing: they are noise, not progress.
 - **Credential IDs link a handle across renames.** Anyone who recorded an
   account's credential IDs before a rename can find its new handle by trying
-  candidates. [#297](https://github.com/piquel-fr/piquel-fr/issues/297) decides
+  candidates. [#297](https://github.com/sourceorigin-dev/sourceorigin/issues/297) decides
   what to do about it.

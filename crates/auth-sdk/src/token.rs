@@ -2,7 +2,7 @@
 
 use crate::{Issuer, KeyError, LEEWAY, keys::Jws, scope::ScopeSet};
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, SessionId, TokenId, UserId,
     protocol::{
         challenge::{BearerChallenge, BearerError},
@@ -25,7 +25,7 @@ use thiserror::Error;
 ///
 /// ```
 /// use chrono::Utc;
-/// use piquel_auth::{
+/// use sourceorigin_auth::{
 ///     KeyError, TokenError,
 ///     protocol::sdk::{ErrorCategory, ErrorReason, SdkError},
 /// };
@@ -45,7 +45,7 @@ use thiserror::Error;
 ///
 /// // Keys that cannot be fetched are the server's failure: answer 503, not a challenge.
 /// assert!(TokenError::Keys(KeyError::Unavailable).challenge().is_none());
-/// # Ok::<(), piquel_auth::protocol::oauth::InvalidScope>(())
+/// # Ok::<(), sourceorigin_auth::protocol::oauth::InvalidScope>(())
 /// ```
 #[derive(Debug, Error)]
 pub enum TokenError {
@@ -239,7 +239,7 @@ impl TokenError {
 ///
 /// ```
 /// use chrono::{TimeDelta, Utc};
-/// use piquel_auth::{Acr, AuthenticationPolicy, StepUpRequirement, TokenError};
+/// use sourceorigin_auth::{Acr, AuthenticationPolicy, StepUpRequirement, TokenError};
 ///
 /// /// A passkey confirmation within the last five minutes.
 /// struct RecentPasskey;
@@ -279,10 +279,10 @@ pub enum Subject {
 /// [`Scopes`] proves none. `X` holds application claims.
 ///
 /// ```no_run
-/// # async fn run(issuer: piquel_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-/// use piquel_auth::{Resource, Scopes};
+/// # async fn run(issuer: sourceorigin_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// use sourceorigin_auth::{Resource, Scopes};
 ///
-/// piquel_auth::scopes! {
+/// sourceorigin_auth::scopes! {
 ///     /// Scopes of the notes API.
 ///     pub mod notes {
 ///         Read = "notes:read",

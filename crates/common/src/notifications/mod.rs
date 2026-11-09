@@ -228,7 +228,7 @@ impl EmailCategory {
     pub const fn description(self) -> &'static str {
         match self {
             Self::Announcements => {
-                "News from Piquel, such as a new feature. Announcements about a security incident, or a change to the privacy policy or terms, reach you by email either way."
+                "News from SourceOrigin, such as a new feature. Announcements about a security incident, or a change to the privacy policy or terms, reach you by email either way."
             }
         }
     }
@@ -337,12 +337,12 @@ impl Notification {
             Self::Announcement { title, .. } | Self::AlertRaised { title, .. } => title,
             Self::PrimaryEmailChanged => "Your primary email address changed",
             Self::EmailRemoved => "An email address was removed from your account",
-            Self::AccountSecured { .. } => "Piquel support secured your account",
+            Self::AccountSecured { .. } => "SourceOrigin support secured your account",
             Self::Recovered => "A recovery added a passkey to your account",
             Self::RecoveryUndone => "A recovery of your account was undone",
-            Self::HandleChanged => "Piquel support changed your handle",
-            Self::DisplayNameChanged => "Piquel support changed your display name",
-            Self::PictureRemoved => "Piquel support removed your profile picture",
+            Self::HandleChanged => "SourceOrigin support changed your handle",
+            Self::DisplayNameChanged => "SourceOrigin support changed your display name",
+            Self::PictureRemoved => "SourceOrigin support removed your profile picture",
             Self::AccountDisabled => "Your account was disabled",
             Self::AccountEnabled => "Your account was enabled again",
             Self::DeletionScheduled { .. } => "Your account is scheduled for deletion",
@@ -355,25 +355,25 @@ impl Notification {
     pub fn body(&self) -> String {
         match self {
             Self::Announcement { text, .. } | Self::AlertRaised { text, .. } => text.clone(),
-            Self::PrimaryEmailChanged => "Another of your verified addresses is now the primary one. Piquel sends notices about your account there, and apps that read your email address see it the next time they refresh your profile. If you didn’t make this change, sign in and review your security history.".to_owned(),
-            Self::EmailRemoved => "Piquel no longer sends anything to that address. If you didn’t remove it, sign in and review your security history.".to_owned(),
+            Self::PrimaryEmailChanged => "Another of your verified addresses is now the primary one. Origin Auth sends notices about your account there, and apps that read your email address see it the next time they refresh your profile. If you didn’t make this change, sign in and review your security history.".to_owned(),
+            Self::EmailRemoved => "Origin Auth no longer sends anything to that address. If you didn’t remove it, sign in and review your security history.".to_owned(),
             Self::AccountSecured { kept } => {
                 let undo = if *kept {
-                    "If you didn’t ask for this, undo it with a passkey you kept, then contact Piquel support."
+                    "If you didn’t ask for this, undo it with a passkey you kept, then contact SourceOrigin support."
                 } else {
-                    "If you didn’t ask for this, contact Piquel support."
+                    "If you didn’t ask for this, contact SourceOrigin support."
                 };
                 format!("Support signed your account out everywhere, removed your other passkeys, unlinked your social sign-ins and withdrew every app’s access, then sent a recovery link to whoever asked for help. {undo}")
             }
-            Self::Recovered => "Someone used a recovery link from Piquel support to add a passkey and sign in. Until the recovery settles, that passkey can sign in but can’t change your account’s security settings. If it wasn’t you, undo the recovery with a passkey from before it: that removes the new passkey, signs every device out and withdraws every app’s access. With no passkey from before it, contact Piquel support, who can undo it for you.".to_owned(),
-            Self::RecoveryUndone => "The recovery Piquel support started no longer works: any passkey it added was removed, and every device and app was signed out.".to_owned(),
+            Self::Recovered => "Someone used a recovery link from SourceOrigin support to add a passkey and sign in. Until the recovery settles, that passkey can sign in but can’t change your account’s security settings. If it wasn’t you, undo the recovery with a passkey from before it: that removes the new passkey, signs every device out and withdraws every app’s access. With no passkey from before it, contact SourceOrigin support, who can undo it for you.".to_owned(),
+            Self::RecoveryUndone => "The recovery SourceOrigin support started no longer works: any passkey it added was removed, and every device and app was signed out.".to_owned(),
             Self::HandleChanged => "You now sign in with your new handle, and apps see it the next time they refresh your profile. Your security history says why it changed.".to_owned(),
             Self::DisplayNameChanged => "Apps see your new name the next time they refresh your profile. Your security history says why it changed.".to_owned(),
             Self::PictureRemoved => "Apps stop showing it the next time they refresh your profile. You can choose another in your settings, and your security history says why it was removed.".to_owned(),
-            Self::AccountDisabled => "Nobody can sign in to it, and every device was signed out. Contact Piquel support to find out why.".to_owned(),
+            Self::AccountDisabled => "Nobody can sign in to it, and every device was signed out. Contact SourceOrigin support to find out why.".to_owned(),
             Self::AccountEnabled => "You can sign in to it again.".to_owned(),
             Self::DeletionScheduled { purge_after } => format!(
-                "It will be deleted for good on {}, with everything Piquel knows about you. Until then, signing in lets you restore it.",
+                "It will be deleted for good on {}, with everything SourceOrigin knows about you. Until then, signing in lets you restore it.",
                 purge_after.format("%-d %B %Y")
             ),
             Self::AccountRestored => "It is no longer scheduled for deletion.".to_owned(),

@@ -57,7 +57,7 @@ const RESOURCE: &str = "https://notes.example.com";
 /// Client of the vectors' ID tokens.
 const CLIENT: &str = "notes-web";
 /// The test client's session cookie.
-const SESSION_COOKIE: &str = "__Host-piquel-notes-web-session";
+const SESSION_COOKIE: &str = "__Host-sourceorigin-notes-web-session";
 /// The fixture user's account ID.
 const USER: &str = "01936f3e-8c00-7000-8000-000000000001";
 
@@ -379,7 +379,7 @@ struct Started {
 }
 
 /// The cookie prefix of the test client's pending logins.
-const PENDING_COOKIE: &str = "__Host-piquel-notes-web-login-";
+const PENDING_COOKIE: &str = "__Host-sourceorigin-notes-web-login-";
 
 impl Started {
     /// Starts a login returning to `return_to`, in a browser holding `cookies`.

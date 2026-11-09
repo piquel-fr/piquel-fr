@@ -2,7 +2,7 @@
 
 use crate::{AccessToken, Issuer, ScopeSet, TokenError};
 use chrono::{DateTime, Utc};
-use piquel_common::protocol::{claims::AccessTokenClaims, jwt::TokenType};
+use sourceorigin_common::protocol::{claims::AccessTokenClaims, jwt::TokenType};
 use serde::de::DeserializeOwned;
 use std::{fmt, marker::PhantomData, str::FromStr};
 use thiserror::Error;
@@ -15,17 +15,17 @@ pub struct ResourceError;
 
 /// A protected resource: the identifier its access tokens carry in `aud`. Auth
 /// registers audiences such as `notes-api` today; RFC 8707 resource URIs such as
-/// `https://notes.piquel.fr` work the same way. The identifier is kept exactly as
+/// `https://notes.sourceorigin.dev` work the same way. The identifier is kept exactly as
 /// given, since `aud` is compared exactly.
 ///
 /// ```
-/// use piquel_auth::Resource;
+/// use sourceorigin_auth::Resource;
 ///
 /// let notes = Resource::new("notes-api")?;
 /// assert_eq!(notes.identifier(), "notes-api");
-/// assert!("https://notes.piquel.fr".parse::<Resource>().is_ok());
+/// assert!("https://notes.sourceorigin.dev".parse::<Resource>().is_ok());
 /// assert!(Resource::new("has space").is_err());
-/// # Ok::<(), piquel_auth::ResourceError>(())
+/// # Ok::<(), sourceorigin_auth::ResourceError>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Resource {
@@ -90,8 +90,8 @@ impl fmt::Display for Resource {
 /// claims, `()` by default; choose another with [`Self::with_claims`].
 ///
 /// ```no_run
-/// # async fn run(issuer: piquel_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-/// use piquel_auth::{Resource, Scopes};
+/// # async fn run(issuer: sourceorigin_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// use sourceorigin_auth::{Resource, Scopes};
 ///
 /// /// An application claim the tokens carry.
 /// #[derive(Clone, serde::Deserialize)]
@@ -188,15 +188,15 @@ impl<X: DeserializeOwned> ResourceValidator<X> {
     /// See [`TokenError`]; checks run in the order of the SDK design.
     ///
     /// ```no_run
-    /// # async fn run(issuer: piquel_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    /// piquel_auth::scopes! {
+    /// # async fn run(issuer: sourceorigin_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// sourceorigin_auth::scopes! {
     ///     /// Scopes of the notes API.
     ///     pub mod notes {
     ///         Read = "notes:read",
     ///     }
     /// }
     ///
-    /// let notes_api = issuer.resource(piquel_auth::Resource::new("notes-api")?);
+    /// let notes_api = issuer.resource(sourceorigin_auth::Resource::new("notes-api")?);
     /// match notes_api.validate::<notes::Read>(token).await {
     ///     Ok(token) => println!("{:?} may read notes", token.subject()),
     ///     Err(error) => {

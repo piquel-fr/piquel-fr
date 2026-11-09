@@ -6,12 +6,12 @@ use crate::admin::DashboardSignIn;
 use crate::security::{BrowserCookie, RequestContext, Session, SessionError};
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, SessionId,
     admin::DashboardSession,
     events::{RevocationReason, UserAgentFamily},
 };
-use piquel_repository::{SessionScope, StoredSession};
+use sourceorigin_repository::{SessionScope, StoredSession};
 use serde::Serialize;
 use std::net::IpAddr;
 

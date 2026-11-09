@@ -70,7 +70,7 @@ impl Title {
     }
 }
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// A theme the browser chose, over the one it prefers.
     pub enum Theme {
         /// Light.
@@ -80,7 +80,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// How wide the sidebar is, on windows wide enough to show it beside the page.
     pub enum Sidebar {
         /// Icons and their labels.
@@ -124,10 +124,10 @@ pub struct PreferenceChange {
 
 /// The document around every page: the head, which links `stylesheet` and loads
 /// the page's `scripts`, if it has any, and the page as `child`. `title`
-/// names the page in the browser, before "· Piquel". The browser's `preferences`
+/// names the page in the browser, before "· SourceOrigin". The browser's `preferences`
 /// set the theme and the sidebar's width on the root, where the stylesheet reads
 /// them, and an `admin` page is marked so the stylesheet colours it as the
-/// dashboard. Only an `indexable` page, such as piquel.fr's own, may be indexed
+/// dashboard. Only an `indexable` page, such as sourceorigin.dev's own, may be indexed
 /// by search engines.
 #[component]
 pub async fn document<'a>(
@@ -153,7 +153,7 @@ pub async fn document<'a>(
                     <meta name="robots" content="noindex">
                 }
                 <meta name="color-scheme" content="light dark">
-                <title>(format!("{title} · Piquel"))</title>
+                <title>(format!("{title} · SourceOrigin"))</title>
                 <link rel="stylesheet" href=(stylesheet)>
                 for script in scripts {
                     <script type="module" src=(*script)></script>

@@ -8,8 +8,8 @@ use crate::{
     security::Session,
     tests::{Browser, Replicas, change, register, registration, replace, until_blocked},
 };
-use piquel_common::{AuthenticationMethod, UserId, clients::RedirectUris};
-use piquel_repository::Database;
+use sourceorigin_common::{AuthenticationMethod, UserId, clients::RedirectUris};
+use sourceorigin_repository::Database;
 
 mod deletion;
 mod origins;

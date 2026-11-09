@@ -5,7 +5,7 @@ use crate::{
     ClientRegistry,
     tests::{operator, replace},
 };
-use piquel_common::clients::RedirectUris;
+use sourceorigin_common::clients::RedirectUris;
 
 /// Suspending an app while one of its codes is exchanged issues nothing: the
 /// exchange checks the app under its share lock, so it waits for the suspension

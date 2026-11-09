@@ -9,11 +9,11 @@ use axum::{
     extract::{FromRef, FromRequestParts, OptionalFromRequestParts},
     http::{HeaderMap, request::Parts},
 };
-use piquel_common::{
+use sourceorigin_common::{
     SessionId, UserId,
     events::{EventContext, RevocationReason},
 };
-use piquel_repository::{Database, DatabaseTransaction, SessionScope, StoredSession};
+use sourceorigin_repository::{Database, DatabaseTransaction, SessionScope, StoredSession};
 use std::ops::Deref;
 
 /// The signed-in owner of an account, acting through their browser session. Its

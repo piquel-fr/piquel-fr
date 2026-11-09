@@ -107,7 +107,7 @@ the same path.
 
 The owner's settings page calls the same method: its `AccountPage::apply` passes
 `Subject::from(owner)`, and its `render` reads through `reader.viewer()`. Add the
-change to the page's change type and its component in `piquel-ui`, following
+change to the page's change type and its component in `sourceorigin-ui`, following
 [adding a page](page.md). The component takes an `Audience`, so it renders the
 owner's form or the administrator's, which asks for a reason.
 
@@ -137,7 +137,7 @@ Then:
 ## 6. Add it to the dashboard
 
 The account's dashboard pages are in `apps/auth-service/src/web/admin/settings.rs`,
-one per settings tab. Each renders the owner's own `piquel-ui` section with
+one per settings tab. Each renders the owner's own `sourceorigin-ui` section with
 `Audience::Administrator`, and posts the owner's change with a reason:
 
 ```rust

@@ -13,7 +13,7 @@ use crate::{
     sessions::{Revoked, SessionItem},
 };
 use clap::{Args, Subcommand};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId, EmailId, EventId, NotificationId, PasskeyId, Provider, SessionId, UserId,
     notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
