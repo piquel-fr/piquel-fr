@@ -32,7 +32,7 @@ use sourceorigin_repository::{
     SigningKeyState,
 };
 use sourceorigin_telemetry::{HttpTelemetry, Telemetry};
-use sourceorigin_ui::{HandoffQuery, LegacyConfirm};
+use sourceorigin_ui::HandoffQuery;
 use std::net::SocketAddr;
 use url::{Position, Url};
 
@@ -168,14 +168,10 @@ impl Harness {
         let handoff = location(&started);
         assert_eq!(handoff.path(), routes::page::ADMIN);
         assert_eq!(parameter(&handoff, "return_to"), path);
-        // For the previous release's handoff page, which asks for a passkey only
-        // then.
-        assert_eq!(parameter(&handoff, "confirm"), "on");
         let (state, _) = cookie(&started, BrowserCookie::DashboardState);
         let query = HandoffQuery {
             state: state.to_owned(),
             return_to: path.to_owned(),
-            confirm: LegacyConfirm,
         };
         let dashboard = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, state);
         (dashboard, query, self.to_auth(auth, &started).await)
@@ -506,7 +502,6 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
     let query = HandoffQuery {
         state: state.to_owned(),
         return_to: disable.clone(),
-        confirm: LegacyConfirm,
     };
     let other = Browser::sign_in(&harness.database, admin.user_id).await;
     let elsewhere = AdminProof::unverified(other.session_id, Utc::now());
@@ -874,10 +869,6 @@ async fn only_administrators_signed_in_with_a_passkey_are_handed_off() {
     assert_eq!(parameter(&login, "acr"), "phr");
     let back = parameter(&login, "return_to");
     assert!(back.starts_with(routes::page::ADMIN), "{back}");
-    assert!(
-        back.contains("confirm=on"),
-        "kept for the previous release: {back}"
-    );
     let page = social
         .visit(&harness.auth.a, &login[Position::BeforePath..])
         .await;
@@ -2121,7 +2112,6 @@ async fn a_form_posted_without_a_confirmation_comes_back_after_it() {
     let query = HandoffQuery {
         state: state.to_owned(),
         return_to: back.clone(),
-        confirm: LegacyConfirm,
     };
     let proof = AdminProof::unverified(admin.session_id, Utc::now());
     let code_url = harness

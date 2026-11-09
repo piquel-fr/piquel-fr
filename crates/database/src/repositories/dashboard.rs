@@ -162,9 +162,8 @@ impl DashboardRepository<'_> {
     }
 
     /// Consumes the unexpired code with this digest, if the browser's state has
-    /// this digest, and a passkey proved it: the previous release handed off
-    /// without one. A code presented with another state stays, so a forged
-    /// redemption cannot burn the browser's own.
+    /// this digest, and a passkey proved it. A code presented with another state
+    /// stays, so a forged redemption cannot burn the browser's own.
     ///
     /// # Errors
     ///
