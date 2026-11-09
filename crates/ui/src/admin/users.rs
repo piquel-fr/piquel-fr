@@ -262,7 +262,14 @@ async fn session_list<'a>(
                         for row in sessions {
                             <tr>
                                 <td>moment(at: row.session.authenticated_at)</td>
-                                <td>(row.methods())</td>
+                                <td>
+                                    (row.methods())
+                                    // An administrator's sign-in to this dashboard,
+                                    // resting on the session.
+                                    if let Some(dashboard) = row.session.dashboard.first() {
+                                        <br><small>"dashboard, used " moment(at: dashboard.last_used_at)</small>
+                                    }
+                                </td>
                                 <td>moment(at: row.session.last_seen_at)</td>
                                 <td>moment(at: row.session.expires_at)</td>
                                 <td class="right">

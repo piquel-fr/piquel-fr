@@ -20,9 +20,13 @@ Each device shows:
 - how it signed in: **Passkey**, **Social sign-in**, or both,
 - the network address of its last activity, and when that was, such as
   **Active 2 hours ago**,
-- the day it signed in.
+- the day it signed in,
+- if you are an administrator, a line for each admin dashboard signed in
+  through it, such as **Admin dashboard · Active now**.
 
-A device stays signed in for 30 days at most, then signs in again.
+A device stays signed in for 30 days at most, then signs in again. The admin
+dashboard signs out after 30 minutes without use, and 12 hours after you signed
+in to it. Signing a device out signs its admin dashboard out too.
 
 ## Sign out a device
 

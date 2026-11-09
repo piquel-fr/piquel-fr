@@ -9,7 +9,7 @@
  * `E2E_ADMIN_URL` and `E2E_GRANT_ADMIN`; the invitation test also needs
  * `E2E_INVITE`, and the tests that read email `E2E_MAIL_URL`.
  */
-import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 import {
   addPasskeys,
   addSecondPasskey,
@@ -43,9 +43,9 @@ async function administrator(browser: Browser, handle: string): Promise<Page> {
 }
 
 /**
- * Confirms the dashboard with a passkey on auth's handoff page, where a change's
- * page opened without the dashboard's script sends the browser: auth asks for one,
- * for the dashboard only, then the dashboard shows the change's form.
+ * Proves a passkey on auth's handoff page, where the dashboard sends a browser
+ * signing in, or confirming a change without the dashboard's script: auth asks for
+ * one, for the dashboard only, then the dashboard shows its page, confirmed.
  */
 async function confirmThroughAuth(admin: Page): Promise<void> {
   await expect(admin.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
@@ -54,23 +54,17 @@ async function confirmThroughAuth(admin: Page): Promise<void> {
 }
 
 /**
- * Follows the dashboard's `link` to a change, which its first change asks to
- * confirm: the dashboard's script asks for a passkey, for the dashboard only, in a
- * dialog on the page. The page then goes on to the change's form, never leaving
- * the dashboard.
+ * Opens the dashboard's `path`, signing in with a passkey on auth's handoff page
+ * first if the browser has no dashboard session.
  */
-async function confirmInDialog(admin: Page, link: Locator): Promise<void> {
-  const target = await link.evaluate((anchor: HTMLAnchorElement) => anchor.href);
-  await link.click();
-  const dialog = admin.getByRole('dialog', { name: "Confirm it's you" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
-  await expect(admin).toHaveURL(target);
+async function openDashboard(admin: Page, path: string): Promise<void> {
+  await admin.goto(`${adminUrl}${path}`);
+  if (new URL(admin.url()).origin !== adminUrl) await confirmThroughAuth(admin);
 }
 
 /** Opens the dashboard's page of the account `handle`. */
 async function openAccount(admin: Page, handle: string): Promise<void> {
-  await admin.goto(`${adminUrl}/users?q=${handle}`);
+  await openDashboard(admin, `/users?q=${handle}`);
   await admin.getByRole('link', { name: `@${handle}`, exact: true }).click();
 }
 
@@ -104,7 +98,7 @@ function entry(page: Page, change: string, reason: string) {
  */
 test("the dashboard's top bar fits every window size", async ({ browser }) => {
   const admin = await administrator(browser, `bar-${Date.now().toString(36)}`);
-  await admin.goto(`${adminUrl}/users`);
+  await openDashboard(admin, '/users');
   const bar = admin.locator('.topbar');
   const parts = {
     crumb: bar.locator('.crumb'),
@@ -146,18 +140,19 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
   await expect(user.getByRole('table')).toHaveCount(0);
 
-  // The administrator's passkey session hands off to the dashboard silently. A
-  // change needs the dashboard's own confirmation.
+  // Signing in to the dashboard asks for the administrator's passkey on auth's
+  // handoff page, which confirms the dashboard for its first changes too. The
+  // dashboard offers each change in a dialog on the page itself, which the
+  // browser opens and closes with no script.
   await openAccount(admin, `user-${suffix}`);
-  await confirmInDialog(admin, admin.getByRole('link', { name: 'Disable', exact: true }));
-  await admin.getByLabel('Reason').fill('Browser test');
   await admin.getByRole('button', { name: 'Disable', exact: true }).click();
+  const disable = admin.getByRole('dialog', { name: 'Disable this account' });
+  await disable.getByLabel('Reason').fill('Browser test');
+  await disable.getByRole('button', { name: 'Disable', exact: true }).click();
   await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
   await expect(admin.getByText('No active session.')).toBeVisible();
 
-  // Confirmed now, the dashboard offers the next change in a dialog on the page
-  // itself, which the browser opens and closes with no script. Cancelling leaves
-  // the account as it is; confirming enables it.
+  // Cancelling leaves the account as it is; confirming enables it.
   await admin.getByRole('button', { name: 'Enable', exact: true }).click();
   const dialog = admin.getByRole('dialog', { name: 'Enable this account' });
   await expect(dialog).toBeVisible();
@@ -173,11 +168,12 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(user.getByText(`@user-${suffix}`, { exact: true })).toHaveCount(0);
 
   // The dashboard sends no referrer, so its sign-out form posts with `Origin: null`.
-  // Signing out of the dashboard keeps the Origin Account session, so signing in again is
-  // silent.
+  // Signing out of the dashboard keeps the Origin Account session, but signing in
+  // again still asks for the passkey.
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Signed out of the dashboard' })).toBeVisible();
   await admin.getByRole('link', { name: 'Sign in again', exact: true }).click();
+  await confirmThroughAuth(admin);
   await expect(admin.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 
   // Signed out of their Origin Account too, the administrator signs in with a passkey on auth,
@@ -188,6 +184,7 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await admin.goto(`${adminUrl}/users`);
   await admin.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
+  await confirmThroughAuth(admin);
   await expect(admin.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
 });
 
@@ -220,10 +217,9 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   const user = await signedUp(browser, `grantee-${suffix}`);
 
   // Opened by its address, the change's page sends the browser to auth's handoff
-  // page to confirm, then shows the search's results, each result confirming the
+  // page to sign in, then shows the search's results, each result confirming the
   // grant in its own dialog.
-  await admin.goto(`${adminUrl}/administrators/grant?q=grantee-${suffix}`);
-  await confirmThroughAuth(admin);
+  await openDashboard(admin, `/administrators/grant?q=grantee-${suffix}`);
   await admin
     .getByRole('button', { name: `Grant administrator rights: @grantee-${suffix}`, exact: true })
     .click();
@@ -239,7 +235,7 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   // Nobody changes their own rights.
   await expect(row(`granter-${suffix}`).getByRole('button', { name: 'Revoke' })).toBeDisabled();
   await expect(row(`granter-${suffix}`)).toContainText('You cannot change your own rights.');
-  await user.goto(`${adminUrl}/users`);
+  await openDashboard(user, '/users');
   await expect(user.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
 
   await admin.goto(`${adminUrl}/administrators`);
@@ -248,7 +244,8 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   await revoke.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/administrators`);
   await expect(row(`grantee-${suffix}`)).toHaveCount(0);
-  // The account keeps its session, but no longer reaches the dashboard.
+  // The account keeps its Origin Account session, but its dashboard session ended with
+  // its rights, and it no longer reaches the dashboard.
   await user.goto(`${adminUrl}/users`);
   await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
 });
@@ -278,8 +275,7 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
     await expect(page.getByRole('alert')).toBeVisible();
     await expect(page).toHaveURL(/\/register/);
   };
-  await admin.goto(`${adminUrl}/invitations/new`);
-  await confirmThroughAuth(admin);
+  await openDashboard(admin, '/invitations/new');
   const first = await invite();
   expect(new URL(first).origin).toBe(authUrl);
   // The link shows once, on a page reached by `GET`: reloading it shows the form
@@ -328,7 +324,7 @@ test("an administrator changes an account's passkeys and addresses, and its owne
 
   // Every change asks why, beside its own form.
   await openAccount(admin, handle);
-  await confirmInDialog(admin, admin.getByRole('link', { name: 'Sign-in methods', exact: true }));
+  await admin.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
   await admin.getByRole('button', { name: 'Rename Second passkey', exact: true }).click();
   await admin.getByLabel('Passkey name', { exact: true }).fill('Lost passkey');
   await admin.getByLabel('Reason, shown to the owner in their history').fill('Named for the owner');
@@ -387,7 +383,7 @@ test('a handle support renames signs in at once, while the owner waits a month',
 
   // Support renames it without waiting, such as a handle that impersonates another.
   await openAccount(admin, `old-${suffix}`);
-  await confirmInDialog(admin, admin.getByRole('link', { name: 'Change handle', exact: true }));
+  await admin.getByRole('link', { name: 'Change handle', exact: true }).click();
   await admin.getByLabel('New handle').fill(`new-${suffix}`);
   await admin.getByLabel('Reason, shown to the owner in their history').fill('Impersonation');
   await admin.getByRole('button', { name: 'Change handle', exact: true }).click();
@@ -422,8 +418,9 @@ test('a handle support renames signs in at once, while the owner waits a month',
 /**
  * An announcement's journey: a draft saved without a confirmation, then edited
  * to a small group found and added on its form, sent from the editor after the
- * dashboard's passkey dialog, and read in the recipient's inbox, its paragraphs
- * kept, and, with a mail catcher, their mailbox.
+ * dashboard's passkey dialog, once the sign-in's confirmation has ended, and read
+ * in the recipient's inbox, its paragraphs kept, and, with a mail catcher, their
+ * mailbox.
  */
 test('an announcement is drafted, sent to a group found on its form, and read', async ({
   browser
@@ -437,8 +434,10 @@ test('an announcement is drafted, sent to a group found on its form, and read', 
   if (mailUrl) await addAddress(reader, address);
   const subject = `Maintenance ${suffix}`;
 
+  // The page's clock runs as usual until the test moves it on.
+  await admin.clock.install();
   // Saving a draft needs no confirmation; to everyone, it has no accounts to find.
-  await admin.goto(`${adminUrl}/announcements/new`);
+  await openDashboard(admin, '/announcements/new');
   await admin.getByRole('textbox', { name: /^Subject/ }).fill(subject);
   await admin
     .getByRole('textbox', { name: /^Text/ })
@@ -455,6 +454,9 @@ test('an announcement is drafted, sent to a group found on its form, and read', 
   await admin.getByRole('button', { name: 'Find', exact: true }).click();
   await admin.getByRole('button', { name: `Add @${handle}`, exact: true }).click();
   await expect(admin.getByRole('textbox', { name: /^Accounts/ })).toHaveValue(handle);
+  // Past the five minutes signing in confirmed, the dashboard's script asks for a
+  // passkey in a dialog on the page before it sends, never leaving the dashboard.
+  await admin.clock.fastForward('06:00');
   await admin.getByRole('button', { name: 'Send', exact: true }).click();
   const dialog = admin.getByRole('dialog', { name: "Confirm it's you" });
   await dialog.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();

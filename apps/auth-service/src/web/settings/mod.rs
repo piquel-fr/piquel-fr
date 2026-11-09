@@ -108,6 +108,7 @@ impl<'a> From<&'a SessionItem> for DeviceRow<'a> {
             methods: &session.methods,
             authenticated_at: session.authenticated_at,
             last_seen_at: session.last_seen_at,
+            dashboard: &session.dashboard,
         }
     }
 }

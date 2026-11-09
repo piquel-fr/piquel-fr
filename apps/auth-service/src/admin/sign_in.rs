@@ -6,14 +6,15 @@
 //!    confirmation, is sent to auth's handoff page ([`DashboardSignIn::start`]),
 //!    with a state whose digest the dashboard keeps in a cookie of its own origin.
 //! 2. The handoff page needs a session signed in with a passkey, of an account
-//!    that still holds administrator rights. It answers with a single-use code,
-//!    valid for [`HANDOFF_LIFETIME`], bound to that session and to the state
-//!    ([`DashboardSignIn::hand_off`]). A confirmation counts only when a passkey
-//!    proved it in a ceremony the handoff page started for it, never a
-//!    confirmation of the auth session itself.
+//!    that still holds administrator rights, and a passkey's proof, in a ceremony
+//!    it started for the handoff, never a confirmation of the auth session
+//!    itself: a browser left signed in to auth cannot open the dashboard without
+//!    the administrator's passkey. It answers with a single-use code, valid for
+//!    [`HANDOFF_LIFETIME`], bound to that session and to the state
+//!    ([`DashboardSignIn::hand_off`]).
 //! 3. The dashboard redeems the code in the browser holding the state, and starts
-//!    a session of its own, storing only its cookie's digest, with the auth
-//!    session and the confirmation ([`DashboardSignIn::finish`]).
+//!    a session of its own, confirmed by the proof, storing only its cookie's
+//!    digest, with the auth session ([`DashboardSignIn::finish`]).
 //!
 //! The dashboard's own page may confirm its session later, with a passkey proved
 //! for the dashboard's origin, a related origin of auth's RP ID
@@ -21,8 +22,12 @@
 //! page and back.
 //!
 //! A dashboard session lasts while its auth session does: signing out of auth,
-//! revoking that session or replacing it ends the dashboard's too. Every request
-//! checks the administrator's rights again ([`DashboardSignIn::operator`]).
+//! revoking that session or replacing it ends the dashboard's too. It also ends
+//! [`DASHBOARD_IDLE_MINUTES`] after its last request, [`DASHBOARD_LIFETIME_HOURS`]
+//! after its sign-in, and when the account's rights are revoked. Every request
+//! checks the administrator's rights again ([`DashboardSignIn::signed_in`]).
+//! Signing in and out are recorded in the administrator's history; a session
+//! that times out records nothing.
 
 use super::{AdminError, AdminSession, Operator};
 use crate::{
@@ -30,14 +35,18 @@ use crate::{
     federation::ReturnTo,
     passkey::AdminProof,
     routes,
-    security::{BrowserCookie, RequestContext},
+    security::{BrowserCookie, DASHBOARD_IDLE_MINUTES, DASHBOARD_LIFETIME_HOURS, RequestContext},
 };
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
-use chrono::{Duration, Utc};
-use sourceorigin_common::{Handle, PictureId, SessionId, UserId, config::Origin};
+use chrono::{DateTime, Duration, Utc};
+use sourceorigin_common::{
+    Handle, PictureId, SessionId, UserId,
+    config::Origin,
+    events::{Actor, DomainEvent},
+};
 use sourceorigin_crypto::Secret;
-use sourceorigin_repository::{Database, InsertHandoff};
-use sourceorigin_ui::{Checkbox, HandoffQuery, Query};
+use sourceorigin_repository::{Database, DatabaseTransaction, InsertHandoff};
+use sourceorigin_ui::{HandoffQuery, Query};
 use url::Url;
 
 /// How long a handoff code works: the redirect from auth to the dashboard.
@@ -116,35 +125,24 @@ impl DashboardSignIn {
         &self.dashboard
     }
 
-    /// Starts signing the browser in to the dashboard, to go on to the dashboard
-    /// path `return_to`, with a passkey confirmation if `confirm`: the handoff page
-    /// on auth to send it to, and the state cookie binding the handoff to it.
-    pub(crate) fn start(
-        &self,
-        return_to: &str,
-        confirm: bool,
-    ) -> Result<(Url, DashboardCookie), AdminError> {
+    /// Starts signing the browser in to the dashboard, or confirming its session,
+    /// to go on to the dashboard path `return_to`: the handoff page on auth to
+    /// send it to, which asks for a passkey, and the state cookie binding the
+    /// handoff to it.
+    pub(crate) fn start(&self, return_to: &str) -> Result<(Url, DashboardCookie), AdminError> {
         let state = Secret::generate()?;
         let query = HandoffQuery {
             state: state.encoded(),
             return_to: return_to.to_owned(),
-            confirm: Checkbox(confirm),
         };
         let page = query.url(self.auth.as_url(), routes::page::ADMIN)?;
         Ok((page, DashboardCookie(Step::Started(state))))
     }
 
-    /// Hands `owner`'s session off to the dashboard as `handoff` asks: where the
-    /// dashboard is to go on to, with the code to redeem there. The session must be
-    /// signed in with a passkey, of an account that still holds administrator
-    /// rights. A handoff that asks for a confirmation needs `proof`, of this
-    /// session, whose time the dashboard session keeps as its confirmation.
-    pub(crate) async fn hand_off(
-        &self,
-        owner: &Owner,
-        handoff: &HandoffQuery,
-        proof: Option<AdminProof>,
-    ) -> Result<Url, AdminError> {
+    /// Requires `owner`'s session to be signed in with a passkey, of an account
+    /// that still holds administrator rights: what a handoff needs, which its
+    /// page checks before asking for a passkey.
+    pub(crate) async fn admit(&self, owner: &Owner) -> Result<(), AdminError> {
         let session = owner.session();
         let operator = Operator::Admin(AdminSession {
             user_id: session.user_id,
@@ -152,27 +150,41 @@ impl DashboardSignIn {
             confirmed_at: None,
             context: owner.request(),
         });
-        operator.authorize_read(&self.database).await?;
-        let confirmed_at = match proof {
-            Some(proof) if proof.session_id() == session.id => Some(proof.at()),
-            Some(_) => return Err(AdminError::SessionEnded),
-            None if handoff.confirm.0 => return Err(AdminError::InvalidHandoff),
-            None => None,
-        };
+        operator.authorize_read(&self.database).await
+    }
+
+    /// Hands `owner`'s session off to the dashboard as `handoff` asks, with
+    /// `proof`, a passkey's of this session: where the dashboard is to go on to,
+    /// with the code to redeem there. The session must be one [`Self::admit`]
+    /// admits. The dashboard session the code starts keeps the proof's time as
+    /// its confirmation.
+    pub(crate) async fn hand_off(
+        &self,
+        owner: &Owner,
+        handoff: &HandoffQuery,
+        proof: AdminProof,
+    ) -> Result<Url, AdminError> {
+        let session = owner.session();
+        self.admit(owner).await?;
+        if proof.session_id() != session.id {
+            return Err(AdminError::SessionEnded);
+        }
         let state = Secret::parse(&handoff.state).map_err(|_| AdminError::InvalidHandoff)?;
         let return_to = Self::path(&handoff.return_to)?;
         let code = Secret::generate()?;
-        self.database
-            .dashboard()
+        let mut tx = self.database.begin().await?;
+        Self::hold_rights(&mut tx, session.user_id).await?;
+        tx.dashboard()
             .insert_handoff(&InsertHandoff {
                 code_digest: code.digest().as_bytes(),
                 session_id: session.id,
                 state_digest: state.digest().as_bytes(),
                 return_to: return_to.as_str(),
-                confirmed_at,
+                confirmed_at: proof.at(),
                 expires_at: Utc::now() + HANDOFF_LIFETIME,
             })
             .await?;
+        tx.commit().await?;
         let mut target = self.dashboard.url(routes::dashboard::SIGN_IN);
         target
             .query_pairs_mut()
@@ -181,11 +193,13 @@ impl DashboardSignIn {
     }
 
     /// Redeems auth's handoff `code` in the browser whose cookies `headers` carries,
-    /// which must hold the state the handoff was bound to. Starts the dashboard
-    /// session, replacing the browser's previous one, and returns the dashboard
-    /// path to go on to, with the cookies to set.
+    /// which must hold the state the handoff was bound to, from `context`. Starts
+    /// the dashboard session, replacing the browser's previous one, records the
+    /// sign-in, and returns the dashboard path to go on to, with the cookies to
+    /// set.
     pub(crate) async fn finish(
         &self,
+        context: RequestContext,
         headers: &HeaderMap,
         code: &str,
     ) -> Result<(ReturnTo, DashboardCookie), AdminError> {
@@ -194,24 +208,42 @@ impl DashboardSignIn {
             .ok_or(AdminError::InvalidHandoff)?;
         let code = Secret::parse(code).map_err(|_| AdminError::InvalidHandoff)?;
         let mut tx = self.database.begin().await?;
+        let user_id = (tx
+            .dashboard()
+            .handoff_user(code.digest().as_bytes())
+            .await?)
+            .ok_or(AdminError::InvalidHandoff)?;
+        Self::hold_rights(&mut tx, user_id).await?;
         let handoff = tx
             .dashboard()
             .redeem_handoff(code.digest().as_bytes(), state.digest().as_bytes())
             .await?
             .ok_or(AdminError::InvalidHandoff)?;
+        // The new session replaces it, in the same browser: no sign-out to record.
         if let Some(previous) = BrowserCookie::Dashboard.read(headers) {
             tx.dashboard()
                 .delete_session(previous.digest().as_bytes())
                 .await?;
         }
         let secret = Secret::generate()?;
+        let lifetime = Duration::hours(DASHBOARD_LIFETIME_HOURS.into());
         tx.dashboard()
             .insert_session(
                 secret.digest().as_bytes(),
                 handoff.session_id,
                 handoff.confirmed_at,
+                Utc::now() + lifetime,
             )
             .await?;
+        let signed_in = DomainEvent::DashboardSignedIn {
+            session_id: handoff.session_id,
+        };
+        tx.record(
+            &Self::by(context, handoff.user_id, handoff.session_id),
+            Some(handoff.user_id),
+            signed_in,
+        )
+        .await?;
         tx.commit().await?;
         let return_to = Self::path(&handoff.return_to)?;
         Ok((return_to, DashboardCookie(Step::SignedIn(secret))))
@@ -219,8 +251,9 @@ impl DashboardSignIn {
 
     /// The administrator signed in to the dashboard in the browser whose cookies
     /// `headers` carries, acting from `context`, or `None` when it has no session,
-    /// or its auth session ended. Their rights and auth session are checked now,
-    /// as every read checks them again.
+    /// its session timed out, or its auth session ended. This request counts as
+    /// the session's latest. Their rights and auth session are checked now, as
+    /// every read checks them again.
     pub(crate) async fn signed_in(
         &self,
         context: RequestContext,
@@ -232,7 +265,7 @@ impl DashboardSignIn {
         let Some(stored) = self
             .database
             .dashboard()
-            .find_session(secret.digest().as_bytes())
+            .use_session(secret.digest().as_bytes(), Self::idle_since())
             .await?
         else {
             return Ok(None);
@@ -275,19 +308,68 @@ impl DashboardSignIn {
         confirmed.then_some(()).ok_or(AdminError::SessionEnded)
     }
 
-    /// Ends the dashboard session of the browser whose cookies `headers` carries.
-    /// Its auth session stays signed in.
+    /// Ends the dashboard session of the browser whose cookies `headers` carries,
+    /// from `context`, and records it. Its auth session stays signed in.
     pub(crate) async fn sign_out(
         &self,
+        context: RequestContext,
         headers: &HeaderMap,
     ) -> Result<DashboardCookie, AdminError> {
         if let Some(secret) = BrowserCookie::Dashboard.read(headers) {
-            self.database
+            let mut tx = self.database.begin().await?;
+            if let Some(ended) = tx
                 .dashboard()
                 .delete_session(secret.digest().as_bytes())
+                .await?
+            {
+                let signed_out = DomainEvent::DashboardSignedOut {
+                    session_id: ended.session_id,
+                };
+                tx.record(
+                    &Self::by(context, ended.user_id, ended.session_id),
+                    Some(ended.user_id),
+                    signed_out,
+                )
                 .await?;
+            }
+            tx.commit().await?;
         }
         Ok(DashboardCookie(Step::SignedOut))
+    }
+
+    /// Requires `user_id` to hold administrator rights, share-locked until `tx`
+    /// ends: a handoff or a dashboard session written in `tx` then commits before
+    /// a revocation of the rights, which ends it, or not at all. The rights come
+    /// first, as a revocation takes them before the handoffs and sessions it
+    /// deletes, so neither waits for the other in a cycle.
+    async fn hold_rights(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<(), AdminError> {
+        if tx.administrators().contains_for_share(user_id).await? {
+            Ok(())
+        } else {
+            Err(AdminError::NotAdministrator)
+        }
+    }
+
+    /// The earliest last request of a dashboard session still in use: one unused
+    /// since has timed out.
+    pub(crate) fn idle_since() -> DateTime<Utc> {
+        Utc::now() - Duration::minutes(DASHBOARD_IDLE_MINUTES.into())
+    }
+
+    /// Attributes a sign-in or sign-out, from `context`, to the account `user_id`
+    /// in its auth session `session_id`: the administrator acts as themselves.
+    fn by(
+        context: RequestContext,
+        user_id: UserId,
+        session_id: SessionId,
+    ) -> sourceorigin_common::events::EventContext {
+        context.actor(Actor::User {
+            user_id,
+            session_id: Some(session_id),
+        })
     }
 
     /// The dashboard path `value` names, which cannot leave the dashboard's origin.

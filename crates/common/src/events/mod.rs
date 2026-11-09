@@ -211,8 +211,22 @@ pub enum DomainEvent {
     AccountViewed {},
     /// The account became an administrator.
     AdministratorGranted {},
-    /// The account's administrator rights were removed.
+    /// The account's administrator rights were removed. Its dashboard sessions
+    /// end with them, each as [`Self::DashboardSignedOut`].
     AdministratorRevoked {},
+    /// An administrator signed in to the admin dashboard, with a passkey, from
+    /// the auth session `session_id`.
+    DashboardSignedIn {
+        /// The auth session the dashboard's session rests on.
+        session_id: SessionId,
+    },
+    /// A dashboard session of the auth session `session_id` ended early: its
+    /// administrator signed out, or their rights were revoked, as the actor says.
+    /// One that timed out records nothing.
+    DashboardSignedOut {
+        /// The auth session the dashboard's session rested on.
+        session_id: SessionId,
+    },
     /// The account's handle changed. Relying parties see it as a new
     /// `preferred_username` once they refresh the profile.
     HandleChanged {
@@ -535,6 +549,8 @@ impl DomainEvent {
             | Self::AccountViewed {}
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
+            | Self::DashboardSignedIn { .. }
+            | Self::DashboardSignedOut { .. }
             | Self::HandleChanged { .. }
             | Self::DisplayNameChanged { .. }
             | Self::PictureChanged { .. }
@@ -570,7 +586,9 @@ impl DomainEvent {
         match self {
             Self::SignedIn { session_id, .. }
             | Self::SessionRevoked { session_id, .. }
-            | Self::PasskeyConfirmed { session_id } => Some(*session_id),
+            | Self::PasskeyConfirmed { session_id }
+            | Self::DashboardSignedIn { session_id }
+            | Self::DashboardSignedOut { session_id } => Some(*session_id),
             Self::AccountCreated { .. }
             | Self::SignInFailed { .. }
             | Self::PasskeyAdded { .. }
@@ -665,6 +683,8 @@ impl DomainEvent {
             Self::AccountViewed {} => "account_viewed",
             Self::AdministratorGranted {} => "administrator_granted",
             Self::AdministratorRevoked {} => "administrator_revoked",
+            Self::DashboardSignedIn { .. } => "dashboard_signed_in",
+            Self::DashboardSignedOut { .. } => "dashboard_signed_out",
             Self::HandleChanged { .. } => "handle_changed",
             Self::DisplayNameChanged { .. } => "display_name_changed",
             Self::PictureChanged { .. } => "picture_changed",

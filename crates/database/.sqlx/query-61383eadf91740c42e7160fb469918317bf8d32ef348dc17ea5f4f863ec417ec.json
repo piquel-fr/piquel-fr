@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH used AS (\n                    UPDATE dashboard_sessions d SET last_used_at = now()\n                    FROM sessions s\n                    WHERE d.secret_digest = $1 AND s.id = d.session_id\n                    AND s.revoked_at IS NULL AND s.expires_at > now()\n                    AND d.expires_at > now() AND d.last_used_at > $2\n                    RETURNING d.session_id, s.user_id, d.confirmed_at\n                )\n                SELECT u.session_id AS \"session_id: SessionId\",\n                    u.user_id AS \"user_id: UserId\", h.handle AS \"handle: Handle\",\n                    p.id AS \"picture?: PictureId\", u.confirmed_at\n                FROM used u\n                JOIN handles h ON h.user_id = u.user_id AND h.released_at IS NULL\n                LEFT JOIN profile_pictures p ON p.user_id = u.user_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "picture?: PictureId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "confirmed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "61383eadf91740c42e7160fb469918317bf8d32ef348dc17ea5f4f863ec417ec"
+}

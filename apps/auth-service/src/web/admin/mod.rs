@@ -12,8 +12,9 @@
 //! only, and forms posting only to the dashboard, whose answer may go on to
 //! auth's handoff page.
 //!
-//! A browser without a dashboard session goes through auth's handoff page and
-//! back. A page that changes something needs the dashboard's own passkey
+//! A browser without a dashboard session, or whose session timed out, goes
+//! through auth's handoff page, which asks for a passkey, and back. A page that
+//! changes something needs the dashboard's own passkey
 //! confirmation, recent enough that the service still accepts it once the form
 //! is submitted; without one, it sends the browser to confirm on auth's handoff
 //! page, and back to the page. The dashboard's script spares the page that trip:
@@ -247,12 +248,10 @@ impl Answer {
 
 /// What the dashboard does about a change the service refused.
 enum Refusal {
-    /// The change needs a newer confirmation: the browser confirms on auth's
-    /// handoff page, and comes back to the form's page.
-    Confirm,
-    /// The administrator's session ended: the browser signs in again, and comes
-    /// back to the form's page.
-    SignIn,
+    /// The change needs a newer confirmation, or the administrator's session
+    /// ended: the browser proves a passkey on auth's handoff page, and comes back
+    /// to the form's page.
+    HandOff,
     /// The page explains it instead, and logs it: the account administers
     /// nothing.
     Page(AdminError),
@@ -269,8 +268,7 @@ impl From<AdminError> for Refusal {
             ref error => error.log_refusal(),
         }
         match error {
-            AdminError::StepUpRequired(_) => Self::Confirm,
-            AdminError::SessionEnded => Self::SignIn,
+            AdminError::StepUpRequired(_) | AdminError::SessionEnded => Self::HandOff,
             error => Self::Form(error.into()),
         }
     }
@@ -502,7 +500,7 @@ impl AdminApplication {
         let context = RequestContext::of(extensions(cx))?;
         match app.sign_in.signed_in(context, headers(cx)).await {
             Ok(Some(admin)) => Ok(admin),
-            Ok(None) => Err(app.hand_off(cx, false)),
+            Ok(None) => Err(app.hand_off(cx)),
             Err(error) => Err(error.into()),
         }
     }
@@ -520,17 +518,17 @@ impl AdminApplication {
         if admin.operator.is_confirmed(ahead) {
             Ok(())
         } else {
-            Err(Self::of(cx).hand_off(cx, true))
+            Err(Self::of(cx).hand_off(cx))
         }
     }
 
-    /// Sends the browser through auth's handoff page, confirming with a passkey if
-    /// `confirm`, and back to the page.
-    fn hand_off(&self, cx: &Cx, confirm: bool) -> Error {
+    /// Sends the browser through auth's handoff page, which signs it in or
+    /// confirms its session with a passkey, and back to the page.
+    fn hand_off(&self, cx: &Cx) -> Error {
         let page = uri(cx).path_and_query().map_or("/", |page| page.as_str());
         let started = self
             .sign_in
-            .start(page, confirm)
+            .start(page)
             .map_err(Error::from)
             .and_then(|(to, cookie)| {
                 let mut response = see_other(to).into_response(cx)?;
@@ -568,8 +566,7 @@ impl AdminApplication {
             Err(refused) => refused.into(),
         };
         match refused {
-            Refusal::Confirm => Err(Self::of(cx).hand_off(cx, true)),
-            Refusal::SignIn => Err(Self::of(cx).hand_off(cx, false)),
+            Refusal::HandOff => Err(Self::of(cx).hand_off(cx)),
             Refusal::Page(error) => Err(error.into()),
             Refusal::Form(refusal) => match refusal.public() {
                 (status, _) if status.is_server_error() => {
@@ -991,7 +988,8 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
     let code = parse_query_params::<SignInQuery>(cx)
         .map(|query| query.code)
         .unwrap_or_default();
-    match app.sign_in.finish(headers(cx), &code).await {
+    let context = RequestContext::of(extensions(cx))?;
+    match app.sign_in.finish(context, headers(cx), &code).await {
         Ok((return_to, cookie)) => {
             let mut response = see_other(return_to.as_str()).into_response(cx)?;
             cookie.set_on(&mut response)?;
@@ -1062,7 +1060,8 @@ async fn finish_confirmation(cx: &Cx, Json(input): Json<AuthenticationFinish>) -
 async fn sign_out(cx: &Cx) -> Result<Response> {
     let app = AdminApplication::of(cx);
     if method(cx) == Method::POST {
-        let cookie = app.sign_in.sign_out(headers(cx)).await?;
+        let context = RequestContext::of(extensions(cx))?;
+        let cookie = app.sign_in.sign_out(context, headers(cx)).await?;
         let mut response = see_other(href!(sign_out).resolve(cx)).into_response(cx)?;
         cookie.set_on(&mut response)?;
         return Ok(response);

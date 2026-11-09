@@ -1,11 +1,12 @@
 //! `/admin`: hands an administrator's passkey session off to the admin dashboard,
-//! which sent the browser here (see [`DashboardSignIn`]).
+//! which sent the browser here (see [`DashboardSignIn`]), to sign in or to
+//! confirm a change.
 //!
-//! Its `GET` goes on to the dashboard at once, unless the dashboard asked for a
-//! confirmation: then it asks for a passkey, in a ceremony started for this
-//! handoff only, which its form posts. A browser that is not signed in with a
-//! passkey signs in first, and comes back. An account that does not administer
-//! SourceOrigin is told it has no access, and nothing is handed off.
+//! Its `GET` asks for a passkey, in a ceremony started for this handoff only,
+//! which its form posts; its `POST` goes on to the dashboard. A browser that is
+//! not signed in with a passkey signs in first, and comes back. An account that
+//! does not administer SourceOrigin is told it has no access, and nothing is
+//! handed off.
 
 use crate::web::{Failure, WebApplication};
 use crate::{
@@ -17,7 +18,7 @@ use crate::{
     security::ApiError,
 };
 use sourceorigin_common::protocol::claims::Acr;
-use sourceorigin_ui::{Checkbox, HandoffProof, HandoffQuery, LoginQuery, Query, Title};
+use sourceorigin_ui::{HandoffProof, HandoffQuery, LoginQuery, Query, Title};
 use topcoat::{
     context::{Cx, app_context},
     router::{
@@ -59,8 +60,8 @@ impl From<ApiError> for Refusal {
 }
 
 impl WebApplication {
-    /// `GET /admin`: goes on to the dashboard, or asks for the passkey proof the
-    /// dashboard asked for.
+    /// `GET /admin`: asks for the passkey proof of the handoff, once the browser's
+    /// session may hand off.
     pub(in crate::web) async fn admin(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let sign_in = web.dashboard_sign_in()?;
@@ -70,17 +71,14 @@ impl WebApplication {
                 .answer_handoff(cx, sign_in, &query, Refusal::SignIn)
                 .await;
         };
-        if query.confirm.0 {
-            return web.handoff_page(cx, sign_in, &query, None).await;
-        }
-        match sign_in.hand_off(&owner, &query, None).await {
-            Ok(target) => Ok(see_other(target).into_response(cx)?),
+        match sign_in.admit(&owner).await {
+            Ok(()) => web.handoff_page(cx, sign_in, &query, None).await,
             Err(error) => web.answer_handoff(cx, sign_in, &query, error.into()).await,
         }
     }
 
     /// `POST /admin`: verifies the passkey proof its form posted, for the browser's
-    /// session only, then goes on to the dashboard, confirmed now.
+    /// session only, then goes on to the dashboard, signed in and confirmed now.
     pub(in crate::web) async fn admin_proof(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let sign_in = web.dashboard_sign_in()?;
@@ -88,7 +86,6 @@ impl WebApplication {
         let query = HandoffQuery {
             state: posted.state,
             return_to: posted.return_to,
-            confirm: Checkbox(true),
         };
         let Some(owner) = web.owner(cx).await? else {
             return web
@@ -118,7 +115,7 @@ impl WebApplication {
             .passkeys
             .verify_admin_proof(headers(cx), owner, assertion)
             .await?;
-        Ok(sign_in.hand_off(owner, query, Some(proof)).await?)
+        Ok(sign_in.hand_off(owner, query, proof).await?)
     }
 
     /// Answers the handoff `query` that `refusal` stopped: a passkey sign-in that
