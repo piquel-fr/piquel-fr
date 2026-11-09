@@ -21,6 +21,8 @@ emails, you need a [confirmed email address](email-addresses.md).
   restored.
 - Piquel sent an announcement, such as news of a security incident or a change
   to its privacy policy, to every account or to yours.
+- If you administer Piquel, an alert about the service was raised, such as a
+  broken audit chain. Its subject starts with **Alert:**.
 
 ## Read your inbox
 
@@ -34,7 +36,8 @@ The sidebar's **Notifications** tab shows how many are unread, and the
 
 A notification's page says what happened and shows its entry in your
 [security history](security-history.md), with **This wasn’t me** if you can
-report it. Select **Mark as unread** to keep it in mind for later.
+report it. An alert concerns the service rather than your account, so it has
+no entry. Select **Mark as unread** to keep it in mind for later.
 
 To mark every notification read, select **Mark all as read** in the inbox.
 **Show older notifications** pages back through the rest.
@@ -47,6 +50,9 @@ Each notification is also emailed, in one of two categories:
   so nobody can hide one from you.
 - **Announcements:** news from Piquel, such as a new feature. You receive these
   by default, and can [turn them off](#turn-announcement-emails-off).
+
+If you administer Piquel, you always receive alerts by email too, like
+**Security** notifications.
 
 Some announcements are **essential**: a security incident, or a change to the
 privacy policy or terms. You receive those by email even with announcements

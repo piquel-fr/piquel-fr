@@ -266,15 +266,15 @@ impl AccountDeletionRepository<'_> {
     /// the account first, and record its last events afterwards.
     ///
     /// Deletes, in order: the grants, consents, sessions and administrator rights
-    /// that reference the account without cascading, the announcements to chosen
-    /// accounts it was the last recipient of, and its email deliveries;
+    /// that reference the account without cascading, and the announcements to
+    /// chosen accounts it was the last recipient of;
     /// the related origins of its clients, deleted ones included, wherever events
     /// recorded them, since its domain may be among them;
     /// the account, which cascades to its emails, passkeys, identities, ceremonies,
     /// announcement rows and scheduled deletion, and leaves its handles without an owner, so nobody
-    /// claims them again; then its announcement deliveries, which an announcement
-    /// sent meanwhile may have just queued, the personal data of every event the
-    /// account is the subject or actor of, so those events read it as erased, and
+    /// claims them again; then its email and announcement deliveries, including
+    /// any an announcement sent or an alert raised meanwhile just queued, the
+    /// personal data of every event the account is the subject or actor of, so those events read it as erased, and
     /// any announcement to chosen accounts left without recipients, such as a
     /// draft naming the account saved while the purge ran. Callers lock the
     /// administrator list, so purges take turns, end its sessions, which queues
@@ -326,9 +326,6 @@ impl AccountDeletionRepository<'_> {
                 SELECT FROM announcement_recipients other
                 WHERE other.announcement_id = a.id AND other.user_id <> $1
             )",
-            // Notification emails copy their address; the account's other
-            // channels' deliveries hold no personal data.
-            "DELETE FROM deliveries WHERE channel = 'email' AND recipient = to_jsonb($1::uuid::text)",
         );
         // An operator's approval and another person's inline sign-in name neither
         // the owner nor its account, so only the client finds them. They read
@@ -354,14 +351,19 @@ impl AccountDeletionRepository<'_> {
         )?
         .rows_affected()
             == 1;
-        // Its announcements' emails would find no recipient left to send to. An
-        // announcement being sent key-share locks its recipients, so deleting the
-        // account waited for it, and this fresh snapshot sees the emails it queued.
+        // Its emails copy its addresses, and its announcements' would find no
+        // recipient left to send to; its other channels' deliveries hold no
+        // personal data. An announcement being sent, or an alert notifying the
+        // administrators, key-share locks its recipients, so deleting the account
+        // waited for it, and this fresh snapshot sees the emails it queued. Each
+        // channel's recipient index is partial, so the channels are matched with
+        // `OR`, which uses both, rather than `IN`, which uses neither.
         // Users and administrators act as `{"type": …, "user_id": …}`; both
         // branches are indexed, so the cost does not grow with others' history.
         delete!(
             "DELETE FROM deliveries
-            WHERE channel = 'announcement' AND recipient = to_jsonb($1::uuid::text)",
+            WHERE (channel = 'email' OR channel = 'announcement')
+            AND recipient = to_jsonb($1::uuid::text)",
             "DELETE FROM event_personal_data p
             USING domain_events e
             WHERE p.event_id = e.id

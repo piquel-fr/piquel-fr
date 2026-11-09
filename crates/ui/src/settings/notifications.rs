@@ -143,7 +143,7 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
         if owner {
             page_head(
                 title: "Notifications",
-                lead: "What Piquel tells you about your account. Opening one marks it read.".to_owned(),
+                lead: "What Piquel tells you. Opening one marks it read.".to_owned(),
                 actions: view! { email_button() },
             )
         }
@@ -328,7 +328,7 @@ pub(crate) async fn unread_hint(unread: u64, page: &str) -> Result<impl View> {
                 icon(kind: Icon::Bell)
                 <div class="text">
                     <strong>(said)</strong>
-                    <small>"Piquel told you about something that happened to your account."</small>
+                    <small>"Piquel has something to tell you."</small>
                 </div>
                 <a class="button small" href=(page)>"Read"</a>
             </section>
