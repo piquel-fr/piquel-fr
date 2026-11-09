@@ -1,7 +1,7 @@
 //! Handles: an account's public identifier, which is also its login name.
 //!
 //! ```
-//! use piquel_common::{Handle, HandleError};
+//! use sourceorigin_common::{Handle, HandleError};
 //!
 //! let handle = Handle::parse(" Alice-B ")?;
 //! assert_eq!(handle.as_str(), "alice-b");
@@ -27,7 +27,7 @@ pub const MAX_LENGTH: usize = 32;
 /// one's [skeleton](Handle::skeleton). Operators may still assign them, and
 /// administrators reserve more, which auth keeps in its database.
 pub const RESERVED: &[&str] = &[
-    // Infrastructure labels: a handle may become a subdomain of piquel.fr.
+    // Infrastructure labels: a handle may become a subdomain of sourceorigin.dev.
     "auth",
     "admin",
     "www",
@@ -49,7 +49,7 @@ pub const RESERVED: &[&str] = &[
     "security",
     "noc",
     "support",
-    // piquel.fr routes.
+    // sourceorigin.dev routes.
     "settings",
     "developers",
     "login",
@@ -59,8 +59,8 @@ pub const RESERVED: &[&str] = &[
     "privacy",
     "terms",
     // The brand.
-    "piquel",
-    "piquelfr",
+    "sourceorigin",
+    "sourceorigindev",
     // Other
     "system",
     "origin",

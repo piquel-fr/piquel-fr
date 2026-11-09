@@ -4,7 +4,7 @@
 use super::{CliError, Confirm, Console};
 use crate::{Reason, UserRef};
 use clap::Subcommand;
-use piquel_common::Handle;
+use sourceorigin_common::Handle;
 
 /// Handle checks and changes. The CLI may act on any account.
 #[derive(Subcommand)]
@@ -108,7 +108,7 @@ impl HandleCommand {
                         reserved.reason
                     );
                 }
-                for name in piquel_common::handle::RESERVED {
+                for name in sourceorigin_common::handle::RESERVED {
                     println!("{name}\tbuilt-in\t-");
                 }
             }

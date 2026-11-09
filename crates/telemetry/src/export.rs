@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use opentelemetry_http::{HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithHttpConfig};
-use piquel_common::config::Variable;
+use sourceorigin_common::config::Variable;
 use std::{sync::Arc, time::Duration};
 use tokio::runtime::Handle;
 

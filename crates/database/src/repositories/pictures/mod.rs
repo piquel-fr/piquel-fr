@@ -5,7 +5,7 @@
 use super::{PictureRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{PictureId, UserId};
+use sourceorigin_common::{PictureId, UserId};
 
 /// An account's current picture, without its bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

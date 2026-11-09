@@ -1,14 +1,14 @@
 # Protecting an API
 
-An API protected by piquel.fr accepts the access tokens auth issues, and checks
+An API protected by sourceorigin.dev accepts the access tokens auth issues, and checks
 on each request that the token is valid and grants what the request needs. Both
 SDKs do this for you, with the API's scopes declared as types, so a misspelled
 scope doesn't compile.
 
 The code on this page comes from the SDKs' examples,
-[`examples/notes.rs`](https://github.com/piquel-fr/piquel-fr/blob/main/crates/auth-sdk/examples/notes.rs)
+[`examples/notes.rs`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/crates/auth-sdk/examples/notes.rs)
 and
-[`examples/resource.ts`](https://github.com/piquel-fr/piquel-fr/blob/main/packages/auth/examples/resource.ts).
+[`examples/resource.ts`](https://github.com/sourceorigin-dev/sourceorigin/blob/main/packages/auth/examples/resource.ts).
 
 ## Before you start
 
@@ -67,7 +67,7 @@ Declare the API's scopes with `defineScopes`, and make a resource for the API's
 identifier, the `aud` its tokens carry:
 
 ```ts
-import { AuthError, Issuer, defineScopes } from '@piquel/auth';
+import { AuthError, Issuer, defineScopes } from '@sourceorigin/auth';
 
 {{#include ../../../packages/auth/examples/resource.ts:resource}}
 ```
@@ -91,7 +91,7 @@ Then authenticate each request:
 ## Scopes
 
 Besides `openid`, `profile`, `email` and `offline_access`, an API's own scopes,
-such as `notes:read`, are granted only to clients piquel.fr's operators register
+such as `notes:read`, are granted only to clients sourceorigin.dev's operators register
 with them. Apps registered in the developer console can't request them, so an API
 that serves those apps checks the user, not a scope: take `Authenticated` in
 Rust, and `authenticate(request)` without scopes in TypeScript.
@@ -123,7 +123,7 @@ It fetches the keys again once for an unknown key ID, and at most every 30
 seconds:
 
 ```ts
-import { Jws, KeyCache } from '@piquel/auth';
+import { Jws, KeyCache } from '@sourceorigin/auth';
 
 const keys = new KeyCache('https://www.googleapis.com/oauth2/v3/certs');
 const jws = Jws.parse(token);

@@ -17,10 +17,10 @@ use serde::{Deserialize, Serialize};
 /// handler's `Json`.
 ///
 /// ```no_run
-/// # async fn run(user: piquel_auth::axum::SignedIn) -> Result<(), reqwest::Error> {
+/// # async fn run(user: sourceorigin_auth::axum::SignedIn) -> Result<(), reqwest::Error> {
 /// // Call an API for the user with their access token, refreshed by the login layer.
 /// let notes = reqwest::Client::new()
-///     .get("https://notes.piquel.fr/api/notes")
+///     .get("https://notes.sourceorigin.dev/api/notes")
 ///     .bearer_auth(user.login().access_token().expose())
 ///     .send()
 ///     .await?;

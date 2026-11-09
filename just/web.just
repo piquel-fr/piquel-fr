@@ -20,16 +20,16 @@ test:
 # workerd is the Cloudflare Workers runtime. Needs `bun`, as CI installs it.
 # Validate a vector token with the built TypeScript SDK in Node, Bun and workerd.
 smoke:
-    @pnpm --filter @piquel/auth build
+    @pnpm --filter @sourceorigin/auth build
     @node packages/auth/test/smoke/smoke.js
     @bun packages/auth/test/smoke/smoke.js
-    @pnpm --filter @piquel/auth exec node test/smoke/workerd.js
+    @pnpm --filter @sourceorigin/auth exec node test/smoke/workerd.js
 
 # Builds the TypeScript SDK first, as browser-client.spec.ts serves the built package.
 # Requires a running auth service; see tests/browser/README.md.
 [positional-arguments]
 test-browser *ARGS:
-    @pnpm --filter @piquel/auth build
+    @pnpm --filter @sourceorigin/auth build
     @pnpm test:browser "$@"
 
 # The browser checks' clients have origins with no server: tests/browser/oidc.spec.ts,

@@ -4,7 +4,7 @@
 use super::{DashboardRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{Handle, PictureId, SessionId, UserId};
+use sourceorigin_common::{Handle, PictureId, SessionId, UserId};
 
 /// A handoff code, which redeems once, before `expires_at`, in the browser
 /// holding the state its digest names.

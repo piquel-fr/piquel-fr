@@ -1,18 +1,18 @@
 /**
- * A server-side app signing users in with `@piquel/auth/server`, in one file, on
+ * A server-side app signing users in with `@sourceorigin/auth/server`, in one file, on
  * Node's `http` server. The session lives in the browser, in a cookie sealed with
  * `COOKIE_KEY`, so the app stores nothing, and sessions a back-channel logout ended
  * are signed out. Run it with Node 22.18 or later, which runs TypeScript directly:
  *
  * ```sh
- * AUTH_URL=https://auth.piquel.fr CLIENT_ID=notes-web CLIENT_SECRET=pqcs_… \
+ * AUTH_URL=https://auth.sourceorigin.dev CLIENT_ID=notes-web CLIENT_SECRET=socs_… \
  *   COOKIE_KEY="$(openssl rand -base64 32)" APP_URL=http://127.0.0.1:4100 \
  *   node packages/auth/examples/server.ts
  * ```
  *
  * Register the client as confidential, allowed `offline_access`, with the redirect
  * URI `$APP_URL/auth/callback` and the post-logout URI `$APP_URL/`. An app outside
- * this repository imports `@piquel/auth` and `@piquel/auth/server` instead of the
+ * this repository imports `@sourceorigin/auth` and `@sourceorigin/auth/server` instead of the
  * sources. The `ANCHOR` comments mark the parts `docs/user/apps/sign-in-typescript.md`
  * shows.
  */

@@ -8,13 +8,13 @@ use crate::{
     admin::{AdminOperation, OperatorName},
     tests::{Browser, Replicas, operator},
 };
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, Handle, UserId,
     clients::ClientKind,
     config::ConfigurationError,
     events::{Actor, DomainEvent},
 };
-use piquel_repository::StoredEvent;
+use sourceorigin_repository::StoredEvent;
 
 impl AdminOperation {
     /// A full command line that runs this operation, after `auth-service`. The

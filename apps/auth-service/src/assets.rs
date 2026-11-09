@@ -7,7 +7,7 @@ use axum::{
     http::header,
     response::{IntoResponse, Response},
 };
-use piquel_ui::Asset;
+use sourceorigin_ui::Asset;
 
 /// Failures of embedded browser asset lookup.
 #[derive(Debug, thiserror::Error)]
@@ -28,8 +28,8 @@ impl From<AssetError> for ApiError {
 /// The files of auth's pages, embedded in this executable.
 pub(crate) struct EmbeddedAssets;
 impl EmbeddedAssets {
-    /// The stylesheet of auth's pages, `piquel-ui`'s.
-    pub(crate) const STYLESHEET: Asset = piquel_ui::STYLESHEET;
+    /// The stylesheet of auth's pages, `sourceorigin-ui`'s.
+    pub(crate) const STYLESHEET: Asset = sourceorigin_ui::STYLESHEET;
     /// The passkey script, which runs the pages' passkey ceremonies.
     pub(crate) const SCRIPT: Asset =
         Asset::script("passkey", include_bytes!("../assets/passkey.js"));
@@ -46,9 +46,9 @@ impl EmbeddedAssets {
     /// typefaces it links.
     pub(crate) const SHARED: [Asset; 4] = [
         Self::STYLESHEET,
-        piquel_ui::FONTS[0],
-        piquel_ui::FONTS[1],
-        piquel_ui::FONTS[2],
+        sourceorigin_ui::FONTS[0],
+        sourceorigin_ui::FONTS[1],
+        sourceorigin_ui::FONTS[2],
     ];
 
     /// Serves the embedded file at exactly `path`. A file's path changes with its
@@ -86,7 +86,7 @@ mod tests {
                 EmbeddedAssets::DASHBOARD_SCRIPT,
                 "text/javascript; charset=utf-8",
             ),
-            (piquel_ui::FONTS[0], "font/woff2"),
+            (sourceorigin_ui::FONTS[0], "font/woff2"),
         ] {
             let response = EmbeddedAssets::serve(&asset.path()).expect("found");
             assert_eq!(response.headers()[header::CONTENT_TYPE], content_type);

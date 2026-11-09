@@ -9,7 +9,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{
+use sourceorigin_ui::{
     Audience, EmailChange, EmailRow, EmailsState, Messages, Notice, Section, Tab, Title,
 };
 use serde::Deserialize;
@@ -95,7 +95,7 @@ impl AccountPage for Addresses {
         let rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
         let sends = web.email.smtp.is_some();
         let page = Child::new(view! { cx =>
-            piquel_ui::addresses(
+            sourceorigin_ui::addresses(
                 page: settings::EMAILS,
                 emails: &rows,
                 state: &state,
@@ -123,7 +123,7 @@ impl WebApplication {
         let owner = web.owner(cx).await?;
         let Some(Verification { token }) = Self::change(cx, body).await else {
             return web
-                .verify_page(cx, StatusCode::BAD_REQUEST, Some(piquel_ui::OUT_OF_DATE))
+                .verify_page(cx, StatusCode::BAD_REQUEST, Some(sourceorigin_ui::OUT_OF_DATE))
                 .await;
         };
         match web
@@ -133,7 +133,7 @@ impl WebApplication {
         {
             Ok(verified) => {
                 let page = view! { cx =>
-                    piquel_ui::verified(
+                    sourceorigin_ui::verified(
                         address: &verified.address,
                         primary: verified.primary,
                         emails: settings::EMAILS,
@@ -158,7 +158,7 @@ impl WebApplication {
         alert: Option<&str>,
     ) -> Result<Response, Failure> {
         let page = view! { cx =>
-            piquel_ui::verify(action: settings::VERIFY, emails: settings::EMAILS, alert: alert)
+            sourceorigin_ui::verify(action: settings::VERIFY, emails: settings::EMAILS, alert: alert)
         };
         self.verification(cx, status, page).await
     }

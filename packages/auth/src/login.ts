@@ -232,7 +232,7 @@ export class Login {
     // Client IDs are letters, digits, `.`, `_` and `-`, all valid in a cookie name,
     // and each app sharing a host keeps its own cookies. `__Host-` makes browsers
     // require `Secure`, `Path=/` and no `Domain`, so no other host can set or read them.
-    const prefix = `__Host-piquel-${client.config.clientId}`;
+    const prefix = `__Host-sourceorigin-${client.config.clientId}`;
     this.#sessionCookie = `${prefix}-session`;
     this.#stepUpCookie = `${prefix}-step-up`;
     this.#pendingCookie = `${prefix}-login-`;
@@ -265,7 +265,7 @@ export class Login {
       try {
         response = await route.answer(request);
       } catch (error) {
-        console.error('@piquel/auth: a login route failed', error);
+        console.error('@sourceorigin/auth: a login route failed', error);
         response = new Response(null, { status: 500 });
       }
     }
@@ -525,7 +525,7 @@ export class Login {
           // As when new profile claims outgrow the cookie: this request still uses
           // the new tokens, and the next refreshes again.
           if (!(error instanceof RangeError)) throw error;
-          console.warn('@piquel/auth: the refreshed session could not be saved', error);
+          console.warn('@sourceorigin/auth: the refreshed session could not be saved', error);
         }
         login = refreshed;
       }
@@ -558,14 +558,14 @@ export class Login {
       if (error.code === 'oauth' && error.response?.error === 'invalid_grant') return 'ended';
       // The session cannot go on as another user or sign-in.
       if (error.reason === 'subject_mismatch' || error.reason === 'authentication_changed') {
-        console.warn('@piquel/auth: a refresh changed the signed-in user or sign-in', error);
+        console.warn('@sourceorigin/auth: a refresh changed the signed-in user or sign-in', error);
         return 'ended';
       }
-      console.warn('@piquel/auth: session refresh failed', error);
+      console.warn('@sourceorigin/auth: session refresh failed', error);
       return 'kept';
     }
     if (tokens === TIMED_OUT) {
-      console.warn('@piquel/auth: session refresh timed out');
+      console.warn('@sourceorigin/auth: session refresh timed out');
       return 'kept';
     }
     return login.refreshed(tokens);
@@ -613,11 +613,11 @@ export class Login {
       revoked = await Login.#within(REVOCATION_DEADLINE, this.client.revoke(refreshToken));
     } catch (error) {
       if (!(error instanceof AuthError)) throw error;
-      console.warn('@piquel/auth: a refresh token could not be revoked', error);
+      console.warn('@sourceorigin/auth: a refresh token could not be revoked', error);
       return false;
     }
     if (revoked === TIMED_OUT) {
-      console.warn('@piquel/auth: revoking a refresh token timed out');
+      console.warn('@sourceorigin/auth: revoking a refresh token timed out');
       return false;
     }
     return true;
@@ -775,7 +775,7 @@ export class Login {
       session = await this.#sealSession(login);
     } catch (error) {
       if (!(error instanceof RangeError)) throw error;
-      console.error('@piquel/auth: sign-in failed', error);
+      console.error('@sourceorigin/auth: sign-in failed', error);
       return Login.text(500, `Sign-in failed: ${error.message}.`);
     }
     // A step-up marks its return; any other sign-in drops an unused marker, which

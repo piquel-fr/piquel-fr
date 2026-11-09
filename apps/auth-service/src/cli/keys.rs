@@ -10,9 +10,9 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
-use piquel_common::{admin::SigningKey, config::SecretReference, protocol::jwt::KeyId};
-use piquel_crypto::Rs256Key;
-use piquel_repository::Database;
+use sourceorigin_common::{admin::SigningKey, config::SecretReference, protocol::jwt::KeyId};
+use sourceorigin_crypto::Rs256Key;
+use sourceorigin_repository::Database;
 use std::sync::Arc;
 
 /// The key ID `keys import` gives the PEM key, the default of the removed

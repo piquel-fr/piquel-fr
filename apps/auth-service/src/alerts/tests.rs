@@ -7,12 +7,12 @@ use crate::{
     admin::tests::{Harness, operator},
 };
 use chrono::Utc;
-use piquel_common::{
+use sourceorigin_common::{
     admin::{ChainBreak, ChainProblem},
     alerts::{AlertAuthor, AlertState, AlertStatus, AlertsShown},
     events::{Actor, JobName},
 };
-use piquel_repository::{Database, EventFilter, RecordedEvent};
+use sourceorigin_repository::{Database, EventFilter, RecordedEvent};
 
 /// A broken chain at `position`.
 fn broken(position: u64) -> Alert {

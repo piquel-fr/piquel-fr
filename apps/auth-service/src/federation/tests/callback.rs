@@ -10,7 +10,7 @@ fn return_destinations_and_browser_bindings_are_strict() {
         "//evil.test",
         "/\\evil.test",
         "https://evil.test",
-        "https://auth.piquel.fr/settings",
+        "https://auth.sourceorigin.dev/settings",
         "/login#x",
         "/\n/evil",
         "settings",
@@ -79,7 +79,7 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
             .any(|value| value
                 .to_str()
                 .expect("cookie")
-                .starts_with("__Host-piquel_session="))
+                .starts_with("__Host-sourceorigin_session="))
     );
     let response = router
         .oneshot(TestApp::request(

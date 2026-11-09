@@ -16,7 +16,7 @@ const json = [
   'tests/sdk-vectors/discovery/valid.json',
   'tests/sdk-vectors/tokens/access-valid.json'
 ];
-const directory = mkdtempSync(join(tmpdir(), 'piquel-auth-smoke-'));
+const directory = mkdtempSync(join(tmpdir(), 'sourceorigin-auth-smoke-'));
 const embed = (file) => JSON.stringify(relative(directory, join(root, file)));
 const modules = [
   ...files.map((file) => `(name = ${JSON.stringify(file)}, esModule = embed ${embed(file)})`),

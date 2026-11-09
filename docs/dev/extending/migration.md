@@ -86,7 +86,7 @@ See [roles](../architecture/database.md#roles) for why.
 
 ## 5. Check the runtime role's grants
 
-Auth serves as `piquel_auth`, a role with row privileges only. `migrate`,
+Auth serves as `sourceorigin_auth`, a role with row privileges only. `migrate`,
 connected as the schema owner, grants it `SELECT, INSERT, UPDATE, DELETE` on every table after the migrations,
 so a new table needs nothing. A table that needs less, such as append-only
 history, gets its exception in

@@ -3,13 +3,13 @@
 use crate::{
     AdminError, ClientRegistryError, KeyError, StartupError, UserRef, account::AccountError,
 };
-use piquel_common::{
+use sourceorigin_common::{
     clients::{InvalidCount, InvalidDisplayName, InvalidRedirectUri, InvalidScopeName},
     config::{ConfigurationError, SecretError},
 };
-use piquel_crypto::CryptoError;
-use piquel_repository::{DatabaseConnectionError, DatabaseError};
-use piquel_telemetry::TelemetryError;
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::{DatabaseConnectionError, DatabaseError};
+use sourceorigin_telemetry::TelemetryError;
 use thiserror::Error;
 
 /// Failures of startup and administrative commands, preserving their original causes.

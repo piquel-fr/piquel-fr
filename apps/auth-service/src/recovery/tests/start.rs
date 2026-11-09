@@ -1,7 +1,7 @@
 //! Starting a recovery: what a start replaces and refuses, `--revoke`, and a disabled email.
 
 use super::*;
-use piquel_common::events::RecoveryRevocation;
+use sourceorigin_common::events::RecoveryRevocation;
 
 /// A start is refused while a recovery is in probation, for a disabled account,
 /// and for an administrator; it replaces an unused link, expired or not. Only an

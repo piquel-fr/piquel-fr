@@ -4,7 +4,7 @@
 use super::{PasskeyApplication, PasskeyError, PasskeyName};
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use piquel_common::{
+use sourceorigin_common::{
     PasskeyId,
     events::{DomainEvent, RevocationReason},
     protocol::api,

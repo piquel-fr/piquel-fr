@@ -1,11 +1,11 @@
-#:schema https://raw.githubusercontent.com/piquel-fr/piqueld/main/docs/application-manifest.schema.json
-# Telemetry of piquel.fr on piqueld: an OpenTelemetry Collector receiving auth's
+#:schema https://raw.githubusercontent.com/sourceorigin-dev/piqueld/main/docs/application-manifest.schema.json
+# Telemetry of SourceOrigin on piqueld: an OpenTelemetry Collector receiving auth's
 # and the admin dashboard's traces, metrics and logs, Prometheus, Tempo and Loki
-# storing them, and Grafana showing them. One environment serves both piquel-fr
+# storing them, and Grafana showing them. One environment serves both sourceorigin
 # environments, which `deployment.environment.name` tells apart. See
 # docs/dev/operations/telemetry.md.
 #
-# Grafana never signs in through auth.piquel.fr: it is needed most when auth is
+# Grafana never signs in through auth.sourceorigin.dev: it is needed most when auth is
 # down. Its private route and its own admin login keep it to the tailnet.
 api_version = "piqueld.dev/v1alpha1"
 kind = "Application"
@@ -18,7 +18,7 @@ path = "infra/telemetry.toml"
 sync = { mode = "webhook" }
 
 [spec.manifest.repository]
-url = "https://github.com/piquel-fr/piquel-fr.git"
+url = "https://github.com/sourceorigin-dev/sourceorigin.git"
 branch = "main"
 
 [spec.environments.production]
@@ -26,7 +26,7 @@ sync = true
 visibility = "private"
 
 [spec.environments.production.variables]
-grafana_host = "grafana.piquel.fr"
+grafana_host = "grafana.sourceorigin.dev"
 
 [[spec.secrets]]
 name = "grafana-admin-password"
@@ -201,7 +201,7 @@ name = "loki"
 [[spec.volumes]]
 name = "grafana"
 
-# Tailnet only; its DNS record points at the apps node, like staging.piquel.fr.
+# Tailnet only; its DNS record points at the apps node, like staging.sourceorigin.dev.
 [[spec.routes]]
 name = "grafana"
 hostname = "${{ vars.grafana_host }}"
@@ -209,8 +209,8 @@ service = "grafana"
 port = 3000
 visibility = "private"
 
-# piquel-fr's staging and production send telemetry here, as
+# sourceorigin's staging and production send telemetry here, as
 # `http://collector.telemetry:4318`. Previews do not.
 [[spec.exports]]
 service = "collector"
-applications = ["piquel-fr"]
+applications = ["sourceorigin"]

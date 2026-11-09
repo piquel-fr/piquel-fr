@@ -7,8 +7,8 @@ use crate::{
     AdminService, AuthConfig, Operator, UserRef, account::AccountService, admin::OperatorName,
 };
 use clap::{Args, ValueEnum};
-use piquel_common::{UserId, admin::Paging, config::ConfigurationError};
-use piquel_repository::Database;
+use sourceorigin_common::{UserId, admin::Paging, config::ConfigurationError};
+use sourceorigin_repository::Database;
 use serde::Serialize;
 use std::io::{BufRead, IsTerminal};
 
@@ -66,7 +66,7 @@ pub(super) enum OutputFormat {
     /// Tab-separated lines for people.
     Table,
     /// The view the admin dashboard shows, as JSON, for scripts: its shape is
-    /// `piquel_common`'s, as its `admin` and `alerts` modules define it.
+    /// `sourceorigin_common`'s, as its `admin` and `alerts` modules define it.
     Json,
 }
 

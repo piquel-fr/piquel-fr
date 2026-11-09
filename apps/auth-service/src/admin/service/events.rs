@@ -7,12 +7,12 @@ use crate::{
     admin::{AdminError, Operator},
     audit::{AuditChain, AuditPage, AuditVerification},
 };
-use piquel_common::{
+use sourceorigin_common::{
     DeliveryId,
     admin::{Event, EventPage, EventSearch, Paging},
     events::DomainEvent,
 };
-use piquel_repository::{DeliveryStatus, DeliverySummary, EventFilter};
+use sourceorigin_repository::{DeliveryStatus, DeliverySummary, EventFilter};
 
 /// Events per page.
 const EVENT_PAGE_SIZE: u16 = 50;

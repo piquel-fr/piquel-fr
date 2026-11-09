@@ -1,6 +1,6 @@
 [package]
-name = "piquel-auth"
-description = "Validate auth.piquel.fr tokens, declare typed scopes and sign users in"
+name = "sourceorigin-auth"
+description = "Validate auth.sourceorigin.dev tokens, declare typed scopes and sign users in"
 version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
@@ -11,7 +11,7 @@ repository.workspace = true
 axum = ["dep:aws-lc-rs", "dep:axum", "dep:tower", "dep:tracing"]
 
 [dependencies]
-piquel-common = { workspace = true, features = ["client-spans"] }
+sourceorigin-common = { workspace = true, features = ["client-spans"] }
 
 aws-lc-rs = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }

@@ -70,7 +70,7 @@ test('the developer console registers an app, shows its secret once, and the app
   expect(answer.headers()['cache-control']).toBe('no-store, no-transform');
   await expect(page.getByRole('heading', { name: 'Your client secret' })).toBeVisible();
   const secret = (await page.locator('#client-secret').textContent()) ?? '';
-  expect(secret).toMatch(/^pqcs_/);
+  expect(secret).toMatch(/^socs_/);
   const kept = await page.evaluate(() => ({
     url: location.href,
     state: JSON.stringify(history.state),

@@ -3,7 +3,7 @@
 use super::{CliError, Confirm, Console, Output};
 use crate::{Applied, DEFAULT_CLIENT_SCOPES, GracePeriod, PUBLIC_BASE_URL};
 use clap::{Args, Subcommand};
-use piquel_common::{
+use sourceorigin_common::{
     ClientId,
     clients::{
         AllowedScopes, ClientKind, ClientRegistration, DisplayName, PostLogoutUris, RedirectUri,
@@ -11,8 +11,8 @@ use piquel_common::{
     },
     config::{Origin, SecretReference},
 };
-use piquel_crypto::ClientSecret;
-use piquel_repository::StoredOidcClient;
+use sourceorigin_crypto::ClientSecret;
+use sourceorigin_repository::StoredOidcClient;
 
 /// Registering, inspecting and changing OIDC clients.
 #[derive(Subcommand)]

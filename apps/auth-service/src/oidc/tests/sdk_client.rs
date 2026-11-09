@@ -11,7 +11,7 @@ use super::*;
     reason = "The scenario follows one login from authorization through logout."
 )]
 async fn sdk_login_client_runs_against_the_provider() {
-    use piquel_auth::{
+    use sourceorigin_auth::{
         AuthorizeRequest, CallbackParams, ClientConfig, Credentials, LoginError, OAuthError,
         Resource, Scopes, Subject,
     };
@@ -23,7 +23,7 @@ async fn sdk_login_client_runs_against_the_provider() {
     let flow = Flow::at(&origin, true, false).await;
     let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
     let http = reqwest::Client::builder().add_root_certificate(certificate);
-    let issuer = piquel_auth::Issuer::builder()
+    let issuer = sourceorigin_auth::Issuer::builder()
         .http_client(http)
         .discover(&origin)
         .await

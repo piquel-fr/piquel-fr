@@ -1,7 +1,7 @@
 //! Validated `PostgreSQL` transport, bounded pools and explicit maintenance.
 
 use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction, LockKey};
-use piquel_crypto::ScramVerifier;
+use sourceorigin_crypto::ScramVerifier;
 use sqlx::{
     ConnectOptions, Connection, PgConnection, PgPool,
     migrate::Migrator,
@@ -171,7 +171,7 @@ impl RuntimeRole {
     /// # Errors
     ///
     /// Returns [`DatabaseConnectionError::RoleName`] unless the connection's user
-    /// is a plain lowercase identifier, like `piquel_auth`.
+    /// is a plain lowercase identifier, like `sourceorigin_auth`.
     pub fn new(runtime: &DatabaseConfig, password: &str) -> Result<Self, DatabaseConnectionError> {
         let name = runtime.options.get_username();
         let mut chars = name.chars();

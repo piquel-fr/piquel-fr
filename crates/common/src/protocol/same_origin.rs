@@ -16,17 +16,17 @@ const SAME_ORIGIN: &str = "same-origin";
 /// `Origin` header values. A header that is absent, or not text, is `None`.
 ///
 /// ```
-/// use piquel_common::protocol::same_origin::BrowserRequest;
+/// use sourceorigin_common::protocol::same_origin::BrowserRequest;
 ///
-/// let site = url::Url::parse("https://notes.piquel.fr/auth/callback")?.origin();
+/// let site = url::Url::parse("https://notes.sourceorigin.dev/auth/callback")?.origin();
 /// let request = |fetch_site, origin| BrowserRequest { fetch_site, origin };
 ///
 /// // A form posted from a page with `Referrer-Policy: no-referrer`.
 /// assert!(request(Some("same-origin"), Some("null")).is_same_origin(&site));
 /// // `Sec-Fetch-Site` decides, whatever `Origin` says.
-/// assert!(!request(Some("same-site"), Some("https://notes.piquel.fr")).is_same_origin(&site));
+/// assert!(!request(Some("same-site"), Some("https://notes.sourceorigin.dev")).is_same_origin(&site));
 /// // An older browser: its `Origin` must be the site's.
-/// assert!(request(None, Some("https://notes.piquel.fr")).is_same_origin(&site));
+/// assert!(request(None, Some("https://notes.sourceorigin.dev")).is_same_origin(&site));
 /// assert!(!request(None, Some("null")).is_same_origin(&site));
 /// assert!(!request(None, None).is_same_origin(&site));
 ///

@@ -194,9 +194,9 @@ overview dashboard charts them in its Deliveries row.
 
 | Metric | Kind | Meaning |
 | --- | --- | --- |
-| `piquel.auth.deliveries.attempts{channel, outcome}` | Counter | Attempts by outcome, counted where the worker records it: `succeeded`, `retried`, `failed`, or `lease_lost` when its claim token no longer held the delivery and the outcome was discarded |
-| `piquel.auth.deliveries.pending{channel}` | Gauge | Deliveries waiting for an attempt, or being attempted |
-| `piquel.auth.deliveries.oldest_pending_age{channel}` | Gauge, seconds | Time since the oldest pending delivery was created, or last retried by an operator |
+| `sourceorigin.auth.deliveries.attempts{channel, outcome}` | Counter | Attempts by outcome, counted where the worker records it: `succeeded`, `retried`, `failed`, or `lease_lost` when its claim token no longer held the delivery and the outcome was discarded |
+| `sourceorigin.auth.deliveries.pending{channel}` | Gauge | Deliveries waiting for an attempt, or being attempted |
+| `sourceorigin.auth.deliveries.oldest_pending_age{channel}` | Gauge, seconds | Time since the oldest pending delivery was created, or last retried by an operator |
 
 An attempt whose outcome could not be recorded, because the database failed, is
 logged and not counted; its lease expires and it is attempted again. Every

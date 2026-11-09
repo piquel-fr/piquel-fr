@@ -14,7 +14,7 @@ check:
         echo "$log" >&2
         exit 1
     fi
-    repository='https://(github\.com/piquel-fr/piquel-fr/(blob|tree)|raw\.githubusercontent\.com/piquel-fr/piquel-fr)'
+    repository='https://(github\.com/sourceorigin-dev/sourceorigin/(blob|tree)|raw\.githubusercontent\.com/sourceorigin-dev/sourceorigin)'
     # mdBook checks SUMMARY.md's links itself; its section headings are empty
     # links, which lychee rejects.
     git ls-files -z --cached --others --exclude-standard '*.md' ':!docs/SUMMARY.md' \
@@ -31,7 +31,7 @@ serve *args:
 # defines them. `just test` fails while they are stale.
 # Rewrite the generated reference pages.
 reference:
-    @UPDATE_DOCS_REFERENCE=1 cargo nextest run --locked -p auth-service -p piquel-web -E 'test(reference_is_current)'
+    @UPDATE_DOCS_REFERENCE=1 cargo nextest run --locked -p auth-service -p sourceorigin-web -E 'test(reference_is_current)'
 
 # Each run deploys this checkout to a fresh preview of its own, the `docs` slot,
 # takes the screenshots there, and deletes it: a new database every run keeps the
@@ -45,7 +45,7 @@ screenshots *args:
     just preview-delete --slot docs 2>/dev/null || true
     trap 'just preview-delete --slot docs' EXIT
     just preview --slot docs
-    url() { piquelctl preview url piquel-fr "$branch" --slot docs --route "$1"; }
+    url() { piquelctl preview url sourceorigin "$branch" --slot docs --route "$1"; }
     E2E_AUTH_URL=$(url auth) E2E_ADMIN_URL=$(url admin) \
-        E2E_GRANT_ADMIN="piquelctl preview exec piquel-fr $branch --slot docs auth -- auth-service --operator docs-screenshots admin grant" \
+        E2E_GRANT_ADMIN="piquelctl preview exec sourceorigin $branch --slot docs auth -- auth-service --operator docs-screenshots admin grant" \
         pnpm exec playwright test --project docs --update-snapshots=changed {{ args }}

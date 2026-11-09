@@ -32,8 +32,8 @@ impl Purpose {
     /// The HKDF `info`. Every SDK uses the same, so their cookies interoperate.
     const fn info(self) -> &'static [u8] {
         match self {
-            Self::Session => b"piquel-auth session v1",
-            Self::PendingLogin => b"piquel-auth pending login v1",
+            Self::Session => b"sourceorigin-auth session v1",
+            Self::PendingLogin => b"sourceorigin-auth pending login v1",
         }
     }
 }
@@ -102,12 +102,12 @@ impl SealingKey {
 /// the refresh tokens in captured cookies stay valid without it.
 ///
 /// ```
-/// use piquel_auth::axum::CookieKey;
+/// use sourceorigin_auth::axum::CookieKey;
 ///
 /// let key = CookieKey::from_base64("q5xP0Pl8m0l3pkk1Hk0aQe9H6P7l4H6Jt6bq0c5u3jE=")?;
 /// // Keys are never printed.
 /// assert_eq!(format!("{key:?}"), "CookieKey(REDACTED)");
-/// # Ok::<(), piquel_auth::axum::CookieKeyError>(())
+/// # Ok::<(), sourceorigin_auth::axum::CookieKeyError>(())
 /// ```
 pub struct CookieKey {
     /// Seals sessions.

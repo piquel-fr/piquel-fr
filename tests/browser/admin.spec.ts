@@ -94,7 +94,7 @@ function entry(page: Page, change: string, reason: string) {
   return page
     .getByRole('listitem')
     .filter({ hasText: change })
-    .filter({ hasText: `By a Piquel administrator: “${reason}”` })
+    .filter({ hasText: `By a SourceOrigin administrator: “${reason}”` })
     .first();
 }
 
@@ -174,17 +174,17 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(user.getByText(`@user-${suffix}`, { exact: true })).toHaveCount(0);
 
   // The dashboard sends no referrer, so its sign-out form posts with `Origin: null`.
-  // Signing out of the dashboard keeps the Piquel session, so signing in again is
+  // Signing out of the dashboard keeps the SourceOrigin session, so signing in again is
   // silent.
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Signed out of the dashboard' })).toBeVisible();
   await admin.getByRole('link', { name: 'Sign in again', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 
-  // Signed out of Piquel too, the administrator signs in with a passkey on auth,
+  // Signed out of SourceOrigin too, the administrator signs in with a passkey on auth,
   // whose sign-in form then goes on through the handoff to the dashboard.
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await admin.getByRole('link', { name: 'Sign out of Piquel', exact: true }).click();
+  await admin.getByRole('link', { name: 'Sign out of SourceOrigin', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Ready to sign out?' })).toBeVisible();
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await admin.goto(`${adminUrl}/users`);

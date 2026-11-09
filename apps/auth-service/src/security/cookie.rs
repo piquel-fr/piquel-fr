@@ -6,40 +6,40 @@ use axum::http::{
     HeaderMap, HeaderValue,
     header::{self, InvalidHeaderValue},
 };
-use piquel_crypto::Secret;
-use piquel_ui::{PreferenceChange, Preferences};
+use sourceorigin_crypto::Secret;
+use sourceorigin_ui::{PreferenceChange, Preferences};
 
 /// Browser flow cookies slightly outlive their server-side ceremonies.
 const FLOW_COOKIE_MAX_AGE: u32 = 600;
 
-piquel_common::str_enum! {
+sourceorigin_common::str_enum! {
     /// Host-only cookies: browser secrets binding server-side state, and the notice
     /// of an account page's change just made.
     pub(crate) enum BrowserCookie {
         /// Central sign-in session.
-        Session = "__Host-piquel_session",
+        Session = "__Host-sourceorigin_session",
         /// In-progress WebAuthn ceremony.
-        Ceremony = "__Host-piquel_ceremony",
+        Ceremony = "__Host-sourceorigin_ceremony",
         /// Provider redirect awaiting its callback.
-        Federation = "__Host-piquel_federation",
+        Federation = "__Host-sourceorigin_federation",
         /// Verified identity awaiting signup or linking.
-        FederationPending = "__Host-piquel_federation_pending",
+        FederationPending = "__Host-sourceorigin_federation_pending",
         /// Offer to restore an account scheduled for deletion, from a passkey sign-in.
-        Restore = "__Host-piquel_restore",
+        Restore = "__Host-sourceorigin_restore",
         /// What an account page's change just did, which the page it goes to says once.
-        Notice = "__Host-piquel_notice",
+        Notice = "__Host-sourceorigin_notice",
         /// The admin dashboard's session, on the dashboard's own origin.
-        Dashboard = "__Host-piquel_dashboard",
+        Dashboard = "__Host-sourceorigin_dashboard",
         /// A sign-in to the admin dashboard awaiting auth's handoff, on the
         /// dashboard's origin.
-        DashboardState = "__Host-piquel_dashboard_state",
+        DashboardState = "__Host-sourceorigin_dashboard_state",
         /// What a dashboard change made and its page shows once, such as a client
         /// secret, sealed, across the redirect that follows the change's form.
-        DashboardReveal = "__Host-piquel_dashboard_reveal",
+        DashboardReveal = "__Host-sourceorigin_dashboard_reveal",
         /// The theme the browser chose, on each origin.
-        Theme = "__Host-piquel_theme",
+        Theme = "__Host-sourceorigin_theme",
         /// The sidebar's width the browser chose, on each origin.
-        Sidebar = "__Host-piquel_sidebar",
+        Sidebar = "__Host-sourceorigin_sidebar",
     }
 }
 
@@ -131,7 +131,7 @@ impl BrowserCookie {
 
     /// The notice [`Self::Notice`] carries, of the change just made. An unknown or
     /// duplicated one counts as absent.
-    pub(crate) fn read_notice(headers: &HeaderMap) -> Option<piquel_ui::Notice> {
+    pub(crate) fn read_notice(headers: &HeaderMap) -> Option<sourceorigin_ui::Notice> {
         Self::Notice.value(headers)?.parse().ok()
     }
 
@@ -139,7 +139,7 @@ impl BrowserCookie {
     /// answer of the change it says was made.
     pub(crate) fn set_notice_on<B>(
         response: &mut axum::http::Response<B>,
-        notice: piquel_ui::Notice,
+        notice: sourceorigin_ui::Notice,
     ) -> Result<(), InvalidHeaderValue> {
         Self::Notice.append(response, notice.as_str(), Self::Notice.max_age())
     }

@@ -86,7 +86,7 @@ async fn every_change_needs_a_confirmation() {
     let client = account.find(account.owner().await, &id).await;
     let grace = "0".parse().expect("grace period");
     let secret = service.rotate_client_secret(&client, grace).await;
-    assert!(secret.expect("rotate").expose().starts_with("pqcs_"));
+    assert!(secret.expect("rotate").expose().starts_with("socs_"));
     let patch = ClientPatch {
         redirect_uris: Some(vec!["https://notes.example/auth".into()]),
         ..rename()
@@ -210,7 +210,7 @@ async fn invalid_settings_name_their_field_first() {
         ),
         (
             ClientPatch {
-                display_name: Some("Piquel Settings".into()),
+                display_name: Some("SourceOrigin Settings".into()),
                 ..ClientPatch::default()
             },
             ClientField::DisplayName,

@@ -17,7 +17,7 @@ use crate::{
     sessions::SessionsError,
 };
 use axum::response::{IntoResponse, Response};
-use piquel_repository::DatabaseError;
+use sourceorigin_repository::DatabaseError;
 
 /// Why an account operation failed: the setting's own failure, or the actor's.
 /// The owner's routes answer each failure as its module always has.

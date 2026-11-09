@@ -3,7 +3,7 @@
 use super::{CliError, Console, Output};
 use crate::{InviteExpiry, PUBLIC_BASE_URL};
 use clap::Subcommand;
-use piquel_common::TokenId;
+use sourceorigin_common::TokenId;
 
 /// Creating, listing and revoking single-use signup links.
 #[derive(Subcommand)]

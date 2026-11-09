@@ -6,7 +6,7 @@ down, or mail stops going out. Each runbook says how you notice, what to do in
 order, and how to check that it's over.
 
 Run every `auth-service` command below in the affected environment, with
-`piquelctl app exec -t piquel-fr auth --env production -- auth-service --operator <you> …` (see
+`piquelctl app exec -t sourceorigin auth --env production -- auth-service --operator <you> …` (see
 [running auth-service commands](deploying.md#running-auth-service-commands)).
 `-t` gives the command a terminal: most commands below ask you to confirm what
 they will change, and refuse without one. The
@@ -62,7 +62,7 @@ too.
 4. Wait 15 minutes after the revocation. Each replica serves its own copy of
    the key set and reloads it each minute, and one that can't reload stops
    serving within 15 minutes, so only then has every replica dropped the
-   revoked keys. `https://auth.piquel.fr/.well-known/jwks.json` no longer
+   revoked keys. `https://auth.sourceorigin.dev/.well-known/jwks.json` no longer
    listing them shows only that the replica that answered has.
 5. Then restart the first-party resource servers, which drops the keys they
    cached. Restarting sooner could cache the revoked keys again from a replica
@@ -78,7 +78,7 @@ apps refresh and receive tokens signed by the new key.
 
 - `auth-service keys list` lists none of the revoked keys, and a new `active`
   key if you revoked the active one.
-- `https://auth.piquel.fr/.well-known/jwks.json` no longer lists their IDs.
+- `https://auth.sourceorigin.dev/.well-known/jwks.json` no longer lists their IDs.
 - An hour after step 5, verifiers that respect `Cache-Control` have dropped them. Until
   then, whoever holds a revoked key can mint tokens that third parties accept,
   with any `exp`, so token lifetimes don't shorten this window. Verifiers that
@@ -90,7 +90,7 @@ apps refresh and receive tokens signed by the new key.
 
 ### How you notice
 
-A secret starting with `pqcs_` appears where it shouldn't: in a repository, a
+A secret starting with `socs_` appears where it shouldn't: in a repository, a
 log, a ticket or a message. Secret scanners recognize the prefix. The app's
 owner may report it too.
 
@@ -150,7 +150,7 @@ For a leaked key, replace it at once instead:
 1. Generate a new key:
 
    ```sh
-   piquelctl env secret piquel-fr --env production regenerate token-digest-key
+   piquelctl env secret sourceorigin --env production regenerate token-digest-key
    ```
 
    If the `signing-key` secret leaked with it, regenerate it too: it is the
@@ -160,7 +160,7 @@ For a leaked key, replace it at once instead:
    describes.
 2. Deploy production's own release again, as
    [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)
-   describes. For staging, run `piquelctl --timeout 30m env deploy piquel-fr staging`.
+   describes. For staging, run `piquelctl --timeout 30m env deploy sourceorigin staging`.
 
    Every refresh token, code and login in progress under the old key ends, so
    apps sign their users in again. During the rollout, each release refuses what
@@ -200,7 +200,7 @@ old key stop working once the new key replaces it.
 - The [Admin activity](telemetry.md#watch-administrator-activity) dashboard
   shows changes nobody you know made: rights granted, accounts disabled or
   viewed, refused sign-ins.
-- An owner asks about a change "By a Piquel administrator" in their security
+- An owner asks about a change "By a SourceOrigin administrator" in their security
   history that they never asked for.
 - An administrator finds an entry in their own security history that isn't
   theirs, and reports it, which signs out their other sessions.
@@ -268,10 +268,10 @@ leaked, starting with the runbooks above.
 
 ### How you notice
 
-- auth.piquel.fr answers errors, or nothing, and users report it.
-- `https://auth.piquel.fr/health/ready` doesn't answer `204`. It checks the
+- auth.sourceorigin.dev answers errors, or nothing, and users report it.
+- `https://auth.sourceorigin.dev/health/ready` doesn't answer `204`. It checks the
   database and that the replica's signing keys were reloaded recently.
-- `piquelctl env show piquel-fr production` reports a service unhealthy.
+- `piquelctl env show sourceorigin production` reports a service unhealthy.
 - The Auth overview dashboard's **Server errors** rise. Grafana keeps working,
   since it never signs in through auth (see
   [sign in to Grafana](telemetry.md#sign-in-to-grafana)).
@@ -281,8 +281,8 @@ leaked, starting with the runbooks above.
 1. See what piqueld sees:
 
    ```sh
-   piquelctl env history piquel-fr production
-   piquelctl env logs piquel-fr production --service auth --since-seconds 900
+   piquelctl env history sourceorigin production
+   piquelctl env logs sourceorigin production --service auth --since-seconds 900
    ```
 
 2. If a deployment caused it, return to the previous one. When its rollout
@@ -292,7 +292,7 @@ leaked, starting with the runbooks above.
 3. Read Grafana's Auth overview: **Server errors**, **Database connections**
    and **Logs**.
 4. If the replicas aren't ready because of the database, read
-   `piquelctl env logs piquel-fr production --service postgres`.
+   `piquelctl env logs sourceorigin production --service postgres`.
 5. If they aren't ready because of their signing keys, the logs say which key
    failed. A replica that can't reload its keys fails readiness after 5 minutes,
    and answers `503` where it signs or verifies after 15. A key that won't open
@@ -309,13 +309,13 @@ tailnet, PostgreSQL, DNS, the tunnel, Grafana and Resend (see
 
 ### Check that it's over
 
-- `piquelctl --timeout 10m env wait piquel-fr production --ready routes`
+- `piquelctl --timeout 10m env wait sourceorigin production --ready routes`
   returns: the deployment runs healthy, and every route answers. It waits for
   the deployment that was newest when it started, so if that one failed and
   production rolled back, check
-  `piquelctl env history piquel-fr production` and
-  `piquelctl env url piquel-fr production` instead.
-- `https://auth.piquel.fr/health/ready` answers `204`.
+  `piquelctl env history sourceorigin production` and
+  `piquelctl env url sourceorigin production` instead.
+- `https://auth.sourceorigin.dev/health/ready` answers `204`.
 - **Server errors** on the Auth overview dashboard are back to their usual
   level.
 

@@ -1,6 +1,6 @@
 //! Known vectors and boundary tests for each primitive.
 use super::*;
-use piquel_common::protocol::jwt::TokenType;
+use sourceorigin_common::protocol::jwt::TokenType;
 
 /// Random secrets round-trip and reject malformed encodings without exposing bytes.
 #[test]
@@ -94,7 +94,7 @@ fn pkce_matches_rfc() {
 /// A JWK thumbprint matches RFC 7638's example, and names the key whatever its ID.
 #[test]
 fn thumbprints_match_rfc() {
-    use piquel_common::protocol::jwt::{Jwk, KeyType};
+    use sourceorigin_common::protocol::jwt::{Jwk, KeyType};
     let jwk = Jwk {
         alg: None,
         e: "AQAB".to_owned(),

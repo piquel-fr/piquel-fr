@@ -1,11 +1,11 @@
 {
-  "name": "@piquel/auth",
+  "name": "@sourceorigin/auth",
   "version": "0.1.0",
-  "description": "TypeScript SDK for auth.piquel.fr",
+  "description": "TypeScript SDK for auth.sourceorigin.dev",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/piquel-fr/piquel-fr.git",
+    "url": "git+https://github.com/sourceorigin-dev/sourceorigin.git",
     "directory": "packages/auth"
   },
   "private": true,

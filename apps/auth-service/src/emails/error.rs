@@ -2,9 +2,9 @@
 
 use super::VERIFICATION_WINDOW;
 use crate::security::ApiError;
-use piquel_common::email::InvalidEmail;
-use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
+use sourceorigin_common::email::InvalidEmail;
+use sourceorigin_crypto::CryptoError;
+use sourceorigin_repository::DatabaseError;
 use thiserror::Error;
 
 /// Why an address could not be added, verified, made primary or removed, mapped
@@ -14,7 +14,7 @@ pub(crate) enum EmailError {
     /// `AUTH_SMTP_URL` is unset, so no verification link could be sent.
     #[error("email is disabled")]
     Disabled,
-    /// The address is not one Piquel accepts.
+    /// The address is not one Origin Auth accepts.
     #[error("invalid email address")]
     Invalid(#[source] InvalidEmail),
     /// The SMTP client cannot send to the address.
@@ -70,16 +70,16 @@ impl From<EmailError> for ApiError {
     fn from(error: EmailError) -> Self {
         match error {
             EmailError::Disabled => Self::forbidden(
-                "This Piquel server does not send email, so addresses cannot be added.",
+                "This Origin Auth server does not send email, so addresses cannot be added.",
             ),
             EmailError::Invalid(reason) => {
                 Self::bad_request(format!("This email address cannot be used: {reason}."))
             }
             EmailError::Unsendable(_) => {
-                Self::bad_request("Piquel cannot send email to this address. Use another one.")
+                Self::bad_request("Origin Auth cannot send email to this address. Use another one.")
             }
             EmailError::OtherAccount => Self::conflict(
-                "This link adds the address to a Piquel account other than the one you are \
+                "This link adds the address to an Origin Account other than the one you are \
                  signed in to. Sign out first if you meant to confirm it.",
             ),
             EmailError::AlreadyAdded => {
@@ -106,7 +106,7 @@ impl From<EmailError> for ApiError {
                  Add the address again to get a new one.",
             ),
             EmailError::OwnedElsewhere => {
-                Self::conflict("This address is already used by another Piquel account.")
+                Self::conflict("This address is already used by another Origin Account.")
             }
             error @ EmailError::Crypto(_) => Self::internal(error),
             EmailError::Database(error) => error.into(),

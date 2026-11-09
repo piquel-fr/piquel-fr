@@ -7,12 +7,12 @@ use crate::{
     tests::{Browser, Replicas},
 };
 use axum::http::{Method, StatusCode};
-use piquel_common::{
+use sourceorigin_common::{
     PasskeyId, TokenId,
     clients::{ClientKind, ClientOwner},
     events::{EventContext, JobName},
 };
-use piquel_repository::{RefreshRedemption, RefreshRedemptionError};
+use sourceorigin_repository::{RefreshRedemption, RefreshRedemptionError};
 use serde_json::{Value, json};
 
 /// The history routes over the test database.

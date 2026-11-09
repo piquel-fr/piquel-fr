@@ -15,13 +15,13 @@ use crate::{
     web::tests::{authorize, value_after},
 };
 use axum::http::{StatusCode, header};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, Provider, UserId,
     clients::{ClientKind, ClientRegistration},
 };
-use piquel_crypto::Secret;
-use piquel_repository::{Database, PendingFederation};
-use piquel_ui::{Checkbox, LoginChange, LoginQuery, PendingDestination, Query};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{Database, PendingFederation};
+use sourceorigin_ui::{Checkbox, LoginChange, LoginQuery, PendingDestination, Query};
 use url::Position;
 
 /// The test service's configuration, which `invite_required` needs or not.
@@ -165,7 +165,7 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     let register = attribute(&link(REGISTER, &query));
     assert!(
         page.contains(&format!(
-            r#"New to Piquel? <a href="{register}">Create an account</a>"#
+            r#"New to SourceOrigin? <a href="{register}">Create an account</a>"#
         )),
         "{page}"
     );
