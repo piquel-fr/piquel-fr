@@ -322,4 +322,24 @@ impl AlertRepository<'_> {
         )?;
         Ok(count.try_into().unwrap_or_default())
     }
+
+    /// Stores alert `id` as written at payload `version`, as a newer release
+    /// writing a payload this one does not would: a fixture for reading one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the update fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn set_version(&mut self, id: AlertId, version: i16) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE alerts SET version = $2 WHERE id = $1",
+                id.as_uuid(),
+                version,
+            )
+        )?;
+        Ok(())
+    }
 }
