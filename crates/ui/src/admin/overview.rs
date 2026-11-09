@@ -135,16 +135,32 @@ pub struct AdminOverview<'a> {
     pub all_users: &'a str,
 }
 
+/// The overview's lead: how many accounts there are, and how many of them
+/// administer Piquel, each with its noun in the right number.
+#[must_use]
+pub fn overview_lead(accounts: u64, administrators: u64) -> String {
+    let accounts = if accounts == 1 {
+        "1 account".to_owned()
+    } else {
+        format!("{accounts} accounts")
+    };
+    let administrators = if administrators == 1 {
+        "1 of them an administrator".to_owned()
+    } else {
+        format!("{administrators} of them administrators")
+    };
+    format!(
+        "{accounts}, {administrators}. What needs attention, and what the service is doing right now."
+    )
+}
+
 /// The overview page.
 #[component]
 pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View> {
     Ok(view! {
         page_head(
             title: "Overview",
-            lead: format!(
-                "{} accounts, {} of them administrators. What needs attention, and what the service is doing right now.",
-                overview.accounts, overview.administrators
-            ),
+            lead: overview_lead(overview.accounts, overview.administrators),
         )
         for problem in overview.problems {
             problem_notice(problem: problem)
@@ -224,4 +240,30 @@ async fn problem_notice<'a>(problem: &'a Problem<'a>) -> Result<impl View> {
             },
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::overview_lead;
+
+    /// One account, or one administrator, reads as a singular.
+    #[test]
+    fn the_lead_counts_accounts_in_the_right_number() {
+        assert_eq!(
+            overview_lead(1, 1),
+            "1 account, 1 of them an administrator. What needs attention, and what the service is doing right now."
+        );
+        assert_eq!(
+            overview_lead(1, 0),
+            "1 account, 0 of them administrators. What needs attention, and what the service is doing right now."
+        );
+        assert_eq!(
+            overview_lead(2, 1),
+            "2 accounts, 1 of them an administrator. What needs attention, and what the service is doing right now."
+        );
+        assert_eq!(
+            overview_lead(2, 3),
+            "2 accounts, 3 of them administrators. What needs attention, and what the service is doing right now."
+        );
+    }
 }
