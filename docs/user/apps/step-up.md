@@ -8,8 +8,8 @@ again, and retries the action with the new token.
 ## Before you start
 
 - You need an app that signs users in ([registering an app](register-an-app.md)),
-  and an API that validates its access tokens, with the Rust SDK (`piquel-auth`)
-  or the TypeScript SDK (`@piquel/auth`).
+  and an API that validates its access tokens, with the Rust SDK (`sourceorigin-auth`)
+  or the TypeScript SDK (`@sourceorigin/auth`).
 
 ## Choose a requirement
 
@@ -18,10 +18,10 @@ A requirement has two optional parts.
 - **`acr`: how the user signed in.** Ask for `phr` when a phished or reused
   GitHub or Google login must not be enough, for example to delete data or
   change who can access it. `phr` means a passkey signed in or confirmed the
-  session. `urn:piquel:acr:social` is weaker, and `phr` also meets it.
+  session. `urn:sourceorigin:acr:social` is weaker, and `phr` also meets it.
 - **`max_age`: how recently, in seconds.** Ask for it when the user should be
   present right now, for example before showing a recovery code or exporting
-  their data. Five minutes (`300`) is what Piquel's own settings use. An API
+  their data. Five minutes (`300`) is what SourceOrigin's own settings use. An API
   should ask for a positive age: by the time a token reaches it, `auth_time` is
   already in the past.
 
@@ -45,7 +45,7 @@ In Rust, `StepUpRequirement` holds the requirement, and
 `AccessToken::require_authentication` checks a validated token against it:
 
 ```rust
-use piquel_auth::StepUpRequirement;
+use sourceorigin_auth::StepUpRequirement;
 
 const DELETE_REPOSITORY: StepUpRequirement = StepUpRequirement::passkey_within(300);
 
@@ -69,7 +69,7 @@ Both SDKs allow 30 seconds of clock difference on `auth_time`.
 ## Step up in your app
 
 With the SDKs' login routes, a page asks for the requirement itself, and the
-SDK sends the user through Piquel and back to the same page:
+SDK sends the user through Origin Auth and back to the same page:
 
 - In Rust, `user.require::<P>()?` on a `SignedIn` user, for a page, or
   `user.step_up(requirement)` with the requirement an API's challenge named.
@@ -86,13 +86,13 @@ Without the login routes, when an API answers with
 1. Start a new authorization request with the challenge's `acr_values` and
    `max_age` (`StepUpRequirement::authorize_params` gives both in Rust). Keep
    the user's place in `state`, and send the current ID token as
-   `id_token_hint`, so Piquel issues tokens only for that account.
+   `id_token_hint`, so Origin Auth issues tokens only for that account.
 2. Send the user through it interactively.
 3. Check that the new ID token's `sub` is unchanged, then retry the action once
    with the new access token. If it fails the same requirement again, show an
    error: starting another authorization would loop.
 
-Piquel signs the user in again on the same session. The new tokens keep the
+Origin Auth signs the user in again on the same session. The new tokens keep the
 same `sid` and carry a newer `auth_time`, so your app's other sessions and other
 apps are unaffected.
 
@@ -100,7 +100,7 @@ apps are unaffected.
 
 1. Sign in to your app with GitHub or Google, or wait more than `max_age`
    seconds after signing in.
-2. Try the protected action. Piquel asks for a passkey, only passkeys if you
+2. Try the protected action. Origin Auth asks for a passkey, only passkeys if you
    asked for `phr`.
 3. After you confirm, the action succeeds without asking again.
 

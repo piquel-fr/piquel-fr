@@ -1,6 +1,6 @@
 # Download your data
 
-You can download everything Piquel keeps about your account, in one JSON file,
+You can download everything SourceOrigin keeps about your account, in one JSON file,
 from your settings.
 
 ## Before you start
@@ -14,11 +14,11 @@ your data during its first 15 days.
 
 1. In your settings, open **Your data**.
 2. Select **Download your data**.
-3. If Piquel asks, confirm with your passkey.
+3. If Origin Auth asks, confirm with your passkey.
 
 ![The Your data tab: Download your data, and Delete your account](../../images/account/data.png)
 
-Your browser saves a file named `piquel-account-<handle>-<date>.json`. The
+Your browser saves a file named `sourceorigin-account-<handle>-<date>.json`. The
 download is recorded in your **Security history**, as "Account data
 downloaded".
 
@@ -47,4 +47,4 @@ downloaded".
 - **What apps keep.** Apps you signed in to keep their own records of you. Ask
   each app for its data.
 
-Only you can download your data. Piquel support can't download it for you.
+Only you can download your data. SourceOrigin support can't download it for you.

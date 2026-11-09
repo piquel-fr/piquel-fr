@@ -5,7 +5,7 @@
 //! Its `GET` asks for a passkey, in a ceremony started for this handoff only,
 //! which its form posts; its `POST` goes on to the dashboard. A browser that is
 //! not signed in with a passkey signs in first, and comes back. An account that
-//! does not administer Piquel is told it has no access, and nothing is handed
+//! does not administer Origin Auth is told it has no access, and nothing is handed
 //! off.
 
 use crate::web::{Failure, WebApplication};
@@ -17,8 +17,8 @@ use crate::{
     routes,
     security::ApiError,
 };
-use piquel_common::protocol::claims::Acr;
-use piquel_ui::{HandoffProof, HandoffQuery, LegacyConfirm, LoginQuery, Query, Title};
+use sourceorigin_common::protocol::claims::Acr;
+use sourceorigin_ui::{HandoffProof, HandoffQuery, LegacyConfirm, LoginQuery, Query, Title};
 use topcoat::{
     context::{Cx, app_context},
     router::{
@@ -34,7 +34,7 @@ use topcoat::{
 enum Refusal {
     /// The browser must sign in with a passkey first.
     SignIn,
-    /// The account does not administer Piquel.
+    /// The account does not administer Origin Auth.
     NoAccess,
     /// The handoff, or its proof, was refused, saying why.
     Alert(ApiError),
@@ -141,7 +141,7 @@ impl WebApplication {
                 Ok(see_other(login).into_response(cx)?)
             }
             Refusal::NoAccess => {
-                let page = view! { cx => piquel_ui::no_access(home: routes::page::settings::HOME) };
+                let page = view! { cx => sourceorigin_ui::no_access(home: routes::page::settings::HOME) };
                 Ok(self
                     .render_as(
                         cx,
@@ -173,7 +173,7 @@ impl WebApplication {
         });
         let action = uri(cx).path();
         let page = view! { cx =>
-            piquel_ui::handoff_proof(
+            sourceorigin_ui::handoff_proof(
                 action: action,
                 proof: routes::passkey::ADMIN_PROOF,
                 query: query,

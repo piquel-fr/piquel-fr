@@ -1,6 +1,6 @@
 [package]
-name = "piquel-common"
-description = "Identifiers, vocabularies and auth protocol wire types shared across Piquel"
+name = "sourceorigin-common"
+description = "Identifiers, vocabularies and auth protocol wire types shared across SourceOrigin"
 version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
@@ -36,7 +36,7 @@ uuid.workspace = true
 [dev-dependencies]
 # The vector generator signs with auth's own signer. A dev-dependency cycle is
 # allowed, and integration tests link the same build of this crate as the signer.
-piquel-crypto.workspace = true
+sourceorigin-crypto.workspace = true
 base64.workspace = true
 openssl.workspace = true
 serde_json.workspace = true

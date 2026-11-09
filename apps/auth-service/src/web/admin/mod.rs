@@ -1,8 +1,8 @@
-//! The admin dashboard at admin.piquel.fr, which auth serves on its admin
+//! The admin dashboard at admin.sourceorigin.dev, which auth serves on its admin
 //! listener: pages over [`AdminService`], and over [`AccountService`] for the
 //! settings administrators share with owners, in-process, for the administrator
 //! [`DashboardSignIn`] finds from the dashboard's own session cookie. Each page
-//! renders `piquel-ui`'s dashboard components, or the owner's settings sections.
+//! renders `sourceorigin-ui`'s dashboard components, or the owner's settings sections.
 //!
 //! The pages declare their own paths, under [`routes::dashboard::PREFIXES`], and
 //! the admin listener mounts them there, never as the fallback, so the listener's
@@ -19,7 +19,7 @@
 //! is submitted; without one, it sends the browser to confirm on auth's handoff
 //! page, and back to the page. The dashboard's script spares the page that trip:
 //! before following a link to such a page or posting a change, as the frame says
-//! it must (see `piquel_ui::DashboardConfirmation`), it asks for a passkey in a
+//! it must (see `sourceorigin_ui::DashboardConfirmation`), it asks for a passkey in a
 //! dialog on the page itself, [`start_confirmation`] and [`finish_confirmation`]
 //! running the ceremony for the dashboard's origin, which auth lists as a related
 //! origin of its RP ID. Every page still works without it.
@@ -74,11 +74,11 @@ use crate::{
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
 use forms::Claimed;
-use piquel_common::{ClientId, ErrorChain, UserId, config::Origin};
-use piquel_crypto::{KeyEncryptionKey, NoteVerifier};
-use piquel_repository::Database;
-use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{
+use sourceorigin_common::{ClientId, ErrorChain, UserId, config::Origin};
+use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
+use sourceorigin_repository::Database;
+use sourceorigin_telemetry::HttpTelemetry;
+use sourceorigin_ui::{
     Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search,
     Target, Who,
 };
@@ -212,7 +212,7 @@ pub(crate) struct AdminApplication {
     /// The passkey ceremonies that confirm the dashboard on its own pages.
     passkeys: PasskeyApplication,
     /// Auth's origin: invitations link its registration page, and the dashboard
-    /// links the account's settings and signing out of Piquel.
+    /// links the account's settings and signing out of Origin Auth.
     auth: Origin,
     /// Whether signup needs an invitation, so the dashboard manages them.
     invitations: bool,
@@ -227,7 +227,7 @@ pub(crate) struct AdminApplication {
     keys: KeyStore,
     /// Every answer's Content-Security-Policy.
     policy: HeaderValue,
-    /// Piquel's policies on piquel.fr, which every page's footer links.
+    /// SourceOrigin's policies on sourceorigin.dev, which every page's footer links.
     policies: PolicyLinks,
     /// What the overview last found, and when, shared by every page.
     attention: Arc<Mutex<AttentionCache>>,
@@ -465,7 +465,7 @@ impl AdminApplication {
             | Op::ImportSigningKey
             // A deployment applies its own clients, with the secret it generated:
             // only the terminal takes a secret. The dashboard registers clients
-            // with `CreateClient`, and Piquel makes their secrets.
+            // with `CreateClient`, and Origin Auth makes their secrets.
             | Op::ApplyClient
             // Pruning needs the schema owner, which auth never holds: the audit page
             // shows the command instead.
@@ -1013,13 +1013,13 @@ impl AdminApplication {
         let page = Child::new(page);
         let scripts = [script.as_str()];
         let html = view! { cx =>
-            piquel_ui::document(
+            sourceorigin_ui::document(
                 title: title.as_str(),
                 stylesheet: stylesheet,
                 scripts: &scripts,
                 preferences: dashboard.preferences,
                 admin: true,
-                piquel_ui::dashboard_frame(dashboard: &dashboard, (page))
+                sourceorigin_ui::dashboard_frame(dashboard: &dashboard, (page))
             )
         }
         .single()
@@ -1037,7 +1037,7 @@ impl AdminApplication {
     }
 
     /// What a page that failed with `error` answers: the [`Answer`] it carries,
-    /// that an account which does not administer Piquel has no access, or why the
+    /// that an account which does not administer Origin Auth has no access, or why the
     /// admin or account service refused. Other failures answer as Topcoat does,
     /// such as a redirect, except that a server error is logged, since Topcoat logs
     /// none, and its page shows its trace ID.
@@ -1056,7 +1056,7 @@ impl AdminApplication {
             refused.log_refusal();
             if let AdminError::NotAdministrator = refused {
                 let home = &Self::of(cx).auth.join(routes::page::settings::HOME);
-                let page = view! { cx => piquel_ui::no_access(home: home.as_str()) };
+                let page = view! { cx => sourceorigin_ui::no_access(home: home.as_str()) };
                 return Self::render(cx, StatusCode::FORBIDDEN, "No access", page).await;
             }
         }
@@ -1071,7 +1071,7 @@ impl AdminApplication {
         };
         let (status, detail) = refused.public();
         let page = view! { cx =>
-            piquel_ui::dashboard_failure(title: "That did not work", detail: Self::sentence(detail))
+            sourceorigin_ui::dashboard_failure(title: "That did not work", detail: Self::sentence(detail))
         };
         Self::render(cx, status, "Refused", page).await
     }
@@ -1087,7 +1087,7 @@ impl AdminApplication {
         }
         ApiError::log_error(&*error);
         let page = view! { cx =>
-            piquel_ui::dashboard_failure(
+            sourceorigin_ui::dashboard_failure(
                 title: "That did not work",
                 detail: "Something went wrong on our side. Please try again.",
             )
@@ -1132,7 +1132,7 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
             refused.log_refusal();
             let retry = href!(overview::overview).resolve(cx);
             let page = view! { cx =>
-                piquel_ui::dashboard_failure(
+                sourceorigin_ui::dashboard_failure(
                     title: "Sign-in did not work",
                     detail: "The sign-in link expired, was used already, or was opened in another browser.",
                     retry: retry,
@@ -1187,7 +1187,7 @@ async fn finish_confirmation(cx: &Cx, Json(input): Json<AuthenticationFinish>) -
 }
 
 /// `/sign-out`: ends the dashboard's session, by `POST`, then says so, by `GET`.
-/// The administrator stays signed in to Piquel, which the page links to sign out
+/// The administrator stays signed in to Origin Auth, which the page links to sign out
 /// of.
 #[route([GET, POST] "/sign-out")]
 async fn sign_out(cx: &Cx) -> Result<Response> {
@@ -1204,7 +1204,7 @@ async fn sign_out(cx: &Cx) -> Result<Response> {
         &app.auth.join(routes::page::LOGOUT),
     );
     let page = view! { cx =>
-        piquel_ui::dashboard_signed_out(sign_in: again, auth_sign_out: auth_sign_out)
+        sourceorigin_ui::dashboard_signed_out(sign_in: again, auth_sign_out: auth_sign_out)
     };
     AdminApplication::render(cx, StatusCode::OK, "Signed out", page).await
 }

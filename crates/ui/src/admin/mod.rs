@@ -1,7 +1,7 @@
-//! The admin dashboard at admin.piquel.fr: the frame of its pages, each page's
+//! The admin dashboard at admin.sourceorigin.dev: the frame of its pages, each page's
 //! view, and auth's page handing an administrator off to it.
 //!
-//! The pages render the views of `piquel_common::admin`, as the service returns
+//! The pages render the views of `sourceorigin_common::admin`, as the service returns
 //! them, with the links their handler resolves. Each change has its own page: a
 //! `GET` shows its form, and only that form's `POST` makes the change, so a link,
 //! even with a query, never changes anything. A passkey confirmation happens in
@@ -69,7 +69,7 @@ use crate::{
     settings::{Tab as SettingsTab, settings_tabs},
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, TraceId,
     admin::{EventSearch, SendAnnouncement, UserSearch},
 };
@@ -145,7 +145,7 @@ pub enum Tab {
     Overview,
     /// Accounts.
     Users,
-    /// Who administers Piquel.
+    /// Who administers Origin Auth.
     Administrators,
     /// Signup invitations.
     Invitations,
@@ -240,7 +240,7 @@ pub struct Dashboard<'a> {
     pub attention: &'a [Tab],
     /// The deployment the status bar names.
     pub environment: &'a str,
-    /// Piquel's policies, which the status bar links.
+    /// SourceOrigin's policies, which the status bar links.
     pub policies: Policies<'a>,
     /// The account search in the top bar, with what was searched, if anything.
     pub search: Search<'a>,
@@ -512,10 +512,10 @@ impl Change {
                 "For an owner support has confirmed, who has no passkey left from before the recovery, or whose account is disabled. In probation, removes the recovery's passkey, even the last, withdraws every consent and ends every session; its link unused, cancels the link."
             }
             Self::ApproveOrigin => {
-                "Pages of the client on this origin sign users in with their Piquel passkeys. It must be the origin of one of the client's redirect URIs, and browsers honour approved origins on a few domains only, across every client."
+                "Pages of the client on this origin sign users in with their Origin Account passkeys. It must be the origin of one of the client's redirect URIs, and browsers honour approved origins on a few domains only, across every client."
             }
             Self::RemoveOrigin => {
-                "Pages of the client on this origin stop signing users in, and send them to Piquel's pages instead. Users stay signed in."
+                "Pages of the client on this origin stop signing users in, and send them to Origin Auth's pages instead. Users stay signed in."
             }
             Self::ChangeHandle => {
                 "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released on the Handles page, and the account can take it back."
@@ -946,7 +946,7 @@ pub(crate) async fn moment(at: DateTime<Utc>) -> Result<impl View> {
     Ok(view! { time(at: at, precision: Precision::Minute) })
 }
 
-/// What an account that does not administer Piquel sees, on the dashboard or on
+/// What an account that does not administer Origin Auth sees, on the dashboard or on
 /// auth's handoff page, and where it may go instead.
 #[component]
 pub async fn no_access<'a>(home: &'a str) -> Result<impl View> {
@@ -977,7 +977,7 @@ pub async fn dashboard_failure<'a>(
 }
 
 /// What the dashboard says once signed out: signing in again, at `sign_in`, is
-/// quick while the Piquel session lasts, which signs out at `auth_sign_out`.
+/// quick while the SourceOrigin session lasts, which signs out at `auth_sign_out`.
 #[component]
 pub async fn dashboard_signed_out<'a>(
     sign_in: &'a str,
@@ -985,10 +985,10 @@ pub async fn dashboard_signed_out<'a>(
 ) -> Result<impl View> {
     Ok(view! {
         <h1>"Signed out of the dashboard"</h1>
-        <p class="lead">"You are still signed in to your Piquel account, so signing in to the dashboard again is quick."</p>
+        <p class="lead">"You are still signed in to your Origin Account, so signing in to the dashboard again is quick."</p>
         <div class="row actions">
             <a class="button" href=(sign_in)>"Sign in again"</a>
-            <a class="button secondary" href=(auth_sign_out)>"Sign out of Piquel"</a>
+            <a class="button secondary" href=(auth_sign_out)>"Sign out of SourceOrigin"</a>
         </div>
     })
 }

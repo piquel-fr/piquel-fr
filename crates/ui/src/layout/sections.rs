@@ -7,7 +7,7 @@ use super::{
     shell,
 };
 use crate::{Messages, icons::Icon, settings::Tab};
-use piquel_common::TraceId;
+use sourceorigin_common::TraceId;
 use topcoat::{
     Result,
     view::{Child, View, component, view},
@@ -37,11 +37,11 @@ impl Section {
         match self {
             Self::Account => (
                 "Sign in to see your settings",
-                "Use your Piquel account to manage your passkeys, devices and linked providers.",
+                "Use your Origin Account to manage your passkeys, devices and linked providers.",
             ),
             Self::Developers => (
                 "Sign in to manage your apps",
-                "Use your Piquel account to register and manage the apps that sign users in with it.",
+                "Use your Origin Account to register and manage the apps that sign users in with it.",
             ),
         }
     }
@@ -60,7 +60,7 @@ pub struct AccountNav<'a> {
     pub current: Option<Tab>,
     /// The developer console's home.
     pub developers: &'a str,
-    /// The admin dashboard, for an account that administers Piquel; a section of
+    /// The admin dashboard, for an account that administers Origin Auth; a section of
     /// its own in the sidebar, which nobody else sees.
     pub dashboard: Option<&'a str>,
     /// How many notifications are unread, which the inbox's tab counts.
@@ -72,7 +72,7 @@ pub struct AccountNav<'a> {
 /// out by posting to `sign_out`, the preference forms posting to
 /// `preferences_action`, reversing `preferences`, and coming back to `here`,
 /// the page named `title` in the crumb after `trail`, the pages it is under,
-/// and the status bar linking Piquel's `policies`; an administrator's sidebar
+/// and the status bar linking SourceOrigin's `policies`; an administrator's sidebar
 /// also links the dashboard. Then what the account's `recovery` that can still
 /// be undone asks, if any, such as a [`crate::recovery_banner`]; the page's
 /// `head`, such as an app's tabs, its `messages`, and the page as `child`.

@@ -10,10 +10,10 @@ use lettre::{
     message::Mailbox,
     transport::smtp::{authentication::Credentials, extension::ClientId},
 };
-use piquel_common::config::{ConfigurationError, Origin, SecretReference};
+use sourceorigin_common::config::{ConfigurationError, Origin, SecretReference};
 use std::{net::IpAddr, time::Duration};
 
-piquel_common::variables! {
+sourceorigin_common::variables! {
     /// Email's variables, in the configuration reference's order.
     #[cfg(test)]
     pub(crate) const VARIABLES;
@@ -31,7 +31,7 @@ piquel_common::variables! {
     const EMAIL_FROM = "AUTH_EMAIL_FROM", default DEFAULT_EMAIL_FROM;
 }
 /// [`EMAIL_FROM`] when none is configured.
-const DEFAULT_EMAIL_FROM: &str = "Piquel <security@piquel.fr>";
+const DEFAULT_EMAIL_FROM: &str = "Origin Account <security@sourceorigin.dev>";
 /// Port of `smtps://` URLs without one: SMTP submission over implicit TLS.
 const SMTPS_PORT: u16 = 465;
 /// Port of `smtp://` URLs without one: SMTP submission, upgraded with STARTTLS.

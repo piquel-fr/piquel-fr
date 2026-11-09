@@ -6,13 +6,13 @@ use crate::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
     admin::{AdminError, Operator},
 };
-use piquel_common::{
+use sourceorigin_common::{
     ClientId,
     admin::{ApprovedOrigin, Client},
     clients::{ClientField, ClientOwner, ClientRegistration, RelatedOrigin},
 };
-use piquel_crypto::ClientSecret;
-use piquel_repository::StoredOidcClient;
+use sourceorigin_crypto::ClientSecret;
+use sourceorigin_repository::StoredOidcClient;
 
 impl AdminService {
     /// Lists every OIDC client, enabled or not.

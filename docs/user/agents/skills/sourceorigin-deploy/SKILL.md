@@ -1,23 +1,23 @@
 ---
-name: piquel-deploy
+name: sourceorigin-deploy
 description: >
-  Deploy an app that signs in with piquel.fr on piqueld: its client secret and
+  Deploy an app that signs in with SourceOrigin on piqueld: its client secret and
   cookie key as piqueld secrets, a redirect URI for each environment, and a
   check of the sign-in once it is deployed. Use when the person wants to ship,
-  deploy or host their piquel.fr app with piqueld or piquelctl.
+  deploy or host their sourceorigin.dev app with piqueld or piquelctl.
 ---
 
-# Deploy a piquel.fr app on piqueld
+# Deploy a sourceorigin.dev app on piqueld
 
-The app signs in with the SDKs' login routes, from the piquel-sign-in skill,
-and reads `PIQUEL_CLIENT_ID`, `PIQUEL_REDIRECT_URI`, and the client secret and
-cookie key from `PIQUEL_CLIENT_SECRET_FILE` and `PIQUEL_COOKIE_KEY_FILE`.
+The app signs in with the SDKs' login routes, from the sourceorigin-sign-in skill,
+and reads `SOURCEORIGIN_CLIENT_ID`, `SOURCEORIGIN_REDIRECT_URI`, and the client secret and
+cookie key from `SOURCEORIGIN_CLIENT_SECRET_FILE` and `SOURCEORIGIN_COOKIE_KEY_FILE`.
 piqueld puts each secret in a read-only file under `/run/secrets`, never in an
 environment variable.
 
 The guides behind this skill:
 
-- Registering an app: https://docs.piquel.fr/user/apps/register-an-app.html
+- Registering an app: https://docs.sourceorigin.dev/user/apps/register-an-app.html
 - piqueld secrets: https://docs.piqueld.dev/user/applications/secrets-and-variables.html
 - piqueld environments: https://docs.piqueld.dev/user/applications/environments.html
 - piqueld routes: https://docs.piqueld.dev/user/networking/routes.html
@@ -28,7 +28,7 @@ Each environment has its own host, so its own redirect URI. Give each its own
 registration, so a staging secret can't sign users in to production. Only the
 person can register them: the developer console asks for a passkey
 confirmation. For each environment, ask them to register an app at
-https://auth.piquel.fr/developers/new, with:
+https://auth.sourceorigin.dev/developers/new, with:
 
 - **Does your app have a backend that can keep a secret?**: **Yes, a web app
   with a backend**.
@@ -51,33 +51,33 @@ the app's service. Here the service is `web`, on port 3000:
 ```toml
 [spec.environments.staging.variables]
 domain = "staging.notes.example.com"
-piquel_client_id = "<staging client ID>"
-piquel_client_secret = "piquel-client-secret-staging"
-piquel_cookie_key = "piquel-cookie-key-staging"
+sourceorigin_client_id = "<staging client ID>"
+sourceorigin_client_secret = "sourceorigin-client-secret-staging"
+sourceorigin_cookie_key = "sourceorigin-cookie-key-staging"
 
 [spec.environments.production.variables]
 domain = "notes.example.com"
-piquel_client_id = "<production client ID>"
-piquel_client_secret = "piquel-client-secret-production"
-piquel_cookie_key = "piquel-cookie-key-production"
+sourceorigin_client_id = "<production client ID>"
+sourceorigin_client_secret = "sourceorigin-client-secret-production"
+sourceorigin_cookie_key = "sourceorigin-cookie-key-production"
 
 [[spec.services]]
 name = "web"
 # ...
 
 [spec.services.environment]
-PIQUEL_CLIENT_ID = "${{ vars.piquel_client_id }}"
-PIQUEL_REDIRECT_URI = "https://${{ vars.domain }}/auth/callback"
-PIQUEL_CLIENT_SECRET_FILE = "/run/secrets/piquel-client-secret"
-PIQUEL_COOKIE_KEY_FILE = "/run/secrets/piquel-cookie-key"
+SOURCEORIGIN_CLIENT_ID = "${{ vars.sourceorigin_client_id }}"
+SOURCEORIGIN_REDIRECT_URI = "https://${{ vars.domain }}/auth/callback"
+SOURCEORIGIN_CLIENT_SECRET_FILE = "/run/secrets/sourceorigin-client-secret"
+SOURCEORIGIN_COOKIE_KEY_FILE = "/run/secrets/sourceorigin-cookie-key"
 
 [[spec.services.secrets]]
-name = "${{ vars.piquel_client_secret }}"
-target = "/run/secrets/piquel-client-secret"
+name = "${{ vars.sourceorigin_client_secret }}"
+target = "/run/secrets/sourceorigin-client-secret"
 
 [[spec.services.secrets]]
-name = "${{ vars.piquel_cookie_key }}"
-target = "/run/secrets/piquel-cookie-key"
+name = "${{ vars.sourceorigin_cookie_key }}"
+target = "/run/secrets/sourceorigin-cookie-key"
 
 [spec.services.healthcheck]
 type = "http"
@@ -96,7 +96,7 @@ visibility = "public"
   route to reach it.
 - The health check's path must answer without a session. A page that takes
   `SignedIn` answers piqueld's check with 401, which fails it, and the app the
-  piquel-sign-in skill builds has no such route yet: add a `/health` route
+  sourceorigin-sign-in skill builds has no such route yet: add a `/health` route
   outside the login layer that answers 200 or 204.
 - The variables are runtime settings, not build arguments, so an environment
   promoted from staging can run staging's image.
@@ -116,8 +116,8 @@ never passes through you. In a terminal, `--stdin` asks for the value without
 showing it:
 
 ```console
-piquelctl app secret <app> set piquel-client-secret-production --stdin --environments production --no-previews
-piquelctl app secret <app> set piquel-client-secret-staging --stdin --environments staging
+piquelctl app secret <app> set sourceorigin-client-secret-production --stdin --environments production --no-previews
+piquelctl app secret <app> set sourceorigin-client-secret-staging --stdin --environments staging
 ```
 
 Each environment also needs its own cookie key, never shared: the key seals
@@ -127,8 +127,8 @@ piqueld's generated secrets are hexadecimal or base64url, which the SDKs refuse,
 so store them instead. You can run these: the values go straight into piqueld.
 
 ```console
-openssl rand -base64 32 | piquelctl app secret <app> set piquel-cookie-key-production --stdin --environments production --no-previews --yes
-openssl rand -base64 32 | piquelctl app secret <app> set piquel-cookie-key-staging --stdin --environments staging --yes
+openssl rand -base64 32 | piquelctl app secret <app> set sourceorigin-cookie-key-production --stdin --environments production --no-previews --yes
+openssl rand -base64 32 | piquelctl app secret <app> set sourceorigin-cookie-key-staging --stdin --environments staging --yes
 ```
 
 ## 4. Deploy
@@ -160,10 +160,10 @@ previews sign-in.
    curl -si https://notes.example.com/auth/login
    ```
 
-   A `303` to `https://auth.piquel.fr/oauth/authorize` with a `request_uri`
+   A `303` to `https://auth.sourceorigin.dev/oauth/authorize` with a `request_uri`
    means auth accepted the client ID, the secret, the redirect URI and the
    scopes. A `502` that starts `Sign-in could not start:` names what it
-   refused: use the piquel-debug-sign-in skill.
+   refused: use the sourceorigin-debug-sign-in skill.
 
 3. Read the service's output if it fails to start, for example when a secret
    file is missing:

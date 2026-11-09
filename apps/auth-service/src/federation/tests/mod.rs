@@ -20,9 +20,9 @@ use axum::{
     http::{HeaderValue, Method, Request, StatusCode, header},
     routing::post,
 };
-use piquel_common::{Handle, PasskeyId};
-use piquel_crypto::Secret;
-use piquel_repository::{DatabaseTransaction, InsertUser, InsertVerifiedEmail};
+use sourceorigin_common::{Handle, PasskeyId};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{DatabaseTransaction, InsertUser, InsertVerifiedEmail};
 use tower::ServiceExt;
 
 /// Isolated database fixture with replaceable provider endpoints and unique subjects.
@@ -64,7 +64,7 @@ impl TestApp {
     async fn with_email(email: Option<&str>) -> Self {
         let database = crate::tests::Replicas::database().await;
         let subject = u64::from_be_bytes(
-            piquel_crypto::Secret::generate()
+            sourceorigin_crypto::Secret::generate()
                 .expect("random")
                 .as_bytes()[..8]
                 .try_into()
@@ -101,14 +101,14 @@ impl TestApp {
             axum::serve(listener, mock).await.expect("mock server");
         });
         let secret_file =
-            std::env::temp_dir().join(format!("piquel-federation-test-{}", TokenId::new()));
+            std::env::temp_dir().join(format!("sourceorigin-federation-test-{}", TokenId::new()));
         std::fs::write(&secret_file, "test-secret").expect("mock provider secret");
         let config = ProviderConfig::test(&secret_file);
         let mut app = FederationApplication::new(
             database,
             &FederationConfig {
-                origin: "https://auth.piquel.fr/"
-                    .parse::<piquel_common::config::Origin>()
+                origin: "https://auth.sourceorigin.dev/"
+                    .parse::<sourceorigin_common::config::Origin>()
                     .expect("origin"),
                 providers: BTreeMap::from([(Provider::GitHub, config)]),
             },
@@ -132,7 +132,7 @@ impl TestApp {
             secret_file,
             subject: subject.to_string(),
             email: crate::config::EmailConfig::test(
-                &"https://auth.piquel.fr/".parse().expect("origin"),
+                &"https://auth.sourceorigin.dev/".parse().expect("origin"),
                 true,
             ),
         }
@@ -197,7 +197,7 @@ impl TestApp {
         if let Some(email) = email {
             tx.emails()
                 .insert_verified(&InsertVerifiedEmail {
-                    id: piquel_common::EmailId::new(),
+                    id: sourceorigin_common::EmailId::new(),
                     user_id: id,
                     normalized_email: email.into(),
                     is_primary: true,

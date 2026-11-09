@@ -3,12 +3,12 @@
 
 use super::AdminService;
 use crate::admin::{AdminError, AnnouncementDraft, AnnouncementRecipients, Operator};
-use piquel_common::{
+use sourceorigin_common::{
     AnnouncementId, UserId,
     admin::{Announcement, AnnouncementDetail},
     events::DomainEvent,
 };
-use piquel_repository::{DraftedAnnouncement, Recipients};
+use sourceorigin_repository::{DraftedAnnouncement, Recipients};
 
 /// Announcements listed, the latest first.
 const ANNOUNCEMENT_LIST_SIZE: u32 = 100;

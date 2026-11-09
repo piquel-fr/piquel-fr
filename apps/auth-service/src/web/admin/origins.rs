@@ -7,8 +7,8 @@ use super::{
     clients::{self, Client},
 };
 use crate::{clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
-use piquel_common::{admin::ApproveOrigin, clients::RelatedOrigin};
-use piquel_ui::{Change, Query, Target};
+use sourceorigin_common::{admin::ApproveOrigin, clients::RelatedOrigin};
+use sourceorigin_ui::{Change, Query, Target};
 use serde::Serialize;
 use topcoat::{
     Result,
@@ -54,7 +54,7 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
     let client =
         format!("Client {id}. Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::ApproveOrigin,
             back: back.as_str(),
             refusal: refusal.as_deref(),
@@ -90,7 +90,7 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<NoInput>>) -> Result<Respo
         id: Some(&client),
     };
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
+        sourceorigin_ui::dashboard_change(
             change: Change::RemoveOrigin,
             target: target,
             back: back.as_str(),

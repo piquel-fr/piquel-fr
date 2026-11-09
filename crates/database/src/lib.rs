@@ -1,4 +1,4 @@
-//! The sole `SQLx` boundary for the Piquel workspace.
+//! The sole `SQLx` boundary for the SourceOrigin workspace.
 //!
 //! Applications receive typed repositories and never a pool, executor, row, or
 //! `SQLx` error. Repositories expose only the operations used by the service, plus

@@ -25,12 +25,12 @@ use crate::{
     security::ApiError,
 };
 use chrono::Utc;
-use piquel_common::{
+use sourceorigin_common::{
     ClientId,
     clients::{ClientKind, ClientRegistration},
 };
-use piquel_repository::StoredOidcClient;
-use piquel_ui::{
+use sourceorigin_repository::StoredOidcClient;
+use sourceorigin_ui::{
     Action, AdminClientRow, Change, ClientChanges, ClientPage, ClientRow, ClientStatus, Crumb,
     NewClientForm, OperatorDraft, Query, Registration, Revealed, SecretRow, SecretsChange,
     SecretsState,
@@ -60,7 +60,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let (rows, new) = (&rows, &href!(create).resolve(cx));
-    let page = view! { cx => piquel_ui::client_list(rows: rows, new: new) };
+    let page = view! { cx => sourceorigin_ui::client_list(rows: rows, new: new) };
     App::render(cx, StatusCode::OK, "Clients", page).await
 }
 
@@ -75,7 +75,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     if let Some(secret) = App::revealed(cx, admin).map(Revealed::new) {
         let (secret, page) = (&secret, &href!(detail, Client(id)).resolve(cx));
         let page = view! { cx =>
-            piquel_ui::client_created(secret: secret, page: page.as_str())
+            sourceorigin_ui::client_created(secret: secret, page: page.as_str())
         };
         return App::render(cx, StatusCode::OK, "Client registered", page).await;
     }
@@ -146,7 +146,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     };
     let shown = &shown;
     let page = view! { cx =>
-        piquel_ui::client_page(page: shown, now: Utc::now())
+        sourceorigin_ui::client_page(page: shown, now: Utc::now())
     };
     // A large page: its future is boxed, off the handler's stack.
     Box::pin(App::render(
@@ -293,7 +293,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
         refusal.as_deref(),
     );
     let page = view! { cx =>
-        piquel_ui::client_secrets(
+        sourceorigin_ui::client_secrets(
             page: here.as_str(),
             name: name,
             secrets: secrets,
@@ -367,7 +367,7 @@ impl Toggle {
         let change = self.change();
         let target = App::target(cx).await;
         let page = view! { cx =>
-            piquel_ui::dashboard_change(
+            sourceorigin_ui::dashboard_change(
                 change: change,
                 target: target,
                 back: back.as_str(),
@@ -508,7 +508,7 @@ impl App {
         let here = uri(cx).path().to_owned();
         let (title, here) = (registration.title(), &here);
         let page = view! { cx =>
-            piquel_ui::client_registration(
+            sourceorigin_ui::client_registration(
                 registration: registration,
                 settings: settings,
                 action: here.as_str(),

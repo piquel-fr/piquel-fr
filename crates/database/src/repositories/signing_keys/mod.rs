@@ -3,8 +3,8 @@
 use super::{RepositoryExecutor, SigningKeyRepository};
 use crate::{DatabaseError, Limit, LockKey, Scope};
 use chrono::{DateTime, Utc};
-pub use piquel_common::admin::{SigningKeyState, SigningKeyType};
-use piquel_common::{
+pub use sourceorigin_common::admin::{SigningKeyState, SigningKeyType};
+use sourceorigin_common::{
     admin::SigningKey,
     protocol::jwt::{Jwk, KeyId},
 };

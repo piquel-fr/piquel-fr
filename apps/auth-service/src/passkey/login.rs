@@ -19,12 +19,12 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, ErrorChain, Handle, UserId,
     events::{Actor, DomainEvent},
 };
-use piquel_crypto::Secret;
-use piquel_repository::{DatabaseError, InsertUser};
+use sourceorigin_crypto::Secret;
+use sourceorigin_repository::{DatabaseError, InsertUser};
 use tracing::Instrument;
 use webauthn_rs::{Webauthn, prelude::*};
 

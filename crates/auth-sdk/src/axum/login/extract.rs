@@ -28,7 +28,7 @@ use std::sync::Arc;
 /// for an endpoint other origins must call with the session cookie.
 ///
 /// ```no_run
-/// use piquel_auth::axum::SignedIn;
+/// use sourceorigin_auth::axum::SignedIn;
 ///
 /// async fn home(user: SignedIn) -> String {
 ///     format!("Hello {}", user.name())
@@ -103,7 +103,7 @@ impl SignedIn {
     /// user through login again and back to the same page.
     ///
     /// ```no_run
-    /// use piquel_auth::{AuthenticationPolicy, StepUpRequirement, axum::{SignedIn, StepUp}};
+    /// use sourceorigin_auth::{AuthenticationPolicy, StepUpRequirement, axum::{SignedIn, StepUp}};
     ///
     /// /// A sign-in within the last five minutes, however it was made.
     /// struct RecentLogin;
@@ -151,7 +151,7 @@ impl SignedIn {
     ///
     /// ```no_run
     /// use axum::response::{IntoResponse, Response};
-    /// use piquel_auth::{
+    /// use sourceorigin_auth::{
     ///     axum::SignedIn,
     ///     protocol::challenge::{BearerChallenge, BearerError},
     /// };
@@ -210,7 +210,7 @@ impl<St: Send + Sync> FromRequestParts<St> for SignedIn {
 /// the access token expired and auth could not renew it, as for [`SignedIn`].
 ///
 /// ```no_run
-/// use piquel_auth::axum::MaybeSignedIn;
+/// use sourceorigin_auth::axum::MaybeSignedIn;
 ///
 /// async fn landing(MaybeSignedIn(user): MaybeSignedIn) -> String {
 ///     match user {
@@ -240,7 +240,7 @@ impl<St: Send + Sync> FromRequestParts<St> for MaybeSignedIn {
 /// forgery itself.
 ///
 /// ```no_run
-/// use piquel_auth::axum::{CrossOrigin, SignedIn};
+/// use sourceorigin_auth::axum::{CrossOrigin, SignedIn};
 ///
 /// async fn widget_vote(CrossOrigin(user): CrossOrigin<SignedIn>) -> String {
 ///     format!("Vote recorded for {}", user.name())
@@ -296,7 +296,7 @@ impl<St: Send + Sync> FromRequestParts<St> for CrossOrigin<MaybeSignedIn> {
 /// as long as the browser returns within a minute ([`SignedIn::step_up`]).
 ///
 /// ```no_run
-/// use piquel_auth::{
+/// use sourceorigin_auth::{
 ///     AuthenticationPolicy, StepUpRequirement,
 ///     axum::{SignedIn, StepUp},
 /// };

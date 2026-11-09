@@ -1,5 +1,5 @@
 [package]
-name = "piquel-telemetry"
+name = "sourceorigin-telemetry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 test-util = ["opentelemetry_sdk/testing"]
 
 [dependencies]
-piquel-common = { workspace = true, features = ["client-spans", "config"] }
+sourceorigin-common = { workspace = true, features = ["client-spans", "config"] }
 
 async-trait.workspace = true
 axum.workspace = true

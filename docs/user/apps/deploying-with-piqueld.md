@@ -1,7 +1,7 @@
 # Deploying with piqueld
 
-Deploy an app that signs users in with piquel.fr on
-[piqueld](https://github.com/piquel-fr/piqueld): keep its client secret in
+Deploy an app that signs users in with sourceorigin.dev on
+[piqueld](https://github.com/sourceorigin-dev/piqueld): keep its client secret in
 piqueld's secret store, and give each environment its own redirect URI.
 
 ## Before you start
@@ -9,7 +9,7 @@ piqueld's secret store, and give each environment its own redirect URI.
 - You need a piqueld application for your app, with its environments, such as
   `production` and `staging`. The examples use `notes`, with a service `web`
   whose route's hostname is `${{ vars.domain }}`. piqueld's guide to
-  [secrets and variables](https://github.com/piquel-fr/piqueld/blob/main/docs/user/applications/secrets-and-variables.md)
+  [secrets and variables](https://github.com/sourceorigin-dev/piqueld/blob/main/docs/user/applications/secrets-and-variables.md)
   explains the commands below in full.
 - `piquelctl` must be signed in, with `secrets:write` on the application.
 
@@ -75,28 +75,28 @@ the key that seals the SDKs' session cookies.
    name = "web"
 
    [spec.services.environment]
-   PIQUEL_CLIENT_ID = "${{ vars.client_id }}"
-   PIQUEL_REDIRECT_URI = "https://${{ vars.domain }}/auth/callback"
+   SOURCEORIGIN_CLIENT_ID = "${{ vars.client_id }}"
+   SOURCEORIGIN_REDIRECT_URI = "https://${{ vars.domain }}/auth/callback"
 
    [[spec.services.secrets]]
    name = "${{ vars.client_secret }}"
-   target = "/run/secrets/piquel-client-secret"
+   target = "/run/secrets/sourceorigin-client-secret"
 
    [[spec.services.secrets]]
    name = "${{ vars.cookie_key }}"
-   target = "/run/secrets/piquel-cookie-key"
+   target = "/run/secrets/sourceorigin-cookie-key"
    ```
 
 4. Read the secrets from their files in your app. In Rust:
 
    ```rust
-   let secret = std::fs::read_to_string("/run/secrets/piquel-client-secret")?;
+   let secret = std::fs::read_to_string("/run/secrets/sourceorigin-client-secret")?;
    let credentials = Credentials::Secret(secret.trim().to_owned().into());
    ```
 
-   In TypeScript, pass `readFileSync('/run/secrets/piquel-client-secret',
+   In TypeScript, pass `readFileSync('/run/secrets/sourceorigin-client-secret',
    'utf8').trim()` as the client's `clientSecret`. Read the cookie key from
-   `/run/secrets/piquel-cookie-key` the same way.
+   `/run/secrets/sourceorigin-cookie-key` the same way.
 
 5. Save the manifest. If the application deploys from a repository, commit and
    push it to the branch each environment deploys from. Otherwise, save it:
@@ -129,7 +129,7 @@ the key that seals the SDKs' session cookies.
 
 1. `piquelctl env show notes production` lists the mounted secret, such as
    `Secret: notes-client-secret: application store, version 1`.
-2. Open the environment's hostname and sign in. Piquel's consent screen names
+2. Open the environment's hostname and sign in. Origin Auth's consent screen names
    that hostname, and your app receives you signed in.
 
 ## Limits
@@ -139,7 +139,7 @@ the key that seals the SDKs' session cookies.
   signing in on it fails until you register its callback. Register it on a
   development or staging app, never the production one, and remove it when you
   delete the preview. An app lists at most 16 redirect URIs.
-- **Back-channel logout needs a public route.** Piquel posts logout tokens
+- **Back-channel logout needs a public route.** Origin Auth posts logout tokens
   only to addresses on the public internet. A private route's hostname resolves
   to tailnet addresses, so an app there learns that a session ended at its next
   refresh instead, within five minutes.
@@ -148,7 +148,7 @@ the key that seals the SDKs' session cookies.
 
 - **The deployment fails with `secret_missing` or `secret_access_denied`.** The
   secret's name is misspelled, or the environment may not mount it. See
-  [piqueld's troubleshooting](https://github.com/piquel-fr/piqueld/blob/main/docs/user/applications/secrets-and-variables.md#troubleshooting).
+  [piqueld's troubleshooting](https://github.com/sourceorigin-dev/piqueld/blob/main/docs/user/applications/secrets-and-variables.md#troubleshooting).
 - **Code exchanges fail with `invalid_client`.** The environment runs with
   another environment's secret, or with one whose grace period ended. Check that
   `client_id` and `client_secret` name the same app, then deploy.

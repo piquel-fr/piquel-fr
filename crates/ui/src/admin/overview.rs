@@ -130,7 +130,7 @@ pub struct AdminOverview<'a> {
     pub measures: &'a [Measure],
     /// How many accounts there are.
     pub accounts: u64,
-    /// How many administer Piquel.
+    /// How many administer Origin Auth.
     pub administrators: u64,
     /// The newest events.
     pub events: &'a [EventRow<'a>],

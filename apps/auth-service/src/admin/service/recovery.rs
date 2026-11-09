@@ -10,11 +10,11 @@ use crate::{
     security::Session,
 };
 use chrono::Utc;
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, RecoveryId, UserId,
     events::{DomainEvent, EventContext, RecoveryRevocation, RevocationReason},
 };
-use piquel_repository::{DatabaseTransaction, InsertRecovery, RecentRecovery};
+use sourceorigin_repository::{DatabaseTransaction, InsertRecovery, RecentRecovery};
 use url::Url;
 
 impl AdminService {

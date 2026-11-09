@@ -21,11 +21,11 @@ mod recovery;
 pub(crate) use alerts::ALERTS_SHOWN;
 
 use super::{AdminError, Operator, Reason};
-use piquel_common::{
+use sourceorigin_common::{
     UserId,
     events::{DomainEvent, EventContext},
 };
-use piquel_repository::{Database, DatabaseTransaction};
+use sourceorigin_repository::{Database, DatabaseTransaction};
 
 /// Owns each administrative operation. Dashboard pages and CLI commands are thin
 /// adapters that say which [`Operator`] acts. Every mutation, and viewing an

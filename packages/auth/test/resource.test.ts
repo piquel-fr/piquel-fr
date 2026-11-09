@@ -90,7 +90,7 @@ test('scopes and step-up requirements answer with their challenges', async () =>
   ]);
   // The token's passkey sign-in is an hour old: `phr` meets a social requirement,
   // and max_age gets the 30-second leeway.
-  token.requireAuthentication({ acr_values: 'urn:piquel:acr:social' });
+  token.requireAuthentication({ acr_values: 'urn:sourceorigin:acr:social' });
   token.requireAuthentication({ acr_values: 'phr', max_age: 3570 });
   assert.deepEqual(
     await answer(() => {

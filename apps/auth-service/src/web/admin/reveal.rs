@@ -90,6 +90,6 @@ impl AdminApplication {
             .session()
             .map(|session| session.to_string())
             .unwrap_or_default();
-        format!("piquel dashboard reveal\0{session}\0{page}").into_bytes()
+        format!("sourceorigin dashboard reveal\0{session}\0{page}").into_bytes()
     }
 }

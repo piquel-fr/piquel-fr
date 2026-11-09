@@ -1,6 +1,6 @@
 # Adding a notification
 
-This guide adds a kind of notification: something Piquel tells an account's
+This guide adds a kind of notification: something SourceOrigin tells an account's
 owner about their account, or administrators about the service, in their inbox
 and by email. [Notifications](../architecture/notifications.md)
 describes what the owner sees; [domain events](../architecture/database.md#notifications)
@@ -104,7 +104,7 @@ Add its arms to `Notification::subject`, one line, which is the inbox's line and
 the email's subject, and `Notification::body`, what it says below:
 
 ```rust
-Self::PictureRemoved => "Piquel support removed your profile picture",
+Self::PictureRemoved => "SourceOrigin support removed your profile picture",
 ```
 
 Write them for the owner: what happened to their account, what changes for them,
@@ -124,7 +124,7 @@ they need no change.
    address receives it once.
 
 ```console
-just test -p piquel-common notifications
+just test -p sourceorigin-common notifications
 just db test -E 'test(notifications_are_emailed)'
 ```
 

@@ -6,12 +6,12 @@ root, configures it.
 
 ## Where pages go
 
-- `docs/user/` is the user guide, for people with a piquel.fr account and for
-  people building apps that sign in with it. Its pages say what piquel.fr does
+- `docs/user/` is the user guide, for people with an Origin Account and for
+  people building apps that sign in with it. Its pages say what SourceOrigin does
   and how to use it, not how it is implemented.
-- `docs/dev/` is the contributor guide, for people who change piquel.fr:
+- `docs/dev/` is the contributor guide, for people who change SourceOrigin:
   development setup, testing, architecture, security, how to extend it, and how
-  it is operated. Operating piquel.fr belongs here, since only its maintainers
+  it is operated. Operating SourceOrigin belongs here, since only its maintainers
   run it.
 - `docs/SUMMARY.md` is the table of contents. A page it doesn't list is not
   published, and a page it lists that doesn't exist fails the build.
@@ -28,7 +28,7 @@ stale:
   line's clap definitions in `apps/auth-service/src/cli`: their doc comments are
   also what `--help` prints.
 - `docs/dev/operations/variables/` comes from the doc comments of the variables
-  that `piquel_common::variables!` declares, in `apps/auth-service/src/config`
+  that `sourceorigin_common::variables!` declares, in `apps/auth-service/src/config`
   and `apps/web/src/main.rs`. The configuration page includes them with
   `{{#include}}`. Write those doc comments for operators: what the variable
   does, its format, and whether it is required. The default is added from the
@@ -51,13 +51,13 @@ doc comment. Commit history records how things changed.
   the only way. If a surface can't do it, say so.
 - Keep a page to one task or topic, and link to the reference rather than
   repeating it.
-- Describe how piquel.fr works now, not how it changed.
+- Describe how SourceOrigin works now, not how it changed.
 - Write placeholders in prose as `` `<name>` `` or `\<name>`. A bare `<name>`
   is an HTML tag: it hides the text, and `just docs` fails.
 
 ## Style
 
-Write so that someone new to piquel.fr can follow the page from top to bottom.
+Write so that someone new to SourceOrigin can follow the page from top to bottom.
 
 - **Start with the reader's goal.** Open each page with one or two sentences
   saying what it helps them do.
@@ -160,7 +160,7 @@ Give each image alt text that says what it shows, for readers who can't see it:
   `[claims](../reference/oidc.md#authentication-claims)`. These links work
   both on GitHub and in the book.
 - Link to a repository file outside `docs/` with its GitHub URL on `main`, such
-  as `https://github.com/piquel-fr/piquel-fr/blob/main/infra/piqueld.toml`
+  as `https://github.com/sourceorigin-dev/sourceorigin/blob/main/infra/piqueld.toml`
   (`tree` instead of `blob` for a directory). A relative path would break in
   the book. The link check resolves these URLs against your checkout, so the
   file must exist on your branch, and fails links to any other branch or
@@ -190,6 +190,6 @@ The `docs` CI job runs `just docs` on every pull request, because a change
 anywhere in the repository can break a link to it.
 
 Every deployment publishes the book of its own commit: production at
-<https://docs.piquel.fr>, staging at `docs.staging.piquel.fr`, and `just preview`
-at the `docs-<slug>.dev.piquel.fr` it prints. See
+<https://docs.sourceorigin.dev>, staging at `docs.staging.sourceorigin.dev`, and `just preview`
+at the `docs-<slug>.dev.sourceorigin.dev` it prints. See
 [documentation](operations/deploying.md#documentation).

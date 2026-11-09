@@ -2,7 +2,7 @@
 //! re-authenticating the browser's existing session.
 
 use super::*;
-use piquel_repository::InsertExternalIdentity;
+use sourceorigin_repository::InsertExternalIdentity;
 
 impl TestApp {
     /// Links this fixture's provider subject to `user_id`.
@@ -13,7 +13,7 @@ impl TestApp {
             .insert_identity(&InsertExternalIdentity {
                 id: TokenId::new(),
                 user_id,
-                provider: piquel_common::Provider::GitHub,
+                provider: sourceorigin_common::Provider::GitHub,
                 issuer: ProviderEndpoints::new(Provider::GitHub)
                     .expect("GitHub facts")
                     .issuer

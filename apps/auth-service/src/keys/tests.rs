@@ -12,8 +12,8 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use piquel_common::protocol::jwt::{Jwk, TokenType};
-use piquel_repository::InsertSigningKey;
+use sourceorigin_common::protocol::jwt::{Jwk, TokenType};
+use sourceorigin_repository::InsertSigningKey;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 

@@ -22,22 +22,22 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, PictureId, UserId,
     admin::CreateInvitation,
     events::{Actor, DomainEvent},
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     Channel, Database, DatabaseError, DatabaseTransaction, EventFilter, NewDelivery,
     SigningKeyState,
 };
-use piquel_telemetry::{HttpTelemetry, Telemetry};
-use piquel_ui::{HandoffQuery, LegacyConfirm};
+use sourceorigin_telemetry::{HttpTelemetry, Telemetry};
+use sourceorigin_ui::{HandoffQuery, LegacyConfirm};
 use std::net::SocketAddr;
 use url::{Position, Url};
 
 /// The dashboard's origin in these scenarios.
-const DASHBOARD: &str = "https://admin.piquel.fr";
+const DASHBOARD: &str = "https://admin.sourceorigin.dev";
 
 /// Auth, with a dashboard on its admin listener.
 struct Harness {
@@ -585,7 +585,7 @@ async fn administrators_remove_an_accounts_app() {
     let admin = harness.admin().await;
     let owner = Browser::new_account(&harness.database).await;
     let client = crate::tests::registration(
-        piquel_common::clients::ClientKind::Public,
+        sourceorigin_common::clients::ClientKind::Public,
         "https://client.example",
     );
     crate::tests::register(&harness.database, &client)
@@ -932,7 +932,7 @@ async fn the_admin_listener_keeps_to_its_host_forms_and_session() {
     let misrouted = anyone.visit(&harness.dashboard, "/users").await;
     assert_eq!(misrouted.status(), StatusCode::MISDIRECTED_REQUEST);
     let elsewhere = anyone
-        .visit(&harness.dashboard, "https://auth.piquel.fr/users")
+        .visit(&harness.dashboard, "https://auth.sourceorigin.dev/users")
         .await;
     assert_eq!(elsewhere.status(), StatusCode::MISDIRECTED_REQUEST);
 
@@ -965,7 +965,7 @@ async fn the_admin_listener_keeps_to_its_host_forms_and_session() {
         .owner(RequestContext::TEST, &admin.headers())
         .await
         .expect("lookup")
-        .expect("still signed in to Piquel");
+        .expect("still signed in to Origin Auth");
 }
 
 /// Recovering an account mails its primary verified address a link, which the
@@ -1243,17 +1243,17 @@ async fn deletions_are_scheduled_and_restored_from_the_dashboard() {
 async fn related_origins_are_approved_and_removed_from_the_dashboard() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
-    // Within auth's own domain, so it counts only as `piquel`, which every such
+    // Within auth's own domain, so it counts only as `sourceorigin`, which every such
     // origin shares.
-    let origin = format!("https://{}.auth.piquel.fr", UserId::new());
-    let client = piquel_common::clients::ClientRegistration {
+    let origin = format!("https://{}.auth.sourceorigin.dev", UserId::new());
+    let client = sourceorigin_common::clients::ClientRegistration {
         trusted: true,
-        ..crate::tests::registration(piquel_common::clients::ClientKind::Public, &origin)
+        ..crate::tests::registration(sourceorigin_common::clients::ClientKind::Public, &origin)
     };
     crate::tests::register(&harness.database, &client)
         .await
         .expect("client");
-    let untrusted = crate::tests::registration(piquel_common::clients::ClientKind::Public, &origin);
+    let untrusted = crate::tests::registration(sourceorigin_common::clients::ClientKind::Public, &origin);
     crate::tests::register(&harness.database, &untrusted)
         .await
         .expect("untrusted client");
@@ -1278,7 +1278,7 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
 
     let refused = html(post(&approve, &[("origin", "notes.example")]).await).await;
     assert!(refused.contains("role=\"alert\""), "{refused}");
-    let elsewhere = format!("https://elsewhere-{}.auth.piquel.fr", UserId::new());
+    let elsewhere = format!("https://elsewhere-{}.auth.sourceorigin.dev", UserId::new());
     let refused = html(post(&approve, &[("origin", &elsewhere)]).await).await;
     assert!(
         refused.contains("is not the origin of any redirect URI"),
@@ -1313,7 +1313,7 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
 }
 
 /// The stored registration of client `id`.
-async fn stored_client(database: &Database, id: &str) -> piquel_repository::StoredOidcClient {
+async fn stored_client(database: &Database, id: &str) -> sourceorigin_repository::StoredOidcClient {
     database
         .oidc()
         .find_client(id)
@@ -1363,7 +1363,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     let settings = format!("{client}/settings");
     // The secrets page shows what a rotation sealed for it, never this.
     harness
-        .shown_once(&dashboard, &created, "pqcs_", &format!("{client}/secret"))
+        .shown_once(&dashboard, &created, "socs_", &format!("{client}/secret"))
         .await;
     let stored = stored_client(&harness.database, &id).await;
     assert!(stored.trusted);
@@ -1413,7 +1413,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     let rotated = post(&format!("{client}/secret"), &[("action", "rotate")]).await;
     assert_eq!(redirect(&rotated), format!("{client}/secret"));
     harness
-        .shown_once(&dashboard, &rotated, "pqcs_", &page)
+        .shown_once(&dashboard, &rotated, "socs_", &page)
         .await;
     let secrets = harness
         .database
@@ -1544,10 +1544,10 @@ async fn a_client_named_new_has_its_overview() {
         .expect("lookup")
         .is_none()
     {
-        let client = piquel_common::clients::ClientRegistration {
+        let client = sourceorigin_common::clients::ClientRegistration {
             id: "new".parse().expect("client ID"),
             ..crate::tests::registration(
-                piquel_common::clients::ClientKind::Public,
+                sourceorigin_common::clients::ClientKind::Public,
                 "https://new.example",
             )
         };
@@ -1576,7 +1576,7 @@ impl Channel for Unsent {
     fn deliveries(
         _: &DomainEvent,
         _: Option<UserId>,
-        _: &[piquel_repository::Notified],
+        _: &[sourceorigin_repository::Notified],
         _: &mut DatabaseTransaction<'_>,
     ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
         std::future::ready(Ok(vec![]))
@@ -1837,7 +1837,7 @@ async fn administrators_read_an_accounts_inbox_and_history() {
 
     let page = html(harness.visit(&dashboard, &inbox).await).await;
     assert!(
-        page.contains("Piquel support changed your handle"),
+        page.contains("SourceOrigin support changed your handle"),
         "{page}"
     );
     assert!(
@@ -1861,7 +1861,7 @@ async fn administrators_read_an_accounts_inbox_and_history() {
     assert!(page.contains("as its owner sees it"), "{page}");
     assert!(page.contains("Handle changed"), "{page}");
     assert!(
-        page.contains("By a Piquel operator: “Asked by email”"),
+        page.contains("By a SourceOrigin operator: “Asked by email”"),
         "{page}"
     );
     assert!(
@@ -2315,7 +2315,7 @@ async fn invitation_pages_sign_in_first() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn alerts_take_updates_from_the_dashboard() {
-    use piquel_common::{
+    use sourceorigin_common::{
         admin::{ChainBreak, ChainProblem},
         alerts::{Alert, AlertKind},
         events::{EventContext, JobName},

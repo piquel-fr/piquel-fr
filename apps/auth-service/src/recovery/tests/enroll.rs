@@ -1,8 +1,8 @@
 //! What a recovery link enrolls: one passkey, once, signed in without confirming.
 
 use super::*;
-use piquel_common::protocol::claims::Acr;
-use piquel_repository::SessionAuthentication;
+use sourceorigin_common::protocol::claims::Acr;
+use sourceorigin_repository::SessionAuthentication;
 
 /// Starting a recovery signs the account out everywhere, ends its refresh grants
 /// and removes its unverified addresses, so an older verification link stops

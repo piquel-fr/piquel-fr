@@ -11,17 +11,17 @@ and key, which the `email_from` and `smtp_secret` variables set:
 
 | Environment | Sender | Stored secret |
 | --- | --- | --- |
-| production | `security@piquel.fr` | `resend-production` |
-| staging, previews | `security@dev.piquel.fr` | `resend-dev` |
+| production | `security@sourceorigin.dev` | `resend-production` |
+| staging, previews | `security@dev.sourceorigin.dev` | `resend-dev` |
 
 Each key is a Resend API key with sending access only, restricted to its
-domain. So a key leaked from a preview can't send as `piquel.fr`, and test mail
+domain. So a key leaked from a preview can't send as `sourceorigin.dev`, and test mail
 never spends production's sender reputation. Resend doesn't sign in through
-Piquel, so auth can still email people while it is broken.
+SourceOrigin, so auth can still email people while it is broken.
 
 ## Set up a sending domain
 
-1. Add the domain to Resend: `piquel.fr` for production, `dev.piquel.fr` for
+1. Add the domain to Resend: `sourceorigin.dev` for production, `dev.sourceorigin.dev` for
    staging and previews.
 2. Create the domain's [DNS records](#dns-records), and wait for Resend to
    verify them.
@@ -29,8 +29,8 @@ Piquel, so auth can still email people while it is broken.
 4. Store it before the first deployment that mounts it, which fails without it:
 
    ```sh
-   piquelctl app secret piquel-fr set resend-production --stdin --environments production --no-previews
-   piquelctl app secret piquel-fr set resend-dev --stdin --environments staging --previews
+   piquelctl app secret sourceorigin set resend-production --stdin --environments production --no-previews
+   piquelctl app secret sourceorigin set resend-dev --stdin --environments staging --previews
    ```
 
 ## Rotate a Resend key
@@ -42,7 +42,7 @@ Piquel, so auth can still email people while it is broken.
 3. Deploy the environments that mount it. For `resend-production`, deploy
    production's own release again (see
    [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)).
-   For `resend-dev`, run `piquelctl --timeout 30m env deploy piquel-fr staging`;
+   For `resend-dev`, run `piquelctl --timeout 30m env deploy sourceorigin staging`;
    each preview uses the new key from its next deployment.
 4. Check that mail goes out: the newest deliveries in
    `auth-service deliveries list --channel email` are `succeeded`, and Resend's
@@ -71,8 +71,8 @@ each, or providers file the mail as spam:
   `v=spf1 include:<provider's SPF domain> -all`. Keep a single SPF record:
   merge the provider's `include:` into an existing one.
 - **DKIM**: the TXT or CNAME records the provider gives for its selector, such
-  as `<selector>._domainkey.piquel.fr`, so it signs the mail for the domain.
-- **DMARC**: a TXT record at `_dmarc.piquel.fr`, starting with
+  as `<selector>._domainkey.sourceorigin.dev`, so it signs the mail for the domain.
+- **DMARC**: a TXT record at `_dmarc.sourceorigin.dev`, starting with
   `v=DMARC1; p=quarantine; rua=mailto:<reports address>`. Move to `p=reject`
   once the reports show only aligned mail. SPF and DKIM must align with the
   `From` domain.

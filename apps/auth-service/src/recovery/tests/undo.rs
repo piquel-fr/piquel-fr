@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::{passkey::VerifiedRecoveryUndo, tests::until_blocked};
-use piquel_common::events::SignInFailure;
+use sourceorigin_common::events::SignInFailure;
 
 /// Undoing a recovery in probation, with a passkey from before it and no
 /// session, takes back what whoever used its link could keep: its passkey, every

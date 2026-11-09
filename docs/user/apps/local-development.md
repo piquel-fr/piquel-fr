@@ -1,12 +1,12 @@
 # Developing on your machine
 
 Run your app on your own machine while it signs users in with the real
-auth.piquel.fr. Piquel accepts plain HTTP redirect URIs on a loopback address,
+auth.sourceorigin.dev. Origin Auth accepts plain HTTP redirect URIs on a loopback address,
 so you don't need a certificate or a public hostname.
 
 ## Before you start
 
-- You need a piquel.fr account with a passkey.
+- You need an Origin Account with a passkey.
 - Pick the address your app listens on locally, such as `127.0.0.1:3000`.
 
 ## Register a development app
@@ -43,13 +43,13 @@ cookies belong to the host they were set on.
 Give your app its secret through the environment, never in a file you commit:
 
 ```console
-export PIQUEL_CLIENT_SECRET='pqcs_…'
+export SOURCEORIGIN_CLIENT_SECRET='socs_…'
 cargo run
 ```
 
-The Rust example on the app's **Overview** tab reads `PIQUEL_CLIENT_SECRET`,
-and its cookie key from `PIQUEL_COOKIE_KEY`. If you keep them in a file such as
-`.env`, list it in `.gitignore`. Every Piquel client secret starts with `pqcs_`,
+The Rust example on the app's **Overview** tab reads `SOURCEORIGIN_CLIENT_SECRET`,
+and its cookie key from `SOURCEORIGIN_COOKIE_KEY`. If you keep them in a file such as
+`.env`, list it in `.gitignore`. Every Origin Auth client secret starts with `socs_`,
 so secret scanners can recognize one that is committed anyway. If that happens,
 [rotate it](rotate-secrets.md#after-a-leak).
 
@@ -61,7 +61,7 @@ restart then signs you out.
 ## Check that it works
 
 1. Start your app, and open it at the address you registered.
-2. Sign in. Piquel shows the consent screen for **Notes (dev)**, naming
+2. Sign in. Origin Auth shows the consent screen for **Notes (dev)**, naming
    `127.0.0.1` as where it sends you back.
 3. Select **Continue**. Your app receives you at its callback, signed in.
 
@@ -73,7 +73,7 @@ restart then signs you out.
 - **Auth answers `redirect_uri is not registered for this client; it must match
   exactly`.** The port or path your app sends differs from the registered one.
   Register the URI your app sends, character for character.
-- **Back-channel logout never reaches your machine.** Piquel posts logout
+- **Back-channel logout never reaches your machine.** Origin Auth posts logout
   tokens only to HTTPS addresses on the public internet. Locally, your app's
   sessions end at their next refresh instead, within five minutes.
 

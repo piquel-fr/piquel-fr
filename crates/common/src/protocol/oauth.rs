@@ -95,7 +95,7 @@ impl Interaction {
     /// `none` comes with any other value.
     ///
     /// ```
-    /// use piquel_common::protocol::oauth::{Interaction, Prompt};
+    /// use sourceorigin_common::protocol::oauth::{Interaction, Prompt};
     ///
     /// let both = Interaction::from_prompts([Prompt::Consent, Prompt::SelectAccount]);
     /// assert_eq!(both, Some(Interaction::LoginAndConsent));
@@ -161,7 +161,7 @@ crate::str_enum! {
 /// besides the standard [`Scope`] values.
 ///
 /// ```
-/// use piquel_common::protocol::oauth::{InvalidScope, Scopes};
+/// use sourceorigin_common::protocol::oauth::{InvalidScope, Scopes};
 ///
 /// let granted: Scopes = "profile openid notes:read profile".parse()?;
 /// assert_eq!(granted.to_string(), "notes:read openid profile");
@@ -233,7 +233,7 @@ impl Scopes {
     /// read back from the database.
     ///
     /// ```
-    /// use piquel_common::protocol::oauth::{InvalidScope, Scopes};
+    /// use sourceorigin_common::protocol::oauth::{InvalidScope, Scopes};
     ///
     /// let granted = Scopes::try_from_iter(["notes:read", "openid"])?;
     /// assert_eq!(granted.to_string(), "notes:read openid");
@@ -354,7 +354,7 @@ crate::open_str_enum! {
 /// so no description can break or inject a header.
 ///
 /// ```
-/// use piquel_common::protocol::oauth::ErrorDescription;
+/// use sourceorigin_common::protocol::oauth::ErrorDescription;
 ///
 /// assert!("the code expired".parse::<ErrorDescription>().is_ok());
 /// assert!("line\nbreak".parse::<ErrorDescription>().is_err());
@@ -436,7 +436,7 @@ impl fmt::Display for ErrorDescription {
 /// JSON error body of auth's OAuth endpoints (RFC 6749 §5.2).
 ///
 /// ```
-/// use piquel_common::protocol::oauth::{ErrorCode, ErrorResponse};
+/// use sourceorigin_common::protocol::oauth::{ErrorCode, ErrorResponse};
 ///
 /// let body: ErrorResponse =
 ///     serde_json::from_str(r#"{"error":"invalid_grant","error_description":"code expired"}"#)?;

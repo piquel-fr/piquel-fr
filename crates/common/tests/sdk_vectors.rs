@@ -17,7 +17,7 @@ use openssl::{
     sign::Signer,
     symm::{Cipher, encrypt_aead},
 };
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, ClientId, DeliveryId, SessionId, TokenId,
     protocol::{
         challenge::{BearerChallenge, BearerError},
@@ -35,7 +35,7 @@ use piquel_common::{
         step_up::StepUpRequirement,
     },
 };
-use piquel_crypto::{Digest, Rs256Key};
+use sourceorigin_crypto::{Digest, Rs256Key};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
@@ -67,11 +67,11 @@ const WEAK_KID: &str = "key-weak";
 /// The app's cookie key, as `openssl rand -base64 32` prints one.
 const COOKIE_KEY: &str = "q5xP0Pl8m0l3pkk1Hk0aQe9H6P7l4H6Jt6bq0c5u3jE=";
 /// The fixture client's session cookie.
-const SESSION_COOKIE: &str = "__Host-piquel-notes-web-session";
+const SESSION_COOKIE: &str = "__Host-sourceorigin-notes-web-session";
 /// The HKDF `info` of session cookies' key.
-const SESSION_INFO: &str = "piquel-auth session v1";
+const SESSION_INFO: &str = "sourceorigin-auth session v1";
 /// The HKDF `info` of pending login cookies' key.
-const PENDING_INFO: &str = "piquel-auth pending login v1";
+const PENDING_INFO: &str = "sourceorigin-auth pending login v1";
 
 /// One case file: inputs, the clock, and the expected result.
 #[derive(Serialize)]
@@ -249,7 +249,7 @@ impl Vectors {
             .as_array_mut()
             .expect("grant types")
             .push(json!("urn:ietf:params:oauth:grant-type:token-exchange"));
-        newer["acr_values_supported"] = json!(["phrh", "phr", "urn:piquel:acr:social"]);
+        newer["acr_values_supported"] = json!(["phrh", "phr", "urn:sourceorigin:acr:social"]);
         self.case(
             "discovery/unknown-values.json",
             &Case {
@@ -302,11 +302,11 @@ impl Vectors {
             require_pushed_authorization_requests: false,
             end_session_endpoint: url("/oidc/logout"),
             jwks_uri: url("/.well-known/jwks.json"),
-            service_documentation: "https://github.com/piquel-fr/piquel-fr#oidc-clients"
+            service_documentation: "https://github.com/sourceorigin-dev/sourceorigin#oidc-clients"
                 .parse()
                 .expect("documentation URL"),
-            op_policy_uri: Some("https://piquel.fr/privacy".parse().expect("policy URL")),
-            op_tos_uri: Some("https://piquel.fr/terms".parse().expect("terms URL")),
+            op_policy_uri: Some("https://sourceorigin.dev/privacy".parse().expect("policy URL")),
+            op_tos_uri: Some("https://sourceorigin.dev/terms".parse().expect("terms URL")),
             scopes_supported: Scope::ALL.into(),
             response_types_supported: ResponseType::ALL.into(),
             response_modes_supported: ResponseMode::ALL.into(),
@@ -1301,7 +1301,7 @@ impl Vectors {
                 seal(
                     COOKIE_KEY,
                     SESSION_INFO,
-                    &context("notes-admin", "__Host-piquel-notes-admin-session"),
+                    &context("notes-admin", "__Host-sourceorigin-notes-admin-session"),
                     &session,
                 ),
                 None,
@@ -1312,7 +1312,7 @@ impl Vectors {
                 seal(
                     COOKIE_KEY,
                     SESSION_INFO,
-                    &context(CLIENT, "__Host-piquel-notes-web-step-up"),
+                    &context(CLIENT, "__Host-sourceorigin-notes-web-step-up"),
                     &session,
                 ),
                 None,

@@ -8,7 +8,7 @@ use crate::{
     handles::Handles,
     security::Session,
 };
-use piquel_common::{
+use sourceorigin_common::{
     AccountStatus, Handle, HandleError, Personal, SessionId, UserId,
     admin::{
         DashboardSession, Email, Paging, ReleasedHandle, ReservedHandle, ScheduledDeletion,
@@ -17,7 +17,7 @@ use piquel_common::{
     email::NormalizedEmail,
     events::{DomainEvent, EventContext, RevocationReason},
 };
-use piquel_repository::{DatabaseError, DatabaseTransaction, SessionScope, StoredUser};
+use sourceorigin_repository::{DatabaseError, DatabaseTransaction, SessionScope, StoredUser};
 
 /// Accounts per search page.
 const USER_PAGE_SIZE: u16 = 50;
@@ -132,7 +132,7 @@ impl AdminService {
                     .await?;
                 (tx.sessions().list_active_for_user(user_id).await?)
                     .into_iter()
-                    .map(|session| piquel_common::admin::Session {
+                    .map(|session| sourceorigin_common::admin::Session {
                         dashboard: DashboardSession::on(&dashboard, session.id),
                         ..session.into()
                     })

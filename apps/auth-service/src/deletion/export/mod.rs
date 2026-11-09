@@ -9,12 +9,12 @@ use crate::{
 };
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use piquel_common::admin::Consent;
-use piquel_common::{
+use sourceorigin_common::admin::Consent;
+use sourceorigin_common::{
     AccountStatus, Handle, PasskeyId, PictureId, Provider, RecoveryId, SessionId, UserId,
     notifications::NotificationPreference,
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     DatabaseError, DatabaseTransaction, RecentRecovery, RecoveryState, StoredExternalIdentity,
     StoredGrant, StoredHandle, StoredPasskey, StoredPicture, StoredUser,
 };
@@ -22,7 +22,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// The `format` of every export.
-const FORMAT: &str = "piquel.account-export";
+const FORMAT: &str = "sourceorigin.account-export";
 /// The export's version; a change to its shape gets a new one.
 const VERSION: u32 = 3;
 /// Where the serialized credential holds whether the passkey may be synced.
@@ -31,7 +31,7 @@ const BACKUP_ELIGIBLE_POINTER: &str = "/cred/backup_eligible";
 const BACKED_UP_POINTER: &str = "/cred/backup_state";
 
 /// Everything auth stores about an account, in one document:
-/// `{"format": "piquel.account-export", "version": 3, …}`. Version 2 added the
+/// `{"format": "sourceorigin.account-export", "version": 3, …}`. Version 2 added the
 /// profile picture; version 3 moved dashboard sessions under the sessions they
 /// rest on, with when each was last used and ends.
 #[derive(Serialize)]
@@ -323,12 +323,12 @@ impl AccountExport {
         })
     }
 
-    /// The download's file name, `piquel-account-<handle>-<date>.json`.
+    /// The download's file name, `sourceorigin-account-<handle>-<date>.json`.
     /// Handles are lowercase ASCII letters, digits and `-`, so it needs no quoting
     /// in a header.
     pub(crate) fn file_name(&self) -> String {
         format!(
-            "piquel-account-{}-{}.json",
+            "sourceorigin-account-{}-{}.json",
             self.profile.handle,
             self.exported_at.format("%Y-%m-%d")
         )

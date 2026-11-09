@@ -1,8 +1,8 @@
 //! The outbound delivery queue: listing deliveries, retrying and cancelling one.
 
 use super::{AdminApplication as App, NoInput};
-use piquel_common::{DeliveryId, admin::DeliveryStatus};
-use piquel_ui::{Action, Change, DeliveryRow, Target};
+use sourceorigin_common::{DeliveryId, admin::DeliveryStatus};
+use sourceorigin_ui::{Action, Change, DeliveryRow, Target};
 use topcoat::{
     Result,
     context::Cx,
@@ -68,7 +68,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         .collect();
     let (page, rows) = (&href!(list).resolve(cx), &rows);
     let view = view! { cx =>
-        piquel_ui::delivery_list(
+        sourceorigin_ui::delivery_list(
             action: page.as_str(),
             status: status,
             channel: channel,
@@ -120,7 +120,7 @@ impl App {
             id: Some(&id),
         };
         let page = view! { cx =>
-            piquel_ui::dashboard_change(
+            sourceorigin_ui::dashboard_change(
                 change: change,
                 target: target,
                 back: back.as_str(),

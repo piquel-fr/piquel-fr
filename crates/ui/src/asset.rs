@@ -128,7 +128,7 @@ macro_rules! stylesheet {
     };
 }
 
-/// The stylesheet of piquel.fr's pages: auth's and the admin dashboard's.
+/// The stylesheet of sourceorigin.dev's pages: auth's and the admin dashboard's.
 pub const STYLESHEET: Asset = Asset::stylesheet(
     "style",
     stylesheet!(

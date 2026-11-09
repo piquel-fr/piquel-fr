@@ -6,11 +6,11 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use piquel_common::{
+use sourceorigin_common::{
     ErrorChain, HandleError,
     protocol::api::{ErrorBody, ErrorCode},
 };
-use piquel_repository::DatabaseError;
+use sourceorigin_repository::DatabaseError;
 use std::{borrow::Cow, time::Duration as StdDuration};
 
 /// Where a request came from, which handlers attribute events to.
@@ -30,7 +30,7 @@ pub(crate) use http::{CacheClass, Cached, FETCH_SITE_HEADER, HttpSecurity, HttpS
 pub(crate) use session::{Confirmed, Credential, OptionalSession, Session, SessionError};
 
 /// Name of the browser proof required on non-protocol mutations.
-pub(crate) const CSRF_HEADER: &str = "x-piquel-csrf";
+pub(crate) const CSRF_HEADER: &str = "x-sourceorigin-csrf";
 /// Browser session lifetime, also used by its host cookie.
 pub(crate) const SESSION_LIFETIME_DAYS: u32 = 30;
 /// How long an admin dashboard session lasts from its sign-in however busy, also
@@ -39,7 +39,7 @@ pub(crate) const SESSION_LIFETIME_DAYS: u32 = 30;
 pub(crate) const DASHBOARD_LIFETIME_HOURS: u32 = 12;
 /// How long an admin dashboard session lasts without a request.
 pub(crate) const DASHBOARD_IDLE_MINUTES: u32 = 30;
-pub(crate) use piquel_common::protocol::step_up::CONFIRMATION_MAX_AGE;
+pub(crate) use sourceorigin_common::protocol::step_up::CONFIRMATION_MAX_AGE;
 
 /// Browser JSON error `{"error": message}`, plus a machine-readable `code` when the
 /// frontend can resolve it. Internal causes only reach the logs.

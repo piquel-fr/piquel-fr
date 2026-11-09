@@ -7,11 +7,11 @@
 )]
 
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, Handle, PasskeyId, RecoveryId, SessionId, UserId,
     events::{Browser, Platform, UserAgentFamily},
 };
-use piquel_repository::{
+use sourceorigin_repository::{
     Database, DatabaseConfig, InsertPasskey, InsertRecovery, InsertSession, InsertUser,
     RecoveryState, StoredRecovery,
 };

@@ -21,8 +21,8 @@ export function handle(name = 'alice'): string {
 
 /** The hosts the guides name, for the deployment's own. */
 const shownHosts: [string, string][] = [
-  [new URL(authUrl).host, 'auth.piquel.fr'],
-  ...(adminUrl ? [[new URL(adminUrl).host, 'admin.piquel.fr'] as [string, string]] : [])
+  [new URL(authUrl).host, 'auth.sourceorigin.dev'],
+  ...(adminUrl ? [[new URL(adminUrl).host, 'admin.sourceorigin.dev'] as [string, string]] : [])
 ];
 
 /**

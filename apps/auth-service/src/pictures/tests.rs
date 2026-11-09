@@ -16,7 +16,7 @@ use axum::{
     http::{Method, Request, StatusCode, header},
     routing::get,
 };
-use piquel_common::events::Actor;
+use sourceorigin_common::events::Actor;
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -29,7 +29,7 @@ use tower::ServiceExt;
 async fn the_account_api_uploads_a_picture() {
     let replicas = Replicas::new().await;
     let owner = Browser::new_account(&Replicas::database().await).await;
-    // As a Piquel page sends it, with the browser's cookies.
+    // As an Origin Auth page sends it, with the browser's cookies.
     let upload = async |browser: &Browser, query: &str| {
         let mut request = Request::put(format!("{}{query}", pictures::OWN))
             .header(header::ORIGIN, AUTH_ORIGIN)

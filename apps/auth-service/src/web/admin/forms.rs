@@ -14,9 +14,9 @@
 //!   even where the dashboard's script could not confirm on the page.
 
 use chrono::{Duration, Utc};
-use piquel_common::UserId;
-use piquel_crypto::Digest;
-use piquel_repository::{Database, DatabaseError, Submission, SubmissionToken};
+use sourceorigin_common::UserId;
+use sourceorigin_crypto::Digest;
+use sourceorigin_repository::{Database, DatabaseError, Submission, SubmissionToken};
 use serde::{Serialize, de::DeserializeOwned};
 
 /// How long a change blocks the same form posted again: a double click, or a

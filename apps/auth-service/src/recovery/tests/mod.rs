@@ -17,10 +17,10 @@ use axum::{
     http::{Method, StatusCode},
     response::Response,
 };
-use piquel_common::{
+use sourceorigin_common::{
     AuthenticationMethod, ClientId, EmailId, Provider, TokenId, clients::ClientKind,
 };
-use piquel_repository::{Database, InsertExternalIdentity, InsertUnverifiedEmail, StoredSession};
+use sourceorigin_repository::{Database, InsertExternalIdentity, InsertUnverifiedEmail, StoredSession};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};

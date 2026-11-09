@@ -4,7 +4,7 @@
 
 use super::Cli;
 use clap::{Arg, ArgAction, Command, CommandFactory};
-use piquel_common::config::GeneratedFile;
+use sourceorigin_common::config::GeneratedFile;
 use std::fmt::Write as _;
 
 /// The page's title and introduction, after the generated-file comment.
