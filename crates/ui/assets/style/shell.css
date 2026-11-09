@@ -43,6 +43,10 @@ html[data-sidebar='collapsed'] .shell {
   color: var(--fg);
   text-decoration: none;
 }
+/* The name stays on one line beside the area's badge. */
+.sidebar .brand .name {
+  white-space: nowrap;
+}
 .mark {
   display: grid;
   place-items: center;
