@@ -6,7 +6,7 @@ use crate::{Reason, handles::HandlesError};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use sourceorigin_common::{Handle, handle::RESERVED};
 use sourceorigin_ui::{
-    Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder,
+    Action, Change, HandlesPage, Query, ReleasedRow, ReservationRow, ReservedHolder, Target,
 };
 use topcoat::{
     Result,
@@ -156,6 +156,10 @@ impl App {
         let handle = query_params::<HandleQuery>(cx)?.handle.clone();
         let back = href!(check).resolve(cx);
         let shown = format!("@{handle}");
+        let target = Target {
+            name: &shown,
+            id: None,
+        };
         let refusal = Self::submit(cx, form, back.clone(), |_| async move {
             if change == Change::ReleaseHandle {
                 service.release_handle(&admin.operator, handle).await
@@ -167,9 +171,9 @@ impl App {
         let page = view! { cx =>
             sourceorigin_ui::dashboard_change(
                 change: change,
+                target: target,
                 back: back.as_str(),
                 refusal: refusal.as_deref(),
-                <p><strong>(shown.as_str())</strong></p>
             )
         };
         Self::render(cx, StatusCode::OK, change.title(), page).await

@@ -121,9 +121,11 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.revoke_administrator(&admin.operator, id)
     })
     .await?;
+    let target = App::target(cx).await;
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::RevokeAdministrator,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )

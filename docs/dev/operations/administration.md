@@ -212,13 +212,13 @@ themselves, from the link in the recovery's emails.
 ## End sessions
 
 ```sh
-auth-service session revoke <session-id>   # one session, as `user show` lists it
-auth-service session revoke-all alice      # every session of the account
+auth-service session revoke alice <session-id>  # one of its sessions, as `user show` lists them
+auth-service session revoke-all alice           # every session of the account
 ```
 
-Each also ends the refresh tokens of the apps signed in through the session. On
-the dashboard, open the account and select **Revoke** next to a session, or
-**Revoke all**.
+Each also ends the refresh tokens of the apps signed in through the session. A
+session of another account is not found. On the dashboard, open the account and
+select **Revoke** next to a session, or **Revoke all**.
 
 ## Delete or restore an account
 

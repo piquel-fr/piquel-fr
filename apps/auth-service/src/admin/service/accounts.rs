@@ -310,24 +310,21 @@ impl AdminService {
         Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
-    /// Ends one active session and the refresh grants issued from it.
+    /// Ends `user_id`'s active session `session_id` and the refresh grants issued
+    /// from it. Another account's session is not found: the caller names the
+    /// account it means to sign out, as its page or command shows it.
     pub(crate) async fn revoke_session(
         &self,
         operator: &Operator,
+        user_id: UserId,
         session_id: SessionId,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        // The owner never changes, so it can be read before taking the account lock.
-        let session = tx
-            .sessions()
-            .find_by_id(session_id)
-            .await?
-            .ok_or(AdminError::SessionNotFound)?;
-        operator.lock(&mut tx, session.user_id).await?;
+        operator.lock(&mut tx, user_id).await?;
         if tx
             .revoke_sessions(
                 &operator.context(),
-                session.user_id,
+                user_id,
                 SessionScope::One(session_id),
                 &RevocationReason::Admin,
             )
@@ -336,7 +333,7 @@ impl AdminService {
         {
             return Err(AdminError::SessionNotFound);
         }
-        Self::finish(tx, operator, Some(session.user_id), vec![]).await
+        Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
     /// Lists the accounts whose current handle is reserved, by the handle rules or

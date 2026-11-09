@@ -82,7 +82,10 @@ pub async fn administrator_list<'a>(
                             <small>"since " moment(at: row.administrator.granted_at)</small>
                         </div>
                         match &row.revoke {
-                            Ok(action) => confirm(action: action, change: Change::RevokeAdministrator),
+                            Ok(action) => {
+                                let named = format!("{} ({})", row.administrator.handle, row.administrator.user_id);
+                                confirm(action: action, change: Change::RevokeAdministrator, target: named.as_str())
+                            },
                             Err(reason) => refused_action(label: "Revoke", reason: reason),
                         }
                     </li>
@@ -214,7 +217,8 @@ pub async fn invitation_list<'a>(
                                             <td><span class=(class!("badge", tone))>(label)</span></td>
                                             <td class="right">
                                                 if let Some(revoke) = &row.revoke {
-                                                    confirm(action: revoke, change: Change::RevokeInvitation)
+                                                    let named = format!("Invitation ({})", row.invitation.id);
+                                                    confirm(action: revoke, change: Change::RevokeInvitation, target: named.as_str())
                                                 }
                                             </td>
                                         </tr>

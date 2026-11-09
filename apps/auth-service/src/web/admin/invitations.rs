@@ -8,7 +8,7 @@ use sourceorigin_common::{
     TokenId,
     admin::{CreateInvitation, CreatedInvitation},
 };
-use sourceorigin_ui::{Action, Change, InvitationRow};
+use sourceorigin_ui::{Action, Change, InvitationRow, Target};
 use topcoat::{
     Result,
     context::Cx,
@@ -22,7 +22,8 @@ path_param!(pub invitation: TokenId, error = not_found);
 
 impl App {
     /// Requires signup to need invitations, without which there are none to
-    /// manage.
+    /// manage. Pages check it once the administrator is signed in, so the
+    /// dashboard says nothing of its configuration to anyone else.
     fn invitations(cx: &Cx) -> Result<()> {
         if Self::of(cx).invitations {
             Ok(())
@@ -68,8 +69,8 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 /// its link once.
 #[route([GET, POST] "/invitations/new")]
 pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Result<Response> {
-    App::invitations(cx)?;
     let admin = App::admin(cx).await?;
+    App::invitations(cx)?;
     // The page showing a new link needs no confirmation: sending the browser to
     // confirm would lose the link.
     let revealed: Option<CreatedInvitation> = App::revealed(cx, admin);
@@ -130,8 +131,8 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
 /// `/invitations/{invitation}/revoke`: revokes an unredeemed invitation.
 #[route([GET, POST] "/invitations/{invitation}/revoke")]
 pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
-    App::invitations(cx)?;
     let admin = App::admin(cx).await?;
+    App::invitations(cx)?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
     let id = *path_param::<Invitation>(cx)?;
@@ -140,9 +141,15 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.revoke_invitation(&admin.operator, id)
     })
     .await?;
+    let shown = id.to_string();
+    let target = Target {
+        name: "Invitation",
+        id: Some(&shown),
+    };
     let page = view! { cx =>
         sourceorigin_ui::dashboard_change(
             change: Change::RevokeInvitation,
+            target: target,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )
