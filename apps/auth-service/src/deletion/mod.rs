@@ -27,7 +27,7 @@ use crate::{
     ClientRegistry,
     account::{AccountError, AccountService, Owner},
     passkey::PasskeyApplication,
-    security::{BrowserCookie, RequestContext, Session},
+    security::{BrowserCookie, RequestContext, Session, SignedIn},
 };
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Duration, Utc};
@@ -82,7 +82,7 @@ pub(crate) struct RestoreOffer {
 /// with the restored account, and drops the offer either way. Only
 /// [`AccountService::restore`] and [`RestoreSettled::declined`] make one.
 #[must_use = "the browser keeps its restore offer until `set_on` drops it"]
-pub(crate) struct RestoreSettled(Option<Secret>);
+pub(crate) struct RestoreSettled(Option<SignedIn>);
 
 impl<'a, 't> Deletions<'a, 't> {
     /// Locks the administrator list, then the account, in any status, to delete or
@@ -400,7 +400,7 @@ impl RestoreSettled {
     ) -> Result<(), InvalidHeaderValue> {
         BrowserCookie::Restore.clear_on(response)?;
         match self.0 {
-            Some(session) => BrowserCookie::Session.set_on(response, &session),
+            Some(session) => session.set_on(response),
             None => Ok(()),
         }
     }

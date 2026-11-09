@@ -166,7 +166,7 @@ async fn deliveries_commit_with_their_event() {
         let event = DomainEvent::IdentityUnlinked {
             provider: sourceorigin_common::Provider::GitHub,
         };
-        tx.record_to::<(Recorder, ())>(&context, Some(user), event)
+        tx.record_to::<(Recorder, ())>(&context, Some(user), event, None)
             .await
             .expect("record");
         if commit {

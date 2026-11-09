@@ -7,7 +7,7 @@ use crate::{
     account::{AccountError, AccountService, Owner, Viewer},
     history::HistoryItem,
     routes,
-    security::ApiError,
+    security::{ApiError, RequestContext, Session},
 };
 use axum::{
     Json, Router,
@@ -15,23 +15,32 @@ use axum::{
     http::StatusCode,
     routing::{get, post, put},
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EventId, NotificationId,
+    events::{Actor, RevocationReason},
     notifications::{Notification, NotificationPreference},
 };
 use sourceorigin_repository::{Database, StoredNotification};
 
 /// Notification failures and their response mapping.
 mod error;
-/// Email preferences and unsubscribe links.
+/// The links of notifications' emails that work without signing in.
+mod links;
+/// Email preferences.
 mod preferences;
 pub(crate) use error::NotificationError;
-pub(crate) use preferences::{Unsubscribe, UnsubscribeLinks};
+pub(crate) use links::{Link, LinkTarget, Links, SignOutLinks, UnsubscribeLinks};
 
 /// Notifications per page.
 const PAGE_SIZE: u16 = 50;
+/// Unread security notifications the settings' banner shows at most, newest
+/// first; the inbox shows the rest.
+const BANNER_SIZE: u32 = 3;
+/// How long the "sign me out everywhere" link of a security notification's
+/// email works, once.
+pub(crate) const SIGN_OUT_LINK_LIFETIME: Duration = Duration::days(7);
 
 /// The owner's routes that change their inbox's read state and email
 /// preferences, and count what is unread.
@@ -204,6 +213,74 @@ impl AccountService {
     pub(crate) async fn unread_notifications(&self, viewer: &Viewer) -> Result<u64, AccountError> {
         viewer.authorize(&self.database).await?;
         Ok(self.database.notifications().unread(viewer.user()).await?)
+    }
+
+    /// The account's newest unread security notifications, at most
+    /// [`BANNER_SIZE`], each with its event's history entry: what the banner of
+    /// every settings page asks the owner about.
+    pub(crate) async fn unread_alerts(
+        &self,
+        viewer: &Viewer,
+    ) -> Result<Vec<NotificationView>, AccountError> {
+        viewer.authorize(&self.database).await?;
+        let unread = self
+            .database
+            .notifications()
+            .unread_except(viewer.user(), &Notification::OUTSIDE_SECURITY, BANNER_SIZE)
+            .await?;
+        let mut alerts = Vec::new();
+        for item in unread.into_iter().filter_map(NotificationItem::new) {
+            let history = match item.event_id {
+                Some(event_id) => {
+                    HistoryItem::find(&self.database, viewer.user(), event_id).await?
+                }
+                None => None,
+            };
+            alerts.push(NotificationView { item, history });
+        }
+        Ok(alerts)
+    }
+}
+
+/// The "sign me out everywhere" link of security notifications' emails.
+impl AccountService {
+    /// Signs the account whose notification `id` is out everywhere, from the link
+    /// the notification's email carried, opened from `request`: as the owner,
+    /// without a session, for an owner whose session was stolen while their
+    /// passkey is out of reach. It ends every session and refresh grant, never a
+    /// credential, so the worst a leaked link can do is sign the owner out. The
+    /// link works once, within [`SIGN_OUT_LINK_LIFETIME`]; returns whether it
+    /// still did.
+    pub(crate) async fn sign_out_everywhere(
+        &self,
+        id: NotificationId,
+        request: RequestContext,
+    ) -> Result<bool, AccountError> {
+        let mut tx = self.database.begin().await?;
+        let Some(user) = tx.notifications().owner(id).await? else {
+            return Ok(false);
+        };
+        // The account first, as every change to its sessions locks it, then the
+        // link, which a concurrent use already used, or a purge deleted.
+        if tx.users().find_by_id_for_update(user).await?.is_none() {
+            return Ok(false);
+        }
+        let issued_after = Utc::now() - SIGN_OUT_LINK_LIFETIME;
+        if tx
+            .notifications()
+            .use_sign_out_link(id, issued_after)
+            .await?
+            .is_none()
+        {
+            return Ok(false);
+        }
+        let context = request.actor(Actor::User {
+            user_id: user,
+            session_id: None,
+        });
+        Session::end_all(&mut tx, &context, user, RevocationReason::SignOutLink).await?;
+        tx.commit().await?;
+        Ok(true)
     }
 }
 

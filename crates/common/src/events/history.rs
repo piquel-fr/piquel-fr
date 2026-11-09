@@ -23,8 +23,14 @@ impl DomainEvent {
     pub fn history_entry(&self) -> Option<HistoryEntry> {
         Some(match self {
             Self::AccountCreated { method, .. } => HistoryEntry::AccountCreated { method: *method },
-            Self::SignedIn { method, inline, .. } => HistoryEntry::SignedIn {
+            Self::SignedIn {
+                method,
+                inline,
+                new_device,
+                ..
+            } => HistoryEntry::SignedIn {
                 method: *method,
+                new_device: *new_device,
                 origin: inline
                     .as_ref()
                     .and_then(|inline| inline.origin.value().cloned()),
@@ -40,7 +46,8 @@ impl DomainEvent {
                 | RevocationReason::AccountDisabled
                 | RevocationReason::AccountDeletion
                 | RevocationReason::CompromiseReported
-                | RevocationReason::UserRevoked => HistoryEntry::SessionRevoked {
+                | RevocationReason::UserRevoked
+                | RevocationReason::SignOutLink => HistoryEntry::SessionRevoked {
                     reason: reason.clone(),
                 },
                 RevocationReason::Expired => return None,
@@ -193,6 +200,9 @@ pub enum HistoryEntry {
         /// the origin was not erased since.
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<RelatedOrigin>,
+        /// Whether the browser had never signed in to the account before.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        new_device: bool,
     },
     /// A browser signed out, at the user's or an application's request, or by
     /// signing in to another account.

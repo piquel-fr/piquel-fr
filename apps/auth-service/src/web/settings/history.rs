@@ -33,7 +33,11 @@ impl AccountPage for History {
     type Change = HistoryChange;
     type Row = HistoryState;
 
-    fn reopened(&HistoryChange::Report { event_id, before }: &HistoryChange) -> HistoryState {
+    fn reopened(
+        &HistoryChange::Report {
+            event_id, before, ..
+        }: &HistoryChange,
+    ) -> HistoryState {
         HistoryState {
             before,
             reporting: Some(event_id),
@@ -41,14 +45,24 @@ impl AccountPage for History {
         }
     }
 
-    /// A report goes on to what is left to undo, on the page it was made on.
+    /// A report goes on to what is left to undo, on the page it was made on. One
+    /// a notification asked for marks it read once made.
     async fn apply(
         web: &WebApplication,
         _: &Cx,
         owner: Owner,
-        HistoryChange::Report { event_id, before }: HistoryChange,
+        HistoryChange::Report {
+            event_id,
+            before,
+            notification,
+        }: HistoryChange,
     ) -> Result<Applied<HistoryState>, AccountError> {
         web.account.report(&owner, event_id).await?;
+        if let Some(notification) = notification {
+            web.account
+                .mark_notification(&owner, notification, true)
+                .await?;
+        }
         Ok(Applied::Opened(HistoryState {
             before,
             reporting: None,

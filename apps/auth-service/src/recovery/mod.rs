@@ -570,7 +570,8 @@ impl AccountService {
 
     /// Revokes `user`'s passkey `passkey_id`, the last one included, recording
     /// its removal in `context`, and returns whether it was active. Undoing a
-    /// recovery and starting one with `--revoke` take passkeys back with it.
+    /// recovery and starting one with `--revoke` take passkeys back with it, and
+    /// tell the owner as a whole, so the removal notifies nobody of its own.
     pub(crate) async fn take_back_passkey(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
@@ -580,7 +581,7 @@ impl AccountService {
         let revoked = tx.passkeys().revoke(passkey_id, user).await?;
         if revoked {
             let removed = DomainEvent::PasskeyRemoved { passkey_id };
-            tx.record(context, Some(user), removed).await?;
+            tx.record_quietly(context, Some(user), removed).await?;
         }
         Ok(revoked)
     }

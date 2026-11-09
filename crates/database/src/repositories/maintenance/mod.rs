@@ -67,9 +67,10 @@ impl MaintenanceRepository<'_> {
         )
     }
 
-    /// Purges a bounded batch of expired ephemeral authentication state, of event
-    /// personal data older than 90 days, of deliveries that succeeded over 7
-    /// days ago or failed or were cancelled over 30 days ago, and of what an
+    /// Purges a bounded batch of expired ephemeral authentication state, of known
+    /// devices unused for 400 days, of event personal data older than 90 days, of
+    /// deliveries that succeeded over 7 days ago or failed or were cancelled over
+    /// 30 days ago, and of what an
     /// account no longer uses: passkeys revoked, identities unlinked and
     /// recoveries ended over 90 days ago, notifications and the recipients of
     /// announcements sent over a year ago, with the announcements to chosen
@@ -251,6 +252,16 @@ impl MaintenanceRepository<'_> {
                 OR session.revoked_at < now() - interval '1 day'
                 LIMIT $1
                 FOR UPDATE OF secret SKIP LOCKED
+            )",
+            // A browser unused for 400 days has lost its device cookie, which
+            // lives as long: its next sign-in is a new device's either way.
+            "DELETE FROM known_devices
+            WHERE ctid IN (
+                SELECT ctid
+                FROM known_devices
+                WHERE last_seen_at < now() - interval '400 days'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
             )",
             // Events are kept indefinitely; the personal data beside them is not.
             // A purge erasing its apps' origins may hold some of these rows.

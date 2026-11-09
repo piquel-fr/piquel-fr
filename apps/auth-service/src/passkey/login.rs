@@ -178,7 +178,7 @@ impl PasskeyApplication {
             None => None,
         };
         let mut response =
-            Self::complete_sign_in(tx, context, &headers, user_id, Credential::Passkey(passkey))
+            Self::complete_sign_up(tx, context, &headers, user_id, Credential::Passkey(passkey))
                 .await?;
         // Once the account is committed, and off the request, so a slow provider or
         // uploads waiting to be decoded never hold up the sign-up. A picture that

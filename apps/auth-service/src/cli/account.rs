@@ -16,6 +16,7 @@ use crate::{
 use clap::{Args, Subcommand};
 use sourceorigin_common::{
     ClientId, EmailId, EventId, NotificationId, PasskeyId, Provider, SessionId, UserId,
+    admin::KnownDevice,
     notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
 };
@@ -238,6 +239,14 @@ enum Sessions {
         #[command(flatten)]
         confirm: Confirm,
     },
+    /// List the browsers that signed in within the last 400 days, most recently
+    /// seen first. A sign-in from any other browser sends the owner a security
+    /// notification.
+    Known {
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
 }
 
 /// The apps that keep access to the account: those it consented to, and those
@@ -321,6 +330,7 @@ impl AccountCommand {
                 Sessions::List { .. } => Op::ListSessions,
                 Sessions::Revoke { .. } => Op::RevokeSession,
                 Sessions::RevokeAll { .. } => Op::RevokeOtherSessions,
+                Sessions::Known { .. } => Op::ListKnownDevices,
             },
             Setting::Apps(command) => match command {
                 Apps::List { .. } => Op::ListApps,
@@ -421,6 +431,12 @@ impl AccountCommand {
                     .revoke_other_sessions(&change.on(id, console))
                     .await?;
                 eprintln!("Signed out {revoked} sessions.");
+            }
+            Setting::Sessions(Sessions::Known { output }) => {
+                output.print(
+                    &account.known_devices(&read()).await?[..],
+                    Self::print_known_devices,
+                )?;
             }
             Setting::Apps(Apps::List { output }) => {
                 output.print(&account.apps(&read()).await?[..], Self::print_apps)?;
@@ -529,6 +545,21 @@ impl AccountCommand {
                     dashboard.expires_at.to_rfc3339()
                 );
             }
+        }
+    }
+
+    /// Prints one known browser per line, as `user show` does too.
+    pub(super) fn print_known_devices(devices: &[KnownDevice]) {
+        println!("DEVICE\tFIRST SEEN\tLAST SEEN");
+        for device in devices {
+            println!(
+                "{}\t{}\t{}",
+                device
+                    .device
+                    .map_or_else(|| "-".to_owned(), |device| device.to_string()),
+                device.first_seen_at.to_rfc3339(),
+                device.last_seen_at.to_rfc3339()
+            );
         }
     }
 

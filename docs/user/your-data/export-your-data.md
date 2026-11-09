@@ -35,7 +35,8 @@ downloaded".
   unlinked,
 - the devices signed in to your account, with their IP addresses, the apps each
   signed in to, and, if you are an administrator, the admin dashboards signed in
-  through each,
+  through each, and the browsers it knows, which sign in without a security
+  alert,
 - the apps you gave access to, with what each may read, and their access
   grants,
 - the apps you registered in the developer console, deleted ones included,
@@ -69,6 +70,7 @@ is deleted on its own:
 - passkeys you removed, GitHub or Google accounts you unlinked, and account
   recoveries, 90 days after they end,
 - signed-out devices, within a day or two, or a month at most,
+- browsers your account knows, once unused for 400 days,
 - the IP address and browser of each security history entry, after 90 days,
 - your notifications, and the record that you received an announcement, after
   a year.

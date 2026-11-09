@@ -115,6 +115,10 @@ pub enum RevocationReason {
     /// The user signed it out from another session's settings. Added in version 2
     /// of `session_revoked`.
     UserRevoked,
+    /// The user signed out everywhere with the link of a security
+    /// notification's email, which works without signing in. Added in version 3
+    /// of `session_revoked`.
+    SignOutLink,
 }
 
 crate::str_enum! {

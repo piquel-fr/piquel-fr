@@ -186,7 +186,7 @@ Options:
 Commands:
 
 - [`auth-service user search`](#auth-service-user-search): Search accounts by ID, or by part of a handle, display name or email, ignoring case. Lists 50 at a time, by handle.
-- [`auth-service user show`](#auth-service-user-show): Show an account's profile, status, emails, passkeys, linked identities, sessions and consents. Recorded, since it shows personal data.
+- [`auth-service user show`](#auth-service-user-show): Show an account's profile, status, emails, passkeys, linked identities, sessions, known browsers and consents. Recorded, since it shows personal data.
 - [`auth-service user disable`](#auth-service-user-disable): Disable an account and end its sessions and refresh tokens. Never the last active administrator's.
 - [`auth-service user enable`](#auth-service-user-enable): Let a disabled account sign in again.
 - [`auth-service user recover`](#auth-service-user-recover): Recover an account whose owner lost every passkey.
@@ -214,7 +214,7 @@ Options:
 
 ## `auth-service user show`
 
-Show an account's profile, status, emails, passkeys, linked identities, sessions and consents. Recorded, since it shows personal data.
+Show an account's profile, status, emails, passkeys, linked identities, sessions, known browsers and consents. Recorded, since it shows personal data.
 
 ```text
 auth-service user show [OPTIONS] <USER>
@@ -1532,6 +1532,7 @@ Commands:
 - [`auth-service account sessions list`](#auth-service-account-sessions-list): List the active sessions, most recently active first.
 - [`auth-service account sessions revoke`](#auth-service-account-sessions-revoke): Sign one session out, with its applications' refresh tokens.
 - [`auth-service account sessions revoke-all`](#auth-service-account-sessions-revoke-all): Sign every session out, with their applications' refresh tokens.
+- [`auth-service account sessions known`](#auth-service-account-sessions-known): List the browsers that signed in within the last 400 days, most recently seen first. A sign-in from any other browser sends the owner a security notification.
 
 ## `auth-service account sessions list`
 
@@ -1576,6 +1577,18 @@ Options:
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
+## `auth-service account sessions known`
+
+List the browsers that signed in within the last 400 days, most recently seen first. A sign-in from any other browser sends the owner a security notification.
+
+```text
+auth-service account <USER> sessions known [OPTIONS]
+```
+
+Options:
+
+- `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
 
 ## `auth-service account apps`
 

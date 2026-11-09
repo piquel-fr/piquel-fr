@@ -145,6 +145,9 @@ pub struct UserDetail {
     pub identities: Vec<Identity>,
     /// Active sessions, newest first.
     pub sessions: Vec<Session>,
+    /// The browsers it knows, most recently seen first.
+    #[serde(default)]
+    pub known_devices: Vec<KnownDevice>,
     /// Remembered consents to applications.
     pub consents: Vec<Consent>,
     /// The account's deletion, while it is scheduled.
@@ -230,6 +233,19 @@ impl DashboardSession {
             .cloned()
             .collect()
     }
+}
+
+/// A browser that signed in to an account within the last 400 days, signed in
+/// now or not, as its device cookie identifies it: a sign-in from any other one
+/// alerts the account's owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnownDevice {
+    /// The browser and platform it last signed in with, if recorded.
+    pub device: Option<UserAgentFamily>,
+    /// When it first signed in.
+    pub first_seen_at: DateTime<Utc>,
+    /// When it last signed in.
+    pub last_seen_at: DateTime<Utc>,
 }
 
 /// The scopes an account consented to for one application.

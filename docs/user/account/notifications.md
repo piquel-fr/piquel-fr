@@ -11,12 +11,17 @@ emails, you need a [confirmed email address](email-addresses.md).
 
 ## What SourceOrigin tells you
 
+- A [security alert](security-alerts.md): a new device signed in, a passkey,
+  social sign-in or email address was added or removed, an app's token was
+  reused, or a sign-in was refused because a passkey looked copied or your
+  account is disabled.
 - Your primary email address changed, or an address was removed.
 - SourceOrigin support changed your handle or display name, or removed your profile
   picture. When you change these yourself, SourceOrigin doesn't tell you: you
   already know.
-- SourceOrigin support secured your account, or someone used a recovery link to add
-  a passkey, or a recovery was undone.
+- SourceOrigin support started a recovery or secured your account, someone used
+  a recovery link to add a passkey, or a recovery was undone.
+- SourceOrigin support signed your devices out.
 - Your account was disabled, enabled again, scheduled for deletion or
   restored.
 - SourceOrigin support sent you a message about your account, such as why it was
@@ -26,6 +31,10 @@ emails, you need a [confirmed email address](email-addresses.md).
   to its privacy policy, to every account or to yours.
 - If you administer Origin Auth, an alert about the service was raised, such as a
   broken audit chain. Its subject starts with **Alert:**.
+
+Unread security notifications also show at the top of every settings page,
+where you answer them with **This was me** or **This wasn’t me**. See
+[security alerts](security-alerts.md#answer-an-alert-in-your-settings).
 
 ## Read your inbox
 
@@ -68,9 +77,13 @@ announcement's or a message's email links your inbox.
 
 - A change of primary address is emailed to the address that stopped being
   primary, and a removed address is told at that address.
-- A recovery that adds a passkey, or support securing your account, is emailed
-  to every confirmed address.
+- A recovery started, a recovery that adds a passkey, or support securing your
+  account, is emailed to every confirmed address.
 - Everything else goes to your primary address.
+
+A **Security** email also carries a link that signs your account out of every
+device and app without signing in, once, within 7 days. See
+[security alerts](security-alerts.md#answer-an-alert-by-email).
 
 SourceOrigin's emails carry no tracking and no remote images.
 

@@ -14,7 +14,7 @@ SourceOrigin support started a recovery of the Origin Account @{{ handle }}, so 
 The link works once, for {{ hours }} hours. If you didn't ask for this, contact SourceOrigin support. If you still have a passkey, you can also cancel the recovery:
 
 {{ undo }}
-{%- when Content::Notification { address: _, subject, body, page, undo, alerts } %}
+{%- when Content::Notification { address: _, subject, body, page, undo, alerts, sign_out } %}
 {{ subject }}.
 
 {{ body }}
@@ -36,6 +36,12 @@ See the alerts on the admin dashboard:
 Read it in your Origin Account notifications:
 
 {{ page }}
+{%- if let Some(sign_out) = sign_out %}
+
+If this wasn't you and you can't sign in to secure your account, sign it out of every device and app, without signing in. The link works once, for 7 days:
+
+{{ sign_out }}
+{%- endif %}
 {%- when Content::Message { address: _, subject: _, body, paragraphs: _, inbox } %}
 {{ body }}
 

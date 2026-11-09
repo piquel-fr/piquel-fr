@@ -25,15 +25,16 @@ pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, con
 pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use notifications::{
-    InboxChange, InboxPage, InboxRow, InboxState, NotificationPage, NotificationState,
-    UnsubscribeStep, inbox, notification, unsubscribe,
+    AlertBanner, AlertRow, InboxChange, InboxPage, InboxRow, InboxState, NotificationPage,
+    NotificationState, SignOutStep, UnsubscribeStep, inbox, notification, security_banner,
+    sign_out_everywhere, unsubscribe,
 };
 pub use overview::{AccountOverview, OverviewLinks, account_overview};
 pub use profile::{
     CROP_SIZE, CROP_X, CROP_Y, PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog,
     ProfilePages, ProfileState, profile_settings,
 };
-pub use sessions::{DeviceChange, DeviceRow, devices};
+pub use sessions::{DeviceChange, DeviceRow, devices, known_devices};
 pub use sign_in::{ProviderRow, SignInChange, SignInState, sign_in_methods};
 pub use timeline::{HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, history};
 
@@ -41,6 +42,7 @@ use crate::{
     icons::Icon,
     layout::{Label, navigation},
 };
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::events::{Browser, Platform, UserAgentFamily};
 use topcoat::{
     Result,
@@ -90,8 +92,10 @@ impl<'a> Audience<'a> {
     }
 }
 
-/// The settings pages, in the order the sidebar lists them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The settings pages, in the order the sidebar lists them. A form names one,
+/// e.g. `sign_in`, to come back to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Tab {
     /// The account at a glance.
     Overview,

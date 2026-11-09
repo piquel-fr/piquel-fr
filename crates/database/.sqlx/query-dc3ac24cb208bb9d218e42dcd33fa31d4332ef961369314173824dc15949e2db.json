@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id AS \"id: NotificationId\", event_id AS \"event_id: EventId\",\n                    payload, created_at, read_at\n                FROM notifications\n                WHERE user_id = $1 AND read_at IS NULL\n                    AND NOT (payload ->> 'kind' = ANY($2))\n                ORDER BY created_at DESC, id DESC\n                LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: NotificationId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_id: EventId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "read_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "dc3ac24cb208bb9d218e42dcd33fa31d4332ef961369314173824dc15949e2db"
+}

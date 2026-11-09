@@ -81,7 +81,7 @@ Revoke an unused link with **Revoke** on the **Invitations** page, or
 
 ```sh
 auth-service user search ali     # by ID, or part of a handle, name or email
-auth-service user show alice     # the account's profile, emails, passkeys, sessions and consents
+auth-service user show alice     # the account's profile, emails, passkeys, sessions, known browsers and consents
 ```
 
 Commands name an account by its handle, its ID, or a verified email of an active
@@ -221,7 +221,17 @@ auth-service session revoke-all alice --reason "Phone stolen"           # every 
 
 Each also ends the refresh tokens of the apps signed in through the session. A
 session of another account is not found. On the dashboard, open the account and
-select **Revoke** next to a session, or **Revoke all**.
+select **Revoke** next to a session, or **Revoke all**. The owner receives one
+**SourceOrigin support signed your account out** notification, whatever the
+number of sessions.
+
+The browsers an account knows, whose sign-ins send its owner no
+[new-device alert](../architecture/sessions.md#known-devices), are listed under
+**Known browsers** on the account's dashboard page, and with:
+
+```sh
+auth-service account alice sessions known
+```
 
 ## Delete or restore an account
 

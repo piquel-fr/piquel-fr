@@ -180,6 +180,7 @@ impl EventRow<'_> {
                 session_id,
                 method: how,
                 inline,
+                new_device,
             } => {
                 let summary = match &inline {
                     Some(inline) => format!(
@@ -189,7 +190,9 @@ impl EventRow<'_> {
                     ),
                     None => format!("Signed in with {}", method(how)),
                 };
-                Description::new(summary).with("session", session_id)
+                Description::new(summary)
+                    .with("session", session_id)
+                    .with("new device", if new_device { "yes" } else { "no" })
             }
             DomainEvent::SignInFailed {
                 method: how,
@@ -516,6 +519,9 @@ impl EventRow<'_> {
             }
             RevocationReason::UserRevoked => {
                 "the owner signed it out from another device".to_owned()
+            }
+            RevocationReason::SignOutLink => {
+                "the owner signed out everywhere from an email's link".to_owned()
             }
         }
     }

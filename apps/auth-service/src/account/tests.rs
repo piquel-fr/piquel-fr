@@ -311,6 +311,7 @@ impl AccountOperation {
             Self::ListIdentities => service.identities(viewer).await.map(drop),
             Self::ListEmails => service.emails(viewer).await.map(drop),
             Self::ListSessions => service.sessions(viewer).await.map(drop),
+            Self::ListKnownDevices => service.known_devices(viewer).await.map(drop),
             Self::ListApps => service.apps(viewer).await.map(drop),
             Self::ViewHistory => service.history(viewer, None).await.map(drop),
             Self::ViewPicture => service.picture(viewer).await.map(drop),

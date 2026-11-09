@@ -443,6 +443,7 @@ async fn settings_show_the_recovery() {
     let report = HistoryChange::Report {
         event_id: recovering.older.expect("a passkey from before"),
         before: None,
+        notification: None,
     };
     let reported = browser.post(&replicas, settings::HISTORY, &report).await;
     let page = html(browser.visit(&replicas.a, redirect(&reported)).await).await;

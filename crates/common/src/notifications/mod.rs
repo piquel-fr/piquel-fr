@@ -7,8 +7,8 @@
 //! Its event's security history entry, while kept, tells the rest.
 
 use crate::{
-    AlertId, AnnouncementId,
-    events::{Actor, DomainEvent},
+    AlertId, AnnouncementId, Provider,
+    events::{Actor, DomainEvent, GrantRevocation, RevocationReason, SignInFailure},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,44 @@ pub enum Notification {
     },
     /// The account was restored before its deletion.
     AccountRestored,
+    /// A browser that had never signed in to the account did.
+    NewDeviceSignIn,
+    /// A passkey was added to the account.
+    PasskeyAdded,
+    /// A passkey was removed from the account.
+    PasskeyRemoved,
+    /// A social sign-in was linked to the account.
+    IdentityLinked {
+        /// Its provider.
+        provider: Provider,
+    },
+    /// A social sign-in was unlinked from the account.
+    IdentityUnlinked {
+        /// Its provider.
+        provider: Provider,
+    },
+    /// An email address was added to the account.
+    EmailAdded {
+        /// The provider it was imported from, when linking one brought it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<Provider>,
+    },
+    /// An app's refresh token was used twice, so its access was revoked: one of
+    /// the two may have been stolen.
+    TokenReused,
+    /// Support started a recovery of the account, whose link went to its
+    /// primary address.
+    RecoveryStarted,
+    /// Support signed the account out, of one device or every one.
+    SignedOutBySupport,
+    /// The owner reported an entry of their history as not theirs.
+    CompromiseReported,
+    /// A sign-in was refused because the passkey's signature counter went
+    /// backwards, as a copied passkey's does.
+    PasskeyCopied,
+    /// Someone proved they hold a way into the account, but the sign-in was
+    /// refused: the account is disabled, or cannot sign in that way any more.
+    SignInRefused,
     /// Administrators sent an announcement to every account, or to chosen ones
     /// among them this one. Sending writes it, as no event about the account
     /// does.
@@ -102,13 +140,29 @@ impl DomainEvent {
     /// be added without deciding whether anyone is told.
     ///
     /// A change the owner makes to their own name tells them nothing they don't
-    /// know; one made by support does. Notices that are emails today, about the
-    /// account's addresses and recovery, notify whoever made the change, since
-    /// the email they replace is sent either way.
+    /// know; one made by support does. Every change to the account's ways in,
+    /// its addresses and recovery notifies whoever made it, so a stolen session
+    /// cannot make one unseen, except the steps of an operation the owner takes
+    /// without a session, signing up or through a recovery's link or undo page,
+    /// which tells them as a whole, if at all. Support's own steps of a
+    /// recovery are recorded without their notifications
+    /// (`DatabaseTransaction::record_quietly`).
     #[must_use]
     #[deny(clippy::wildcard_enum_match_arm)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "One arm per event kind, so a new kind cannot skip the decision."
+    )]
     pub fn notification(&self, actor: &Actor) -> Option<Notification> {
         let by_support = matches!(actor, Actor::Admin { .. } | Actor::Cli { .. });
+        let sessionless = matches!(
+            actor,
+            Actor::Anonymous
+                | Actor::User {
+                    session_id: None,
+                    ..
+                }
+        );
         Some(match self {
             Self::PrimaryEmailChanged {
                 previous_email_id: Some(_),
@@ -132,6 +186,40 @@ impl DomainEvent {
                 purge_after: *purge_after,
             },
             Self::AccountRestored {} => Notification::AccountRestored,
+            Self::SignedIn {
+                new_device: true, ..
+            } => Notification::NewDeviceSignIn,
+            Self::PasskeyAdded { .. } if !sessionless => Notification::PasskeyAdded,
+            Self::PasskeyRemoved { .. } if !sessionless => Notification::PasskeyRemoved,
+            Self::IdentityLinked { provider, .. } if !sessionless => Notification::IdentityLinked {
+                provider: *provider,
+            },
+            Self::IdentityUnlinked { provider } if !sessionless => {
+                Notification::IdentityUnlinked {
+                    provider: *provider,
+                }
+            }
+            Self::EmailAdded { provider, .. } if !sessionless => Notification::EmailAdded {
+                provider: *provider,
+            },
+            Self::GrantRevoked {
+                reason: GrantRevocation::RefreshReplay,
+                ..
+            } => Notification::TokenReused,
+            Self::RecoveryStarted { revoke: None, .. } => Notification::RecoveryStarted,
+            Self::SessionRevoked {
+                reason: RevocationReason::Admin,
+                ..
+            } => Notification::SignedOutBySupport,
+            Self::CompromiseReported { .. } => Notification::CompromiseReported,
+            Self::SignInFailed {
+                reason: SignInFailure::CounterRegression,
+                ..
+            } => Notification::PasskeyCopied,
+            Self::SignInFailed {
+                reason: SignInFailure::AccountUnavailable,
+                ..
+            } => Notification::SignInRefused,
             Self::AlertRaised { alert_id, alert } => Notification::AlertRaised {
                 alert_id: *alert_id,
                 title: format!("Alert: {}", alert.subject()),
@@ -145,34 +233,38 @@ impl DomainEvent {
             | Self::DisplayNameChanged { .. }
             | Self::PictureRemoved {}
             | Self::PictureChanged { .. }
-            // Its link is the email; whoever lost every passkey reads no inbox.
-            | Self::RecoveryStarted { revoke: None, .. }
             // The account's first verified address: nothing was replaced.
             | Self::PrimaryEmailChanged {
                 previous_email_id: None,
                 ..
             }
-            // Sign-ins, sessions, credentials and consents: their security alerts
-            // are #83's to decide.
-            | Self::AccountCreated { .. }
-            | Self::SignedIn { .. }
-            | Self::SignInFailed { .. }
-            | Self::SessionRevoked { .. }
-            | Self::PasskeyConfirmed { .. }
+            // Signing up, or a recovery's link or undo page: the account's
+            // creation needs no alert, and a recovery tells its owner as a whole.
             | Self::PasskeyAdded { .. }
-            | Self::PasskeyRenamed { .. }
             | Self::PasskeyRemoved { .. }
             | Self::IdentityLinked { .. }
             | Self::IdentityUnlinked { .. }
             | Self::EmailAdded { .. }
+            // A browser the account knows, or a sign-in that only shows the
+            // account's existence, such as a wrong passkey's.
+            | Self::AccountCreated { .. }
+            | Self::SignedIn { .. }
+            | Self::SignInFailed { .. }
+            // The owner signed out, or another change that notifies ended them.
+            | Self::SessionRevoked { .. }
+            // Nothing that adds a way in: a confirmation, a name, a verified
+            // address the owner already heard of, or an app's grants.
+            | Self::PasskeyConfirmed { .. }
+            | Self::PasskeyRenamed { .. }
             | Self::EmailVerified { .. }
             | Self::ConsentGranted { .. }
             | Self::ConsentRevoked { .. }
             | Self::GrantIssued { .. }
             | Self::GrantRevoked { .. }
+            // A replayed code's grants are revoked as `GrantRevoked`, which shows
+            // its app's mistake rather than a stolen token: the history shows it.
             | Self::CodeReplayed { .. }
             | Self::CodeRedemptionFailed { .. }
-            | Self::CompromiseReported { .. }
             | Self::AccountExported {}
             // Administrator rights show in the dashboard, which its holder uses.
             | Self::AdministratorGranted {}
@@ -312,9 +404,41 @@ impl Notification {
             | Self::AccountEnabled
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
+            | Self::NewDeviceSignIn
+            | Self::PasskeyAdded
+            | Self::PasskeyRemoved
+            | Self::IdentityLinked { .. }
+            | Self::IdentityUnlinked { .. }
+            | Self::EmailAdded { .. }
+            | Self::TokenReused
+            | Self::RecoveryStarted
+            | Self::SignedOutBySupport
+            | Self::CompromiseReported
+            | Self::PasskeyCopied
+            | Self::SignInRefused
             | Self::Announcement { .. }
             | Self::Message { .. } => Audience::Subject,
         }
+    }
+
+    /// The kinds outside the security category: what administrators announce or
+    /// alert, rather than what happened to the account. Every other notification
+    /// is about the account's security, is always emailed, and its email carries
+    /// a link that signs the account out everywhere.
+    pub const OUTSIDE_SECURITY: [&'static str; 2] = ["announcement", "alert_raised"];
+
+    /// Whether it is about the account's security: see [`Self::OUTSIDE_SECURITY`].
+    #[must_use]
+    pub const fn security(&self) -> bool {
+        !matches!(self, Self::Announcement { .. } | Self::AlertRaised { .. })
+    }
+
+    /// Whether it only follows from another change, such as support signing the
+    /// account out while recovering it: a transaction that already told the
+    /// account something does not write it.
+    #[must_use]
+    pub const fn consequence(&self) -> bool {
+        matches!(self, Self::SignedOutBySupport)
     }
 
     /// Whether its page and email link the admin dashboard's Alerts tab, while
@@ -330,7 +454,9 @@ impl Notification {
     #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn addressees(&self) -> Addressees {
         match self {
-            Self::AccountSecured { .. } | Self::Recovered => Addressees::Verified,
+            Self::AccountSecured { .. } | Self::Recovered | Self::RecoveryStarted => {
+                Addressees::Verified
+            }
             Self::PrimaryEmailChanged | Self::EmailRemoved => Addressees::Affected,
             Self::RecoveryUndone
             | Self::HandleChanged
@@ -340,6 +466,17 @@ impl Notification {
             | Self::AccountEnabled
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
+            | Self::NewDeviceSignIn
+            | Self::PasskeyAdded
+            | Self::PasskeyRemoved
+            | Self::IdentityLinked { .. }
+            | Self::IdentityUnlinked { .. }
+            | Self::EmailAdded { .. }
+            | Self::TokenReused
+            | Self::SignedOutBySupport
+            | Self::CompromiseReported
+            | Self::PasskeyCopied
+            | Self::SignInRefused
             | Self::AlertRaised { .. }
             // About the account itself, so whatever the owner's preferences.
             | Self::Message { .. }
@@ -367,6 +504,18 @@ impl Notification {
             Self::AccountEnabled => "Your account was enabled again",
             Self::DeletionScheduled { .. } => "Your account is scheduled for deletion",
             Self::AccountRestored => "Your account was restored",
+            Self::NewDeviceSignIn => "A new device signed in to your account",
+            Self::PasskeyAdded => "A passkey was added to your account",
+            Self::PasskeyRemoved => "A passkey was removed from your account",
+            Self::IdentityLinked { .. } => "A social sign-in was linked to your account",
+            Self::IdentityUnlinked { .. } => "A social sign-in was unlinked from your account",
+            Self::EmailAdded { .. } => "An email address was added to your account",
+            Self::TokenReused => "An app’s access to your account was revoked",
+            Self::RecoveryStarted => "SourceOrigin support started recovering your account",
+            Self::SignedOutBySupport => "SourceOrigin support signed your account out",
+            Self::CompromiseReported => "You reported activity on your account",
+            Self::PasskeyCopied => "A copy of one of your passkeys was refused",
+            Self::SignInRefused => "A sign-in to your account was refused",
         }
     }
 
@@ -399,6 +548,29 @@ impl Notification {
                 purge_after.format("%-d %B %Y")
             ),
             Self::AccountRestored => "It is no longer scheduled for deletion.".to_owned(),
+            Self::NewDeviceSignIn => "A browser that had never signed in to your account did. If it was you, there is nothing to do. If it wasn’t, open this notification and select “This wasn’t me”, or sign out everywhere from the link in its email.".to_owned(),
+            Self::PasskeyAdded => "It can sign in to your account from now on. If you didn’t add it, remove it from your sign-in methods and report the change in your security history.".to_owned(),
+            Self::PasskeyRemoved => "It can no longer sign in to your account, and your other devices were signed out. If you didn’t remove it, report the change in your security history.".to_owned(),
+            Self::IdentityLinked { provider } => format!(
+                "Your {} account can sign in to your Origin Account from now on. If you didn’t link it, unlink it from your sign-in methods and report the change in your security history.",
+                provider.name()
+            ),
+            Self::IdentityUnlinked { provider } => format!(
+                "Your {} account can no longer sign in to your Origin Account, and your other devices were signed out. If you didn’t unlink it, report the change in your security history.",
+                provider.name()
+            ),
+            Self::EmailAdded { provider } => {
+                let from = provider.map_or_else(String::new, |provider| {
+                    format!(" It came from your {} account.", provider.name())
+                });
+                format!("Origin Auth may send notices about your account there once it is verified.{from} If you didn’t add it, remove it from your email addresses and report the change in your security history.")
+            }
+            Self::TokenReused => "An app used the same sign-in token twice, which happens when a token is stolen, so Origin Auth signed that app out of your account. The app asks you to sign in again. Your security history says which app it was.".to_owned(),
+            Self::RecoveryStarted => "Someone asked SourceOrigin support for help signing in, and support sent a recovery link to your primary address: it adds a new passkey to your account. If you didn’t ask for it, cancel the recovery with a passkey you have, then contact SourceOrigin support.".to_owned(),
+            Self::SignedOutBySupport => "Support ended one or more of your sessions. Sign in again to keep using your account, and see your security history for why.".to_owned(),
+            Self::CompromiseReported => "You said an entry of your security history wasn’t yours, so Origin Auth signed out every other device and every app. Your security history shows what you can still undo.".to_owned(),
+            Self::PasskeyCopied => "A sign-in used one of your passkeys, but its signature showed it may be a copy, so Origin Auth refused it. If your passkey’s provider doesn’t sync it between devices, remove that passkey from your sign-in methods and add a new one.".to_owned(),
+            Self::SignInRefused => "Someone signed in with one of your passkeys or social sign-ins, but your account is disabled, or no longer signs in that way, so Origin Auth refused it. If it wasn’t you, contact SourceOrigin support.".to_owned(),
         }
     }
 }

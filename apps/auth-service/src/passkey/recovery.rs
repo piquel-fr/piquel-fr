@@ -9,7 +9,7 @@ use super::{
 };
 use crate::account::{AccountError, AccountService, Owner};
 use crate::recovery::{PROBATION, ProbationPasskey, RecoveryError, RecoveryView};
-use crate::security::{self, ApiError, BrowserCookie, Credential, RequestContext};
+use crate::security::{self, ApiError, Credential, RequestContext};
 use axum::{
     Json,
     extract::State,
@@ -163,8 +163,8 @@ impl PasskeyApplication {
         let signed_in = session.is_some();
         let mut response = Json(UndoOutcome { signed_in }).into_response();
         if let Some(session) = session {
-            BrowserCookie::Session
-                .set_on(&mut response, &session)
+            session
+                .set_on(&mut response)
                 .map_err(PasskeyError::CookieHeader)?;
         }
         Ok(response)

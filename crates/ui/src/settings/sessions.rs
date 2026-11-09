@@ -1,4 +1,4 @@
-//! Signed-in devices.
+//! Signed-in devices, and the browsers the account knows.
 
 use super::device_name;
 use crate::{
@@ -8,7 +8,9 @@ use crate::{
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
-    AuthenticationMethod, SessionId, admin::DashboardSession, events::UserAgentFamily,
+    AuthenticationMethod, SessionId,
+    admin::{DashboardSession, KnownDevice},
+    events::UserAgentFamily,
 };
 use std::net::IpAddr;
 use topcoat::{
@@ -120,12 +122,47 @@ impl DeviceRow<'_> {
     }
 }
 
-/// The devices page: every browser signed in to the account, as of `now`. Signing
-/// one out, or every other one, posts to `page`.
+/// The browsers the account knows, `known`: a sign-in from any other one alerts
+/// the owner.
+#[component]
+pub async fn known_devices<'a>(known: &'a [KnownDevice]) -> Result<impl View> {
+    Ok(view! {
+        <section class="card" aria-labelledby="known-heading">
+            <header>
+                <h2 id="known-heading">"Known browsers " <span class="count">(known.len().to_string())</span></h2>
+            </header>
+            <p class="help">
+                "Browsers that signed in to this account within the last 400 days. A sign-in from any other browser sends a security notification."
+            </p>
+            <ul class="list">
+                for row in known {
+                    <li>
+                        <div class="text">
+                            <strong>(row.device.map_or_else(|| "An unrecorded browser".to_owned(), device_name))</strong>
+                            <small>
+                                "First signed in "
+                                time(at: row.first_seen_at, precision: Precision::Day)
+                                ", last "
+                                time(at: row.last_seen_at, precision: Precision::Day)
+                            </small>
+                        </div>
+                    </li>
+                }
+            </ul>
+            if known.is_empty() {
+                <p class="empty">"No browser has signed in since Origin Auth started keeping track."</p>
+            }
+        </section>
+    })
+}
+
+/// The devices page: every browser signed in to the account, as of `now`, then
+/// every browser it knows. Signing one out, or every other one, posts to `page`.
 #[component]
 pub async fn devices<'a>(
     page: &'a str,
     rows: &'a [DeviceRow<'a>],
+    known: &'a [KnownDevice],
     now: DateTime<Utc>,
 ) -> Result<impl View> {
     let others = rows.iter().any(|row| !row.current);
@@ -182,5 +219,6 @@ pub async fn devices<'a>(
                 <p class="empty">"You’re only signed in on this device."</p>
             }
         </section>
+        known_devices(known: known)
     })
 }

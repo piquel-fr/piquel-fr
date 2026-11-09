@@ -18,6 +18,10 @@ sourceorigin_common::str_enum! {
     pub(crate) enum BrowserCookie {
         /// Central sign-in session.
         Session = "__Host-sourceorigin_session",
+        /// The browser itself, across its sessions: signing out keeps it, so the
+        /// accounts it signed in to know it again, and a sign-in from any other
+        /// browser alerts the account's owner.
+        Device = "__Host-sourceorigin_device",
         /// In-progress WebAuthn ceremony.
         Ceremony = "__Host-sourceorigin_ceremony",
         /// Provider redirect awaiting its callback.
@@ -45,6 +49,9 @@ sourceorigin_common::str_enum! {
 
 /// How long a preference is kept: a year.
 const PREFERENCE_MAX_AGE: u32 = 365 * 24 * 60 * 60;
+/// How long a device cookie is kept: 400 days, the most browsers allow. Every
+/// sign-in sets it again. Maintenance forgets a known device unused as long.
+const DEVICE_MAX_AGE: u32 = 400 * 24 * 60 * 60;
 
 impl BrowserCookie {
     /// Lifetime in seconds. Flow cookies outlive their server-side state slightly; a
@@ -60,6 +67,7 @@ impl BrowserCookie {
             | Self::Restore => FLOW_COOKIE_MAX_AGE,
             Self::Notice | Self::DashboardReveal => 60,
             Self::Theme | Self::Sidebar => PREFERENCE_MAX_AGE,
+            Self::Device => DEVICE_MAX_AGE,
         }
     }
 

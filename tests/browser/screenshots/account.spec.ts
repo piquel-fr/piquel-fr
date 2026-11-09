@@ -11,7 +11,8 @@ test.use({ userAgent: mac });
 
 /**
  * The account's settings tabs, as the user guide's account pages show them: two
- * passkeys, a second device signed in with one of them, a display name of its own,
+ * passkeys, a second device signed in with one of them and the alert it raised, a
+ * display name of its own,
  * an address being added, the history all of that left, and the inbox's email
  * preferences.
  */
@@ -36,8 +37,15 @@ test('account settings', async ({ page, context, browser }) => {
   await laptop.goto('/login');
   await laptop.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
   await expect(laptop).toHaveURL('/settings');
+  // The new device's sign-in alerts, at the top of every settings page.
   await page.goto('/settings/sessions');
-  await expect(page.getByText('Firefox on Windows', { exact: true })).toBeVisible();
+  const alerts = page.getByRole('region', { name: 'Unread security notifications' });
+  await expect(alerts.getByText('A new device signed in to your account')).toBeVisible();
+  await shoot(page, 'account/security-alerts', alerts);
+  await page.goto('/settings/notifications');
+  await page.getByRole('button', { name: 'Mark all as read', exact: true }).click();
+  await page.goto('/settings/sessions');
+  await expect(page.getByText('Firefox on Windows', { exact: true }).first()).toBeVisible();
   await shoot(page, 'account/devices');
 
   await page.goto('/settings/profile');

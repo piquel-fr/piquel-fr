@@ -141,6 +141,7 @@ fn event_kinds_match_their_serde_tags() {
             session_id,
             method: AuthenticationMethod::Federation,
             inline: None,
+            new_device: true,
         },
         DomainEvent::SignInFailed {
             method: AuthenticationMethod::Passkey,

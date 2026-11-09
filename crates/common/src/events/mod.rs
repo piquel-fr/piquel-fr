@@ -62,6 +62,12 @@ pub enum DomainEvent {
         /// auth's pages. The session then has no browser cookie.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         inline: Option<InlineSignIn>,
+        /// Set when the browser had never signed in to the account, as far as
+        /// its device cookie tells: its owner is alerted. Signing up and a
+        /// recovery's link register the browser without it, and a sign-in on an
+        /// application's page, which sets no cookie, never has it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        new_device: bool,
     },
     /// A passkey or provider authentication was rejected, whether signing in or
     /// confirming a session. Only the rejected attempt is recorded; nothing changed.
@@ -493,6 +499,10 @@ impl DomainEvent {
                 reason: RevocationReason::UserRevoked,
                 ..
             } => 2,
+            Self::SessionRevoked {
+                reason: RevocationReason::SignOutLink,
+                ..
+            } => 3,
             Self::RelatedOriginApproved { origin, .. }
             | Self::RelatedOriginRemoved { origin, .. }
             | Self::SignedIn {

@@ -5,7 +5,7 @@ use super::{ApiError, BrowserCookie, CONFIRMATION_MAX_AGE, RequestContext, SESSI
 use crate::recovery::ProbationPasskey;
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::{HeaderMap, request::Parts},
+    http::{HeaderMap, header::InvalidHeaderValue, request::Parts},
 };
 use chrono::{Duration, Utc};
 use sourceorigin_common::{
@@ -100,6 +100,62 @@ pub(crate) enum SessionError {
     /// Secure session material could not be generated.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
+}
+
+/// What signing a browser in leaves it: its new session's secret, and its device
+/// cookie's, which every sign-in sets again, so a browser that keeps signing in
+/// stays known.
+#[must_use = "the browser is signed in only once `set_on` stores its cookies"]
+pub(crate) struct SignedIn {
+    /// The session cookie's secret.
+    session: Secret,
+    /// The device cookie's secret.
+    device: Device,
+}
+
+impl SignedIn {
+    /// Stores the session and device cookies on `response`, an axum response or
+    /// a page's, keeping any other cookies being set. Callers set them only
+    /// after the sign-in's transaction commits.
+    pub(crate) fn set_on<B>(
+        &self,
+        response: &mut axum::http::Response<B>,
+    ) -> Result<(), InvalidHeaderValue> {
+        BrowserCookie::Session.set_on(response, &self.session)?;
+        BrowserCookie::Device.set_on(response, &self.device.0)
+    }
+}
+
+/// The browser's device cookie, [`BrowserCookie::Device`]: a random secret it
+/// keeps across sessions, whose digest each account it signed in to remembers.
+struct Device(Secret);
+
+impl Device {
+    /// The device cookie the browser's `headers` carry, or a new one for a browser
+    /// without one.
+    fn of(headers: &HeaderMap) -> Result<Self, CryptoError> {
+        BrowserCookie::Device
+            .read(headers)
+            .map_or_else(Secret::generate, Ok)
+            .map(Self)
+    }
+
+    /// Remembers this browser, as `context` describes it, as one of `user_id`'s,
+    /// and returns whether it is new to the account.
+    async fn remember(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        user_id: UserId,
+    ) -> Result<bool, DatabaseError> {
+        tx.sessions()
+            .remember_device(
+                user_id,
+                self.0.digest().as_bytes(),
+                context.user_agent_family,
+            )
+            .await
+    }
 }
 
 impl From<SessionError> for ApiError {
@@ -199,23 +255,29 @@ impl Session {
     }
 
     /// Signs `user_id` in on this browser inside the caller's transaction, records the
-    /// sign-in, and returns the secret for its session cookie. Callers set the cookie
-    /// only after the transaction commits. Locks the account first, so sign-in
-    /// serializes with its disablement and with other changes to its sessions.
+    /// sign-in, and returns the secrets of its session and device cookies. Callers
+    /// set the cookies only after the transaction commits. Locks the account first,
+    /// so sign-in serializes with its disablement and with other changes to its
+    /// sessions.
     ///
     /// A browser already signed in as `user_id` re-authenticates that session (see
     /// [`Self::reauthenticate`]). A browser signed in as someone else has that session
-    /// revoked, then gets a new one.
+    /// revoked, then gets a new one. Either way, a browser whose device cookie the
+    /// account does not know becomes one of its devices, and its sign-in is a new
+    /// device's, which alerts the owner.
     pub(crate) async fn sign_in(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
         headers: &HeaderMap,
         user_id: UserId,
         credential: Credential,
-    ) -> Result<Secret, SessionError> {
-        match Self::browser_session(tx, headers, user_id).await? {
+    ) -> Result<SignedIn, SessionError> {
+        let device = Device::of(headers)?;
+        let current = Self::browser_session(tx, headers, user_id).await?;
+        let new_device = device.remember(tx, context, user_id).await?;
+        let session = match current {
             Some(current) if current.user_id == user_id => {
-                let secret = Self::reauthenticate(tx, &current, credential).await?;
+                let session = Self::reauthenticate(tx, &current, credential).await?;
                 tx.record(
                     &context.user(&current),
                     Some(user_id),
@@ -223,28 +285,36 @@ impl Session {
                         session_id: current.id,
                         method: credential.method(),
                         inline: None,
+                        new_device,
                     },
                 )
                 .await?;
-                Ok(secret)
+                session
             }
-            current => Self::replace(tx, context, current, user_id, credential).await,
-        }
+            current => Self::replace(tx, context, current, user_id, credential, new_device).await?,
+        };
+        Ok(SignedIn { session, device })
     }
 
     /// Signs `user_id` in on this browser with a new session, as [`Self::sign_in`]
     /// does, but never re-authenticates the browser's session: whatever session it
-    /// had, of this account or another, is revoked first. A recovery link signs in
-    /// this way, so an existing session can neither make it fail nor carry over.
+    /// had, of this account or another, is revoked first. The browser becomes one of
+    /// the account's devices without an alert. Signing up and a recovery's link sign
+    /// in this way: a new account has nothing to alert about, and a recovery tells
+    /// its owner itself. An existing session can neither make a recovery's link fail
+    /// nor carry over.
     pub(crate) async fn sign_in_anew(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
         headers: &HeaderMap,
         user_id: UserId,
         credential: Credential,
-    ) -> Result<Secret, SessionError> {
+    ) -> Result<SignedIn, SessionError> {
+        let device = Device::of(headers)?;
         let current = Self::browser_session(tx, headers, user_id).await?;
-        Self::replace(tx, context, current, user_id, credential).await
+        device.remember(tx, context, user_id).await?;
+        let session = Self::replace(tx, context, current, user_id, credential, false).await?;
+        Ok(SignedIn { session, device })
     }
 
     /// Locks `user_id`'s active account, then reads the session of the browser's
@@ -269,13 +339,15 @@ impl Session {
     }
 
     /// Revokes the browser's `current` session, if any, then creates `user_id`'s
-    /// new one.
+    /// new one, from a browser new to the account when `new_device` says so, and
+    /// returns the secret for its cookie.
     async fn replace(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
         current: Option<StoredSession>,
         user_id: UserId,
         credential: Credential,
+        new_device: bool,
     ) -> Result<Secret, SessionError> {
         if let Some(current) = current {
             Self::revoke(
@@ -287,7 +359,37 @@ impl Session {
             )
             .await?;
         }
-        Self::create(tx, context, user_id, credential).await
+        Self::open(tx, context, user_id, credential, new_device).await
+    }
+
+    /// Creates a session inside the caller's transaction, records the sign-in, from
+    /// a browser new to the account when `new_device` says so, and returns the
+    /// secret for its cookie.
+    async fn open(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        user_id: UserId,
+        credential: Credential,
+        new_device: bool,
+    ) -> Result<Secret, SessionError> {
+        let session = Self::insert(tx, context, user_id, credential, None, new_device).await?;
+        let secret = Secret::generate()?;
+        tx.sessions()
+            .insert_browser_secret(session.id, secret.digest().as_bytes())
+            .await?;
+        Ok(secret)
+    }
+
+    /// For fixtures: creates a session as a sign-in from a browser the account
+    /// knows, without a device cookie, and returns the secret for its cookie.
+    #[cfg(test)]
+    pub(crate) async fn create(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        user_id: UserId,
+        credential: Credential,
+    ) -> Result<Secret, SessionError> {
+        Self::open(tx, context, user_id, credential, false).await
     }
 
     /// Records a new authentication of `session` with `credential` inside the
@@ -335,27 +437,12 @@ impl Session {
         Ok(secret)
     }
 
-    /// Creates a session inside the caller's transaction, records the sign-in, and
-    /// returns the secret for its cookie. A passkey sign-in also confirms the session,
-    /// so an action right after it prompts no more, unless it is a recovery's
-    /// passkey during its probation. The session records which passkey it was.
-    pub(crate) async fn create(
-        tx: &mut DatabaseTransaction<'_>,
-        context: RequestContext,
-        user_id: UserId,
-        credential: Credential,
-    ) -> Result<Secret, SessionError> {
-        let session = Self::insert(tx, context, user_id, credential, None).await?;
-        let secret = Secret::generate()?;
-        tx.sessions()
-            .insert_browser_secret(session.id, secret.digest().as_bytes())
-            .await?;
-        Ok(secret)
-    }
-
     /// Creates the session of a sign-in with `credential` on an application's page,
     /// inside the caller's transaction, and records the sign-in. It has no browser
     /// secret, so no auth cookie: only the tokens the client gets from it use it.
+    /// The page sets no cookie either, so it never sees the device cookie: such a
+    /// sign-in is never a new device's, as the related origin's passkey ceremony
+    /// already needed the passkey itself.
     pub(crate) async fn create_inline(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
@@ -363,17 +450,21 @@ impl Session {
         credential: Credential,
         inline: InlineSignIn,
     ) -> Result<StoredSession, SessionError> {
-        Self::insert(tx, context, user_id, credential, Some(inline)).await
+        Self::insert(tx, context, user_id, credential, Some(inline), false).await
     }
 
     /// Inserts a session, confirmed and naming its passkey if `credential` is one,
-    /// and records the sign-in, on an application's page when `inline` says so.
+    /// and records the sign-in, on an application's page when `inline` says so, from
+    /// a browser new to the account when `new_device` says so. A passkey sign-in
+    /// confirms the session, so an action right after it prompts no more, unless it
+    /// is a recovery's passkey during its probation.
     async fn insert(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
         user_id: UserId,
         credential: Credential,
         inline: Option<InlineSignIn>,
+        new_device: bool,
     ) -> Result<StoredSession, SessionError> {
         let method = credential.method();
         let now = Utc::now();
@@ -398,6 +489,7 @@ impl Session {
                 session_id: session.id,
                 method,
                 inline,
+                new_device,
             },
         )
         .await?;

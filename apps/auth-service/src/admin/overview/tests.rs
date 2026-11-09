@@ -17,6 +17,7 @@ fn the_counted_kinds_are_the_stored_tags() {
         session_id: SessionId::new(),
         method: AuthenticationMethod::Passkey,
         inline: None,
+        new_device: false,
     };
     assert_eq!(signed_in.kind(), Kinds::SIGNED_IN);
     let grant = DomainEvent::GrantIssued {

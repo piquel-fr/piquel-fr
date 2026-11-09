@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     AuthenticationMethod, PasskeyId, SessionId, UserId,
-    admin::Session,
+    admin::{KnownDevice, Session},
     events::{DomainEvent, EventContext, RevocationReason, UserAgentFamily},
     protocol::claims::{Acr, Amr},
 };
@@ -621,6 +621,64 @@ impl SessionRepository<'_> {
             return Err(DatabaseError::NotFound);
         }
         Ok(())
+    }
+}
+
+/// The browsers each account has signed in from.
+impl SessionRepository<'_> {
+    /// Remembers that the browser whose device cookie has the digest `digest`
+    /// signed in to `user_id` with `user_agent_family`, and returns whether it is
+    /// new to the account: a browser it knows is only seen again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn remember_device(
+        &mut self,
+        user_id: UserId,
+        digest: &[u8],
+        user_agent_family: UserAgentFamily,
+    ) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                // `xmax` is zero only on a row this statement inserted.
+                r#"INSERT INTO known_devices (user_id, device_digest, user_agent_family)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, device_digest) DO UPDATE
+                SET last_seen_at = now(), user_agent_family = excluded.user_agent_family
+                RETURNING (xmax = 0) AS "new!""#,
+                user_id.as_uuid(),
+                digest,
+                user_agent_family.to_string(),
+            )
+        )
+    }
+
+    /// The browsers `user_id` signed in from within the last 400 days, most
+    /// recently seen first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn known_devices(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<KnownDevice>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                KnownDevice,
+                r#"SELECT user_agent_family AS "device: UserAgentFamily",
+                    first_seen_at, last_seen_at
+                FROM known_devices
+                WHERE user_id = $1
+                ORDER BY last_seen_at DESC, first_seen_at DESC"#,
+                user_id.as_uuid(),
+            )
+        )
     }
 }
 

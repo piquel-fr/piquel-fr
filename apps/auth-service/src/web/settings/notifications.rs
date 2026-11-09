@@ -1,11 +1,14 @@
 //! `/settings/notifications`: the inbox, marking every notification read or one
-//! unread, and turning a category's email on or off; `/settings/notifications/{id}`,
-//! one notification, which opening marks read; and `/unsubscribe`, which an
-//! announcement's email links to turn announcements' email off.
+//! unread, recognizing one from the banner of unread security notifications, and
+//! turning a category's email on or off; `/settings/notifications/{id}`, one
+//! notification, which opening marks read; `/unsubscribe`, which an
+//! announcement's email links to turn announcements' email off; and
+//! `/sign-out-everywhere`, which a security notification's email links to sign
+//! the account out everywhere.
 
 use crate::{
     account::{AccountError, Owner},
-    notifications::Unsubscribe,
+    notifications::{Link, LinkTarget, Links},
     routes::{
         self,
         page::{self, settings},
@@ -14,15 +17,16 @@ use crate::{
     web::{
         Failure, WebApplication,
         account::{AccountPage, Applied, Framed, NoChange, Reader},
+        settings::TABS,
     },
 };
 use sourceorigin_common::{
-    NotificationId, UserId,
+    NotificationId,
     notifications::{Notification, NotificationPreference},
 };
 use sourceorigin_ui::{
     Audience, Crumb, EmailRow, HistoryRow, Holdings, InboxChange, InboxPage, InboxRow, InboxState,
-    Messages, NotificationState, Section, Tab, Title, UnsubscribeStep,
+    Messages, Notice, NotificationState, Section, SignOutStep, Tab, Title, UnsubscribeStep,
 };
 use topcoat::{
     Error,
@@ -61,8 +65,9 @@ impl AccountPage for Inbox {
     }
 
     /// Marking read or unread goes back to the inbox's newest page, which shows
-    /// the change; turning a category's email on or off reopens the email
-    /// preferences dialog, which shows it.
+    /// the change; recognizing a notification from the banner goes back to the
+    /// settings page it was on; turning a category's email on or off reopens the
+    /// email preferences dialog, which shows it.
     async fn apply(
         web: &WebApplication,
         _: &Cx,
@@ -73,6 +78,17 @@ impl AccountPage for Inbox {
             InboxChange::ReadAll => web.account.read_all_notifications(&owner).await?,
             InboxChange::MarkUnread { id } => {
                 web.account.mark_notification(&owner, id, false).await?;
+            }
+            InboxChange::Recognized { id, back } => {
+                web.account.mark_notification(&owner, id, true).await?;
+                let to = TABS
+                    .iter()
+                    .find(|(tab, _)| Some(*tab) == back)
+                    .map_or(settings::NOTIFICATIONS, |(_, page)| *page);
+                return Ok(Applied::Moved {
+                    to: to.to_owned(),
+                    notice: Notice::Recognized,
+                });
             }
             InboxChange::Email { category, email } => {
                 let preference = NotificationPreference {
@@ -174,8 +190,8 @@ impl AccountPage for NotificationPage {
         std::future::ready(change.absurd())
     }
 
-    /// Marks the notification read once opened from auth's own pages, then
-    /// shows it, with its history entry, the recovery's undo page while it can
+    /// Marks the notification read once opened from auth's own pages, unless to
+    /// report its event, which marks it read once made, then shows it, with its history entry, the recovery's undo page while it can
     /// still be undone, and the dashboard's alerts for an alert's.
     async fn render(
         web: &WebApplication,
@@ -185,7 +201,7 @@ impl AccountPage for NotificationPage {
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
         let id = Self::id(cx)?;
-        if Self::opened_here(cx) {
+        if Self::opened_here(cx) && !shown.reporting {
             web.account
                 .mark_notification(reader.owner(), id, true)
                 .await?;
@@ -246,8 +262,10 @@ impl AccountPage for NotificationPage {
     }
 }
 
-/// The unsubscribe link of an announcement's email, which needs no session: its
-/// token, derived from the account's ID, is its credential.
+/// The links of notifications' emails, which need no session: the token of each,
+/// derived from the ID it names, is its credential. The unsubscribe link of an
+/// announcement's email turns announcements' email off; the sign-out link of a
+/// security notification's signs its account out everywhere.
 impl WebApplication {
     /// `GET /unsubscribe`: asks to turn announcements' email off, for the account
     /// the link names. Opening it changes nothing, so a mail scanner that follows
@@ -255,7 +273,7 @@ impl WebApplication {
     pub(in crate::web) async fn unsubscription(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let here = uri(cx).to_string();
-        match web.unsubscriber(cx)? {
+        match Self::linked(cx, &web.email.unsubscribe_links)? {
             Some(_) => {
                 let step = UnsubscribeStep::Confirm { action: &here };
                 web.unsubscribe_page(cx, StatusCode::OK, step).await
@@ -273,7 +291,7 @@ impl WebApplication {
     /// read: the link is all it needs.
     pub(in crate::web) async fn unsubscribe(cx: &Cx, _: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
-        let Some(user) = web.unsubscriber(cx)? else {
+        let Some(user) = Self::linked(cx, &web.email.unsubscribe_links)? else {
             return web
                 .unsubscribe_page(cx, StatusCode::NOT_FOUND, UnsubscribeStep::Invalid)
                 .await;
@@ -285,17 +303,69 @@ impl WebApplication {
         web.unsubscribe_page(cx, StatusCode::OK, step).await
     }
 
-    /// The account the page's link names, if its token is the one Origin Auth made
-    /// for it.
-    fn unsubscriber(&self, cx: &Cx) -> Result<Option<UserId>, Failure> {
-        let Ok(link) = parse_query_params::<Unsubscribe>(cx) else {
+    /// `GET /sign-out-everywhere`: asks to sign the account out everywhere, for
+    /// the notification the link names. Opening it changes nothing, so a mail
+    /// scanner that follows links signs no one out.
+    pub(in crate::web) async fn sign_out_confirmation(cx: &Cx) -> Result<Response, Failure> {
+        let web = app_context::<Self>(cx);
+        let here = uri(cx).to_string();
+        match Self::linked(cx, &web.email.sign_out_links)? {
+            Some(_) => {
+                let step = SignOutStep::Confirm { action: &here };
+                web.sign_out_page(cx, StatusCode::OK, step).await
+            }
+            None => {
+                web.sign_out_page(cx, StatusCode::NOT_FOUND, SignOutStep::Invalid)
+                    .await
+            }
+        }
+    }
+
+    /// `POST /sign-out-everywhere`: signs the account of the notification the
+    /// link names out everywhere, once, while the link works.
+    pub(in crate::web) async fn sign_out_everywhere(cx: &Cx, _: Body) -> Result<Response, Failure> {
+        let web = app_context::<Self>(cx);
+        let signed_out = match Self::linked(cx, &web.email.sign_out_links)? {
+            Some(id) => {
+                web.account
+                    .sign_out_everywhere(id, Self::context(cx)?)
+                    .await?
+            }
+            None => false,
+        };
+        if signed_out {
+            let step = SignOutStep::Done {
+                history: settings::HISTORY,
+            };
+            web.sign_out_page(cx, StatusCode::OK, step).await
+        } else {
+            web.sign_out_page(cx, StatusCode::NOT_FOUND, SignOutStep::Invalid)
+                .await
+        }
+    }
+
+    /// What the page's link names, if its token is the one Origin Auth made for
+    /// it with `links`.
+    fn linked<T: LinkTarget>(cx: &Cx, links: &Links<T>) -> Result<Option<T>, Failure>
+    where
+        Link<T>: serde::de::DeserializeOwned,
+    {
+        let Ok(link) = parse_query_params::<Link<T>>(cx) else {
             return Ok(None);
         };
-        Ok(self
-            .email
-            .unsubscribe_links
-            .check(&link)
-            .map_err(Error::from)?)
+        Ok(links.check(&link).map_err(Error::from)?)
+    }
+
+    /// The sign-out page at `step`, at `status`.
+    async fn sign_out_page(
+        &self,
+        cx: &Cx,
+        status: StatusCode,
+        step: SignOutStep<'_>,
+    ) -> Result<Response, Failure> {
+        let view = view! { cx => sourceorigin_ui::sign_out_everywhere(step: step) };
+        let title = Title::SignOut.as_str();
+        Ok(self.render(cx, status, title, &[], view).await?)
     }
 
     /// The unsubscribe page at `step`, at `status`.

@@ -474,7 +474,8 @@ foreign ID, `400` for the caller's own) and signs every other out
 (`POST /account/sessions/revoke-others`, answering the count). Both record
 `RevocationReason::UserRevoked`. They need a session but no passkey confirmation:
 signing out only removes access, and a user who suspects a stolen cookie must be
-able to act at once.
+able to act at once. `GET /account/devices` lists the browsers the account
+knows, from `known_devices` (see [known devices](sessions.md#known-devices)).
 
 ### Handles
 

@@ -132,8 +132,9 @@ impl AdminService {
         }
         for identity in tx.federation().list_active(user_id).await? {
             let provider = identity.provider;
+            // The recovery's own notification tells the owner.
             if tx.federation().unlink(user_id, provider).await? {
-                tx.record(
+                tx.record_quietly(
                     context,
                     Some(user_id),
                     DomainEvent::IdentityUnlinked { provider },

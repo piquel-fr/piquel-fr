@@ -6,7 +6,7 @@ use crate::config::{EmailConfig, PasskeyConfig};
 use crate::deliveries::OutboundClient;
 use crate::oidc::OidcApplication;
 use crate::routes;
-use crate::security::{self, BrowserCookie, Credential, RequestContext};
+use crate::security::{self, BrowserCookie, Credential, RequestContext, SignedIn};
 use axum::{
     Router,
     http::{HeaderMap, StatusCode, header},
@@ -18,7 +18,6 @@ use sourceorigin_common::{
     config::Origin,
     events::{DomainEvent, EventContext},
 };
-use sourceorigin_crypto::Secret;
 use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertPasskey, PasskeyRepository, StoredPasskey,
 };
@@ -220,15 +219,30 @@ impl PasskeyApplication {
         Self::signed_in(tx, &session).await
     }
 
-    /// Commits `tx`, which signed the browser in with the `session` secret, and
-    /// answers with its cookie.
+    /// Commits the new account `user_id` that `tx` created together with its first
+    /// sign-in with `credential`, whose browser becomes one of the account's
+    /// devices without an alert.
+    async fn complete_sign_up(
+        mut tx: DatabaseTransaction<'_>,
+        context: RequestContext,
+        headers: &HeaderMap,
+        user_id: UserId,
+        credential: Credential,
+    ) -> Result<Response, PasskeyError> {
+        let session =
+            security::Session::sign_in_anew(&mut tx, context, headers, user_id, credential).await?;
+        Self::signed_in(tx, &session).await
+    }
+
+    /// Commits `tx`, which signed the browser in as `session` says, and answers
+    /// with its cookies.
     async fn signed_in(
         tx: DatabaseTransaction<'_>,
-        session: &Secret,
+        session: &SignedIn,
     ) -> Result<Response, PasskeyError> {
         tx.commit().await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
-        BrowserCookie::Session.set_on(&mut response, session)?;
+        session.set_on(&mut response)?;
         // An offer an earlier sign-in left to restore another account no longer
         // stands: this one signed in.
         BrowserCookie::Restore.clear_on(&mut response)?;

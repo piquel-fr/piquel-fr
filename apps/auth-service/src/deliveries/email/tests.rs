@@ -517,11 +517,24 @@ async fn notifications_are_emailed_to_the_addresses_their_kind_names() {
         },
     )
     .await;
+    record(
+        user_id,
+        DomainEvent::RecoveryStarted {
+            recovery_id: RecoveryId::new(),
+            expires_at: chrono::Utc::now(),
+            revoke: None,
+        },
+    )
+    .await;
     let enabled = ("account_enabled".to_owned(), false);
     let removed = ("email_removed".to_owned(), false);
     let recovered = ("recovered".to_owned(), true);
-    assert_eq!(emailed(primary).await, [enabled, recovered.clone()]);
-    assert_eq!(emailed(other).await, [removed, recovered]);
+    let started = ("recovery_started".to_owned(), true);
+    assert_eq!(
+        emailed(primary).await,
+        [enabled, recovered.clone(), started.clone()]
+    );
+    assert_eq!(emailed(other).await, [removed, recovered, started]);
 
     let unaddressed = account(&database).await;
     record(unaddressed, DomainEvent::AccountEnabled {}).await;
@@ -652,6 +665,51 @@ async fn an_alerts_email_links_the_dashboard() {
     }
 }
 
+/// A security notification's email carries the link that signs its account out
+/// everywhere, which names the notification and is one auth checks; an alert
+/// to administrators, about the service, carries none.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn security_emails_carry_the_sign_out_link() {
+    let database = Replicas::database().await;
+    let user_id = account(&database).await;
+    let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
+    let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config);
+    let notification_id = NotificationId::new();
+    let message = |notification| EmailMessage::Notification {
+        address: format!("{user_id}@example.com"),
+        notification_id,
+        notification,
+        recovery_id: None,
+    };
+    let alert = message(Notification::NewDeviceSignIn);
+    let Some(Content::Notification {
+        sign_out: Some(link),
+        ..
+    }) = sender.content(user_id, &alert).await.expect("content")
+    else {
+        panic!("a security notification's email carries the link");
+    };
+    let link = url::Url::parse(&link).expect("URL");
+    assert_eq!(link.path(), routes::page::SIGN_OUT);
+    let query: std::collections::HashMap<_, _> = link.query_pairs().into_owned().collect();
+    let checked = config.sign_out_links.check(&crate::notifications::Link {
+        id: query["id"].parse().expect("notification"),
+        token: query["token"].clone(),
+    });
+    assert_eq!(checked.expect("check"), Some(notification_id));
+    sender.assert_renders(user_id, &alert).await;
+    let service = message(Notification::AlertRaised {
+        alert_id: sourceorigin_common::AlertId::new(),
+        title: "Alert".into(),
+        text: "Text".into(),
+    });
+    assert!(matches!(
+        sender.content(user_id, &service).await.expect("content"),
+        Some(Content::Notification { sign_out: None, .. })
+    ));
+}
+
 /// An announcement's email offers a one-click unsubscribe (RFC 8058) whose
 /// link turns only its recipient's announcements' email off, in its headers and
 /// its body; an essential one, which its recipient cannot turn off, offers none.
@@ -704,8 +762,8 @@ async fn announcement_emails_offer_unsubscribing_unless_essential() {
     );
     let url = url::Url::parse(link).expect("URL");
     let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
-    let unsubscribe = crate::notifications::Unsubscribe {
-        account: query["account"].parse().expect("account"),
+    let unsubscribe = crate::notifications::Link {
+        id: query["id"].parse().expect("account"),
         token: query["token"].clone(),
     };
     assert_eq!(

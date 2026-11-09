@@ -81,3 +81,183 @@ fn notifications_serialize_by_kind() {
     let unit = serde_json::to_value(Notification::EmailRemoved).expect("serializes");
     assert_eq!(unit, serde_json::json!({ "kind": "email_removed" }));
 }
+
+/// Each alerting event, as its actor causes it, with the notification it gives.
+#[expect(
+    clippy::too_many_lines,
+    reason = "One entry per alerting event, so the list reads as the issue's."
+)]
+fn alerts() -> [(DomainEvent, Actor, Notification); 12] {
+    use crate::{
+        PasskeyId, Provider, RecoveryId, TokenId,
+        events::{GrantRevocation, RevocationReason, SignInFailure},
+    };
+    use chrono::Utc;
+    let passkey_id = PasskeyId::new();
+    [
+        (
+            DomainEvent::SignedIn {
+                session_id: SessionId::new(),
+                method: crate::AuthenticationMethod::Passkey,
+                inline: None,
+                new_device: true,
+            },
+            owner(),
+            Notification::NewDeviceSignIn,
+        ),
+        (
+            DomainEvent::PasskeyAdded { passkey_id },
+            owner(),
+            Notification::PasskeyAdded,
+        ),
+        (
+            DomainEvent::PasskeyRemoved { passkey_id },
+            admin(),
+            Notification::PasskeyRemoved,
+        ),
+        (
+            DomainEvent::IdentityLinked {
+                provider: Provider::GitHub,
+                subject: Personal::Value("1".to_owned()),
+            },
+            owner(),
+            Notification::IdentityLinked {
+                provider: Provider::GitHub,
+            },
+        ),
+        (
+            DomainEvent::IdentityUnlinked {
+                provider: Provider::Google,
+            },
+            owner(),
+            Notification::IdentityUnlinked {
+                provider: Provider::Google,
+            },
+        ),
+        (
+            DomainEvent::EmailAdded {
+                email_id: EmailId::new(),
+                address: Personal::Erased,
+                provider: Some(Provider::Google),
+            },
+            owner(),
+            Notification::EmailAdded {
+                provider: Some(Provider::Google),
+            },
+        ),
+        (
+            DomainEvent::GrantRevoked {
+                client_id: "notes".parse().expect("client ID"),
+                family_id: TokenId::new(),
+                reason: GrantRevocation::RefreshReplay,
+            },
+            Actor::Anonymous,
+            Notification::TokenReused,
+        ),
+        (
+            DomainEvent::RecoveryStarted {
+                recovery_id: RecoveryId::new(),
+                expires_at: Utc::now(),
+                revoke: None,
+            },
+            admin(),
+            Notification::RecoveryStarted,
+        ),
+        (
+            DomainEvent::SessionRevoked {
+                session_id: SessionId::new(),
+                reason: RevocationReason::Admin,
+            },
+            admin(),
+            Notification::SignedOutBySupport,
+        ),
+        (
+            DomainEvent::CompromiseReported {
+                event_id: crate::EventId::new(),
+            },
+            owner(),
+            Notification::CompromiseReported,
+        ),
+        (
+            DomainEvent::SignInFailed {
+                method: crate::AuthenticationMethod::Passkey,
+                reason: SignInFailure::CounterRegression,
+            },
+            Actor::Anonymous,
+            Notification::PasskeyCopied,
+        ),
+        (
+            DomainEvent::SignInFailed {
+                method: crate::AuthenticationMethod::Federation,
+                reason: SignInFailure::AccountUnavailable,
+            },
+            Actor::Anonymous,
+            Notification::SignInRefused,
+        ),
+    ]
+}
+
+/// Every alerting event of the owner's or support's is a security notification,
+/// emailed to the primary address, or to every verified one for a recovery.
+#[test]
+fn alerting_events_are_security_notifications() {
+    use crate::notifications::Addressees;
+    for (event, actor, expected) in alerts() {
+        let notification = event.notification(&actor);
+        assert_eq!(notification.as_ref(), Some(&expected), "{event:?}");
+        assert!(expected.security(), "{expected:?}");
+        let addressees = match expected {
+            Notification::RecoveryStarted => Addressees::Verified,
+            _ => Addressees::Primary,
+        };
+        assert_eq!(expected.addressees(), addressees, "{expected:?}");
+    }
+}
+
+/// Signing up and a recovery's link add passkeys, identities and addresses
+/// without a session; those steps alert no one, nor does a sign-in from a known
+/// browser.
+#[test]
+fn sessionless_steps_and_known_browsers_alert_no_one() {
+    let signing_up = Actor::User {
+        user_id: UserId::new(),
+        session_id: None,
+    };
+    let added = DomainEvent::PasskeyAdded {
+        passkey_id: crate::PasskeyId::new(),
+    };
+    assert_eq!(added.notification(&signing_up), None);
+    assert_eq!(added.notification(&Actor::Anonymous), None);
+    let known = DomainEvent::SignedIn {
+        session_id: SessionId::new(),
+        method: crate::AuthenticationMethod::Passkey,
+        inline: None,
+        new_device: false,
+    };
+    assert_eq!(known.notification(&owner()), None);
+}
+
+/// The kinds outside the security category are those of announcements and
+/// raised alerts, which the banner's query leaves out by name.
+#[test]
+fn outside_security_names_the_kinds_it_leaves_out() {
+    let outside = [
+        Notification::Announcement {
+            announcement_id: crate::AnnouncementId::new(),
+            title: String::new(),
+            text: String::new(),
+        },
+        Notification::AlertRaised {
+            alert_id: crate::AlertId::new(),
+            title: String::new(),
+            text: String::new(),
+        },
+    ];
+    for notification in outside {
+        let stored = serde_json::to_value(&notification).expect("serializes");
+        let kind = stored["kind"].as_str().expect("kind");
+        assert!(Notification::OUTSIDE_SECURITY.contains(&kind), "{kind}");
+        assert!(!notification.security());
+    }
+    assert!(Notification::NewDeviceSignIn.security());
+}

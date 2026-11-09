@@ -200,6 +200,7 @@ async fn related_pages_sign_in_for_pkce_bound_codes() {
         session_id,
         method: AuthenticationMethod::Passkey,
         inline: Some(inline),
+        new_device: false,
     } = fixture
         .events()
         .await

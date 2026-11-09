@@ -86,6 +86,8 @@ sourceorigin_common::str_enum! {
         /// A recovery was undone: its link cancelled, and what the link did, if it
         /// was used, taken back.
         RecoveryUndone = "recovery_undone",
+        /// The owner recognized a security notification, which was marked read.
+        Recognized = "recognized",
     }
 }
 
@@ -118,6 +120,7 @@ impl Notice {
             Self::RecoveryUndone => {
                 "The recovery is undone. Its link no longer works, and if it was used, its passkey is removed, every device is signed out, and apps ask for access again."
             }
+            Self::Recognized => "Thanks for checking. The notification is marked as read.",
         }
     }
 }
