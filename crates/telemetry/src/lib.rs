@@ -46,7 +46,7 @@ use sourceorigin_common::{
     ErrorChain, TraceId,
     config::{ConfigurationError, Variable},
 };
-use std::io::IsTerminal;
+use std::{io::IsTerminal, time::Duration};
 use thiserror::Error;
 use tracing::{Metadata, Subscriber, subscriber::Interest};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -99,7 +99,10 @@ pub enum TelemetryError {
     Flush(#[from] OTelSdkError),
     /// The flush panicked.
     #[error("telemetry flush panicked")]
-    Join(#[from] tokio::task::JoinError),
+    Panicked(#[from] tokio::sync::oneshot::error::RecvError),
+    /// The flush did not finish in time, so what was still pending is lost.
+    #[error("telemetry flush did not finish within {0:?}")]
+    TimedOut(Duration),
 }
 
 /// A service's installed telemetry. Spans always get trace IDs; exporters exist
@@ -181,19 +184,29 @@ impl Telemetry {
     }
 
     /// Flushes and stops every exporter; call it once the service stopped serving.
+    /// It gives up after `within`, so a slow or unreachable collector cannot hold
+    /// up an exit, such as a container's stop.
     ///
     /// # Errors
-    /// Returns the first provider that failed to flush.
-    pub async fn shutdown(self) -> Result<(), TelemetryError> {
-        // Exporters send on this runtime while the flush blocks its own thread.
-        tokio::task::spawn_blocking(move || {
+    /// Returns the first provider that failed to flush, or that the flush took
+    /// longer than `within`.
+    pub async fn shutdown(self, within: Duration) -> Result<(), TelemetryError> {
+        let (flushed, result) = tokio::sync::oneshot::channel();
+        // Exporters send on this runtime while the flush blocks its own thread. A
+        // detached thread, unlike `spawn_blocking`, is never waited for when the
+        // runtime drops, so a flush that times out does not delay the exit. Blocking
+        // work the exporters started on the runtime, such as a DNS lookup, still
+        // holds a runtime's drop: a bounded exit also needs `shutdown_background`.
+        std::thread::spawn(move || {
             let tracer = self.tracer.shutdown();
             let meter = self.meter.map_or(Ok(()), |meter| meter.shutdown());
             let logger = self.logger.map_or(Ok(()), |logger| logger.shutdown());
-            tracer.and(meter).and(logger)
-        })
-        .await??;
-        Ok(())
+            let _ = flushed.send(tracer.and(meter).and(logger));
+        });
+        let flushed = tokio::time::timeout(within, result)
+            .await
+            .map_err(|_| TelemetryError::TimedOut(within))?;
+        Ok(flushed??)
     }
 
     /// The trace ID of the current span, e.g. to keep with what a request records.
