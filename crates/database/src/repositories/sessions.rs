@@ -674,7 +674,9 @@ impl SessionRepository<'_> {
                 r#"SELECT user_agent_family AS "device: UserAgentFamily",
                     first_seen_at, last_seen_at
                 FROM known_devices
-                WHERE user_id = $1
+                -- The maintenance job deletes older ones; until it runs, they are
+                -- known no more, since their cookie expired.
+                WHERE user_id = $1 AND last_seen_at >= now() - interval '400 days'
                 ORDER BY last_seen_at DESC, first_seen_at DESC"#,
                 user_id.as_uuid(),
             )
