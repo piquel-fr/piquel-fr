@@ -348,6 +348,9 @@ pub struct NotificationPage<'a> {
     /// The page undoing the account's recovery, while one can still be undone
     /// and the notification is about it.
     pub undo: Option<&'a str>,
+    /// The admin dashboard's Alerts tab, for an alert's notification, unless
+    /// the dashboard is off.
+    pub alerts: Option<&'a str>,
     /// Its event's entry in the security history, while kept.
     pub entry: Option<&'a HistoryRow<'a>>,
     /// What the account holds, to name what the entry refers to.
@@ -358,7 +361,8 @@ pub struct NotificationPage<'a> {
 
 /// One notification's page: what it says, its security history entry while the
 /// history keeps it, which the owner may report as not theirs where the history
-/// allows, the recovery's undo page when it is about one, and marking it unread.
+/// allows, the recovery's undo page when it is about one, the dashboard's
+/// alerts for an alert's, and marking it unread.
 #[component]
 pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> Result<impl View> {
     let reportable = page.entry.filter(|entry| entry.reportable);
@@ -372,6 +376,9 @@ pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> 
                 announcement_text(body: row.body)
                 if let Some(undo) = page.undo {
                     <p><a class="button danger" href=(undo)>"Undo the recovery"</a></p>
+                }
+                if let Some(alerts) = page.alerts {
+                    <p><a class="button" href=(alerts)>"See the alerts"</a></p>
                 }
             </div>
             if let Some(entry) = page.entry {

@@ -19,7 +19,7 @@
 <p><a href="{{ link }}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">Add a passkey</a></p>
 <p style="font-size:14px;color:#555555">Or copy this link: {{ link }}</p>
 <p>The link works once, for {{ hours }} hours. If you didn’t ask for this, contact Piquel support. If you still have a passkey, you can also <a href="{{ undo }}">cancel the recovery</a>.</p>
-{%- when Content::Notification { address: _, subject, body, page, undo } %}
+{%- when Content::Notification { address: _, subject, body, page, undo, alerts } %}
 <p><strong>{{ subject }}.</strong></p>
 <p>{{ body }}</p>
 {%- match undo %}
@@ -27,6 +27,9 @@
 <p><a href="{{ undo }}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">Undo the recovery</a></p>
 {%- when None %}
 {%- endmatch %}
+{%- if let Some(alerts) = alerts %}
+<p><a href="{{ alerts }}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">See the alerts</a></p>
+{%- endif %}
 <p><a href="{{ page }}">Read it in your Piquel notifications</a></p>
 {%- when Content::Announcement { address: _, subject: _, body: _, paragraphs, everyone, inbox, unsubscribe } %}
 {%- for paragraph in paragraphs %}

@@ -37,7 +37,8 @@ The sidebar's **Notifications** tab shows how many are unread, and the
 A notification's page says what happened and shows its entry in your
 [security history](security-history.md), with **This wasn’t me** if you can
 report it. An alert concerns the service rather than your account, so it has
-no entry. Select **Mark as unread** to keep it in mind for later.
+no entry, and **See the alerts** opens the admin dashboard's **Alerts** tab.
+Select **Mark as unread** to keep it in mind for later.
 
 To mark every notification read, select **Mark all as read** in the inbox.
 **Show older notifications** pages back through the rest.

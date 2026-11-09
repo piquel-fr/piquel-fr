@@ -6,7 +6,10 @@
 use crate::{
     account::{AccountError, Owner},
     notifications::Unsubscribe,
-    routes::page::{self, settings},
+    routes::{
+        self,
+        page::{self, settings},
+    },
     security::FETCH_SITE_HEADER,
     web::{
         Failure, WebApplication,
@@ -172,8 +175,8 @@ impl AccountPage for NotificationPage {
     }
 
     /// Marks the notification read once opened from auth's own pages, then
-    /// shows it, with its history entry and the recovery's undo page while it
-    /// can still be undone.
+    /// shows it, with its history entry, the recovery's undo page while it can
+    /// still be undone, and the dashboard's alerts for an alert's.
     async fn render(
         web: &WebApplication,
         cx: &Cx,
@@ -205,11 +208,17 @@ impl AccountPage for NotificationPage {
             Notification::Recovered | Notification::AccountSecured { kept: true }
         );
         let here = uri(cx).path().to_owned();
+        let alerts = web
+            .dashboard
+            .as_ref()
+            .filter(|_| view.item.notification.links_alerts())
+            .map(|dashboard| dashboard.dashboard().join(routes::dashboard::ALERTS));
         let page = piquel_ui::NotificationPage {
             here: &here,
             inbox: settings::NOTIFICATIONS,
             history: settings::HISTORY,
             undo: (about_recovery && reader.recovery().is_some()).then_some(page::RECOVER_UNDO),
+            alerts: alerts.as_deref(),
             entry: entry.as_ref(),
             holds: Holdings {
                 passkeys: &passkeys,

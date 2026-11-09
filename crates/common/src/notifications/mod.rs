@@ -299,6 +299,13 @@ impl Notification {
         }
     }
 
+    /// Whether its page and email link the admin dashboard's Alerts tab, while
+    /// auth serves a dashboard.
+    #[must_use]
+    pub const fn links_alerts(&self) -> bool {
+        matches!(self, Self::AlertRaised { .. })
+    }
+
     /// Where its email goes. Every notification is emailed, except an
     /// announcement whose recipient turned [`EmailCategory::Announcements`] off.
     #[must_use]
