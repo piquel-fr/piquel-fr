@@ -199,7 +199,8 @@ impl WebApplication {
         step: RecoverStep<'_>,
         alert: Option<&str>,
     ) -> Result<Response, Failure> {
-        let view = view! { sourceorigin_ui::recover(action: page::RECOVER, step: step, alert: alert) };
+        let view =
+            view! { sourceorigin_ui::recover(action: page::RECOVER, step: step, alert: alert) };
         let title = Title::Recover.as_str();
         Ok(self.render(cx, status, title, &[], view).await?)
     }

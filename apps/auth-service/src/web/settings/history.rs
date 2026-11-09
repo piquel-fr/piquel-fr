@@ -97,7 +97,8 @@ impl AccountPage for History {
                 confirmed: reader.is_recent(),
             },
         };
-        let page = Child::new(view! { sourceorigin_ui::history(rows: &rows, holds: holds, page: page) });
+        let page =
+            Child::new(view! { sourceorigin_ui::history(rows: &rows, holds: holds, page: page) });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await
     }

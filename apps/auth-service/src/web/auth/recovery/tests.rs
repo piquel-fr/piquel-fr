@@ -314,7 +314,10 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
     let unaided = Recovering::new(&database, false).await;
     let unaided = open(Some(unaided.id));
     let page = html(browser.post(&replicas, RECOVER_UNDO, &unaided).await).await;
-    assert!(page.contains("only SourceOrigin support can undo it"), "{page}");
+    assert!(
+        page.contains("only SourceOrigin support can undo it"),
+        "{page}"
+    );
     assert_eq!(ceremonies(&page, routes::recovery::UNDO_START), 0, "{page}");
 
     let undone = |signed_in| UndoChange::Undone { signed_in };

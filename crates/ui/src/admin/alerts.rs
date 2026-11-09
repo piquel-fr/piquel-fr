@@ -69,7 +69,8 @@ pub async fn alert_list<'a>(
         if cards.is_empty() {
             <section class="card"><p class="empty">"No alert needs attention."</p></section>
         }
-        for card in cards {
+        #[key(position)]
+        for (position, card) in cards.iter().enumerate() {
             alert_card(card: card)
         }
     })
@@ -94,7 +95,8 @@ pub async fn previous_alerts<'a>(
         if cards.is_empty() {
             <section class="card"><p class="empty">"No alert has cleared yet."</p></section>
         }
-        for card in cards {
+        #[key(position)]
+        for (position, card) in cards.iter().enumerate() {
             alert_card(card: card)
         }
         if full {

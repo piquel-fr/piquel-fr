@@ -235,7 +235,8 @@ async fn email_preferences<'a>(cx: &Cx, page: InboxPage<'a>) -> Result<impl View
                 })
             </p>
             <ul class="list">
-                for preference in page.preferences {
+                #[key(position)]
+                for (position, preference) in page.preferences.iter().enumerate() {
                     <li>
                         <div class="text">
                             <strong>(preference.category.label())</strong>

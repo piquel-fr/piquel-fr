@@ -364,9 +364,9 @@ impl WebApplication {
         match P::render(self, cx, reader, row, outcome).await {
             Err(Failure::Missing) => {
                 let head = match P::SECTION {
-                    Section::Developers => {
-                        Child::new(view! { sourceorigin_ui::back_to_apps(home: page::developers::HOME) })
-                    }
+                    Section::Developers => Child::new(
+                        view! { sourceorigin_ui::back_to_apps(home: page::developers::HOME) },
+                    ),
                     Section::Account => Child::default(),
                 };
                 let framed = Framed {

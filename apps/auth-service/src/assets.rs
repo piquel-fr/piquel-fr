@@ -81,7 +81,10 @@ mod tests {
         for (asset, content_type) in [
             (EmbeddedAssets::STYLESHEET, "text/css; charset=utf-8"),
             (sourceorigin_ui::RUNTIME, "text/javascript; charset=utf-8"),
-            (*sourceorigin_ui::EXPRESSIONS, "text/javascript; charset=utf-8"),
+            (
+                *sourceorigin_ui::EXPRESSIONS,
+                "text/javascript; charset=utf-8",
+            ),
             (sourceorigin_ui::FONTS[0], "font/woff2"),
         ] {
             let response = EmbeddedAssets::serve(&asset.path()).expect("found");

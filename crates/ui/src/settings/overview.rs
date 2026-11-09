@@ -168,7 +168,11 @@ fn sessions_detail(browsers: usize, other: usize) -> String {
 #[component]
 async fn link_hint<'a>(cx: &Cx, provider: Provider, sign_in: &'a str) -> Result<impl View> {
     let name = provider.name();
-    let dismissal = Dismissal::new(cx, format!("sourceorigin-link:{}", provider.as_str()), false);
+    let dismissal = Dismissal::new(
+        cx,
+        format!("sourceorigin-link:{}", provider.as_str()),
+        false,
+    );
     Ok(view! {
         <section class="hint" :hidden=(dismissal.hidden()) @mount=(dismissal.mount())>
             icon(kind: Icon::Link)

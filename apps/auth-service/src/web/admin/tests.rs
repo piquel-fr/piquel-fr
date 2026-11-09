@@ -7,8 +7,6 @@ use crate::{
     AdminService, AuthConfig, DashboardConfig, Reason,
     account::AccountService,
     admin::DashboardSignIn,
-    assets::EmbeddedAssets,
-    config::EmailConfig,
     passkey::AdminProof,
     routes,
     security::{BrowserCookie, RequestContext},
@@ -284,7 +282,10 @@ async fn signing_in_hands_off_through_auth_once() {
     let csp = policy(&page).to_owned();
     let handoff = format!("form-action 'self' {AUTH_ORIGIN}{};", routes::page::ADMIN);
     assert!(csp.contains(&handoff), "{csp}");
-    let (runtime, expressions) = (sourceorigin_ui::RUNTIME.path(), sourceorigin_ui::EXPRESSIONS.path());
+    let (runtime, expressions) = (
+        sourceorigin_ui::RUNTIME.path(),
+        sourceorigin_ui::EXPRESSIONS.path(),
+    );
     assert!(
         csp.contains(&format!(
             "script-src {DASHBOARD}{runtime} {DASHBOARD}{expressions};"

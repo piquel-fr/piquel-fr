@@ -557,7 +557,8 @@ impl WebApplication {
     ) -> Result<Response> {
         let (status, code, description) = error.public();
         let description = status.is_client_error().then_some(description);
-        let page = view! { sourceorigin_ui::failure(code: &code, description: description, link: link) };
+        let page =
+            view! { sourceorigin_ui::failure(code: &code, description: description, link: link) };
         self.render(cx, status, title, &[], page).await
     }
 }
