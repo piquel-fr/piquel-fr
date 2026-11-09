@@ -10,8 +10,8 @@ import { execFileSync } from 'node:child_process';
 import { signedUp, withPasskeys } from './helpers';
 
 // A command that starts a recovery of the account named by the arguments appended
-// to it, e.g. `just auth user recover` or `piquelctl preview exec … -- auth-service
-// user recover`.
+// to it, e.g. `just auth user recover` or
+// `piquelctl preview exec … -- auth-service --operator <you> user recover`.
 const recover = process.env.E2E_RECOVER;
 
 /** Runs against a deployment whose CLI the test can run, such as CI or a preview. */

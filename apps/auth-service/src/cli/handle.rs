@@ -1,7 +1,7 @@
 //! Checking accounts' handles against the handle rules, changing them, and the
 //! handles kept from others: released ones and reserved ones.
 
-use super::{CliError, Console};
+use super::{CliError, Confirm, Console};
 use crate::{Reason, UserRef};
 use clap::Subcommand;
 use sourceorigin_common::Handle;
@@ -28,11 +28,14 @@ pub(super) enum HandleCommand {
     },
     /// Delete a released handle, or a purged account's last one, so anyone may
     /// claim it again, e.g. after a trademark dispute. An account's current handle is
-    /// never released: rename the account first.
+    /// never released: rename the account first. Asks first.
     Release {
         /// The released handle.
         #[arg(value_parser = Handle::parse)]
         handle: Handle,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// List released handles and purged accounts' last ones, which `release` frees.
     Released,
@@ -79,7 +82,12 @@ impl HandleCommand {
                     .rename_handle(operator, user, new, reason, allow_reserved)
                     .await?;
             }
-            Self::Release { handle } => service.release_handle(operator, handle).await?,
+            Self::Release { handle, confirm } => {
+                confirm.ask(&format!(
+                    "Release @{handle}: anyone may claim it, and it is no longer kept for the account that held it"
+                ))?;
+                service.release_handle(operator, handle).await?;
+            }
             Self::Released => {
                 for released in service.list_released_handles(operator).await? {
                     let user = released

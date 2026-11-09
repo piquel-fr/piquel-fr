@@ -541,7 +541,7 @@ pub(crate) fn location(response: &Response) -> url::Url {
 /// command's are.
 pub(crate) fn operator() -> Operator {
     Operator::Cli {
-        os_user: "test".into(),
+        name: "test".parse().expect("operator"),
         host: "test".into(),
     }
 }

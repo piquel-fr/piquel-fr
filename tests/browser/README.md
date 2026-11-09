@@ -26,8 +26,8 @@ it, against the debug binary behind Caddy; see the `e2e` job in
    export E2E_AUTH_URL=$(piquelctl preview url sourceorigin "$branch" --route auth)
    export E2E_ADMIN_URL=$(piquelctl preview url sourceorigin "$branch" --route admin)
    export E2E_WEB_URL=$(piquelctl preview url sourceorigin "$branch" --route web)
-   export E2E_GRANT_ADMIN="piquelctl preview exec sourceorigin $branch auth -- auth-service admin grant"
-   export E2E_RECOVER="piquelctl preview exec sourceorigin $branch auth -- auth-service user recover"
+   export E2E_GRANT_ADMIN="piquelctl preview exec sourceorigin $branch auth -- auth-service --operator e2e admin grant"
+   export E2E_RECOVER="piquelctl preview exec sourceorigin $branch auth -- auth-service --operator e2e user recover"
    export E2E_SERVER_CLIENT_SECRET=<secret>   # printed when you registered browser-e2e-server
    just web test-browser
    ```
@@ -81,7 +81,7 @@ unpadded base64url.
 Previews don't register them. Register them on the preview through its CLI:
 
 ```console
-cli() { piquelctl preview exec sourceorigin "$(git branch --show-current)" auth -- auth-service "$@"; }
+cli() { piquelctl preview exec sourceorigin "$(git branch --show-current)" auth -- auth-service --operator e2e "$@"; }
 cli client create browser-e2e --name 'Browser E2E' \
     --redirect-uri https://browser-e2e.test/callback
 cli client create browser-e2e-sdk --name 'Browser E2E SDK' --trusted --require-par \

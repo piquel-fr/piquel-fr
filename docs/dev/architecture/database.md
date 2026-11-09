@@ -351,7 +351,8 @@ fails for any such function others may execute.
 
 `sourceorigin_common::events` defines `DomainEvent`, one variant per account or security
 change, and `Actor`, the one type every feature uses to say who caused it: a user,
-an administrator, an operator at the CLI (`$USER` and host name), a client, a
+an administrator, an operator at the CLI (who they named themselves and the host
+name), a client, a
 background job, or an anonymous browser. Handlers record an event with
 `tx.record(&context, subject, event)` in the transaction that makes the change, so a
 rolled-back change leaves no event. `record` also creates the outbound deliveries

@@ -239,16 +239,20 @@ skills. Their token needs `previews:deploy` and `previews:delete` on
 ## Running auth-service commands
 
 [Administration](administration.md) and every other operations page run
-`auth-service` commands. In an environment, run them in an auth container:
+`auth-service` commands. In an environment, run them in an auth container,
+naming yourself with `--operator`:
 
 ```sh
-piquelctl app exec sourceorigin auth --env production -- auth-service admin list
+piquelctl app exec sourceorigin auth --env production -- auth-service --operator alice admin list
 ```
 
 The command shares the container's configuration and secrets, and `piquelctl`
-exits with its exit code. A command that asks for confirmation needs a
-terminal: add `-t`, or give the command `--yes`. For a preview, run
-`piquelctl preview exec sourceorigin <branch> auth -- auth-service …`.
+exits with its exit code. The container knows nothing of who you are, so every
+event the command causes records the name `--operator` gives, and an
+administrative command refuses to run without one. A command that asks for
+confirmation needs a terminal: add `-t`, or give the command `--yes`. For a
+preview, run `piquelctl preview exec sourceorigin <branch> auth -- auth-service
+--operator <you> …`.
 
 ## Documentation
 

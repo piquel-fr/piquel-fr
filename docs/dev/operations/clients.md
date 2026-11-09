@@ -72,7 +72,7 @@ settings, change them, and select **Save changes**.
 
 The app's earlier secrets keep working for the grace period, 24 hours by
 default and 30 days at most, so you can switch the app over without downtime.
-`--grace 0`, or **Stop them now**, revokes them at once: for a secret that
+`--grace 0`, or **Stop them now**, revokes them at once, and asks first: for a secret that
 leaked, see [a leaked client secret](incidents.md#a-leaked-client-secret).
 
 ## Disable, suspend or delete a client

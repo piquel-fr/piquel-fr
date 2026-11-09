@@ -26,7 +26,8 @@ import {
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? '';
 // A command that makes the account named by its last argument an administrator,
-// e.g. `just auth admin grant` or `piquelctl app exec … -- auth-service admin grant`.
+// e.g. `just auth admin grant` or
+// `piquelctl app exec … -- auth-service --operator <you> admin grant`.
 const grantAdmin = process.env.E2E_GRANT_ADMIN ?? '';
 
 /** Runs against a deployment with the dashboard, as CI's and previews have. */

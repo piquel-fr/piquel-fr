@@ -3,14 +3,15 @@
 
 use super::*;
 use crate::{
-    AdminService,
+    AdminService, Operator, Reason,
     account::{AccountOperation, AccountService},
-    admin::AdminOperation,
+    admin::{AdminOperation, OperatorName},
     tests::{Browser, Replicas, operator},
 };
 use sourceorigin_common::{
-    AccountStatus, UserId,
+    AccountStatus, Handle, UserId,
     clients::ClientKind,
+    config::ConfigurationError,
     events::{Actor, DomainEvent},
 };
 use sourceorigin_repository::StoredEvent;
@@ -238,6 +239,128 @@ fn confirmation_needs_a_terminal_or_yes() {
     assert!(ask(false, true, "y\n").is_ok());
     assert!(matches!(ask(false, true, "\n"), Err(CliError::Declined)));
     assert!(matches!(ask(false, true, "no\n"), Err(CliError::Declined)));
+}
+
+/// An operator's name is 1 to 64 characters without spaces, and never
+/// `unknown`; `--operator` names one wherever it is given.
+#[test]
+fn operators_are_named() {
+    for valid in ["alice", "ronan@laptop", "deploy"] {
+        assert!(valid.parse::<OperatorName>().is_ok(), "{valid}");
+    }
+    let long = "a".repeat(65);
+    for invalid in [
+        "",
+        "two words",
+        "unknown",
+        "Unknown",
+        "tab\there",
+        long.as_str(),
+    ] {
+        assert!(invalid.parse::<OperatorName>().is_err(), "{invalid:?}");
+    }
+    for arguments in [
+        ["auth-service", "--operator", "alice", "user", "show", "bob"],
+        ["auth-service", "user", "show", "bob", "--operator", "alice"],
+    ] {
+        let cli = Cli::try_parse_from(arguments).expect("arguments");
+        assert_eq!(cli.operator, Some("alice".parse().expect("name")));
+    }
+}
+
+/// Commands run as the operator `--operator` names, else the one the
+/// environment names, and refuse when nothing names one.
+#[test]
+fn the_operator_is_named_or_the_command_refused() {
+    let name = |name: &str| Some(name.parse::<OperatorName>().expect("name"));
+    let recorded =
+        |operator: Result<Operator, CliError>| match operator.expect("operator").context().actor {
+            Actor::Cli { os_user, .. } => os_user,
+            actor => panic!("{actor:?}"),
+        };
+    let unread = || -> Result<Option<OperatorName>, ConfigurationError> {
+        panic!("--operator wins over the environment")
+    };
+    assert_eq!(recorded(Console::operator(name("alice"), unread)), "alice");
+    assert_eq!(
+        recorded(Console::operator(None, || Ok(name("deploy")))),
+        "deploy"
+    );
+    assert!(matches!(
+        Console::operator(None, || Ok(None)),
+        Err(CliError::UnknownOperator)
+    ));
+}
+
+/// Revoking a signing key, making a new one sign at once, revoking a client's
+/// earlier secrets at once and releasing a handle each ask first, and without a
+/// terminal or `--yes` change nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn destructive_commands_confirm() {
+    let database = Replicas::database().await;
+    let service = AdminService::new(database.clone(), true);
+    let owner = Browser::new_account(&database).await;
+    let held = database
+        .users()
+        .find_by_id(owner.user_id)
+        .await
+        .expect("lookup")
+        .expect("account")
+        .handle;
+    let renamed = format!("renamed-{}", &owner.user_id.to_string()[24..]);
+    service
+        .rename_handle(
+            &operator(),
+            owner.user_id,
+            Handle::parse(&renamed).expect("handle"),
+            Reason::parse("Asked by email".into()).expect("reason"),
+            false,
+        )
+        .await
+        .expect("rename");
+    let keys = service.list_signing_keys(&operator()).await.expect("keys");
+    let name = || Some("test".parse().expect("operator"));
+    for arguments in [
+        ["auth-service", "keys", "rotate", "--now"],
+        ["auth-service", "keys", "revoke", "primary"],
+    ] {
+        let Some(Command::Keys(command)) =
+            Cli::try_parse_from(arguments).expect("arguments").command
+        else {
+            panic!("a keys command");
+        };
+        let refused = command.run(database.clone(), name()).await;
+        assert!(
+            matches!(refused, Err(CliError::Unconfirmed)),
+            "{arguments:?}"
+        );
+    }
+    let console = Console::new(database.clone(), name()).expect("console");
+    let held = held.to_string();
+    for arguments in [
+        vec!["handle", "release", held.as_str()],
+        vec!["client", "rotate-secret", "notes", "--grace", "0"],
+    ] {
+        let refused = Administration::parse(&arguments).run(&console).await;
+        assert!(
+            matches!(refused, Err(CliError::Unconfirmed)),
+            "{arguments:?}"
+        );
+    }
+    assert_eq!(
+        service.list_signing_keys(&operator()).await.expect("keys"),
+        keys,
+        "no key changed"
+    );
+    let released = service
+        .list_released_handles(&operator())
+        .await
+        .expect("released");
+    assert!(
+        released.iter().any(|kept| kept.handle.as_str() == held),
+        "still kept: {released:?}"
+    );
 }
 
 impl Administration {

@@ -6,7 +6,7 @@ down, or mail stops going out. Each runbook says how you notice, what to do in
 order, and how to check that it's over.
 
 Run every `auth-service` command below in the affected environment, with
-`piquelctl app exec -t sourceorigin auth --env production -- auth-service …` (see
+`piquelctl app exec -t sourceorigin auth --env production -- auth-service --operator <you> …` (see
 [running auth-service commands](deploying.md#running-auth-service-commands)).
 `-t` gives the command a terminal: most commands below ask you to confirm what
 they will change, and refuse without one. The

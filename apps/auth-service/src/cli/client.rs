@@ -77,9 +77,13 @@ pub(super) enum ClientCommand {
     RotateSecret {
         /// The client's ID.
         id: ClientId,
-        /// How long earlier secrets keep working, e.g. 30m, 24h or 7d; 0 revokes them now.
+        /// How long earlier secrets keep working, e.g. 30m, 24h or 7d; 0 revokes them
+        /// now, which asks first.
         #[arg(long, default_value = "24h")]
         grace: GracePeriod,
+        /// Confirmation, which `--grace 0` needs.
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// Approve, remove or list the origins whose pages may sign users in with
     /// their passkeys, without sending them to auth's pages.
@@ -234,9 +238,16 @@ impl ClientCommand {
                 service.delete_client(operator, &id).await?;
                 ClientChange::Silent
             }
-            Self::RotateSecret { id, grace } => ClientChange::Secret(Some(
-                service.rotate_client_secret(operator, &id, grace).await?,
-            )),
+            Self::RotateSecret { id, grace, confirm } => {
+                if grace.duration().is_zero() {
+                    confirm.ask(&format!(
+                        "Rotate client {id}'s secret and revoke every earlier one now: the client stops signing users in until it uses the new one"
+                    ))?;
+                }
+                ClientChange::Secret(Some(
+                    service.rotate_client_secret(operator, &id, grace).await?,
+                ))
+            }
             Self::Origin(command) => {
                 command.run(console).await?;
                 ClientChange::Silent

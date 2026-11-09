@@ -57,6 +57,11 @@ pub(super) enum CliError {
         #[source]
         source: AdminError,
     },
+    /// Nothing names who runs an administrative command.
+    #[error(
+        "who runs this command is unknown: pass --operator NAME, or set AUTH_OPERATOR, as piquelctl app exec sets no $USER"
+    )]
+    UnknownOperator,
     /// A change that needs confirmation ran without a terminal or `--yes`.
     #[error("this command needs confirmation: run it on a terminal, or pass --yes")]
     Unconfirmed,

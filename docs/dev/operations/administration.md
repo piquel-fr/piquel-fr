@@ -27,14 +27,14 @@ deployed. In production (for staging, use `--env staging` and its own hosts):
 1. Create an invitation, since signing up needs one:
 
    ```sh
-   piquelctl app exec sourceorigin auth --env production -- auth-service invite create
+   piquelctl app exec sourceorigin auth --env production -- auth-service --operator alice invite create
    ```
 
 2. Open the link it prints, and sign up with a passkey.
 3. Grant the new account administrator rights:
 
    ```sh
-   piquelctl app exec sourceorigin auth --env production -- auth-service admin grant <handle>
+   piquelctl app exec sourceorigin auth --env production -- auth-service --operator alice admin grant <handle>
    ```
 
 4. From a device on the tailnet, open `https://admin.sourceorigin.dev`, and sign in
@@ -424,7 +424,9 @@ Each alert says what to look at. Auth raises these:
 - Commands that change a lot describe the change and ask for confirmation:
   `user disable`, `user delete`, `user recover`, `user undo-recovery`,
   `session revoke-all`, `admin revoke`, `client disable`, `client suspend`,
-  `client delete`, `audit prune`, `announcement send`, and `account … passkeys revoke`,
+  `client delete`, `client rotate-secret --grace 0`, `keys revoke`, `keys rotate
+  --now`, `handle release`, `audit prune`, `announcement send`, and `account …
+  passkeys revoke`,
   `identities unlink` and `sessions revoke-all`. Without a terminal, they
   refuse unless given `--yes`.
 - `--output json` prints the views the dashboard shows, as defined in
@@ -433,8 +435,11 @@ Each alert says what to look at. Auth raises these:
   `admin list`, `announcement list`, `announcement show`
   (`AnnouncementDetail`), `audit verify`'s result, and `alerts list`
   (`AlertDetail`, from `sourceorigin_common::alerts`).
-- Each change is recorded as an event with its operator: `$USER` and the host
-  name.
+- Each change, and each view of an account, is recorded as an event with its
+  operator: `--operator`, else `AUTH_OPERATOR`, else `$USER`, and the host name.
+  Without any of them, as inside `piquelctl app exec`, which sets no `$USER`,
+  administrative commands refuse to run, so nothing is recorded as an unknown
+  operator's.
 - Failures print their causes and exit with 1. Usage errors exit with 2.
 
 ## How the dashboard signs administrators in

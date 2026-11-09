@@ -3,10 +3,12 @@
 //! administrator or client.
 
 use super::CliError;
-use crate::{AdminService, AuthConfig, Operator, UserRef, account::AccountService};
+use crate::{
+    AdminService, AuthConfig, Operator, UserRef, account::AccountService, admin::OperatorName,
+};
 use clap::{Args, ValueEnum};
 use serde::Serialize;
-use sourceorigin_common::{UserId, admin::Paging};
+use sourceorigin_common::{UserId, admin::Paging, config::ConfigurationError};
 use sourceorigin_repository::Database;
 use std::io::{BufRead, IsTerminal};
 
@@ -22,13 +24,28 @@ pub(super) struct Console {
 }
 
 impl Console {
-    /// Runs operations on `database` as the operator at this terminal.
-    pub(super) fn new(database: Database) -> Result<Self, CliError> {
+    /// Runs operations on `database` as the operator at this terminal: `name`,
+    /// given by `--operator`, or the one the environment names.
+    pub(super) fn new(database: Database, name: Option<OperatorName>) -> Result<Self, CliError> {
         Ok(Self {
             service: AdminService::new(database.clone(), AuthConfig::mails_from_environment()?),
             account: AccountService::new(database),
-            operator: Operator::terminal()?,
+            operator: Self::operator(name, OperatorName::from_environment)?,
         })
+    }
+
+    /// The operator at this terminal: `given` by `--operator`, else the one
+    /// `environment` names. Refuses when neither names one, so nothing is
+    /// recorded as an unknown operator's.
+    pub(super) fn operator(
+        given: Option<OperatorName>,
+        environment: impl FnOnce() -> Result<Option<OperatorName>, ConfigurationError>,
+    ) -> Result<Operator, CliError> {
+        let name = match given {
+            Some(name) => name,
+            None => environment()?.ok_or(CliError::UnknownOperator)?,
+        };
+        Ok(Operator::terminal(name)?)
     }
 
     /// The account `user` names. A failure names the reference, as given.

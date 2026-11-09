@@ -498,7 +498,7 @@ impl Change {
                 "The account is shown under the new name at once. Applications receive it as its name once they refresh its profile."
             }
             Self::ReleaseHandle => {
-                "Anyone can claim the handle again, such as after a trademark dispute. The account that held it can no longer take it back."
+                "Anyone can claim the handle again, such as after a trademark dispute. It is no longer kept for the account that held it."
             }
             Self::ReserveHandle => {
                 "Nobody can take the handle, or one that looks like it, at signup or in their settings. Give it to the account it is kept for with Change handle and “Allow a reserved handle”. An account that already holds it keeps it."
