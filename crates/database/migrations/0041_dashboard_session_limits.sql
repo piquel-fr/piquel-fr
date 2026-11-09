@@ -10,6 +10,5 @@ ALTER TABLE dashboard_sessions
 -- A session signed in more than 12 hours ago has ended already.
 UPDATE dashboard_sessions SET expires_at = created_at + interval '12 hours';
 
--- Cleanup deletes the sessions that ended, and revoking an account's rights
--- deletes its own.
+-- Cleanup deletes the sessions that ended.
 CREATE INDEX dashboard_sessions_expires_idx ON dashboard_sessions (expires_at);

@@ -102,8 +102,11 @@ the rights, as a change does, so a revocation waits for it and then ends what it
 wrote, or comes first and refuses it. Signing out of the dashboard ends only its
 session. Signing in and out are recorded as `dashboard_signed_in` and
 `dashboard_signed_out`, which the administrator's security history shows; a
-session that times out records nothing. The account's devices list each
-dashboard session under the auth session it rests on, with its last use.
+session that times out records nothing. A confirmation on auth's handoff page,
+where the dashboard's script cannot confirm on the page, signs in again: it
+records another sign-in, and the new session's 12 hours start from it, since a
+passkey proved it. The account's devices list each dashboard session under the
+auth session it rests on, with its last use.
 [The admin dashboard's session](sessions.md#the-admin-dashboards-session) describes
 how it is stored.
 
