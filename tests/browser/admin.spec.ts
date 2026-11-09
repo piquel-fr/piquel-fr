@@ -244,7 +244,7 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   await revoke.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/administrators`);
   await expect(row(`grantee-${suffix}`)).toHaveCount(0);
-  // The account keeps its SourceOrigin session, but its dashboard session ended with
+  // The account keeps its Origin Account session, but its dashboard session ended with
   // its rights, and it no longer reaches the dashboard.
   await user.goto(`${adminUrl}/users`);
   await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
