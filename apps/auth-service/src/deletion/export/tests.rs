@@ -6,6 +6,7 @@ use chrono::TimeZone;
 use serde_json::json;
 use sourceorigin_common::{
     AuthenticationMethod, ClientId, EmailId, EventId, NotificationId, TokenId,
+    admin::DashboardSession,
     events::{Browser, HistoryActor, HistoryEntry, Platform, UserAgentFamily},
     notifications::{EmailCategory, Notification, NotificationPreference},
 };
@@ -62,11 +63,6 @@ fn serializes_every_category_in_its_documented_shape() {
             released_at: None,
         })],
         administrator: true,
-        dashboard_sessions: vec![DashboardSession::from(DashboardSignIn {
-            session_id: session,
-            created_at: at,
-            confirmed_at: Some(at),
-        })],
         emails: vec![EmailView {
             id: email,
             address: "ada@example.com".into(),
@@ -86,8 +82,8 @@ fn serializes_every_category_in_its_documented_shape() {
             subject: "1234".into(),
             linked_email: Some("ada@example.com".into()),
         }],
-        sessions: vec![SessionItem::new(
-            StoredSession {
+        sessions: SessionItem::all(
+            vec![StoredSession {
                 id: session,
                 user_id: user,
                 authentication_methods: vec![AuthenticationMethod::Passkey],
@@ -98,9 +94,15 @@ fn serializes_every_category_in_its_documented_shape() {
                 passkey_confirmed_at: Some(at),
                 user_agent_family: Some(device),
                 last_seen_ip: Some([192, 0, 2, 1].into()),
-            },
+            }],
+            &[DashboardSession {
+                session_id: session,
+                signed_in_at: at,
+                last_used_at: at,
+                expires_at: at,
+            }],
             Some(session),
-        )],
+        ),
         consents: vec![Consent {
             client_id: client.to_string(),
             audience: "notes".into(),
@@ -169,7 +171,7 @@ fn serializes_every_category_in_its_documented_shape() {
         serde_json::to_value(&export).expect("export"),
         json!({
             "format": "sourceorigin.account-export",
-            "version": 2,
+            "version": 3,
             "exported_at": time,
             "profile": {
                 "id": user,
@@ -187,9 +189,6 @@ fn serializes_every_category_in_its_documented_shape() {
             },
             "handles": [{"handle": "ada", "claimed_at": time, "released_at": null}],
             "administrator": true,
-            "dashboard_sessions": [
-                {"session_id": session, "created_at": time, "confirmed_at": time}
-            ],
             "emails": [{"id": email, "address": "ada@example.com", "verified": true, "primary": true}],
             "passkeys": [{
                 "id": passkey,
@@ -213,6 +212,12 @@ fn serializes_every_category_in_its_documented_shape() {
                 "authenticated_at": time,
                 "last_seen_at": time,
                 "expires_at": time,
+                "dashboard": [{
+                    "session_id": session,
+                    "signed_in_at": time,
+                    "last_used_at": time,
+                    "expires_at": time,
+                }],
             }],
             "consents": [{"client_id": "notes", "audience": "notes", "scopes": ["openid"]}],
             "grants": [{

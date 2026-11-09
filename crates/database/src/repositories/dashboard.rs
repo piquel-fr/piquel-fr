@@ -4,10 +4,10 @@
 use super::{DashboardRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use sourceorigin_common::{Handle, PictureId, SessionId, UserId};
+use sourceorigin_common::{Handle, PictureId, SessionId, UserId, admin::DashboardSession};
 
 /// A handoff code, which redeems once, before `expires_at`, in the browser
-/// holding the state its digest names.
+/// holding the state its digest names. Every handoff needs a passkey's proof.
 pub struct InsertHandoff<'a> {
     /// SHA-256 of the code.
     pub code_digest: &'a [u8],
@@ -17,8 +17,9 @@ pub struct InsertHandoff<'a> {
     pub state_digest: &'a [u8],
     /// The dashboard path to go on to.
     pub return_to: &'a str,
-    /// When a passkey confirmed the handoff, if one did.
-    pub confirmed_at: Option<DateTime<Utc>>,
+    /// When a passkey proved the handoff, which confirms the dashboard session
+    /// it starts.
+    pub confirmed_at: DateTime<Utc>,
     /// When the code stops working.
     pub expires_at: DateTime<Utc>,
 }
@@ -28,13 +29,16 @@ pub struct InsertHandoff<'a> {
 pub struct RedeemedHandoff {
     /// The auth session that handed off.
     pub session_id: SessionId,
+    /// Its account.
+    pub user_id: UserId,
     /// The dashboard path to go on to.
     pub return_to: String,
-    /// When a passkey confirmed the handoff, if one did.
-    pub confirmed_at: Option<DateTime<Utc>>,
+    /// When a passkey proved the handoff.
+    pub confirmed_at: DateTime<Utc>,
 }
 
-/// A dashboard session whose auth session is still active.
+/// A dashboard session in use: its auth session is still active, and it has
+/// not timed out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredDashboardSession {
     /// Its auth session.
@@ -49,20 +53,19 @@ pub struct StoredDashboardSession {
     pub confirmed_at: Option<DateTime<Utc>>,
 }
 
-/// One of an account's sign-ins to the dashboard.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DashboardSignIn {
-    /// The auth session it rests on.
+/// A dashboard session that signing out ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EndedDashboardSession {
+    /// Its auth session.
     pub session_id: SessionId,
-    /// When it started.
-    pub created_at: DateTime<Utc>,
-    /// When a passkey last confirmed it, if one did.
-    pub confirmed_at: Option<DateTime<Utc>>,
+    /// The account that was signed in.
+    pub user_id: UserId,
 }
 
 impl DashboardRepository<'_> {
-    /// Lists `user_id`'s dashboard sessions, newest first, while their auth
-    /// sessions are kept.
+    /// Lists `user_id`'s dashboard sessions still in use, newest first: their
+    /// auth sessions are active, they have not reached their `expires_at`, and
+    /// their last request came after `idle_since`.
     ///
     /// # Errors
     ///
@@ -70,18 +73,23 @@ impl DashboardRepository<'_> {
     pub async fn of_user(
         &mut self,
         user_id: UserId,
-    ) -> Result<Vec<DashboardSignIn>, DatabaseError> {
+        idle_since: DateTime<Utc>,
+    ) -> Result<Vec<DashboardSession>, DatabaseError> {
         run!(
             self,
             fetch_all,
             sqlx::query_as!(
-                DashboardSignIn,
-                r#"SELECT d.session_id AS "session_id: SessionId", d.created_at, d.confirmed_at
+                DashboardSession,
+                r#"SELECT d.session_id AS "session_id: SessionId", d.created_at AS signed_in_at,
+                    d.last_used_at, d.expires_at
                 FROM dashboard_sessions d
                 JOIN sessions s ON s.id = d.session_id
                 WHERE s.user_id = $1
+                AND s.revoked_at IS NULL AND s.expires_at > now()
+                AND d.expires_at > now() AND d.last_used_at > $2
                 ORDER BY d.created_at DESC"#,
                 user_id.as_uuid(),
+                idle_since,
             )
         )
     }
@@ -113,9 +121,32 @@ impl DashboardRepository<'_> {
         Ok(())
     }
 
+    /// The account whose session handed off the unexpired code with this digest,
+    /// if there is one: what redeeming it locks first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn handoff_user(
+        &mut self,
+        code_digest: &[u8],
+    ) -> Result<Option<UserId>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"SELECT s.user_id AS "user_id: UserId"
+                FROM dashboard_handoffs h
+                JOIN sessions s ON s.id = h.session_id
+                WHERE h.code_digest = $1 AND h.expires_at > now()"#,
+                code_digest,
+            )
+        )
+    }
+
     /// Consumes the unexpired code with this digest, if the browser's state has
-    /// this digest. A code presented with another state stays, so a forged
-    /// redemption cannot burn the browser's own.
+    /// this digest, and a passkey proved it. A code presented with another state
+    /// stays, so a forged redemption cannot burn the browser's own.
     ///
     /// # Errors
     ///
@@ -130,9 +161,13 @@ impl DashboardRepository<'_> {
             fetch_optional,
             sqlx::query_as!(
                 RedeemedHandoff,
-                r#"DELETE FROM dashboard_handoffs
-                WHERE code_digest = $1 AND state_digest = $2 AND expires_at > now()
-                RETURNING session_id AS "session_id: SessionId", return_to, confirmed_at"#,
+                r#"DELETE FROM dashboard_handoffs h
+                USING sessions s
+                WHERE h.code_digest = $1 AND h.state_digest = $2 AND h.expires_at > now()
+                AND h.confirmed_at IS NOT NULL AND s.id = h.session_id
+                RETURNING h.session_id AS "session_id: SessionId",
+                    s.user_id AS "user_id: UserId", h.return_to,
+                    h.confirmed_at AS "confirmed_at!""#,
                 code_digest,
                 state_digest,
             )
@@ -140,7 +175,7 @@ impl DashboardRepository<'_> {
     }
 
     /// Stores a dashboard session of the auth session `session_id`, confirmed at
-    /// `confirmed_at` if a passkey confirmed it.
+    /// `confirmed_at`, which ends at `expires_at` however busy.
     ///
     /// # Errors
     ///
@@ -149,17 +184,20 @@ impl DashboardRepository<'_> {
         &mut self,
         secret_digest: &[u8],
         session_id: SessionId,
-        confirmed_at: Option<DateTime<Utc>>,
+        confirmed_at: DateTime<Utc>,
+        expires_at: DateTime<Utc>,
     ) -> Result<(), DatabaseError> {
         run!(
             self,
             execute,
             sqlx::query!(
-                "INSERT INTO dashboard_sessions (secret_digest, session_id, confirmed_at)
-                VALUES ($1, $2, $3)",
+                "INSERT INTO dashboard_sessions
+                    (secret_digest, session_id, confirmed_at, expires_at)
+                VALUES ($1, $2, $3, $4)",
                 secret_digest,
                 session_id.as_uuid(),
                 confirmed_at,
+                expires_at,
             )
         )?;
         Ok(())
@@ -193,51 +231,134 @@ impl DashboardRepository<'_> {
             == 1)
     }
 
-    /// The dashboard session with this cookie digest, if its auth session is still
-    /// active: signing out, a revocation or an expiry of the auth session ends it.
+    /// Uses the dashboard session with this cookie digest, if it is still in use:
+    /// its auth session is active, since signing out, a revocation or an expiry
+    /// of the auth session ends it, it has not reached its `expires_at`, and its
+    /// last request came after `idle_since`. Using it makes this request its
+    /// last.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or a row is invalid.
-    pub async fn find_session(
+    pub async fn use_session(
         &mut self,
         secret_digest: &[u8],
+        idle_since: DateTime<Utc>,
     ) -> Result<Option<StoredDashboardSession>, DatabaseError> {
         run!(
             self,
             fetch_optional,
             sqlx::query_as!(
                 StoredDashboardSession,
-                r#"SELECT d.session_id AS "session_id: SessionId",
-                    s.user_id AS "user_id: UserId", h.handle AS "handle: Handle",
-                    p.id AS "picture?: PictureId", d.confirmed_at
-                FROM dashboard_sessions d
-                JOIN sessions s ON s.id = d.session_id
-                JOIN handles h ON h.user_id = s.user_id AND h.released_at IS NULL
-                LEFT JOIN profile_pictures p ON p.user_id = s.user_id
-                WHERE d.secret_digest = $1
-                AND s.revoked_at IS NULL AND s.expires_at > now()"#,
+                r#"WITH used AS (
+                    UPDATE dashboard_sessions d SET last_used_at = now()
+                    FROM sessions s
+                    WHERE d.secret_digest = $1 AND s.id = d.session_id
+                    AND s.revoked_at IS NULL AND s.expires_at > now()
+                    AND d.expires_at > now() AND d.last_used_at > $2
+                    RETURNING d.session_id, s.user_id, d.confirmed_at
+                )
+                SELECT u.session_id AS "session_id: SessionId",
+                    u.user_id AS "user_id: UserId", h.handle AS "handle: Handle",
+                    p.id AS "picture?: PictureId", u.confirmed_at
+                FROM used u
+                JOIN handles h ON h.user_id = u.user_id AND h.released_at IS NULL
+                LEFT JOIN profile_pictures p ON p.user_id = u.user_id"#,
+                secret_digest,
+                idle_since,
+            )
+        )
+    }
+
+    /// Ends the dashboard session with this cookie digest: the one it was, if
+    /// there was one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn delete_session(
+        &mut self,
+        secret_digest: &[u8],
+    ) -> Result<Option<EndedDashboardSession>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                EndedDashboardSession,
+                r#"DELETE FROM dashboard_sessions d
+                USING sessions s
+                WHERE d.secret_digest = $1 AND s.id = d.session_id
+                RETURNING d.session_id AS "session_id: SessionId", s.user_id AS "user_id: UserId""#,
                 secret_digest,
             )
         )
     }
 
-    /// Ends the dashboard session with this cookie digest. Returns `false` if there
-    /// was none.
+    /// Ends every dashboard session of `user_id`, and the handoffs that would
+    /// start one, as revoking its administrator rights does. Returns the auth
+    /// sessions of those still in use, as [`Self::of_user`] finds them with
+    /// `idle_since`, each once.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn delete_session(&mut self, secret_digest: &[u8]) -> Result<bool, DatabaseError> {
-        Ok(run!(
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn end_of_user(
+        &mut self,
+        user_id: UserId,
+        idle_since: DateTime<Utc>,
+    ) -> Result<Vec<SessionId>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_scalar!(
+                r#"WITH handoffs AS (
+                    DELETE FROM dashboard_handoffs h
+                    USING sessions s
+                    WHERE s.id = h.session_id AND s.user_id = $1
+                ),
+                ended AS (
+                    DELETE FROM dashboard_sessions d
+                    USING sessions s
+                    WHERE s.id = d.session_id AND s.user_id = $1
+                    RETURNING d.session_id, d.created_at,
+                        s.revoked_at IS NULL AND s.expires_at > now()
+                        AND d.expires_at > now() AND d.last_used_at > $2 AS in_use
+                )
+                SELECT session_id AS "session_id!: SessionId"
+                FROM ended
+                WHERE in_use
+                GROUP BY session_id
+                ORDER BY min(created_at)"#,
+                user_id.as_uuid(),
+                idle_since,
+            )
+        )
+    }
+
+    /// Moves the last use of the dashboard sessions of the auth session
+    /// `session_id` `by` into the past, as if they had been left that long: a
+    /// fixture for their idle timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the update fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn backdate_use(
+        &mut self,
+        session_id: SessionId,
+        by: chrono::Duration,
+    ) -> Result<(), DatabaseError> {
+        run!(
             self,
             execute,
             sqlx::query!(
-                "DELETE FROM dashboard_sessions WHERE secret_digest = $1",
-                secret_digest,
+                "UPDATE dashboard_sessions
+                SET last_used_at = last_used_at - $2::bigint * interval '1 millisecond'
+                WHERE session_id = $1",
+                session_id.as_uuid(),
+                by.num_milliseconds(),
             )
-        )?
-        .rows_affected()
-            == 1)
+        )?;
+        Ok(())
     }
 }

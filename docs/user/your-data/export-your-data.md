@@ -32,14 +32,15 @@ downloaded".
 - your passkeys: their names, when they were added and last used, and whether
   they sync between devices,
 - the GitHub or Google accounts linked to it,
-- the devices signed in to your account, with their IP addresses,
+- the devices signed in to your account, with their IP addresses, and, if you
+  are an administrator, the admin dashboards signed in through each,
 - the apps you gave access to, with what each may read, and their access
   grants,
 - the apps you registered in the developer console,
 - the recoveries support started for your account,
 - your security history and your notifications, with which kinds of
   notifications you receive by email,
-- whether you are an administrator, and your sign-ins to the admin dashboard.
+- whether you are an administrator.
 
 ## What it doesn't hold
 
