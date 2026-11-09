@@ -219,6 +219,30 @@ impl Operator {
         session.check(stored, held, RECENT_PASSKEY)
     }
 
+    /// Share-locks an administrator's rights until `tx` ends, refusing one who no
+    /// longer holds them, before anything in `tx` locks their account: a purge
+    /// of them, which deletes the rights first, then waits rather than
+    /// deadlocks. A change takes it before recording an event that may notify
+    /// every administrator, which locks their rights too. Checks nothing else,
+    /// so what the caller needs stays as it was.
+    pub(crate) async fn hold_rights(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+    ) -> Result<(), AdminError> {
+        let Self::Admin(session) = self else {
+            return Ok(());
+        };
+        if tx
+            .administrators()
+            .contains_for_share(session.user_id)
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(AdminError::NotAdministrator)
+        }
+    }
+
     /// Requires an administrator to still hold their rights and their session,
     /// signed in with a passkey: what every read needs, before it reads. Reads
     /// lock nothing, so this reads `database` directly. The CLI may always read.

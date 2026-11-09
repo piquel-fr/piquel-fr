@@ -5,6 +5,8 @@ mod access;
 /// Accounts: finding, viewing, disabling and deleting them, their sessions and
 /// their handles.
 mod accounts;
+/// The alerts administrators are shown, and the updates they post on them.
+mod alerts;
 /// Announcements to accounts: drafting, changing and sending them.
 mod announcements;
 /// OIDC clients and the origins approved for their pages.
@@ -15,6 +17,8 @@ mod events;
 mod keys;
 /// Recovering an account whose owner lost every passkey, and undoing it.
 mod recovery;
+
+pub(crate) use alerts::ALERTS_SHOWN;
 
 use super::{AdminError, Operator, Reason};
 use piquel_common::{

@@ -1,7 +1,8 @@
 # Auth, account and admin surfaces
 
-piquel.fr identity spans three hosts. This is the target design; parts not built
-yet are marked *(planned)*.
+This page sets out what each of piquel.fr's three hosts serves, and how
+administrators act on accounts without signing in as their owners. Parts not
+built yet are marked *(planned)*.
 
 | Host | Serves | Used by |
 | --- | --- | --- |
@@ -25,7 +26,7 @@ executable too, on another listener and host (see admin.piquel.fr below).
 The account API is routes in the same executable. It is small next to the pages
 that use it, and keeping it there keeps one binary, one database owner and one
 policy layer per listener. Auth keeps its state in PostgreSQL, so it runs
-as several replicas (see [running several replicas](../operations/deploying.md#running-several-replicas)). Every page it
+as several replicas (see [running several replicas](../operations/replicas.md)). Every page it
 serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
 never cached. Their scripts are the passkey script, which runs the passkey
@@ -50,9 +51,9 @@ them as `op_policy_uri` and `op_tos_uri`, which the SDK reads with the rest of t
 metadata.
 
 Every other path redirects to the same one on auth.piquel.fr, with a temporary
-`307` keeping the path and query; browsers keep the fragment. Links to
-`piquel.fr/settings/…` sent before the settings moved still open the same page.
-The security notices among them never expire, so the redirect stays until
+`307` keeping the path and query; browsers keep the fragment, so links to
+`piquel.fr/settings/…` open the same page on auth. The security notices among
+them never expire, so the redirect stays until
 piquel.fr serves pages of its own at those paths, such as public profiles
 *(planned)*.
 
@@ -103,6 +104,8 @@ session. Signing in and out are recorded as `dashboard_signed_in` and
 `dashboard_signed_out`, which the administrator's security history shows; a
 session that times out records nothing. The account's devices list each
 dashboard session under the auth session it rests on, with its last use.
+[The admin dashboard's session](sessions.md#the-admin-dashboards-session) describes
+how it is stored.
 
 A change needs the dashboard's own passkey confirmation from the last five
 minutes, which a confirmation for auth's pages never gives, and signing in gives.
@@ -139,8 +142,18 @@ dashboard's recent confirmation, like any change, and names the draft's revision
 its page showed, so a draft changed meanwhile is checked again rather than sent
 unseen; its text never changes afterwards. Each recipient gets it as a
 notification in their inbox, and each with a primary verified address is emailed
-it (see
+it, unless they turned announcements' email off and it is not essential, which
+its sender chooses on the draft (see
 [the delivery queue](delivery-queue.md#announcements)).
+
+Administrators also follow alerts: conditions auth's background jobs find that
+need their attention, such as a broken audit chain. The dashboard's **Alerts**
+page lists the current ones, on which administrators post status updates until
+each clears, and links those that cleared; `auth-service alerts` does the same
+(see [respond to an alert](../operations/administration.md#respond-to-an-alert)).
+Raising an alert notifies every active administrator, in their inbox and by
+email. While an alert has no update yet, the overview's banner and the
+sidebar's dot point to the page.
 
 Administrators manage the administrator list too, but never their own rights or
 the last active administrator's, and the dashboard never changes an administrator's
@@ -168,9 +181,10 @@ The rule for what is shared: administrators may view, edit and remove, but never
 add a way to sign in or to receive the account's email, since that would let them
 take the account over. The operations only the owner may run take an `Owner`,
 which only the session cookie builds, or for a client the `OwnedClient` built from
-one, so calling one for an administrator does not compile. Two owner-only actions
-are authorized otherwise: verifying an address by its link's token, so it works
-signed out, and confirming with a passkey by the session it confirms.
+one, so calling one for an administrator does not compile. Three owner-only
+actions are authorized otherwise: verifying an address by its link's token, so it
+works signed out, turning announcements' email off by an email's unsubscribe
+link, likewise, and confirming with a passkey by the session it confirms.
 
 | Area | Shared | Owner only |
 | --- | --- | --- |
@@ -182,7 +196,7 @@ signed out, and confirming with a passkey by the session it confirms.
 | Sessions | list, sign out one, sign out all | |
 | Connected apps | list, remove an app's access | |
 | Security history | read | report an entry |
-| Notifications | list, read | mark read or unread |
+| Notifications | list, read, view email preferences | mark read or unread, change email preferences |
 | Account data | | download |
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 
@@ -194,9 +208,9 @@ first, and downloads it themselves.
 
 When an administrator or operator acts:
 
-- Every change needs their reason, renaming the handle included. It is stored with
-  each event as personal data, and the owner sees it in their security history,
-  next to "By a Piquel administrator".
+- Every change to a shared setting needs their reason, renaming the handle
+  included. It is stored with each event as personal data, and the owner sees
+  it in their security history, next to "By a Piquel administrator".
 - Events record the administrator or operator as their actor. Their reads are
   recorded as a view of the account, as `user show` is, once an hour per
   administrator session or operator. The owner's history leaves views out: it

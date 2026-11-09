@@ -38,6 +38,9 @@ pub enum AdminError {
     /// No OIDC client has this ID.
     #[error("no OIDC client has this ID")]
     ClientNotFound,
+    /// No current alert has this ID.
+    #[error("no current alert has this ID: it cleared, or never existed")]
+    AlertNotFound,
     /// No delivery with this ID is in a state the operation applies to.
     #[error("no {states} delivery has ID {id}")]
     DeliveryNotFound {
@@ -212,6 +215,7 @@ impl AdminError {
             Self::InvitationNotFound => "invitation_not_found",
             Self::ClientNotFound => "client_not_found",
             Self::DeliveryNotFound { .. } => "delivery_not_found",
+            Self::AlertNotFound => "alert_not_found",
             Self::AdministratorTarget => "administrator_target",
             Self::AlreadyDisabled => "already_disabled",
             Self::AlreadyActive => "already_active",
@@ -300,6 +304,7 @@ impl From<AdminError> for ApiError {
             | AdminError::InvitationNotFound
             | AdminError::ClientNotFound
             | AdminError::DeliveryNotFound { .. }
+            | AdminError::AlertNotFound
             | AdminError::HandleNotReleased
             | AdminError::HandleNotReserved
             | AdminError::UnknownRecipient(_)

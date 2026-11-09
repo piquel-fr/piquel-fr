@@ -65,6 +65,8 @@ export async function shoot(page: Page, name: string, area?: Locator): Promise<v
         ],
         [/\b\d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}\b/g, '12 May 2026 09:41'],
         [/\b\d{1,2} [A-Z][a-z]{2} \d{4}\b/g, '12 May 2026'],
+        // A time alone, under a heading naming its day, as the history shows it.
+        [/\b\d{2}:\d{2} UTC\b/g, '09:41 UTC'],
         [/\bActive \d+ \w+ ago\b/g, 'Active 2 minutes ago'],
         // Trace IDs, and the host of the container a command ran in.
         [/\b[0-9a-f]{32}\b/g, '4bf92f3577b34da6a3ce929d0e0e4736'],

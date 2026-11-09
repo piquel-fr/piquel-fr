@@ -1,8 +1,8 @@
 /**
  * A server-side app signing users in with `@piquel/auth/server`, in one file, on
  * Node's `http` server. The session lives in the browser, in a cookie sealed with
- * `COOKIE_KEY`, so the app stores nothing. Run it with Node 22.18 or later, which runs
- * TypeScript directly:
+ * `COOKIE_KEY`, so the app stores nothing, and sessions a back-channel logout ended
+ * are signed out. Run it with Node 22.18 or later, which runs TypeScript directly:
  *
  * ```sh
  * AUTH_URL=https://auth.piquel.fr CLIENT_ID=notes-web CLIENT_SECRET=pqcs_… \
@@ -13,7 +13,8 @@
  * Register the client as confidential, allowed `offline_access`, with the redirect
  * URI `$APP_URL/auth/callback` and the post-logout URI `$APP_URL/`. An app outside
  * this repository imports `@piquel/auth` and `@piquel/auth/server` instead of the
- * sources.
+ * sources. The `ANCHOR` comments mark the parts `docs/user/apps/sign-in-typescript.md`
+ * shows.
  */
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { Issuer } from '../src/index.ts';
@@ -25,6 +26,13 @@ function env(name: string): string {
   if (value === undefined || value === '') throw new Error(`${name} is not set`);
   return value;
 }
+
+// ANCHOR: login
+/**
+ * Auth sessions that back-channel logouts ended. Kept in the app's database in
+ * practice, so every replica sees it.
+ */
+const ended = new Set<string>();
 
 const app = new URL(env('APP_URL'));
 const issuer = await Issuer.discover(env('AUTH_URL'));
@@ -41,9 +49,15 @@ const login = new Login(
       ? CookieKey.fromBase64(process.env.COOKIE_KEY)
       : CookieKey.generate(),
     scopes: ['profile'],
-    afterLogout: new URL('/', app).href
+    afterLogout: new URL('/', app).href,
+    // Auth's logout tokens always name the session that ended.
+    backchannelLogout: (token) => {
+      if (token.target.kind === 'session') ended.add(token.target.sid);
+      return Promise.resolve();
+    }
   }
 );
+// ANCHOR_END: login
 
 /** A page around `body`, escaped by the caller. */
 function page(body: string): Response {
@@ -56,14 +70,20 @@ function escape(text: string): string {
   return text.replace(/[&<>"']/g, (character) => `&#${String(character.charCodeAt(0))};`);
 }
 
-/** The app: login's routes, a public home page, and a page that needs a recent passkey. */
+// ANCHOR: handle
+/**
+ * The app: login's routes, a public home page, and a page that needs a recent
+ * passkey.
+ */
 async function handle(request: Request): Promise<Response> {
   const routed = await login.handle(request);
   if (routed) return routed;
   const user = await login.session(request);
   if (user instanceof Response) return user; // 403 from another site, or 503
+  // A session a back-channel logout ended is signed out.
+  const live = user?.sid !== undefined && ended.has(user.sid) ? null : user;
   // Sets the cookies the session's read needs, such as a refreshed session.
-  return login.respond(request, answer(request, user));
+  return login.respond(request, answer(request, live));
 }
 
 /** The app's page `request` asks for, for `user` when signed in. */
@@ -87,6 +107,7 @@ function answer(request: Request, user: SignedIn | null): Response {
       return new Response('Not found', { status: 404 });
   }
 }
+// ANCHOR_END: handle
 
 /** Answers one of Node's requests with {@link handle}, converting to and from `Request` and `Response`. */
 async function serve(incoming: IncomingMessage, outgoing: ServerResponse): Promise<void> {

@@ -1,3 +1,8 @@
+/**
+ * The settings and sign-in pages at every window size from a small phone to a
+ * wide desktop, where nothing scrolls sideways; and the theme and sidebar
+ * preferences, which pages keep across navigations.
+ */
 import { expect, test } from '@playwright/test';
 import { scrollsSideways, signUp, viewports, withPasskeys } from './helpers';
 

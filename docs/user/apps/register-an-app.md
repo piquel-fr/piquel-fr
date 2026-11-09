@@ -1,89 +1,90 @@
 # Registering an app
 
-Any account can register OIDC clients for its own applications in the developer
-console, at `auth.piquel.fr/developers` (`piquel.fr/developers` redirects there).
-Operators manage first-party clients with `auth-service client` instead (see
-[OIDC clients](../../dev/operations/clients.md)), and those never appear in the
-console.
+Register your app in the developer console to get the client ID, and for an app
+with a backend the client secret, it needs to sign users in with piquel.fr.
 
-The console's pages are auth's own, under its session cookie. "Confirmed" means a
-passkey confirmation of the session from the last five minutes. A page asks for it
-before it posts a change that needs one, and a change posted without one is refused
-and asked again (see [step-up authentication](step-up.md)).
+## Before you start
 
-| Page | Needs | Does |
-| --- | --- | --- |
-| `/developers` | Session | Lists your apps: name, ID, kind, status and when each was last used |
-| `/developers/new` | Confirmed | Registers an app. A confidential app's secret shows in the answer, only this once |
-| `/developers/clients/{id}` | Session | What an OpenID Connect library needs: issuer, discovery URL, client ID, client authentication and scopes, and a Rust example |
-| `/developers/clients/{id}/settings` | Session; Confirmed for every change | Changes the settings, disables or enables the app, and deletes it |
-| `/developers/clients/{id}/secrets` | Confirmed to rotate | A confidential app's secrets, with when each was made and stops working, never their values. A new secret shows in the answer, only this once; earlier ones keep working for the grace period you choose (none, an hour, a day, a week or 30 days) |
+- You need a piquel.fr account with a passkey. Registering an app asks you to
+  confirm with it.
+- Know where your app receives users after they sign in: its redirect URI,
+  such as `https://notes.example/auth/callback`. The SDKs' login routes serve
+  it at `/auth/callback` when you mount them at `/auth`.
+- Decide whether your app has a backend that can keep a secret. A server-rendered
+  app does. A single-page, mobile or desktop app does not.
 
-Registering an app asks for its name, whether it has a backend that can keep a
-secret, and where Piquel may send users back:
+Piquel's own apps are registered by its operators, with `auth-service client`,
+and never appear in the console: see [OIDC clients](../../dev/operations/clients.md).
+
+## Register an app
+
+1. Open the developer console, at `auth.piquel.fr/developers`, and select
+   **New app**.
+2. Fill in **App name**. Users see it on the consent screen when they sign in
+   to your app.
+3. Answer **Does your app have a backend that can keep a secret?**:
+   - **Yes, a web app with a backend**: your server signs users in with a
+     client secret.
+   - **No, it runs in the browser or on a device**: your app signs users in
+     without a secret.
+
+   You can't change this later. Both kinds sign in with PKCE.
+4. Fill in **Redirect URIs**, one per line.
+5. If your server signs users in with the SDKs' login routes, check
+   `offline_access` under **Scopes**, and **Allow refresh tokens**. The routes
+   request `offline_access` at every sign-in, and use refresh tokens to learn
+   when a user's session at Piquel ends. Leave the other settings as they are
+   for now: [app settings](app-settings.md) explains each one.
+6. Select **Register app**. If you haven't used your passkey in the last five
+   minutes, your browser asks for it first.
 
 ![The Register an app form, for a browser app called Notes](../../images/apps/new-app.png)
 
-Its overview then shows what an OpenID Connect library needs:
+An app with a backend then shows **Your client secret**. This is the only time
+Piquel shows it: copy it into your app's secret store or environment, then
+select **I saved it**. Piquel keeps only a digest of it, so a lost secret can't
+be shown again; [rotate it](rotate-secrets.md) instead.
+
+## Connect your app
+
+The app's **Overview** tab shows what an OpenID Connect library needs: the
+**Issuer**, the **Discovery URL**, the **Client ID**, the **Client
+authentication** method and the **Scopes**. An app with a backend also gets a
+Rust example that signs users in with the
+[Rust SDK](https://github.com/piquel-fr/piquel-fr/tree/main/crates/auth-sdk).
+A browser app signs users in with the
+[TypeScript SDK](browser-apps.md).
 
 ![The overview of the registered app Notes: issuer, discovery URL, client ID, client authentication and scopes](../../images/apps/app-overview.png)
 
-An app that is not yours, or was deleted, answers `404`, the same as an ID that
-never existed. A secret is never in a URL, a cookie or the browser's storage, and,
-with the page's script, reloading the page that showed it does not post the form
-again.
+Auth chooses the client ID: `c_` followed by 20 random characters.
 
-## Settings
+## Check that it works
 
-| Setting | Meaning |
-| --- | --- |
-| Name | The name the consent screen shows, at most 80 characters. It cannot contain Piquel or another well-known brand, such as Google or GitHub, even disguised (`P1quel`) |
-| Kind | A web app with a backend (confidential, signs in with a client secret) or an app running in the browser or on a device (public, with PKCE alone). Both sign in with S256 PKCE, and the kind never changes |
-| Redirect URIs | 1 to 16 authorization callbacks, one per line, matched exactly, under the same rules as for operators' clients |
-| Post-logout URIs | Up to 16 pages the browser may return to after logout, one per line; none by default |
-| Scopes | Any of `openid`, `profile`, `email` and `offline_access`; `openid profile email` by default |
-| Refresh tokens | Whether the app may receive refresh tokens when it requests `offline_access`; off by default |
-| Pushed requests | Whether the app must push its authorization requests to `/oauth/par` (RFC 9126), so none of their parameters travel through the browser; off by default |
-| Back-channel logout URI | Where auth tells the app that a user's session ended ([back-channel logout](back-channel-logout.md)), under the same rules as redirect URIs; none by default. The SDKs serve it beside their login routes, e.g. at `https://app.example/auth/backchannel-logout`, for an app that gives them a logout handler; without one, its sessions end at their next refresh, within five minutes. Auth posts only to HTTPS URIs with public addresses |
+Sign in to your app. Piquel shows the consent screen, which names your app, the
+host your redirect URI sends users back to, and says the app is unverified and
+registered by your handle. Apps registered in the console are never trusted,
+so users see this page at their first sign-in, and again when your app asks for
+a new scope.
 
-Auth chooses the ID, `c_` followed by 20 random characters, so nobody can claim a
-name like `piquel-admin`. Your apps are never trusted: users always see the
-consent screen, which names the host your redirect URI sends them to and says
-your app is unverified and registered by your handle. Every change to an app needs a confirmation, so a stolen session
-cookie cannot add a redirect URI and collect authorization codes, nor enable a
-disabled app again, which revives its users' refresh tokens. An invalid setting is
-refused with what to fix, beside its input.
+Back in the console, **Your apps** lists the app with the day it was last used.
 
-## Limits
+## Troubleshooting
 
-An account can have 10 apps at once. Deleting one frees its place. An account can
-also register at most 20 apps a day, deleted ones included, since a deleted app's
-ID stays reserved forever.
+- **A setting is refused.** The form says what to fix beside its input. Common
+  refusals are a redirect URI that isn't HTTPS, and a name containing Piquel or
+  another well-known brand, such as Google or GitHub, even disguised
+  (`P1quel`). [App settings](app-settings.md#settings) lists every rule.
+- **Signing in to your app fails with `invalid_scope`, "scope includes values
+  this client may not request".** The app asks for a scope its registration
+  doesn't allow, often `offline_access`, which the SDKs' login routes always
+  request. Check it under **Scopes** on the app's **Settings** tab.
+- **There's no New app button.** An account can have 10 apps at once. Delete
+  one to register another.
+- **Registering is refused for today.** An account can register 20 apps a day,
+  deleted ones included.
+- **An app's page answers `404`.** The app was deleted, or another account
+  registered it.
 
-Disabling is yours to undo. An administrator can also suspend an app, for example
-one that is abused: it stops working, you still see it, and you can delete it,
-but you cannot enable it until they lift the suspension. It is then disabled until
-you enable it again.
-
-## What changes take effect
-
-Every change applies to the next request, on every replica, and to sign-ins
-already under way. Disabling or deleting an app also stops its pending sign-ins
-and unused authorization codes. Removing a redirect URI or a scope stops the
-pending sign-ins and codes that use it, and requiring pushed requests stops the
-pending ones the browser brought. A change made during a code exchange either
-waits for it to finish or applies to it.
-
-Deleting an app also revokes its refresh tokens and removes its secrets and the
-consents users gave it. Its ID stays reserved forever, because tokens name their
-client in `aud`: no one, not even an operator, can register it again. Nothing else
-that could name you stays: its name, redirect URIs and back-channel logout URI are
-erased, so security histories show it only as an app, and the admin dashboard by
-its ID.
-
-An app's "last used" is the last time a token was issued to it, to within an hour.
-Each change is recorded in the client's history with your account as the actor:
-`client_registered`, `client_updated` with the settings that changed,
-`client_enabled`, `client_disabled`, `client_secret_rotated` and `client_deleted`.
-Suspensions record `client_suspended` and `client_suspension_lifted`, with the
-administrator as the actor. Secrets are never recorded.
+[Troubleshooting](troubleshooting.md) covers errors your app sees while users
+sign in.

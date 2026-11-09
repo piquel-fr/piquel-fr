@@ -419,11 +419,24 @@ impl EventRow<'_> {
             DomainEvent::AnnouncementSent {
                 announcement_id,
                 recipients,
-            } => Description::new(format!("Announcement sent to {recipients} accounts"))
-                .with("announcement", announcement_id),
+                essential,
+            } => Description::new(if essential {
+                format!("Essential announcement sent to {recipients} accounts")
+            } else {
+                format!("Announcement sent to {recipients} accounts")
+            })
+            .with("announcement", announcement_id),
+            DomainEvent::NotificationPreferenceChanged(preference) => {
+                Description::new(preference.change())
+            }
             DomainEvent::AlertRaised { alert_id, alert } => {
                 Self::alert("Alert raised", alert_id, &alert)
             }
+            DomainEvent::AlertUpdated {
+                alert_id,
+                alert,
+                status,
+            } => Self::alert("Alert updated", alert_id, &alert).with("status", status),
             DomainEvent::AlertCleared { alert_id, alert } => {
                 Self::alert("Alert cleared", alert_id, &alert)
             }
@@ -439,9 +452,13 @@ impl EventRow<'_> {
         let description =
             Description::new(format!("{what}: {}", alert.subject())).with("alert", id);
         match alert {
-            Alert::AuditChainBroken(broken) => description
+            Alert::AuditChainBroken(broken) | Alert::CheckpointRefused(broken) => description
                 .with("position", broken.position)
                 .with("problem", broken.problem),
+            Alert::PurgesFailing {}
+            | Alert::CleanupBehind {}
+            | Alert::VerificationFailing {}
+            | Alert::CleanupFailing {} => description,
         }
     }
 

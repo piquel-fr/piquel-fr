@@ -34,7 +34,7 @@ impl Channel for BackchannelLogout {
     async fn deliveries(
         event: &DomainEvent,
         _: Option<UserId>,
-        _: Option<&Notified>,
+        _: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
         let DomainEvent::SessionRevoked { session_id, .. } = event else {
