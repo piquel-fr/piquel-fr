@@ -36,6 +36,10 @@ pub(super) enum Endpoint {
     Dashboard,
     /// Passkey sign-in on the pages of approved related origins, without cookies.
     RelatedLogin,
+    /// The unsubscribe page of announcements' emails, which mail clients post to
+    /// from anywhere in one click (RFC 8058): its link's token is its credential,
+    /// and it only turns that email off.
+    Unsubscribe,
     /// Passkey ceremonies, the providers' callbacks and the other auth-origin
     /// routes.
     Other,
@@ -68,6 +72,7 @@ impl Endpoint {
             service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
+            page::UNSUBSCRIBE => Self::Unsubscribe,
             // The root and a page's path ending in a slash redirect to a page.
             page::ROOT => Self::Page,
             _ if page::ALL.contains(&path.strip_suffix('/').unwrap_or(path)) => Self::Page,
@@ -76,10 +81,15 @@ impl Endpoint {
         }
     }
 
-    /// Protocol handlers enforce their own credentials and navigation checks.
+    /// Protocol handlers, and the unsubscribe page, enforce their own credentials
+    /// and navigation checks.
     pub(super) const fn is_protocol(self) -> bool {
         match self {
-            Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
+            Self::OAuthBackChannel
+            | Self::UserInfo
+            | Self::Authorize
+            | Self::Logout
+            | Self::Unsubscribe => true,
             Self::Discovery
             | Self::Checkpoints
             | Self::Picture
@@ -106,7 +116,7 @@ impl Endpoint {
             Self::Authorize | Self::Logout | Self::RelatedLogin | Self::Other => {
                 Some(RateCategory::Login)
             }
-            Self::Page => Some(RateCategory::Page),
+            Self::Page | Self::Unsubscribe => Some(RateCategory::Page),
             Self::Dashboard => Some(RateCategory::Dashboard),
             Self::Checkpoints => Some(RateCategory::Audit),
             Self::Picture => Some(RateCategory::Picture),

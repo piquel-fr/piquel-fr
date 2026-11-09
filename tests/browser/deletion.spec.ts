@@ -1,3 +1,8 @@
+/**
+ * Downloading an account's data from `/settings/data`, deleting the account by
+ * typing its handle, and restoring it: signing in with its passkey offers to
+ * restore it instead of a session, and restoring signs in.
+ */
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { addPasskeys, signUp } from './helpers';

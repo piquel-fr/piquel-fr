@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use piquel_common::admin::{ApprovedOrigin, Consent};
 use piquel_common::{
     AccountStatus, ClientId, ErrorChain, Handle, PasskeyId, PictureId, RecoveryId, SessionId,
-    UserId,
+    UserId, notifications::NotificationPreference,
 };
 use piquel_repository::{
     AnnouncementRecord, DashboardSignIn, DatabaseError, DatabaseTransaction, EventFilter,
@@ -119,6 +119,8 @@ struct Records {
     recoveries: Vec<Recovery>,
     /// The inbox, newest first, with when each notification was read.
     notifications: Vec<Notification>,
+    /// Whether each category of notifications is emailed.
+    notification_preferences: Vec<NotificationPreference>,
     /// The announcements the account received, newest first.
     announcements: Vec<AnnouncementRecord>,
 }
@@ -496,6 +498,7 @@ impl AccountExport {
                 .into_iter()
                 .map(Notification::from)
                 .collect(),
+            notification_preferences: tx.notifications().preferences(user_id).await?,
             announcements: tx.exports().announcements(user_id).await?,
             profile: user.into(),
         };

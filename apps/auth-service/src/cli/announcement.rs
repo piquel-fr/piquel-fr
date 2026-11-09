@@ -4,7 +4,7 @@
 use super::{CliError, Confirm, Console, Output};
 use crate::{AnnouncementDraft, AnnouncementRecipients, UserRef};
 use clap::{Args, Subcommand};
-use piquel_common::AnnouncementId;
+use piquel_common::{AnnouncementId, admin::AnnouncementDetail};
 use std::{io::Read, path::PathBuf};
 
 /// Drafting, sending and reading announcements. A draft goes to nobody until
@@ -74,6 +74,12 @@ pub(super) struct DraftArgs {
     /// 1,000 accounts.
     #[arg(long)]
     to: Vec<UserRef>,
+    /// Email it to every recipient with a primary verified address, even those
+    /// who turned announcements' email off: for a security incident, or a change
+    /// to the privacy policy or terms. Without it, they only find it in their
+    /// inbox.
+    #[arg(long)]
+    essential: bool,
 }
 
 impl DraftArgs {
@@ -93,11 +99,56 @@ impl DraftArgs {
         } else {
             AnnouncementRecipients::Accounts(self.to)
         };
-        Ok(AnnouncementDraft::new(&self.subject, &body, recipients)?)
+        Ok(AnnouncementDraft::new(
+            &self.subject,
+            &body,
+            recipients,
+            self.essential,
+        )?)
     }
 }
 
 impl AnnouncementCommand {
+    /// Prints `detail` as `announcement show` does: one fact per line, then its
+    /// text. Whom a year-old announcement went to was deleted, so its counts are
+    /// left out.
+    fn print_detail(detail: &AnnouncementDetail) {
+        let announcement = &detail.announcement;
+        let to = if announcement.everyone {
+            "everyone"
+        } else {
+            "chosen accounts"
+        };
+        println!("ID\t{}", announcement.id);
+        println!("SUBJECT\t{}", announcement.subject);
+        println!("REVISION\t{}", announcement.revision);
+        println!("ESSENTIAL\t{}", announcement.essentiality());
+        if announcement.recipients_kept {
+            println!("TO\t{to}: {} accounts", announcement.recipients);
+            println!("EMAILED\t{} {}", detail.mailed, announcement.emailed());
+        } else {
+            println!("TO\t{to}: recipients deleted a year after sending");
+        }
+        match announcement.sent_at {
+            Some(at) => {
+                let emails = detail.emails;
+                println!("SENT\t{}", at.to_rfc3339());
+                if announcement.recipients_kept {
+                    println!("READ\t{} of {}", detail.read, announcement.recipients);
+                }
+                println!(
+                    "EMAILS\t{} pending, {} succeeded, {} failed, {} cancelled",
+                    emails.pending, emails.succeeded, emails.failed, emails.cancelled
+                );
+            }
+            None => println!("SENT\tnot yet: a draft"),
+        }
+        for account in &detail.accounts {
+            println!("ACCOUNT\t{}\t{}", account.handle, account.id);
+        }
+        println!("\n{}", announcement.body);
+    }
+
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
@@ -127,41 +178,7 @@ impl AnnouncementCommand {
             }
             Self::Show { id, output } => {
                 let detail = service.view_announcement(operator, id).await?;
-                output.print(&detail, |detail| {
-                    let announcement = &detail.announcement;
-                    let to = if announcement.everyone {
-                        "everyone"
-                    } else {
-                        "chosen accounts"
-                    };
-                    println!("ID\t{}", announcement.id);
-                    println!("SUBJECT\t{}", announcement.subject);
-                    println!("REVISION\t{}", announcement.revision);
-                    if announcement.recipients_kept {
-                        println!("TO\t{to}: {} accounts", announcement.recipients);
-                        println!("EMAILED\t{} with a primary verified address", detail.mailed);
-                    } else {
-                        println!("TO\t{to}: recipients deleted a year after sending");
-                    }
-                    match announcement.sent_at {
-                        Some(at) => {
-                            let emails = detail.emails;
-                            println!("SENT\t{}", at.to_rfc3339());
-                            if announcement.recipients_kept {
-                                println!("READ\t{} of {}", detail.read, announcement.recipients);
-                            }
-                            println!(
-                                "EMAILS\t{} pending, {} succeeded, {} failed, {} cancelled",
-                                emails.pending, emails.succeeded, emails.failed, emails.cancelled
-                            );
-                        }
-                        None => println!("SENT\tnot yet: a draft"),
-                    }
-                    for account in &detail.accounts {
-                        println!("ACCOUNT\t{}\t{}", account.handle, account.id);
-                    }
-                    println!("\n{}", announcement.body);
-                })?;
+                output.print(&detail, Self::print_detail)?;
             }
             Self::Draft(draft) => {
                 let id = service
@@ -183,9 +200,17 @@ impl AnnouncementCommand {
             } => {
                 let detail = service.view_announcement(operator, id).await?;
                 let announcement = &detail.announcement;
+                let essential = if announcement.essential {
+                    "essential "
+                } else {
+                    ""
+                };
                 confirm.ask(&format!(
-                    "Send \"{}\" to {} accounts, emailing the {} with a primary verified address",
-                    announcement.subject, announcement.recipients, detail.mailed
+                    "Send the {essential}announcement \"{}\" to {} accounts, emailing the {} {}",
+                    announcement.subject,
+                    announcement.recipients,
+                    detail.mailed,
+                    announcement.emailed()
                 ))?;
                 let recipients = service.send_announcement(operator, id, revision).await?;
                 println!("Sent to {recipients} accounts");

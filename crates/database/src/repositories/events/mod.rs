@@ -221,6 +221,17 @@ struct TaggedEvent {
     data: Value,
 }
 
+/// Which verifications of the audit chain
+/// [`EventRepository::newest_audit_verification`] reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verifications {
+    /// Every one.
+    Any,
+    /// Those made with the environment's own keys, not keys given with `--key`,
+    /// which say nothing of its checkpoints.
+    OwnKeys,
+}
+
 /// The [`Personal`] values of one payload, keyed by their JSON pointer, as stored
 /// in `event_personal_data.details`.
 #[derive(Default, Serialize, Deserialize)]
@@ -435,17 +446,19 @@ impl EventRepository<'_> {
         .collect()
     }
 
-    /// The newest `audit_chain_verified` event, by when it was recorded. The kind
-    /// is written into the query, not bound, so every plan reads the `(kind,
-    /// occurred_at)` index: one entry, however many events there are. After the
-    /// clock steps back, an older verification can read as the newest until the
-    /// next one is recorded.
+    /// The newest `audit_chain_verified` event of those `counted`, by when it was
+    /// recorded. The kind is written into the query, not bound, so every plan
+    /// reads the `(kind, occurred_at)` index: one entry, however many events
+    /// there are, or as many as the newest verifications that were left out.
+    /// After the clock steps back, an older verification can read as the newest
+    /// until the next one is recorded.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or the stored event does not decode.
     pub async fn newest_audit_verification(
         &mut self,
+        counted: Verifications,
     ) -> Result<Option<StoredEvent>, DatabaseError> {
         run!(
             self,
@@ -464,8 +477,10 @@ impl EventRepository<'_> {
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 WHERE e.kind = 'audit_chain_verified'
+                AND ($1 OR e.payload ->> 'keys' IS DISTINCT FROM 'given')
                 ORDER BY e.occurred_at DESC
-                LIMIT 1"#
+                LIMIT 1"#,
+                counted == Verifications::Any,
             )
         )?
         .map(StoredEvent::try_from)

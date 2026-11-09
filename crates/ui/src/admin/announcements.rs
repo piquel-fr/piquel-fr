@@ -128,12 +128,13 @@ pub async fn announcement_page<'a>(
             <div class="body">
                 <dl class="facts">
                     <dt>"To"</dt><dd>(audience(announcement))</dd>
+                    <dt>"Essential"</dt><dd>(announcement.essentiality())</dd>
                     if announcement.recipients_kept {
                         <dt>"Emailed to"</dt>
                         <dd>
-                            (format!("{} with a primary verified address", detail.mailed))
+                            (format!("{} {}", detail.mailed, announcement.emailed()))
                             if unmailed > 0 {
-                                <small>(format!(" · {unmailed} without one only see it in their inbox"))</small>
+                                <small>(format!(" · the other {unmailed} only find it in their inbox"))</small>
                             }
                         </dd>
                     }
@@ -235,7 +236,6 @@ pub async fn announcement_form<'a>(
     refusal: Option<&'a str>,
 ) -> Result<impl View> {
     let chosen = form.audience == AnnouncementAudience::Accounts;
-    let find = form.find.trim();
     Ok(view! {
         page_head(title: change.title(), lead: change.description().to_owned())
         if let Some(refusal) = refusal {
@@ -271,56 +271,15 @@ pub async fn announcement_form<'a>(
                         detail: view! { "Up to 1,000, found below or pasted into the list." },
                     )
                 </fieldset>
-                <div class="stack chosen-accounts">
-                    <div class="row search">
-                        <label class="search-box grow">
-                            icon(kind: Icon::Search)
-                            <input
-                                type="search"
-                                name="find"
-                                value=(find)
-                                placeholder="Handle, name, email or account ID"
-                                aria-label="Find accounts"
-                                autocomplete="off"
-                                autofocus=(!find.is_empty())
-                            >
-                        </label>
-                        <button class="secondary" name="intent" value="find" formnovalidate="">"Find"</button>
-                    </div>
-                    if !find.is_empty() {
-                        if found.is_empty() {
-                            <p class="empty">(format!("No account matches “{find}”."))</p>
-                        } else {
-                            <ul class="list">
-                                for account in found {
-                                    let handle = format!("@{}", account.user.handle);
-                                    <li>
-                                        <div class="text">
-                                            <strong>(handle.as_str())</strong>
-                                            <small>(account.user.display_name.as_str())</small>
-                                        </div>
-                                        if account.added {
-                                            <span class="badge ok">"Added"</span>
-                                        } else {
-                                            <button
-                                                class="secondary small"
-                                                name="add"
-                                                value=(account.user.handle.as_str())
-                                                formnovalidate=""
-                                                aria-label=(format!("Add {handle}"))
-                                            >"Add"</button>
-                                        }
-                                    </li>
-                                }
-                            </ul>
-                        }
-                    }
-                    <label>
-                        "Accounts"
-                        <textarea name="accounts" rows="5">(form.accounts.as_str())</textarea>
-                        <small>"One per line: a handle, a verified email or an account ID, as added above or pasted. Only used for “These accounts”."</small>
-                    </label>
-                </div>
+                chosen_accounts(form: form, found: found)
+                choice(
+                    name: "essential",
+                    checked: form.essential.0,
+                    label: view! { "Essential" },
+                    detail: view! {
+                        "Emailed even to recipients who turned announcement emails off, without a link to unsubscribe. Only for a security incident, or a change to the privacy policy or terms."
+                    },
+                )
                 <p class="help">"Send emails it at once, to every account when “Everyone” is chosen, and nobody can take it back. Save it as a draft to check its email first."</p>
                 <div class="row actions">
                     <button name="intent" value="send" data-confirms="">"Send"</button>
@@ -329,5 +288,68 @@ pub async fn announcement_form<'a>(
                 </div>
             </form>
         </section>
+    })
+}
+
+/// The chosen accounts of `form`: a search, the accounts it `found`, each adding
+/// itself, and the list, which also takes pasted accounts. Hidden while the form
+/// chooses everyone.
+#[component]
+async fn chosen_accounts<'a>(
+    form: &'a DraftAnnouncement,
+    found: &'a [FoundAccount<'a>],
+) -> Result<impl View> {
+    let find = form.find.trim();
+    Ok(view! {
+        <div class="stack chosen-accounts">
+            <div class="row search">
+                <label class="search-box grow">
+                    icon(kind: Icon::Search)
+                    <input
+                        type="search"
+                        name="find"
+                        value=(find)
+                        placeholder="Handle, name, email or account ID"
+                        aria-label="Find accounts"
+                        autocomplete="off"
+                        autofocus=(!find.is_empty())
+                    >
+                </label>
+                <button class="secondary" name="intent" value="find" formnovalidate="">"Find"</button>
+            </div>
+            if !find.is_empty() {
+                if found.is_empty() {
+                    <p class="empty">(format!("No account matches “{find}”."))</p>
+                } else {
+                    <ul class="list">
+                        for account in found {
+                            let handle = format!("@{}", account.user.handle);
+                            <li>
+                                <div class="text">
+                                    <strong>(handle.as_str())</strong>
+                                    <small>(account.user.display_name.as_str())</small>
+                                </div>
+                                if account.added {
+                                    <span class="badge ok">"Added"</span>
+                                } else {
+                                    <button
+                                        class="secondary small"
+                                        name="add"
+                                        value=(account.user.handle.as_str())
+                                        formnovalidate=""
+                                        aria-label=(format!("Add {handle}"))
+                                    >"Add"</button>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+            <label>
+                "Accounts"
+                <textarea name="accounts" rows="5">(form.accounts.as_str())</textarea>
+                <small>"One per line: a handle, a verified email or an account ID, as added above or pasted. Only used for “These accounts”."</small>
+            </label>
+        </div>
     })
 }

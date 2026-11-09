@@ -63,7 +63,8 @@ impl AdminService {
     ) -> Result<AuditVerification, AdminError> {
         operator.authorize_read(&self.database).await?;
         let verification = AuditChain::new(self.database.clone()).verify(keys).await?;
-        let tx = self.database.begin().await?;
+        let mut tx = self.database.begin().await?;
+        operator.hold_rights(&mut tx).await?;
         AuditChain::record(tx, &operator.context(), &verification).await?;
         Ok(verification)
     }

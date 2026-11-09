@@ -1,159 +1,105 @@
-The browser suite uses the real auth binary and PostgreSQL, with Chromium's virtual
-WebAuthn authenticator. It does not intercept or mock auth's responses. Use an
-isolated database: tests create accounts and credentials. CI runs it against the
-debug binary `just rust build` makes, behind Caddy over HTTPS, as configured below.
+# Browser tests
 
-`settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
-passkeys, which each page then tells the password manager, listing exactly the
-passkeys the virtual authenticators hold that still sign in, a passkey ceremony
-that fails, the passkey confirmation the passkey script runs, an email link's
-token and signing out, which a sign-in from the devices page comes back to. It
-also reports a passkey in the security history as not the owner's, which signs
-out another device holding the same passkey and offers to remove it.
+The browser suite drives Chromium against a running deployment of auth: the real
+binary and PostgreSQL, over HTTPS, with Chromium's virtual passkey authenticator.
+Nothing is mocked. Each spec says at its top what it covers.
 
-`profile.spec.ts` uses the Profile tab's dialogs, which open with no script: it
-uploads a picture, which the tab, the sidebar and the top bar load under the
-pages' Content-Security-Policy, closes the notice saying so, and removes the
-picture. Then the picture script's crop: a chosen image
-shows at its centred square, and zooming in and dragging it change the square the
-form sends.
+Run it against a deployment you can throw away: the tests create accounts,
+passkeys and sessions in it. CI runs it on every pull request that can affect
+it, against the debug binary behind Caddy; see the `e2e` job in
+[ci.yml](https://github.com/piquel-fr/piquel-fr/blob/main/.github/workflows/ci.yml).
 
-`sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
-no passkey for is refused in the form. Every spec signs up through `/register`.
+## Run it against a preview
 
-`deletion.spec.ts` downloads the account's data from `/settings/data`, a whole
-streamed document ending with the account's events, deletes the
-account by typing its handle, and restores it: signing in with its passkey offers to
-restore it instead of a session, and restoring signs in.
+1. Deploy this checkout and install Playwright's Chromium:
 
-`developers.spec.ts` registers a confidential app in the developer console: the
-secret shown once, in an answer no cache keeps and nowhere in the URL, history or
-storage, whose reload, by `GET`, posts nothing again, and the app then signing a
-user in through its consent page and redeeming the code with its secret. Its app
-runs on `https://console-e2e.test`, which the test serves as `oidc.spec.ts` does its
-client. A second test rotates an app's secret with no grace, which leaves only the
-new one redeeming codes, then disables the app, which auth then refuses to sign
-anyone in to until it is enabled, and deletes it.
+   ```console
+   just preview
+   pnpm exec playwright install chromium
+   ```
 
-`oidc.spec.ts` signs in through `browser-e2e`, a public, untrusted client at
-`https://browser-e2e.test` that may request `openid`, `profile` and `email`. No
-server runs it: the test serves its pages through DevTools, so the client's fetches
-to auth are genuinely cross-origin, under auth's real CORS policy. It checks
-consent, posted once on a double click, the `iss` on each authorization response,
-a PKCE exchange and userinfo from the client's page, and a `prompt=none` request
-using remembered consent. Passkey-only accounts must not acquire email claims.
+2. Register the [clients the suite expects](#clients) on the preview, once.
+3. Point the suite at the preview, then run it:
 
-`sdk.spec.ts` signs in with the TypeScript SDK's login client, driven from Node,
-through `browser-e2e-sdk`, a trusted public client registered with `--require-par`
-at `https://sdk-e2e.test`, served like `browser-e2e`'s. The SDK pushes the request,
-so the browser sees only its `request_uri`, then completes the callback and
-validates the ID token; a step-up sign-in must meet its `acr_values` and `max_age`.
+   ```console
+   branch=$(git branch --show-current)
+   export E2E_AUTH_URL=$(piquelctl preview url piquel-fr "$branch" --route auth)
+   export E2E_ADMIN_URL=$(piquelctl preview url piquel-fr "$branch" --route admin)
+   export E2E_WEB_URL=$(piquelctl preview url piquel-fr "$branch" --route web)
+   export E2E_GRANT_ADMIN="piquelctl preview exec piquel-fr $branch auth -- auth-service admin grant"
+   export E2E_RECOVER="piquelctl preview exec piquel-fr $branch auth -- auth-service user recover"
+   export E2E_SERVER_CLIENT_SECRET=<secret>   # printed when you registered browser-e2e-server
+   just web test-browser
+   ```
 
-`server.spec.ts` starts the example app of `@piquel/auth/server`,
-`packages/auth/examples/server.ts`, at `http://127.0.0.1:4100`, a loopback address
-auth accepts plain HTTP redirect URIs on and browsers count as secure, so its
-`__Host-` session cookie works. It signs in through `browser-e2e-server`, a trusted
-confidential client, reloads, opens a page whose step-up requirement a fresh passkey
-sign-in meets, and signs out: the session cookie is gone, and auth's RP-initiated
-logout ends auth's session and returns to the app. The test needs the client's secret
-in `E2E_SERVER_CLIENT_SECRET`, and is skipped without it. Back-channel logout needs a
-public address auth can post to, so unit tests cover it instead.
+`just web test-browser` builds the TypeScript SDK first, since
+`browser-client.spec.ts` serves the built package. Extra arguments go to
+Playwright, such as a spec's name: `just web test-browser admin`.
 
-`browser-client.spec.ts` runs the TypeScript SDK's browser client, built, in the
-page of `browser-e2e-inline`, a trusted client approved as a related origin, which
-imports it from `/sdk/`: a redirect sign-in that a reload restores with
-`prompt=none`, leaving no token in `localStorage`, `sessionStorage` or cookies; a
-passkey sign-in that never leaves the page or gets an auth cookie; and the passkey
-sign-in's fallbacks to auth's pages, `prompt=consent` with the request auth left
-unclaimed, a failed passkey prompt with a fresh one, and a browser without related
-origins. With auth on `localhost`, as in CI, the page is at
-`https://localhost:4443`, on auth's own host, where browsers need no list.
-Elsewhere it is at `https://related-e2e.test`, another site, so the browser reads
-auth's `/.well-known/webauthn` first. `just web test-browser` builds the package
-first.
+A preview sends real email and has no Mailpit, so the tests that read email are
+skipped there.
 
-`just web browser-client` registers the four clients with the auth database
-configured in the environment, as CI does, the last with the secret in
-`E2E_SERVER_CLIENT_SECRET`: 32 random bytes in unpadded base64url. Previews do not register them by default: run
-`auth-service client create browser-e2e --name 'Browser E2E' --redirect-uri
-https://browser-e2e.test/callback`, `auth-service client create browser-e2e-sdk
---name 'Browser E2E SDK' --trusted --require-par --redirect-uri
-https://sdk-e2e.test/callback`, `auth-service client create browser-e2e-inline
---name 'Browser E2E inline' --trusted --redirect-uri
-https://related-e2e.test/callback`, `auth-service client origin add
-browser-e2e-inline https://related-e2e.test` and `auth-service client create
-browser-e2e-server --name 'Browser E2E server' --trusted --confidential
---redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri
-http://127.0.0.1:4100/`, which prints the secret, there.
+## Environment variables
 
-Run `just preview` to build and deploy this checkout over HTTPS on piqueld. Set
-`E2E_AUTH_URL` to the printed auth origin, then run `just web test-browser`. If
-signup requires an invitation, as in CI, set `E2E_INVITE` to a command that
-prints a new signup link, e.g. `just auth invite create` with the deployment's
-configuration: every signup runs it. Previews allow registration without one.
+| Variable | What it is | Without it |
+| --- | --- | --- |
+| `E2E_AUTH_URL` | Auth's origin. | `http://localhost:3000` |
+| `E2E_ADMIN_URL` | The admin dashboard's origin. | The dashboard tests are skipped. |
+| `E2E_GRANT_ADMIN` | A command that makes the handle appended to it an administrator, such as `just auth admin grant` with the deployment's configuration. | The dashboard tests are skipped. |
+| `E2E_INVITE` | A command that prints a new signup link, for a deployment whose signup needs an invitation, as CI's does. Every signup runs it. | Signups go to `/register`, and the dashboard's invitation test is skipped. |
+| `E2E_MAIL_URL` | The API origin of a [Mailpit](https://mailpit.axllent.org) that receives the deployment's email. `just auth mailpit` runs one on `http://localhost:8025`. | The tests that read email are skipped. |
+| `E2E_RECOVER` | A command that runs `auth-service user recover` on the deployment. The test appends the handle, a reason and `--yes`. | The recovery test is skipped. |
+| `E2E_WEB_URL` | The origin of piquel.fr's web server, `apps/web`. | The web test is skipped. |
+| `E2E_SERVER_CLIENT_SECRET` | The secret of the `browser-e2e-server` client. | The server SDK test is skipped. |
+| `CHROMIUM_EXECUTABLE` | A Chromium to use instead of Playwright's. | Playwright's Chromium |
+| `E2E_ALLOW_SELF_SIGNED_TLS` | Any value, such as `1`, accepts certificates no browser trusts, such as Caddy's local CA in CI. Only for test deployments. | Certificates must be valid. |
 
-`E2E_MAIL_URL` names the API of a [Mailpit](https://mailpit.axllent.org) that
-receives the deployment's email, as CI's does over plain SMTP on its loopback
-address, `AUTH_SMTP_URL=smtp://127.0.0.1:1025`. The test that confirms
-addresses reads the email there, and is skipped without it. A run sends two
-confirmation links, and auth sends at most ten an hour to one IP address, so reruns
-against one deployment wait between batches.
+The commands in `E2E_GRANT_ADMIN`, `E2E_INVITE` and `E2E_RECOVER` must use the
+deployment's own configuration: `user recover`, for example, derives its link
+with the deployment's token digest key.
 
-`CHROMIUM_EXECUTABLE` can select an existing Chromium installation.
-`E2E_ALLOW_SELF_SIGNED_TLS=1` permits local test certificates only.
+With `E2E_MAIL_URL` set, a run sends three confirmation emails, and auth sends at
+most ten an hour for one IP address. Wait between reruns against one deployment.
 
-The virtual authenticator registers credentials with backup eligibility and backup
-state enabled, exercising server acceptance of synced passkeys. Apple/Google
-password-manager synchronization and live Google/GitHub callbacks also need a
-manual check with actual providers/devices; this suite does not claim to verify
-those external systems.
+## Clients
 
-`admin.spec.ts` checks the admin dashboard, which CI serves on its own origin,
-`https://localhost:3444`: a non-administrator is handed nothing, an administrator signs in
-through auth's handoff page, confirms a change with a passkey for the dashboard
-only, in the dialog the dashboard's script opens, or on auth's handoff page when a
-change's page is opened directly, and disables an account, whose settings page then
-loses its session; signing out of the dashboard keeps the Piquel session, and
-signed out of both, a passkey sign-in on auth goes on to the dashboard. CI's
-dashboard is on auth's host, `localhost`, so its dialog may use auth's RP ID with
-no list, as `browser-client.spec.ts`'s page does; a preview's has a host of its
-own, so there the browser checks auth's `/.well-known/webauthn` first, which lists
-the dashboard's origin. Another lists an account's events without
-the administrator's view of it until "Show views", which keeps the account filter,
-and hides it again with "Hide views". Another grants administrator rights from a
-search, which then opens the dashboard to the account, and revokes them; creates
-an invitation, whose link signs one account up once, and revokes another, which
-then signs nobody up, when `E2E_INVITE` is set; and, with `E2E_MAIL_URL`, one
-changes an account's passkeys and addresses, each confirmed from its mailed link,
-on its owner's behalf, whose history shows each reason. Support also renames a
-handle, which an owner may change only 30 days after signup: the new one signs in
-at once, and the old one no longer does. The
-top bar keeps its crumb, search box and avatar apart at every window size. An
-administrator saves an announcement as a draft without a confirmation, finds and
-adds its recipient on its form, sends it from the editor after the dashboard's
-confirmation, and the recipient reads it in their inbox and, with
-`E2E_MAIL_URL`, by email. Set
-`E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command
-that grants administrator rights to the handle appended to it, e.g. `just auth
-admin grant` with the deployment's configuration. Without them, the tests are
-skipped.
+Several specs sign in through these clients, and fail without them. No server
+runs their origins: the tests serve the clients' pages themselves.
 
-`web.spec.ts` follows auth's footer to the policies on piquel.fr's web server,
-`apps/web`, which allow nothing but their stylesheet, its homepage to auth's
-pages, and a settings link sent before the settings moved to auth on to auth,
-with its fragment. CI runs it on `web.localhost`, and sets `AUTH_WEB_ORIGIN` to
-it. Set `E2E_WEB_URL` to its origin; without it, the test is skipped.
+| Client | Kind | Redirect URI |
+| --- | --- | --- |
+| `browser-e2e` | Public | `https://browser-e2e.test/callback` |
+| `browser-e2e-sdk` | Public, trusted, pushed requests only | `https://sdk-e2e.test/callback` |
+| `browser-e2e-inline` | Public, trusted, with its own origin approved for passkeys | `https://localhost:4443/callback` with auth on `localhost`, otherwise `https://related-e2e.test/callback` |
+| `browser-e2e-server` | Confidential, trusted, with refresh tokens | `http://127.0.0.1:4100/auth/callback` |
 
-`recovery.spec.ts` recovers an account as support does, against a deployment
-whose CLI it can run, as CI and previews are. `user recover` prints the link,
-which a second browser opens to add a passkey: it lands on settings with the
-probation's restriction and the question "Was this you?", which stays answered
-there across page loads. The owner's browser, which the start signed out, signs in with the
-passkey from before the recovery, follows the question to the undo page and
-undoes the recovery, which signs the second browser out. Set `E2E_RECOVER` to a
-command that runs `auth-service user recover` on the deployment, to which the
-test appends the handle, a reason and `--yes`, e.g. `just auth user recover`
-with the deployment's configuration, or `piquelctl preview exec piquel-fr
-<branch> auth -- auth-service user recover` for a preview. CI sets it to
-`target/debug/auth-service user recover`, which shares the service's
-configuration, its token digest key included. Without it, the test is skipped.
+`just web browser-client` registers all four with the auth database configured in
+the environment, for auth on `localhost`, as CI does. It sets
+`browser-e2e-server`'s secret from `E2E_SERVER_CLIENT_SECRET`: 32 random bytes in
+unpadded base64url.
+
+Previews don't register them. Register them on the preview through its CLI:
+
+```console
+cli() { piquelctl preview exec piquel-fr "$(git branch --show-current)" auth -- auth-service "$@"; }
+cli client create browser-e2e --name 'Browser E2E' \
+    --redirect-uri https://browser-e2e.test/callback
+cli client create browser-e2e-sdk --name 'Browser E2E SDK' --trusted --require-par \
+    --redirect-uri https://sdk-e2e.test/callback
+cli client create browser-e2e-inline --name 'Browser E2E inline' --trusted \
+    --redirect-uri https://related-e2e.test/callback
+cli client origin add browser-e2e-inline https://related-e2e.test
+cli client create browser-e2e-server --name 'Browser E2E server' --trusted --confidential \
+    --scope openid --scope profile --scope email --scope offline_access --refresh \
+    --redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri http://127.0.0.1:4100/
+```
+
+The last command prints the client's secret once: set `E2E_SERVER_CLIENT_SECRET`
+to it.
+
+## Limits
+
+`oidc.spec.ts` signs up with a virtual passkey marked as backed up, so the suite
+checks that auth accepts synced passkeys. It can't check Apple's or Google's
+password managers, or sign-in with live Google and GitHub accounts: try those by
+hand on a preview.

@@ -163,6 +163,8 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         INSERT INTO oidc_consents (user_id, client_id, audience, scopes)
         VALUES ('{user}', '{client}', 'test', '[]');
         INSERT INTO administrators (user_id) VALUES ('{user}');
+        INSERT INTO notification_preferences (user_id, category, email)
+        VALUES ('{user}', 'announcements', FALSE);
         INSERT INTO notifications (id, user_id, payload)
         VALUES (uuidv7(), '{user}', '{{\"kind\": \"account_enabled\"}}');
         INSERT INTO authorization_requests (
@@ -437,6 +439,69 @@ async fn personal_data_stored_during_a_purge_is_erased() {
         .expect("history");
     let [event] = <[_; 1]>::try_from(events).expect("the failed sign-in stays");
     assert_eq!(event.origin, Personal::Erased);
+}
+
+/// An alert raised while an administrator is being purged, whose transaction
+/// key-share locked them and queued their email before the purge started, leaves
+/// no email behind once both commit: the email copied their address.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn an_alert_raised_during_a_purge_leaves_no_email() {
+    use piquel_common::{
+        AlertId,
+        admin::{ChainBreak, ChainProblem},
+        alerts::Alert,
+        events::JobName,
+    };
+    let pool = Database::test_pool().await;
+    let user = insert_user(&pool, "alerted").await;
+    // Test-generated IDs only, so formatting them into the SQL is safe.
+    sqlx::raw_sql(&format!(
+        "INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)
+        VALUES (uuidv7(), '{user}', 'alerted-{user}@example.com', now(), TRUE);
+        INSERT INTO administrators (user_id) VALUES ('{user}');"
+    ))
+    .execute(&pool)
+    .await
+    .expect("administrator");
+    let context = EventContext {
+        actor: Actor::System {
+            job: JobName::AuditVerification,
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let mut raising = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    let raised = DomainEvent::AlertRaised {
+        alert_id: AlertId::new(),
+        alert: Alert::AuditChainBroken(ChainBreak {
+            position: 1,
+            problem: ChainProblem::EventChanged,
+        }),
+    };
+    raising.record(&context, None, raised).await.expect("raise");
+
+    let mut connection = pool.acquire().await.expect("connection");
+    let backend = Database::backend(&mut connection).await;
+    let purging = tokio::spawn(async move {
+        let mut tx = DatabaseTransaction::new(connection.begin().await.expect("transaction"));
+        let purged = tx.deletions().purge(user).await.expect("purge");
+        tx.commit().await.expect("commit");
+        purged
+    });
+    // Only deleting the account waits for the alert's lock.
+    Database::wait_for_lock(&pool, backend).await;
+    raising.commit().await.expect("commit");
+    assert!(purging.await.expect("purge task"));
+
+    let emails: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM deliveries WHERE channel = 'email' AND recipient = to_jsonb($1::text)",
+    )
+    .bind(user.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("deliveries");
+    assert_eq!(emails, 0);
 }
 
 /// A failed purge waits its backoff behind the other due accounts, doubling with

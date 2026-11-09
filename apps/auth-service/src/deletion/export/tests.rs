@@ -5,6 +5,7 @@ use piquel_common::{
     AnnouncementId, AuthenticationMethod, EmailId, EventId, NotificationId, Provider, TokenId,
     clients::ClientKind,
     events::{Browser, Platform, UserAgentFamily},
+    notifications::{EmailCategory, NotificationPreference},
 };
 use piquel_repository::RecoveryPasskey;
 use serde_json::json;
@@ -181,6 +182,10 @@ fn serializes_every_section_in_its_documented_shape() {
             everyone: true,
             sent_at: at,
         }],
+        notification_preferences: vec![NotificationPreference {
+            category: EmailCategory::Announcements,
+            email: false,
+        }],
     };
     assert_eq!(records.file_name(), "piquel-account-ada-2026-10-22.json");
     let time = "2026-10-22T09:30:00Z";
@@ -309,6 +314,7 @@ fn serializes_every_section_in_its_documented_shape() {
                 "everyone": true,
                 "sent_at": time,
             }],
+            "notification_preferences": [{"category": "announcements", "email": false}],
         })
     );
 }

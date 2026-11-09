@@ -16,7 +16,7 @@ use piquel_common::{
     AnnouncementId, AuthenticationMethod, PictureId, Provider, RecoveryId, TokenId,
     clients::{ClientKind, ClientOwner},
     events::{JobName, RequestOrigin, SignInFailure},
-    notifications::Notification,
+    notifications::{EmailCategory, Notification, NotificationPreference},
 };
 use piquel_repository::{
     Database, DraftedAnnouncement, Holds, InsertAuthorizationCode, InsertExternalIdentity,
@@ -247,6 +247,11 @@ impl Fixture {
             .insert(user_id, None, &Notification::AccountEnabled)
             .await
             .expect("notification");
+        let quiet = NotificationPreference {
+            category: EmailCategory::Announcements,
+            email: false,
+        };
+        assert!((tx.notifications().set_preference(user_id, quiet).await).expect("preference"));
         let announcement = AnnouncementId::new();
         tx.announcements()
             .insert_draft(&DraftedAnnouncement {
@@ -254,6 +259,7 @@ impl Fixture {
                 subject: "Maintenance",
                 body: "Tonight.",
                 recipients: Recipients::Accounts(&[user_id]),
+                essential: false,
             })
             .await
             .expect("draft");

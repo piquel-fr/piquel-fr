@@ -4,7 +4,7 @@
 #[cfg(test)]
 use super::LinkKeys;
 use super::TokenDigestKeys;
-use crate::{emails::VerificationKeys, recovery::RecoveryLinks};
+use crate::{emails::VerificationKeys, notifications::UnsubscribeLinks, recovery::RecoveryLinks};
 use lettre::{
     AsyncSmtpTransport, Tokio1Executor,
     message::Mailbox,
@@ -53,6 +53,8 @@ pub(crate) struct EmailConfig {
     pub verification_keys: VerificationKeys,
     /// Derives recovery links from recovery IDs.
     pub recovery_links: RecoveryLinks,
+    /// Derives and checks the unsubscribe links of announcements' emails.
+    pub unsubscribe_links: UnsubscribeLinks,
 }
 
 impl EmailConfig {
@@ -75,6 +77,7 @@ impl EmailConfig {
             origin: origin.clone(),
             verification_keys: digest_keys.verification_keys(),
             recovery_links: digest_keys.recovery_links(origin),
+            unsubscribe_links: digest_keys.unsubscribe_links(origin),
         })
     }
 
@@ -171,6 +174,7 @@ impl EmailConfig {
             origin: origin.clone(),
             verification_keys: VerificationKeys::new(LinkKeys::generate()),
             recovery_links: RecoveryLinks::new(origin.clone(), LinkKeys::generate()),
+            unsubscribe_links: UnsubscribeLinks::new(origin.clone(), LinkKeys::generate()),
         }
     }
 }

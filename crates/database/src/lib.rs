@@ -33,8 +33,7 @@ pub use repositories::{
     RecoveryRepository, SecurityRepository, SessionRepository, SigningKeyRepository,
     TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
-    alerts::StoredAlert,
-    announcements::{DraftedAnnouncement, Recipients},
+    announcements::{DraftedAnnouncement, Recipients, SentAnnouncement},
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},
@@ -44,7 +43,7 @@ pub use repositories::{
         NewDelivery, PendingAddress, PendingRecovery,
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
-    events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},
+    events::{EventCursor, EventFilter, RecordedEvent, StoredEvent, Verifications},
     exports::{AnnouncementRecord, IdentityRecord, NotificationRecord, SessionRecord},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,

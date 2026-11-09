@@ -34,14 +34,14 @@ pub trait Channel: Sized + Send + Sync + 'static {
     type Payload: Serialize + DeserializeOwned + Send + Sync;
 
     /// The deliveries `event`, concerning `subject`, causes, with the
-    /// notification it just gave `subject`, if any. Runs inside the event's
+    /// notifications it just wrote, `notified`. Runs inside the event's
     /// transaction, which sees the rows as the change left them, or as they were
     /// for an event recorded before its change, such as `EmailRemoved`. A
     /// committed event has all its deliveries and a rolled-back one has none.
     fn deliveries(
         event: &DomainEvent,
         subject: Option<UserId>,
-        notified: Option<&Notified>,
+        notified: &[Notified],
         tx: &mut DatabaseTransaction<'_>,
     ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send;
 }
@@ -56,7 +56,7 @@ pub(crate) trait Channels {
         event_id: EventId,
         subject: Option<UserId>,
         event: &DomainEvent,
-        notified: Option<&Notified>,
+        notified: &[Notified],
     ) -> impl Future<Output = Result<(), DatabaseError>> + Send;
 }
 
@@ -70,7 +70,7 @@ impl Channels for () {
         _: EventId,
         _: Option<UserId>,
         _: &DomainEvent,
-        _: Option<&Notified>,
+        _: &[Notified],
     ) -> impl Future<Output = Result<(), DatabaseError>> + Send {
         std::future::ready(Ok(()))
     }
@@ -83,7 +83,7 @@ impl<C: Channel, Rest: Channels> Channels for (C, Rest) {
         event_id: EventId,
         subject: Option<UserId>,
         event: &DomainEvent,
-        notified: Option<&Notified>,
+        notified: &[Notified],
     ) -> Result<(), DatabaseError> {
         for delivery in C::deliveries(event, subject, notified, tx).await? {
             tx.deliveries().insert(Some(event_id), delivery).await?;

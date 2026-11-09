@@ -18,6 +18,8 @@ piquel_common::str_enum! {
         ActiveVerifiedEmailOwnership = "active_verified_email_ownership",
         /// Administrator rights.
         Administrators = "administrators",
+        /// What administrators post on an alert while they handle it.
+        AlertUpdates = "alert_updates",
         /// Conditions administrators are shown.
         Alerts = "alerts",
         /// The accounts an announcement goes to.
@@ -60,6 +62,8 @@ piquel_common::str_enum! {
         Handles = "handles",
         /// Signup invitations.
         Invitations = "invitations",
+        /// Which categories of notifications each account has emailed.
+        NotificationPreferences = "notification_preferences",
         /// Accounts' inboxes.
         Notifications = "notifications",
         /// Digests of client secrets.
@@ -142,6 +146,7 @@ impl Table {
             Self::DomainEvents => Holds::Exported("events"),
             Self::EventPersonalData => Holds::Exported("events/*/ip"),
             Self::Notifications => Holds::Exported("notifications"),
+            Self::NotificationPreferences => Holds::Exported("notification_preferences"),
             // Sent ones; a draft is the administrators' until it is sent.
             Self::Announcements | Self::AnnouncementRecipients => Holds::Exported("announcements"),
             Self::AccountDeletions => Holds::Withheld(
@@ -164,6 +169,10 @@ impl Table {
             | Self::DashboardHandoffs => {
                 Holds::Withheld("sign-ins and ceremonies in progress, deleted within a day")
             }
+            Self::AlertUpdates => Holds::Withheld(
+                "administrators' handling of alerts, naming its author as an event's \
+                actor does; its note is its event's personal data",
+            ),
             Self::RequestLimits => Holds::Withheld(
                 "keyed digests of IP addresses, accounts and email addresses, \
                 deleted within an hour",

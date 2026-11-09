@@ -9,6 +9,8 @@
 //! [`Confirmation`] says; without the script, the browser confirms on auth's
 //! handoff page, and comes back. Every page works without it.
 
+/// The alerts administrators are shown.
+mod alerts;
 /// Announcements to accounts.
 mod announcements;
 /// The audit chain's state and its checkpoints.
@@ -32,6 +34,7 @@ mod recoveries;
 /// Account search and one account.
 mod users;
 
+pub use alerts::{AlertCard, alert_list, alert_update_fields, previous_alerts};
 pub use announcements::{
     AdminAnnouncementRow, DraftActions, FoundAccount, announcement_form, announcement_list,
     announcement_page,
@@ -134,6 +137,8 @@ pub enum Tab {
     Audit,
     /// Announcements to accounts.
     Announcements,
+    /// What needs an administrator's attention.
+    Alerts,
 }
 
 impl Tab {
@@ -151,6 +156,7 @@ impl Tab {
             Self::SigningKeys => Icon::Key,
             Self::Audit => Icon::Audit,
             Self::Announcements => Icon::Megaphone,
+            Self::Alerts => Icon::Warning,
         }
     }
 }
@@ -170,6 +176,7 @@ impl Label for Tab {
             Self::SigningKeys => "Signing keys",
             Self::Audit => "Audit",
             Self::Announcements => "Announcements",
+            Self::Alerts => "Alerts",
         }
     }
 }
@@ -203,6 +210,8 @@ pub struct Dashboard<'a> {
     pub here: &'a str,
     /// Whether the service needs attention, as the overview finds, if known.
     pub health: Option<Health>,
+    /// The tabs whose pages need attention, which the sidebar marks.
+    pub attention: &'a [Tab],
     /// The deployment the status bar names.
     pub environment: &'a str,
     /// Piquel's policies, which the status bar links.
@@ -247,9 +256,6 @@ pub async fn dashboard_frame<'a>(
     dashboard: &'a Dashboard<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
-    let warning = dashboard
-        .health
-        .is_some_and(|health| health != Health::Normal);
     let items: Vec<_> = dashboard
         .tabs
         .iter()
@@ -258,7 +264,7 @@ pub async fn dashboard_frame<'a>(
             label: tab.label(),
             href,
             current: dashboard.current == Some(*tab),
-            warning: warning && *tab == Tab::Overview,
+            warning: dashboard.attention.contains(tab),
             count: None,
         })
         .collect();
@@ -397,6 +403,8 @@ pub enum Change {
     SendAnnouncement,
     /// Deleting a draft announcement, which needs no confirmation.
     DiscardAnnouncement,
+    /// Posting an update on a current alert, saying where its handling stands.
+    UpdateAlert,
 }
 
 impl Change {
@@ -436,6 +444,7 @@ impl Change {
             Self::EditAnnouncement => "Edit the draft",
             Self::SendAnnouncement => "Send this announcement",
             Self::DiscardAnnouncement => "Discard this draft",
+            Self::UpdateAlert => "Post an update",
         }
     }
 
@@ -523,9 +532,12 @@ impl Change {
             }
             Self::EditAnnouncement => "Nothing is sent until you send it.",
             Self::SendAnnouncement => {
-                "Emails it to each recipient with a primary verified address, and puts it in every recipient's inbox. Nobody can change or take it back once it is sent."
+                "Puts it in every recipient's inbox, and emails it to each with a primary verified address who receives announcements by email, or to all of them if it is essential. Nobody can change or take it back once it is sent."
             }
             Self::DiscardAnnouncement => "It is deleted, and goes to nobody.",
+            Self::UpdateAlert => {
+                "Say who is handling it and how. The first update acknowledges it: it stops counting as a warning, though it stays current while its condition holds. If the condition changes, or clears and comes back, a new alert is raised."
+            }
         }
     }
 
@@ -561,6 +573,7 @@ impl Change {
             Self::DraftAnnouncement | Self::EditAnnouncement => "Save draft",
             Self::SendAnnouncement => "Send",
             Self::DiscardAnnouncement => "Discard",
+            Self::UpdateAlert => "Post an update",
         }
     }
 
@@ -597,7 +610,8 @@ impl Change {
             | Self::DraftAnnouncement
             | Self::EditAnnouncement
             | Self::SendAnnouncement
-            | Self::DiscardAnnouncement => self.button(),
+            | Self::DiscardAnnouncement
+            | Self::UpdateAlert => self.button(),
         }
     }
 
@@ -669,7 +683,8 @@ impl Change {
             | Self::DraftAnnouncement
             | Self::EditAnnouncement
             | Self::SendAnnouncement
-            | Self::DiscardAnnouncement => None,
+            | Self::DiscardAnnouncement
+            | Self::UpdateAlert => None,
         }
     }
 }
