@@ -62,9 +62,9 @@ Jobs run through one runner (`apps/auth-service/src/jobs/mod.rs`):
   time advances it. The `keys` commands wait for the same lock.
 
 A run that fails or panics is logged, and retried at the next interval. On
-shutdown, once in-flight requests drain, running jobs get 10 seconds to finish,
-and cleanup stops after its current batch. Then they are cancelled, which
-closes their connection and releases their lock.
+shutdown, running jobs get 6 seconds to finish, and cleanup stops after its
+current batch. Then they are cancelled, which closes their connection and
+releases their lock (see [stopping](deploying.md#stopping)).
 
 Jobs raise alerts for administrators when something keeps going wrong: see
 [respond to an alert](administration.md#respond-to-an-alert) for each.

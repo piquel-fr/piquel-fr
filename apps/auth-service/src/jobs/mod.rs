@@ -32,9 +32,6 @@ use tokio::{
 };
 use tracing::Instrument;
 
-/// How long running jobs may take to finish after shutdown starts.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
-
 /// A periodic task that runs on at most one replica at a time. It receives only the
 /// locked connection, never the pool, so all its work happens while it holds the lock.
 pub(crate) trait ExclusiveJob: Send + Sync + 'static {
@@ -48,7 +45,7 @@ pub(crate) trait ExclusiveJob: Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Runs the job once. A long run should stop early once `shutdown` is requested;
-    /// otherwise it is cancelled after [`SHUTDOWN_GRACE`].
+    /// otherwise it is cancelled after [`Jobs::SHUTDOWN_GRACE`].
     fn run(
         &self,
         connection: &mut ExclusiveConnection,
@@ -83,6 +80,10 @@ pub struct Jobs {
 }
 
 impl Jobs {
+    /// How long running jobs may take to finish once shutdown starts. `serve` gives
+    /// open connections the same time, concurrently.
+    pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(6);
+
     /// Starts every job on `database`: signing key rotation in `store` and the
     /// reloads of this replica's `keys`, audit chain sealing with `config`'s audit
     /// key and its verification, and the delivery workers of every channel,
@@ -131,7 +132,7 @@ impl Jobs {
         }
     }
 
-    /// Stops starting runs, waits up to the `SHUTDOWN_GRACE` period for running ones, then
+    /// Stops starting runs, waits up to `SHUTDOWN_GRACE` for running ones, then
     /// cancels the rest. Cancelling a job drops its connection, which releases its lock;
     /// cancelling a delivery attempt leaves its lease to expire, so it is sent again.
     ///
@@ -140,8 +141,11 @@ impl Jobs {
     pub async fn shutdown(mut self) -> Result<(), JoinError> {
         self.shutdown.send_replace(true);
         let mut panicked = None;
-        let drained =
-            tokio::time::timeout(SHUTDOWN_GRACE, Self::drain(&mut self.tasks, &mut panicked)).await;
+        let drained = tokio::time::timeout(
+            Self::SHUTDOWN_GRACE,
+            Self::drain(&mut self.tasks, &mut panicked),
+        )
+        .await;
         if drained.is_err() {
             tracing::warn!("cancelling background jobs still running after the grace period");
             self.tasks.abort_all();

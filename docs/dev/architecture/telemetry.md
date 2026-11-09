@@ -137,8 +137,9 @@ telemetry its alerts read. Every other `auth-service` command, such as
 only, so broken telemetry never blocks a break-glass fix.
 
 Export goes through the workspace's `reqwest`, on the service's tokio runtime,
-in protobuf, whatever `OTEL_EXPORTER_OTLP_PROTOCOL` says. Shutdown
-flushes pending telemetry after the listeners stop.
+in protobuf, whatever `OTEL_EXPORTER_OTLP_PROTOCOL` says. Shutdown flushes
+pending telemetry after the listeners stop, for up to 3 seconds (see
+[Stopping](../operations/deploying.md#stopping)).
 
 ## Locally
 

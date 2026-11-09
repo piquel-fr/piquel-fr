@@ -3,7 +3,7 @@
 use super::*;
 use super::{
     endpoint::{Endpoint, RateCategory},
-    http::{CorsGrant, FETCH_SITE_HEADER, FORWARDED_FOR_HEADER, Listener},
+    http::{CorsGrant, FETCH_SITE_HEADER, FORWARDED_FOR_HEADER, Listener, MAX_IN_FLIGHT},
 };
 use crate::routes::{oidc, page, service};
 use crate::tests::REQUESTS_PER_MINUTE;
@@ -103,6 +103,7 @@ impl SecurityFixture {
             trusted_proxies: Arc::new(vec![]),
             request_timeout: std::time::Duration::from_secs(30),
             requests_per_minute: REQUESTS_PER_MINUTE,
+            in_flight: Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT)),
             database,
             origin: site(),
             listener: Listener::Public,

@@ -5,9 +5,10 @@ response. Read it before adding a route, so the route gets the right origin,
 CSRF, rate and cache policy without code of its own.
 
 ```text
-TCP listener (axum::serve, peer address attached)
+TCP listener (HTTP/1.1, peer address attached, 10 s header and write timeouts)
  └─ HttpTelemetry::trace            span, access log, duration, X-Trace-Id
      └─ HttpSecurity::protect       30 s deadline around everything below
+         ├─ in-flight limit         64 requests per listener, else 503
          ├─ host check              admin listener only
          ├─ origin check            Origin header against the endpoint's class
          ├─ preflight               OPTIONS answered here
@@ -20,10 +21,14 @@ TCP listener (axum::serve, peer address attached)
 
 ## Listeners and routers
 
-`Command::serve` (`apps/auth-service/src/cli/serve.rs`) binds the public listener
-and, when the dashboard is configured, the admin listener. Each serves its router
-with `into_make_service_with_connect_info::<SocketAddr>()`, so every request
-carries its TCP peer's address.
+`Command::serve` (`apps/auth-service/src/cli/serve/mod.rs`) binds the public
+listener and, when the dashboard is configured, the admin listener.
+`Command::listen` serves each router over HTTP/1.1 with hyper, and attaches the
+TCP peer's address to every request (`ConnectInfo<SocketAddr>`). A client must
+send a request's headers within 10 seconds, which also closes an idle kept-alive
+connection, and a response write that makes no progress for 10 seconds closes
+the connection. On a stop, open requests get 6 seconds to finish
+([stopping](../operations/deploying.md#stopping)).
 
 The public router is `AuthConfig::router` (`src/lib.rs`). It merges every
 feature's `XApplication::routes()`: the health probes, passkeys, federation,
@@ -56,6 +61,15 @@ ID in `X-Trace-Id`. The admin listener labels all of it
 under one 30-second deadline; a request past it answers `504`. Each listener has
 its own `HttpSecurity`: `HttpSecurity::new` for the public one, whose own origin is
 auth's, and `HttpSecurity::admin` for the dashboard's.
+
+### In-flight limit
+
+Each listener runs at most 64 requests at once (`HttpSecurity::admit`). The next
+one answers `503` with `Retry-After: 1` at once, before any check that could
+query the database, so a flood is refused instead of queueing for the pool. It
+counts `sourceorigin.auth.throttled{category="overloaded"}`, and any origin may read
+the refusal. The public and admin listeners each have their own limit, and
+health probes take no slot.
 
 ### Endpoint classes
 
@@ -200,7 +214,8 @@ errors and preflights included:
   `X-Frame-Options: DENY` and `Strict-Transport-Security: max-age=31536000`.
 - **CORS**, once the origin check allowed the request's origin: `*` for public
   documents, or the exact origin with `Vary: Origin` and the methods and headers
-  its class takes, which may then read `X-Trace-Id`.
+  its class takes, which may then read `X-Trace-Id` and `Retry-After`. A refusal
+for the in-flight limit grants any origin, since it skips the origin check.
 
 Pages add their own `Content-Security-Policy` when they render
 (`WebApplication::render_document`): the stylesheet, the passkey and picture

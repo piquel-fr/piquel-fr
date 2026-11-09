@@ -1,5 +1,5 @@
-//! Shared HTTP trust boundaries: origin, proxy, timeout and request-limit
-//! policy, and the cache, isolation and CORS headers of every response.
+//! Shared HTTP trust boundaries: origin, proxy, timeout, request-limit and
+//! in-flight-limit policy, and the cache, isolation and CORS headers of every response.
 
 use super::endpoint::Endpoint;
 use super::{ApiError, CSRF_HEADER, RequestContext};
@@ -24,21 +24,28 @@ use std::{
     time::Duration as StdDuration,
 };
 use thiserror::Error;
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 /// Fetch metadata header naming how a request's initiator relates to its target.
 pub(crate) const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 /// Trusted ingress must overwrite this header with exactly one client address.
 pub(super) const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
-/// Requests refused because their client's budget was exhausted, by category.
+/// Requests refused because their client's budget was exhausted, by category, or
+/// because too many were in flight, as `overloaded`.
 static THROTTLED: Counter<[Label; 1]> = Counter::new(
     "sourceorigin.auth.throttled",
     "{request}",
-    "Requests refused by rate limits, by rate category.",
+    "Requests refused by rate limits, by rate category, or as overloaded.",
 );
 /// The fixed window request budgets count in.
 const RATE_WINDOW: StdDuration = StdDuration::from_mins(1);
 /// Deadline includes origin checks, rate-limit persistence and the handler.
 const REQUEST_TIMEOUT: StdDuration = StdDuration::from_secs(30);
+/// Requests each listener runs at once. More are refused at once instead of
+/// queueing for the database pool's 10 connections until their deadline.
+pub(super) const MAX_IN_FLIGHT: usize = 64;
+/// When a request refused for [`MAX_IN_FLIGHT`] may try again.
+const OVERLOADED_RETRY: StdDuration = StdDuration::from_secs(1);
 
 /// The CORS headers a response carries.
 pub(super) enum CorsGrant {
@@ -157,6 +164,9 @@ pub(crate) enum HttpSecurityError {
     /// This client's category budget is exhausted.
     #[error("request budget exhausted")]
     RateLimited,
+    /// The listener already runs [`MAX_IN_FLIGHT`] requests.
+    #[error("too many requests in flight")]
+    Overloaded,
     /// The complete request exceeded its deadline.
     #[error("HTTP request timed out")]
     Timeout(#[from] tokio::time::error::Elapsed),
@@ -200,6 +210,13 @@ impl From<HttpSecurityError> for ApiError {
             HttpSecurityError::RateLimited => {
                 Self::too_many_requests("Too many requests. Please wait a minute.", RATE_WINDOW)
             }
+            HttpSecurityError::Overloaded => Self {
+                retry_after: Some(OVERLOADED_RETRY),
+                ..Self::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "The service is busy. Please try again in a moment.",
+                )
+            },
             HttpSecurityError::Timeout(_) => {
                 Self::new(StatusCode::GATEWAY_TIMEOUT, "Request timed out.")
             }
@@ -211,7 +228,8 @@ impl From<HttpSecurityError> for ApiError {
     }
 }
 
-/// Shared origin, proxy, timeout and request-limit policy, one per listener.
+/// Shared origin, proxy, timeout, request-limit and in-flight-limit policy, one
+/// per listener.
 #[derive(Clone)]
 pub(crate) struct HttpSecurity {
     /// Stores the rate-limit counters.
@@ -222,6 +240,10 @@ pub(crate) struct HttpSecurity {
     pub request_timeout: StdDuration,
     /// Request budget per category and client in each [`RATE_WINDOW`].
     pub requests_per_minute: i32,
+    /// The listener's slots for requests in flight, [`MAX_IN_FLIGHT`] of them.
+    /// Each listener has its own, so a flood of public requests never locks
+    /// administrators out of the dashboard.
+    pub in_flight: Arc<Semaphore>,
     /// Origin of the listener's own pages, allowed on every endpoint.
     pub origin: url::Origin,
     /// Which listener it guards.
@@ -249,6 +271,7 @@ impl HttpSecurity {
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
             requests_per_minute: config.requests_per_minute,
+            in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
             origin: config.passkey.origin.as_url().origin(),
             listener: Listener::Public,
         }
@@ -290,6 +313,21 @@ impl HttpSecurity {
             }
             _ => Err(HttpSecurityError::WrongHost),
         }
+    }
+
+    /// Takes one of the listener's slots for a request to `endpoint`, held until
+    /// its response is ready, or refuses the request at once when none is free.
+    /// Health probes take none: a busy replica is not a broken one, and piqueld
+    /// must not restart it for being busy.
+    fn admit(&self, endpoint: Endpoint) -> Result<Option<SemaphorePermit<'_>>, HttpSecurityError> {
+        if matches!(endpoint, Endpoint::Health) {
+            return Ok(None);
+        }
+        let Ok(permit) = self.in_flight.try_acquire() else {
+            THROTTLED.add(1, &[("category", "overloaded")]);
+            return Err(HttpSecurityError::Overloaded);
+        };
+        Ok(Some(permit))
     }
 
     /// A trusted edge must overwrite `X-Forwarded-For` with one validated client address.
@@ -365,8 +403,9 @@ impl HttpSecurity {
         })
     }
 
-    /// Middleware: runs the trust checks and the handler under one deadline, then adds the
-    /// cache, isolation and CORS headers to every response, errors included.
+    /// Middleware: sheds the request if the listener is full, runs the trust checks
+    /// and the handler under one deadline, then adds the cache, isolation and CORS
+    /// headers to every response, errors included.
     /// Discovery's errors and preflights get the public grant from their endpoint.
     pub(crate) async fn protect(
         State(policy): State<Self>,
@@ -379,10 +418,14 @@ impl HttpSecurity {
             Listener::Public => Endpoint::of(&request),
             Listener::Admin(_) => Endpoint::Dashboard,
         };
+        let slot = policy.admit(endpoint);
         // Set by the origin check, which runs under the deadline; an error response
-        // still carries CORS headers once the origin is known to be allowed.
-        let mut allowed = false;
+        // still carries CORS headers once the origin is known to be allowed. A
+        // refusal for overload skips the check, which may query the database, and
+        // any origin may read it: it says only when to try again.
+        let mut allowed = slot.is_err();
         let mut response = tokio::time::timeout(policy.request_timeout, async {
+            let _slot = slot?;
             policy.check_host(&request)?;
             if let Some(value) = origin.as_ref().and_then(|value| value.to_str().ok()) {
                 allowed = policy.allowed_origin(endpoint, value).await?;
@@ -539,10 +582,14 @@ impl HttpSecurity {
             headers.insert(name, HeaderValue::from_static(value));
         }
         // Lets cross-origin callers, such as public clients, read the trace ID of a
-        // failed request.
+        // failed request, and when a refused one may try again.
         headers.insert(
             header::ACCESS_CONTROL_EXPOSE_HEADERS,
             HttpTelemetry::TRACE_ID_HEADER.into(),
+        );
+        headers.append(
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            HeaderValue::from_static("retry-after"),
         );
     }
 }
