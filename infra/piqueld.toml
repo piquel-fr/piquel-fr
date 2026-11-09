@@ -31,9 +31,9 @@ audit_key = "audit-key"
 # See docs/dev/operations/replicas.md before raising it.
 auth_replicas = 1
 # Where auth, with the admin dashboard it serves, and sourceorigin.dev's web server
-# send telemetry: the `telemetry` application's collector, imported below.
+# send telemetry: the `sourceorigin-observability` application's collector, imported below.
 # Empty sends none.
-otlp_endpoint = "http://collector.telemetry:4318"
+otlp_endpoint = "http://collector.sourceorigin-observability:4318"
 # GitHub and Google sign-in. An empty client ID turns the provider off; its
 # secret is then mounted but never read, so environments without the provider
 # mount the unused placeholder. Production and staging each have their own OAuth
@@ -56,10 +56,10 @@ admin_host = "admin.sourceorigin.dev"
 docs_host = "docs.sourceorigin.dev"
 smtp_secret = "resend-production"
 email_from = "Origin Account <security@sourceorigin.dev>"
-audit_key = "audit-key-production"
+audit_key = "audit-key-production-2"
 github_client_id = "Ov23litrz0WrDWqrawEM"
 github_secret = "github-production"
-google_client_id = "329657457544-fmlaqdhf3ofcuglb254jmnprdb5s65hc.apps.googleusercontent.com"
+google_client_id = "981383173703-lvo8t7i276v7umdf2hq14l30gknbmdgt.apps.googleusercontent.com"
 google_secret = "google-production"
 
 [spec.environments.staging]
@@ -74,10 +74,10 @@ admin_host = "admin.staging.sourceorigin.dev"
 docs_host = "docs.staging.sourceorigin.dev"
 smtp_secret = "resend-dev"
 email_from = "Origin Account <security@dev.sourceorigin.dev>"
-audit_key = "audit-key-staging"
+audit_key = "audit-key-staging-2"
 github_client_id = "Ov23liZe9WmU9A4fqlqw"
 github_secret = "github-staging"
-google_client_id = "329657457544-v4rtrpcqouifihtc3as6impmn8065ncn.apps.googleusercontent.com"
+google_client_id = "981383173703-rvipsfet9n9270sqp30jttjrsl8beo66.apps.googleusercontent.com"
 google_secret = "google-staging"
 
 # Flat hostnames, so the `*.dev.sourceorigin.dev` certificate covers every preview.
@@ -140,11 +140,11 @@ hostname = "${{ vars.www_host }}"
 redirect = { to = "https://${{ vars.web_host }}", status = 308, preserve_path = true }
 visibility = "public"
 
-# The collector of the `telemetry` application (infra/telemetry.toml), as
-# `collector.telemetry`. It has only a production environment, which staging
+# The collector of the `sourceorigin-observability` application (infra/telemetry.toml), as
+# `collector.sourceorigin-observability`. It has only a production environment, which staging
 # and production share; `deployment.environment.name` tells them apart.
 [[spec.imports]]
-application = "telemetry"
+application = "sourceorigin-observability"
 service = "collector"
 environment = "production"
 
@@ -364,7 +364,7 @@ name = "database-password"
 target = "/run/secrets/database-password"
 
 [[spec.services.mounts]]
-volume = "postgres-data"
+volume = "database"
 target = "/var/lib/postgresql"
 
 # Over TCP: the server initializing a new volume listens only on its socket, so
@@ -374,4 +374,4 @@ type = "command"
 command = ["pg_isready", "-h", "127.0.0.1", "-U", "sourceorigin", "-d", "sourceorigin"]
 
 [[spec.volumes]]
-name = "postgres-data"
+name = "database"

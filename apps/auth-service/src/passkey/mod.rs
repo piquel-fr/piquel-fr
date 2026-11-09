@@ -76,7 +76,7 @@ pub struct PasskeyApplication {
 }
 
 /// Human-readable `WebAuthn` relying party name.
-const RELYING_PARTY_NAME: &str = "SourceOrigin";
+const RELYING_PARTY_NAME: &str = "Origin Account";
 /// Android UA marker is a compatibility gate, never an authentication claim.
 const ANDROID_USER_AGENT: &str = "Android";
 

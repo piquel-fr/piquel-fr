@@ -64,7 +64,8 @@ use uuid::Uuid;
 const SCOPE: &str = "sourceorigin";
 /// Added to every filter: this crate's spans and access logs, the client spans of
 /// [`SendTraced`], and the SDK's own warnings, such as failed exports.
-const OWN_DIRECTIVES: &str = "sourceorigin_telemetry=info,sourceorigin_common=info,opentelemetry=warn";
+const OWN_DIRECTIVES: &str =
+    "sourceorigin_telemetry=info,sourceorigin_common=info,opentelemetry=warn";
 /// Targets never exported as logs: the SDK, which logs its own failures, and the
 /// HTTP stack export requests run on, outside the SDK's suppression of its own
 /// telemetry. Exporting either would feed the exporter its own traffic. They still

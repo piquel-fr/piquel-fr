@@ -14,6 +14,7 @@ use axum::{
     routing::get,
 };
 use chrono::{Duration, Utc};
+use serde::Deserialize;
 use sourceorigin_common::{
     AuthenticationMethod, ErrorChain, Provider, SessionId, TokenId, UserId,
     config::{ConfigurationError, Origin, SecretBytes},
@@ -27,7 +28,6 @@ use sourceorigin_repository::{
     StoredExternalIdentity, StoredSession,
 };
 use sourceorigin_ui::{CallbackError, LoginQuery, PendingDestination, Query as _};
-use serde::Deserialize;
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};
 use url::Url;
 

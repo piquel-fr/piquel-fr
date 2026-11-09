@@ -1,8 +1,8 @@
 error[E0277]: the trait bound `Everything: sourceorigin_auth::scope::sealed::Names` is not satisfied
- --> tests/ui/forged_scope.rs:4:32
+ --> tests/ui/forged_scope.rs:4:38
   |
 4 | impl sourceorigin_auth::ScopeSet for Everything {}
-  |                                ^^^^^^^^^^ unsatisfied trait bound
+  |                                      ^^^^^^^^^^ unsatisfied trait bound
   |
 help: the trait `sourceorigin_auth::__private::Declared` is not implemented for `Everything`
  --> tests/ui/forged_scope.rs:2:1

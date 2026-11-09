@@ -9,6 +9,7 @@
 //! Nothing is cached: every request reads the registration it needs from the
 //! database, so a change applies to the next request on every replica.
 
+use serde::Serialize;
 use sourceorigin_common::{
     ClientId, UserId,
     clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RelatedOrigin},
@@ -16,8 +17,9 @@ use sourceorigin_common::{
     protocol::oauth::Scope,
 };
 use sourceorigin_crypto::{ClientSecret, CryptoError};
-use sourceorigin_repository::{DatabaseError, DatabaseTransaction, StoredClientSecret, StoredOidcClient};
-use serde::Serialize;
+use sourceorigin_repository::{
+    DatabaseError, DatabaseTransaction, StoredClientSecret, StoredOidcClient,
+};
 use std::collections::BTreeSet;
 use thiserror::Error;
 use url::Url;

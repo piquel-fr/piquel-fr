@@ -21,13 +21,13 @@ use crate::{
         settings::{Addresses, ConnectedApps, SignInMethods},
     },
 };
+use serde::{Deserialize, de::DeserializeOwned};
 use sourceorigin_common::{EventId, Handle, UserId};
 use sourceorigin_ui::{
     Audience, Change, Checkbox, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow,
     HistoryPage, HistoryState, Holdings, InboxPage, InboxRow, InboxState, ProfileChange,
     ProfileDialog, ProfilePages, ProfileState, ProviderRow, Recovery, SignInChange, Tab, Who,
 };
-use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
     Result,
     context::Cx,

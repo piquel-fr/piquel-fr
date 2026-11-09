@@ -1,6 +1,6 @@
 # Threat model
 
-This page says what sourceorigin.dev's auth protects, from whom, and which risks it
+This page says what Origin Auth protects, from whom, and which risks it
 accepts. Use it to judge whether a change weakens a defense, or needs one of its
 own. It builds on the [security boundaries](boundaries.md); the
 [security properties](properties.md) and the pages after them hold the details.

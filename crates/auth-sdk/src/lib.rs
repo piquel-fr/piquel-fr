@@ -133,7 +133,9 @@ pub use token::{
 /// The wire types this SDK reads, shared with auth itself. Each item is re-exported
 /// by name, so this list is the SDK's contract.
 pub mod protocol {
-    pub use sourceorigin_common::protocol::{challenge, claims, jwt, metadata, oauth, sdk, step_up};
+    pub use sourceorigin_common::protocol::{
+        challenge, claims, jwt, metadata, oauth, sdk, step_up,
+    };
     pub use sourceorigin_common::{ClientId, DeliveryId, InvalidValue, SessionId, TokenId, UserId};
 }
 pub use protocol::{

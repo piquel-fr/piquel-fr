@@ -9,13 +9,13 @@
 use super::{EventRepository, KindProbe, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use sourceorigin_common::{
     ClientId, EventId, Personal, SessionId, TraceId, UserId,
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
 use sourceorigin_telemetry::Telemetry;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use sqlx::types::Json;
 use std::net::IpAddr;
 

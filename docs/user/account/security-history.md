@@ -74,4 +74,4 @@ until you remove it. After reporting:
 
 If you can't sign in any more, or need help, write to
 [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev). To report a vulnerability in
-sourceorigin.dev, write to [security@sourceorigin.dev](mailto:security@sourceorigin.dev).
+SourceOrigin, write to [security@sourceorigin.dev](mailto:security@sourceorigin.dev).

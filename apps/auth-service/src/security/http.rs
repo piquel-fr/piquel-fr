@@ -182,9 +182,9 @@ impl From<HttpSecurityError> for ApiError {
             HttpSecurityError::ForbiddenPreflight | HttpSecurityError::ForbiddenOrigin => {
                 Self::forbidden("This endpoint does not accept requests from this origin.")
             }
-            HttpSecurityError::MissingOrigin => {
-                Self::forbidden("This request must come from an Origin Auth page, with an Origin header.")
-            }
+            HttpSecurityError::MissingOrigin => Self::forbidden(
+                "This request must come from an Origin Auth page, with an Origin header.",
+            ),
             HttpSecurityError::ForeignForm => {
                 Self::forbidden("Submit this form from its page on this site.")
             }

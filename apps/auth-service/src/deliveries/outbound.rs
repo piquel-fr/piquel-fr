@@ -9,12 +9,12 @@ use axum::http::{
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 use ipnet::{Ipv4Net, Ipv6Net};
-use sourceorigin_telemetry::SendTraced;
 use reqwest::{
     RequestBuilder,
     dns::{Addrs, Name, Resolve, Resolving},
     redirect,
 };
+use sourceorigin_telemetry::SendTraced;
 use std::{
     error::Error as StdError,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},

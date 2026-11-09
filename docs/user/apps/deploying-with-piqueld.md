@@ -1,6 +1,6 @@
 # Deploying with piqueld
 
-Deploy an app that signs users in with sourceorigin.dev on
+Deploy an app that signs users in with Origin Auth on
 [piqueld](https://github.com/sourceorigin-dev/piqueld): keep its client secret in
 piqueld's secret store, and give each environment its own redirect URI.
 
