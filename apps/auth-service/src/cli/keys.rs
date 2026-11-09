@@ -78,7 +78,7 @@ impl KeysCommand {
             .map(|key| format!(", now {},", key.state))
             .unwrap_or_default();
         format!(
-            "Revoke signing key {id}{state} at once: every replica stops accepting the tokens it signed within a minute, and verifiers that cached it within an hour. If it signs when revoked, the keys waiting and retiring beside it go too, and a new key signs at once"
+            "Revoke signing key {id}{state} at once: every replica stops accepting the tokens it signed within a minute, or 15 minutes if it cannot reload its keys, and verifiers that cached it within an hour. If it signs when revoked, the keys waiting and retiring beside it go too, and a new key signs at once"
         )
     }
 
