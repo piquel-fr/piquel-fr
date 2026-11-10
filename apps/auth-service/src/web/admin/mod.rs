@@ -235,6 +235,8 @@ pub(crate) struct AdminApplication {
     /// Auth's origin: invitations link its registration page, and the dashboard
     /// links the account's settings and signing out of Origin Auth.
     auth: Origin,
+    /// The administrator's inbox, on auth, which the top bar's bell links.
+    inbox: String,
     /// Whether signup needs an invitation, so the dashboard manages them.
     invitations: bool,
     /// Derives the links recoveries mail.
@@ -351,6 +353,7 @@ impl AdminApplication {
             keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             passkeys,
+            inbox: auth.join(routes::page::settings::NOTIFICATIONS),
             auth,
             invitations: config.passkey.invite_required,
             links: config.email.recovery_links.clone(),
@@ -803,21 +806,27 @@ impl AdminApplication {
         }
     }
 
-    /// How many of the signed-in `admin`'s own notifications are unread, which
-    /// the top bar's bell counts. Like the status bar, it never costs the page: a
-    /// failed read is logged and counts none.
-    async fn unread(cx: &Cx, admin: &SignedInAdmin) -> u64 {
-        match Self::of(cx)
-            .account
-            .unread_notifications(&Viewer::from(admin))
-            .await
-        {
+    /// The top bar's shortcuts, among `tabs`, for the signed-in administrator:
+    /// none for a browser that is not signed in. The bell counts their own
+    /// unread notifications, read as the owner; like the status bar, it never
+    /// costs the page, so a failed read is logged and counts none.
+    async fn shortcuts<'a>(
+        cx: &'a Cx,
+        tabs: &'a [(DashboardTab, &'a str)],
+        attention: Attention,
+    ) -> Vec<Shortcut<'a>> {
+        let app = Self::of(cx);
+        let Ok(admin) = Self::admin(cx).await else {
+            return Vec::new();
+        };
+        let unread = match app.account.unread_notifications(&Viewer::from(admin)).await {
             Ok(unread) => unread,
             Err(error) => {
                 tracing::warn!(error = %ErrorChain(&error), "counting the unread notifications failed");
                 0
             }
-        }
+        };
+        attention.shortcuts(tabs, &app.inbox, unread)
     }
 
     /// The cache of what every page shows.
@@ -1002,12 +1011,6 @@ impl AdminApplication {
         // The avatar leads to the administrator's own settings, on auth.
         let me = app.auth.join(routes::page::settings::HOME);
         let attention = Self::attention(cx).await;
-        let marked = attention.tabs();
-        let inbox = app.auth.join(routes::page::settings::NOTIFICATIONS);
-        let shortcuts = match admin {
-            Some(admin) => attention.shortcuts(links, &inbox, Self::unread(cx, admin).await),
-            None => Vec::new(),
-        };
         let environment = app.auth.host();
         let dashboard = Dashboard {
             title,
@@ -1022,7 +1025,7 @@ impl AdminApplication {
             preferences_action: prefer,
             here,
             health: Some(attention.health()),
-            attention: &marked,
+            attention: &attention.tabs(),
             environment,
             policies: app.policies.links(),
             search: Search {
@@ -1031,7 +1034,7 @@ impl AdminApplication {
                 placeholder: "Search by handle, name, email or ID",
                 value: &searched,
             },
-            shortcuts: &shortcuts,
+            shortcuts: &Self::shortcuts(cx, links, attention).await,
             reference: HttpTelemetry::trace_id(status),
             confirmation: admin.map(|admin| DashboardConfirmation {
                 start,

@@ -822,6 +822,39 @@ async fn the_crumb_leads_through_the_tab() {
     assert!(page.contains("<b>security history</b>"), "{page}");
 }
 
+/// The top bar's bell counts the administrator's own unread notifications and
+/// opens their inbox on auth; beside it, a shortcut opens the Alerts tab.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_top_bar_has_the_administrators_bell_and_the_alerts() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.sign_in(&admin, "/users").await;
+    let message = Notification::Message {
+        title: "Hello".to_owned(),
+        text: "From the team.".to_owned(),
+    };
+    let mut notifications = harness.database.notifications();
+    notifications
+        .insert(admin.user_id, None, &message)
+        .await
+        .expect("notify");
+    // Raising an alert in another test notifies every administrator.
+    let unread = notifications.unread(admin.user_id).await.expect("unread");
+    assert!(unread >= 1);
+    let page = html(harness.visit(&dashboard, "/users").await).await;
+    let bell = format!(
+        r#"{}" title="Notifications" aria-label="Notifications, {unread} unread">"#,
+        routes::page::settings::NOTIFICATIONS
+    );
+    assert!(page.contains(&bell), "{page}");
+    let alerts = format!(
+        r#"<a class="shortcut alerts" href="{}" title="Alerts""#,
+        routes::dashboard::ALERTS
+    );
+    assert!(page.contains(&alerts), "{page}");
+}
+
 /// The audit page's form verifies as `audit verify` does and comes back to the
 /// page, which then shows that verification, and the page says that pruning is
 /// the database owner's, from the command line. The database is shared, so other
