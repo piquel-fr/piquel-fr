@@ -1790,7 +1790,7 @@ Options:
 Commands:
 
 - [`auth-service account notifications list`](#auth-service-account-notifications-list): List the notifications, newest first.
-- [`auth-service account notifications show`](#auth-service-account-notifications-show): Show one notification, with its security history entry while kept.
+- [`auth-service account notifications show`](#auth-service-account-notifications-show): Show one notification, with what it offers its owner to do and its security history entry while kept.
 - [`auth-service account notifications preferences`](#auth-service-account-notifications-preferences): Show which categories of notifications the account receives by email. Only the owner changes them, since turning one off could hide a notice from them.
 
 ## `auth-service account notifications list`
@@ -1809,7 +1809,7 @@ Options:
 
 ## `auth-service account notifications show`
 
-Show one notification, with its security history entry while kept.
+Show one notification, with what it offers its owner to do and its security history entry while kept.
 
 ```text
 auth-service account <USER> notifications show [OPTIONS] <NOTIFICATION>

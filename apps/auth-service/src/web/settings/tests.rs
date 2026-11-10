@@ -12,12 +12,12 @@ use crate::{
 };
 use axum::http::{StatusCode, header};
 use sourceorigin_common::{
-    AuthenticationMethod, EmailId, EventId, Provider, TokenId,
+    AuthenticationMethod, EmailId, EventId, Provider, RecoveryId, TokenId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
     notifications::EmailCategory,
 };
 use sourceorigin_crypto::Secret;
-use sourceorigin_repository::InsertExternalIdentity;
+use sourceorigin_repository::{InsertExternalIdentity, InsertRecovery};
 use sourceorigin_ui::{
     Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
     HistoryChange, HistoryState, InboxChange, InboxState, NotificationState, PICTURE_FIELD,
@@ -512,6 +512,62 @@ async fn notifications_are_read_by_opening_them() {
     let missing = settings::NOTIFICATION.replace("{id}", "not-an-id");
     let shown = browser.visit_from(&replicas.a, &missing, OWN_PAGE).await;
     assert_eq!(shown.status(), StatusCode::NOT_FOUND);
+}
+
+/// A recovery's notification offers its undo page from the moment support
+/// starts it, as its email does, while the account is still in it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_started_recoverys_notification_offers_to_undo_it() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let recovery_id = RecoveryId::new();
+    let expires_at = chrono::Utc::now() + chrono::Duration::days(1);
+    database
+        .recoveries()
+        .insert(&InsertRecovery {
+            id: recovery_id,
+            user_id: browser.user_id,
+            secret_digest: &[0; 32],
+            expires_at,
+        })
+        .await
+        .expect("recovery");
+    let context = EventContext {
+        actor: Actor::User {
+            user_id: browser.user_id,
+            session_id: Some(browser.session_id),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let started = DomainEvent::RecoveryStarted {
+        recovery_id,
+        expires_at,
+        revoke: None,
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    tx.record(&context, Some(browser.user_id), started)
+        .await
+        .expect("record");
+    tx.commit().await.expect("commit");
+    let id = database
+        .notifications()
+        .list(browser.user_id, None, 1)
+        .await
+        .expect("inbox")[0]
+        .id;
+
+    let item = settings::NOTIFICATION.replace("{id}", &id.to_string());
+    let page = html(browser.visit_from(&replicas.a, &item, OWN_PAGE).await).await;
+    assert!(
+        page.contains(&format!(
+            r#"<a class="button danger" href="{}">Undo the recovery</a>"#,
+            page::RECOVER_UNDO
+        )),
+        "{page}"
+    );
 }
 
 /// The top bar's bell on every settings page links the inbox and counts unread

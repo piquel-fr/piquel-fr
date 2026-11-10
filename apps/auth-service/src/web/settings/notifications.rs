@@ -20,7 +20,7 @@ use crate::{
 };
 use sourceorigin_common::{
     NotificationId,
-    notifications::{Notification, NotificationPreference},
+    notifications::{NotificationAction, NotificationPreference},
 };
 use sourceorigin_ui::{
     Audience, Crumb, EmailRow, HistoryRow, Holdings, InboxChange, InboxPage, InboxRow, InboxState,
@@ -205,22 +205,28 @@ impl AccountPage for NotificationPage {
             .collect();
         let email_rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
         let entry = view.history.as_ref().map(HistoryRow::from);
-        let about_recovery = matches!(
-            view.item.notification,
-            Notification::Recovered | Notification::AccountSecured { kept: true }
-        );
         let here = uri(cx).path().to_owned();
-        let alerts = web
-            .dashboard
-            .as_ref()
-            .filter(|_| view.item.notification.links_alerts())
-            .map(|dashboard| dashboard.dashboard().join(routes::dashboard::ALERTS));
+        // What it offers, while it can be done: undoing a recovery the account
+        // is still in, or the alerts of a dashboard auth serves.
+        let action = view.item.action.and_then(|action| {
+            let href = match action {
+                NotificationAction::UndoRecovery => {
+                    reader.recovery().map(|_| page::RECOVER_UNDO.to_owned())
+                }
+                NotificationAction::SeeAlerts => web
+                    .dashboard
+                    .as_ref()
+                    .map(|dashboard| dashboard.dashboard().join(routes::dashboard::ALERTS)),
+            };
+            href.map(|href| (action, href))
+        });
         let page = sourceorigin_ui::NotificationPage {
             here: &here,
             inbox: settings::NOTIFICATIONS,
             history: settings::HISTORY,
-            undo: (about_recovery && reader.recovery().is_some()).then_some(page::RECOVER_UNDO),
-            alerts: alerts.as_deref(),
+            action: action
+                .as_ref()
+                .map(|(action, href)| (*action, href.as_str())),
             entry: entry.as_ref(),
             holds: Holdings {
                 passkeys: &passkeys,

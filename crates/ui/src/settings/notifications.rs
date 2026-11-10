@@ -11,7 +11,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     NotificationId,
-    notifications::{EmailCategory, NotificationPreference, SIGN_OUT_LINK_LIFETIME},
+    notifications::{
+        EmailCategory, NotificationAction, NotificationPreference, SIGN_OUT_LINK_LIFETIME,
+    },
 };
 use topcoat::{
     Result,
@@ -392,12 +394,9 @@ pub struct NotificationPage<'a> {
     pub inbox: &'a str,
     /// The security history, which a report posts to.
     pub history: &'a str,
-    /// The page undoing the account's recovery, while one can still be undone
-    /// and the notification is about it.
-    pub undo: Option<&'a str>,
-    /// The admin dashboard's Alerts tab, for an alert's notification, unless
-    /// the dashboard is off.
-    pub alerts: Option<&'a str>,
+    /// What the notification offers to do, and the page that does it, while it
+    /// can be done: a recovery's undo page, or the dashboard's Alerts tab.
+    pub action: Option<(NotificationAction, &'a str)>,
     /// Its event's entry in the security history, while kept.
     pub entry: Option<&'a HistoryRow<'a>>,
     /// What the account holds, to name what the entry refers to.
@@ -408,8 +407,7 @@ pub struct NotificationPage<'a> {
 
 /// One notification's page: what it says, its security history entry while the
 /// history keeps it, which the owner may report as not theirs where the history
-/// allows, the recovery's undo page when it is about one, the dashboard's
-/// alerts for an alert's, and marking it unread.
+/// allows, what it offers to do, and marking it unread.
 #[component]
 pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> Result<impl View> {
     let reportable = page.entry.filter(|entry| entry.reportable);
@@ -421,11 +419,18 @@ pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> 
             </header>
             <div class="body">
                 announcement_text(body: row.body)
-                if let Some(undo) = page.undo {
-                    <p><a class="button danger" href=(undo)>"Undo the recovery"</a></p>
-                }
-                if let Some(alerts) = page.alerts {
-                    <p><a class="button" href=(alerts)>"See the alerts"</a></p>
+                if let Some((action, href)) = page.action {
+                    <p>
+                        <a
+                            class=(match action {
+                                NotificationAction::UndoRecovery => "button danger",
+                                NotificationAction::SeeAlerts => "button",
+                            })
+                            href=(href)
+                        >
+                            (action.label())
+                        </a>
+                    </p>
                 }
             </div>
             if let Some(entry) = page.entry {

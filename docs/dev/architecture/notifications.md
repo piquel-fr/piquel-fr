@@ -173,9 +173,20 @@ sent. It carries no unsubscribe link.
 
 The delivery copies the address and the notification when they are written, so
 removing the address right after cannot cancel it. The email links the
-notification's page, and, while a passkey can still undo a recovery, the undo
-page. An alert's email, and its page in the inbox, link the dashboard's Alerts
-tab while auth serves a dashboard (`Notification::links_alerts`).
+notification's page.
+
+A notification may also offer one action (`Notification::action`), which its
+email and its page in the inbox both link while it can be done, under the same
+label:
+
+| Action | Offered by | Linked while |
+| --- | --- | --- |
+| **Undo the recovery**, the recovery's undo page | `RecoveryStarted`, `Recovered`, and `AccountSecured` when support kept a passkey | a passkey from before the recovery can still undo it |
+| **See the alerts**, the dashboard's Alerts tab | `AlertRaised` | auth serves a dashboard |
+
+`GET /account/notifications`, `…/{id}` and
+`auth-service account <user> notifications show` name it too, as `action`
+(`undo_recovery`, `see_alerts`), whether or not it can still be done.
 [The delivery queue](delivery-queue.md#email) describes how it is sent.
 
 ## Email preferences

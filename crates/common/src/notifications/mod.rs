@@ -383,6 +383,30 @@ pub enum Audience {
     Administrators,
 }
 
+/// What a notification offers its reader to do besides reading it
+/// ([`Notification::action`]), named the same on its page, in its email and at
+/// the terminal, e.g. `"undo_recovery"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationAction {
+    /// Undo the recovery it is about, on the recovery's undo page, with a
+    /// passkey from before it.
+    UndoRecovery,
+    /// See the alerts on the admin dashboard's Alerts tab.
+    SeeAlerts,
+}
+
+impl NotificationAction {
+    /// What its button or link says.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::UndoRecovery => "Undo the recovery",
+            Self::SeeAlerts => "See the alerts",
+        }
+    }
+}
+
 /// Which of the account's verified addresses a notification's email goes to,
 /// each once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -479,11 +503,45 @@ impl Notification {
         matches!(self, Self::SignedOutBySupport)
     }
 
-    /// Whether its page and email link the admin dashboard's Alerts tab, while
-    /// auth serves a dashboard.
+    /// What it offers its reader to do besides reading it, which its page and
+    /// its email both link while it can be done: a recovery's undo page while a
+    /// passkey from before it can undo it, or the dashboard's alerts while auth
+    /// serves a dashboard. Every kind is named, so a new one decides.
     #[must_use]
-    pub const fn links_alerts(&self) -> bool {
-        matches!(self, Self::AlertRaised { .. })
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub const fn action(&self) -> Option<NotificationAction> {
+        match self {
+            Self::AccountSecured { kept: true } | Self::RecoveryStarted | Self::Recovered => {
+                Some(NotificationAction::UndoRecovery)
+            }
+            Self::AlertRaised { .. } => Some(NotificationAction::SeeAlerts),
+            // Its passkeys were all removed: no passkey from before can undo it.
+            Self::AccountSecured { kept: false }
+            | Self::PrimaryEmailChanged
+            | Self::EmailRemoved
+            | Self::RecoveryUndone
+            | Self::HandleChanged
+            | Self::DisplayNameChanged
+            | Self::PasskeyRenamed
+            | Self::PictureRemoved
+            | Self::AccountDisabled
+            | Self::AccountEnabled
+            | Self::DeletionScheduled { .. }
+            | Self::AccountRestored
+            | Self::NewDeviceSignIn
+            | Self::PasskeyAdded
+            | Self::PasskeyRemoved
+            | Self::IdentityLinked { .. }
+            | Self::IdentityUnlinked { .. }
+            | Self::EmailAdded { .. }
+            | Self::TokenReused
+            | Self::SignedOutBySupport
+            | Self::CompromiseReported
+            | Self::PasskeyCopied
+            | Self::SignInRefused
+            | Self::Announcement { .. }
+            | Self::Message { .. } => None,
+        }
     }
 
     /// Where its email goes. Every notification is emailed, except an
