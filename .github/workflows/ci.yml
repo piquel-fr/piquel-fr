@@ -175,7 +175,7 @@ jobs:
           # Bump the prefix when a job needs a new cache, as when rust began
           # installing sqlx-cli.
           prefix-key: v1-rust
-          save-if: ${{ github.ref == 'refs/heads/main' || github.job == 'rust-lint' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just rust lint
       - run: just doc
       - run: just doc-test
