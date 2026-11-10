@@ -229,8 +229,9 @@ link, likewise, and confirming with a passkey by the session it confirms.
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 
 Downloading the account's data stays the owner's although administrators may
-read most of it: the export copies every IP address and every event about the account out
-of auth in one file, which only the owner's recently confirmed session receives.
+read most of it: the export copies the account's IP addresses and every event
+about it out of auth in one file, which only the owner's recently confirmed
+session receives.
 Support never hands one over; an owner who lost every passkey is recovered
 first, and downloads it themselves.
 
@@ -241,7 +242,9 @@ When an administrator or operator acts:
   alerts and the audit history too. `AdminService` takes it by type, so no
   change records an event without one. It is stored with each event as
   personal data, and the owner of an account it changes sees it in their
-  security history, next to "By a SourceOrigin administrator". Announcements
+  security history, next to "By a SourceOrigin administrator". The owner never
+  sees who that administrator is, or the IP address and device of their
+  request: only the dashboard's event lists and `audit list` show them. Announcements
   and messages to one account ask for none: their text says why, so sending
   one records "See message contents", and a draft's own changes record
   nothing.

@@ -17,7 +17,8 @@ Entries are grouped by day, newest first, with times in UTC. Each says what
 happened, such as **Signed in with a passkey** or **Passkey “YubiKey”
 added**, then:
 
-- the browser and system it came from, and its network address,
+- the browser and system it came from, and its network address, unless
+  SourceOrigin support made the change,
 - the app it went through, as **App:** and the app's name,
 - who did it, when it wasn't you: **By a SourceOrigin administrator** or **By a
   SourceOrigin operator**, with the reason they gave, **By an app**, or

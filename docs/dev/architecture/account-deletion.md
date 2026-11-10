@@ -144,7 +144,8 @@ cached. Version 4 holds:
   release wrote included, which categories are emailed, and the announcements
   it received;
 - last, every event about the account as stored (`kind` and `data`), with who
-  acted, the app, and the request's IP address and device while they are kept.
+  acted, the app, and the request's IP address and device while they are kept,
+  unless an administrator or operator acted: theirs stay with the admin views.
   Administrators' views of the account are left out, as its history leaves them
   out: a read may be a confidential inquiry.
 
