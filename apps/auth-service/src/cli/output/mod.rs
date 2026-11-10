@@ -37,29 +37,20 @@ pub(super) trait Report {
     fn human(&self, out: &mut HumanWriter<'_>) -> io::Result<()>;
 }
 
-// Implements `Report` with the block as `human`. The JSON is the value itself,
-// or one of its fields:
-//
-// report!(Type, self, out, { ... })                    // Json = Type
-// report!(Wrapper as Inner = field, self, out, { ... }) // Json = Inner, from `self.field`
+// Implements `Report` for a type, with its JSON the value itself and the block
+// as `human`: `report!(Type, self, out, { ... })`.
 macro_rules! report {
-    (@impl $ty:ty, $json:ty, |$this:ident| $value:expr, $out:ident, $body:block) => {
+    ($ty:ty, $this:ident, $out:ident, $body:block) => {
         impl $crate::cli::output::Report for $ty {
-            type Json = $json;
-            fn json(&$this) -> &$json {
-                $value
+            type Json = Self;
+            fn json(&$this) -> &Self {
+                $this
             }
             fn human(
                 &$this,
                 $out: &mut $crate::cli::output::HumanWriter<'_>,
             ) -> std::io::Result<()> $body
         }
-    };
-    ($ty:ty as $json:ty = $field:tt, $this:ident, $out:ident, $body:block) => {
-        $crate::cli::output::report!(@impl $ty, $json, |$this| &$this.$field, $out, $body);
-    };
-    ($ty:ty, $this:ident, $out:ident, $body:block) => {
-        $crate::cli::output::report!(@impl $ty, Self, |$this| $this, $out, $body);
     };
 }
 pub(super) use report;
@@ -501,7 +492,7 @@ impl HumanWriter<'_> {
             Some(next) => {
                 self.styled(
                     Style::Muted,
-                    &format!("More may follow. Next: --before {next}"),
+                    &format!("More may follow. Next: --before {}", Escaped(next)),
                 )?;
                 self.blank()
             }
