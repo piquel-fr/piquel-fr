@@ -23,8 +23,8 @@ checks its operator itself and both surfaces run the same rules.
 
 - Decide whether the operation reads or changes. A read records nothing, unless
   it shows an account's personal data, which records a view. A change records
-  an event. One the owner should understand takes a reason, which their history
-  shows, as disabling an account does.
+  an event, with the reason every change takes. The owner of an account it
+  changes sees that reason in their history, as for disabling an account.
 - If the operation changes a setting the owner also changes, it is an account
   setting instead: follow [adding an account setting](account-setting.md).
 - New tables or columns come first: [adding a migration](migration.md).
@@ -57,11 +57,12 @@ Add the method to `AdminService`, in the module of its area under
   renders and the CLI prints as JSON: `Self::views` converts stored records into
   them. A read of an account's personal data records a view with
   `operator.record_view`, as `view_user` does.
-- **A change** runs in one transaction. On an account, it locks the account with
-  `operator.lock(&mut tx, user_id)` first, which refuses another administrator's
-  account unless the CLI acts. It ends with `Self::finish(tx, operator, subject,
-  events)`, which checks the operator again after the last write, records the
-  events and commits.
+- **A change** takes the operator's `Reason` and runs in one transaction. On an
+  account, it locks the account with `operator.lock(&mut tx, user_id)` first,
+  which refuses another administrator's account unless the CLI acts. It ends
+  with `Self::finish(tx, operator, &reason, subject, events)`, which checks the
+  operator again after the last write, records the events with the reason and
+  commits.
 
 ```rust
 pub(crate) async fn reserve_handle(
@@ -70,18 +71,23 @@ pub(crate) async fn reserve_handle(
     handle: Handle,
     reason: Reason,
 ) -> Result<(), AdminError> {
-    let context = Self::context(operator, reason);
     let mut tx = self.database.begin().await?;
-    // ...the change...
-    tx.record(&context, None, DomainEvent::HandleReserved { handle })
-        .await?;
-    Self::finish(tx, operator, None, vec![]).await
+    if !tx.handles().reserve(&handle, reason.as_str()).await? {
+        return Err(AdminError::HandleReserved);
+    }
+    let reserved = DomainEvent::HandleReserved { handle };
+    Self::finish(tx, operator, &reason, None, vec![reserved]).await
 }
 ```
 
-`Self::context(operator, reason)` attributes an event to the operator with their
-`Reason`, which is stored as personal data. An event without a reason goes in
-`finish`'s list instead.
+Every change takes a `Reason`, which is stored with each of its events as
+personal data, and which the owner of an account it changes sees in their
+history. `operator.context(&reason)` is the only way to attribute a change's
+events, so none is recorded without one: use it for an event the change records
+before `finish`, such as through another service. A read records with
+`operator.reading()`, which has no reason. A change whose own content says why,
+such as an announcement's text, records `Reason::see_message()` instead of
+asking for one.
 
 A refusal is an `AdminError` variant in `apps/auth-service/src/admin/error.rs`:
 its message says what to fix, its `reason()` names it, and its arm in
@@ -165,7 +171,9 @@ pub(super) async fn reserve(cx: &Cx, form: Option<Form<Reservation>>) -> Result<
 - `App::confirm` requires the dashboard's own recent passkey confirmation, or
   sends the browser to confirm and back.
 - `App::submit` makes the change, goes back to `back` once it is made, and
-  otherwise returns the refusal, which the form shows with what was typed.
+  otherwise returns the refusal, which the form shows with what was typed. A
+  change whose form posts only its reason uses `App::submit_reason` and
+  `ReasonForm`, which parse the reason first.
 
 The page's words are a `Change` variant in `crates/ui/src/admin/mod.rs`: its
 title, description, button, label, whether it takes something away, and the

@@ -25,7 +25,7 @@ impl AdminOperation {
             Self::SearchUsers => &["user", "search", "ali"],
             Self::ViewUser => &["user", "show", "alice"],
             Self::DisableUser => &["user", "disable", "alice", "--reason", "Spam"],
-            Self::EnableUser => &["user", "enable", "alice"],
+            Self::EnableUser => &["user", "enable", "alice", "--reason", "Appealed"],
             Self::RecoverAccount => &["user", "recover", "alice", "--reason", "Lost phone"],
             Self::UndoRecovery => &["user", "undo-recovery", "alice", "--reason", "Confirmed"],
             Self::ScheduleDeletion => &["user", "delete", "alice", "--reason", "Asked by email"],
@@ -38,8 +38,17 @@ impl AdminOperation {
                 "--reason",
                 "Spam account",
             ],
-            Self::RevokeUserSessions => &["session", "revoke-all", "alice"],
-            Self::RevokeSession => &["session", "revoke", "alice", AN_ID],
+            Self::RevokeUserSessions => {
+                &["session", "revoke-all", "alice", "--reason", "Phone stolen"]
+            }
+            Self::RevokeSession => &[
+                "session",
+                "revoke",
+                "alice",
+                AN_ID,
+                "--reason",
+                "Phone stolen",
+            ],
             Self::MessageUser => &[
                 "account",
                 "alice",
@@ -50,8 +59,14 @@ impl AdminOperation {
                 "message.txt",
             ],
             Self::ListInvitations => &["invite", "list"],
-            Self::CreateInvitation => &["invite", "create"],
-            Self::RevokeInvitation => &["invite", "revoke", AN_ID],
+            Self::CreateInvitation => &["invite", "create", "--reason", "For Jane"],
+            Self::RevokeInvitation => &[
+                "invite",
+                "revoke",
+                AN_ID,
+                "--reason",
+                "Sent to the wrong person",
+            ],
             Self::ListClients => &["client", "list"],
             Self::ViewClient => &["client", "show", "notes"],
             Self::CreateClient => &[
@@ -62,6 +77,8 @@ impl AdminOperation {
                 "Notes",
                 "--redirect-uri",
                 "https://notes.example/callback",
+                "--reason",
+                "New app",
             ],
             Self::ApplyClient => &[
                 "client",
@@ -71,30 +88,47 @@ impl AdminOperation {
                 "Notes",
                 "--redirect-uri",
                 "https://notes.example/callback",
+                "--reason",
+                "Deployed",
             ],
-            Self::UpdateClient => &["client", "update", "notes", "--trusted"],
-            Self::EnableClient => &["client", "enable", "notes"],
-            Self::DisableClient => &["client", "disable", "notes"],
-            Self::SuspendClient => &["client", "suspend", "notes"],
-            Self::UnsuspendClient => &["client", "unsuspend", "notes"],
-            Self::DeleteClient => &["client", "delete", "notes"],
-            Self::RotateClientSecret => &["client", "rotate-secret", "notes"],
-            Self::ApproveRelatedOrigin => {
-                &["client", "origin", "add", "notes", "https://notes.example"]
-            }
+            Self::UpdateClient => &[
+                "client",
+                "update",
+                "notes",
+                "--trusted",
+                "--reason",
+                "First-party",
+            ],
+            Self::EnableClient => &["client", "enable", "notes", "--reason", "Fixed"],
+            Self::DisableClient => &["client", "disable", "notes", "--reason", "Leaking"],
+            Self::SuspendClient => &["client", "suspend", "notes", "--reason", "Phishing"],
+            Self::UnsuspendClient => &["client", "unsuspend", "notes", "--reason", "Fixed"],
+            Self::DeleteClient => &["client", "delete", "notes", "--reason", "Retired"],
+            Self::RotateClientSecret => &["client", "rotate-secret", "notes", "--reason", "Leaked"],
+            Self::ApproveRelatedOrigin => &[
+                "client",
+                "origin",
+                "add",
+                "notes",
+                "https://notes.example",
+                "--reason",
+                "Sign-in on its page",
+            ],
             Self::RemoveRelatedOrigin => &[
                 "client",
                 "origin",
                 "remove",
                 "notes",
                 "https://notes.example",
+                "--reason",
+                "Moved",
             ],
             Self::ListEvents => &["audit", "list"],
             Self::VerifyAuditChain => &["audit", "verify"],
-            Self::PruneAuditChain => &["audit", "prune", "--through", "1"],
+            Self::PruneAuditChain => &["audit", "prune", "--through", "1", "--reason", "Retention"],
             Self::ListAdministrators => &["admin", "list"],
-            Self::GrantAdministrator => &["admin", "grant", "alice"],
-            Self::RevokeAdministrator => &["admin", "revoke", "alice"],
+            Self::GrantAdministrator => &["admin", "grant", "alice", "--reason", "Joined support"],
+            Self::RevokeAdministrator => &["admin", "revoke", "alice", "--reason", "Left support"],
             Self::CheckHandles => &["handle", "check"],
             Self::RenameHandle => &[
                 "handle",
@@ -104,16 +138,16 @@ impl AdminOperation {
                 "--reason",
                 "Impersonation",
             ],
-            Self::ReleaseHandle => &["handle", "release", "alice"],
+            Self::ReleaseHandle => &["handle", "release", "alice", "--reason", "Trademark"],
             Self::ReserveHandle => &["handle", "reserve", "alice", "--reason", "For Alice"],
-            Self::UnreserveHandle => &["handle", "unreserve", "alice"],
+            Self::UnreserveHandle => &["handle", "unreserve", "alice", "--reason", "Not needed"],
             Self::ListDeliveries => &["deliveries", "list"],
-            Self::RetryDelivery => &["deliveries", "retry", AN_ID],
-            Self::CancelDelivery => &["deliveries", "cancel", AN_ID],
+            Self::RetryDelivery => &["deliveries", "retry", AN_ID, "--reason", "Host back up"],
+            Self::CancelDelivery => &["deliveries", "cancel", AN_ID, "--reason", "Stale"],
             Self::ListSigningKeys => &["keys", "list"],
-            Self::RotateSigningKey => &["keys", "rotate", "--now"],
-            Self::RevokeSigningKey => &["keys", "revoke", "primary"],
-            Self::ImportSigningKey => &["keys", "import", "file://key.pem"],
+            Self::RotateSigningKey => &["keys", "rotate", "--now", "--reason", "Leaked"],
+            Self::RevokeSigningKey => &["keys", "revoke", "primary", "--reason", "Leaked"],
+            Self::ImportSigningKey => &["keys", "import", "file://key.pem", "--reason", "Deploy"],
             Self::ListAnnouncements => &["announcement", "list"],
             Self::ViewAnnouncement => &["announcement", "show", AN_ID],
             Self::DraftAnnouncement => &[
@@ -139,7 +173,15 @@ impl AdminOperation {
             Self::DiscardAnnouncement => &["announcement", "discard", AN_ID],
             Self::SendAnnouncement => &["announcement", "send", AN_ID, "--revision", "1", "--yes"],
             Self::ListAlerts => &["alerts", "list"],
-            Self::UpdateAlert => &["alerts", "update", AN_ID, "--status", "fixing"],
+            Self::UpdateAlert => &[
+                "alerts",
+                "update",
+                AN_ID,
+                "--status",
+                "fixing",
+                "--note",
+                "Alice is on it",
+            ],
         }
     }
 }
@@ -283,7 +325,7 @@ fn operators_are_named() {
 fn the_operator_is_named_or_the_command_refused() {
     let name = |name: &str| Some(name.parse::<OperatorName>().expect("name"));
     let recorded =
-        |operator: Result<Operator, CliError>| match operator.expect("operator").context().actor {
+        |operator: Result<Operator, CliError>| match operator.expect("operator").reading().actor {
             Actor::Cli { os_user, .. } => os_user,
             actor => panic!("{actor:?}"),
         };
@@ -331,8 +373,22 @@ async fn destructive_commands_confirm() {
     let keys = service.list_signing_keys(&operator()).await.expect("keys");
     let name = || Some("test".parse().expect("operator"));
     for arguments in [
-        ["auth-service", "keys", "rotate", "--now"],
-        ["auth-service", "keys", "revoke", "primary"],
+        [
+            "auth-service",
+            "keys",
+            "rotate",
+            "--now",
+            "--reason",
+            "Leaked",
+        ],
+        [
+            "auth-service",
+            "keys",
+            "revoke",
+            "primary",
+            "--reason",
+            "Leaked",
+        ],
     ] {
         let Some(Command::Keys(command)) =
             Cli::try_parse_from(arguments).expect("arguments").command
@@ -348,8 +404,16 @@ async fn destructive_commands_confirm() {
     let console = Console::new(database.clone(), name()).expect("console");
     let held = held.to_string();
     for arguments in [
-        vec!["handle", "release", held.as_str()],
-        vec!["client", "rotate-secret", "notes", "--grace", "0"],
+        vec!["handle", "release", held.as_str(), "--reason", "Trademark"],
+        vec![
+            "client",
+            "rotate-secret",
+            "notes",
+            "--grace",
+            "0",
+            "--reason",
+            "Leaked",
+        ],
     ] {
         let refused = Administration::parse(&arguments).run(&console).await;
         assert!(

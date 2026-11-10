@@ -15,7 +15,7 @@ use sourceorigin_common::{
         UserDetail, UserPage,
     },
     email::NormalizedEmail,
-    events::{DomainEvent, EventContext, RevocationReason},
+    events::{DomainEvent, RevocationReason},
 };
 use sourceorigin_repository::{DatabaseError, DatabaseTransaction, SessionScope, StoredUser};
 
@@ -155,9 +155,10 @@ impl AdminService {
     }
 
     /// Disables an account and ends all its sessions and refresh grants in one
-    /// transaction, so its next request and token refresh fail. A recovery link
-    /// not used yet stops working, so re-enabling the account does not revive it.
-    /// Nobody can disable the last active administrator.
+    /// transaction, so its next request and token refresh fail, for `reason`,
+    /// which the owner sees in their history. A recovery link not used yet stops
+    /// working, so re-enabling the account does not revive it. Nobody can disable
+    /// the last active administrator.
     pub(crate) async fn disable_user(
         &self,
         operator: &Operator,
@@ -177,28 +178,29 @@ impl AdminService {
         tx.users()
             .set_status(user_id, AccountStatus::Disabled)
             .await?;
+        let context = operator.context(&reason);
         let disabled = DomainEvent::AccountDisabled {
-            reason: Personal::Value(reason.into_inner()),
+            reason: Personal::Value(reason.clone().into_inner()),
         };
-        tx.record(&operator.context(), Some(user_id), disabled)
-            .await?;
+        tx.record(&context, Some(user_id), disabled).await?;
         tx.recoveries().cancel_open(user_id).await?;
         Session::end_all(
             &mut tx,
-            &operator.context(),
+            &context,
             user_id,
             RevocationReason::AccountDisabled,
         )
         .await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 
-    /// Reactivates a disabled account. Fails if another active account claimed one
-    /// of its verified emails meanwhile.
+    /// Reactivates a disabled account, for `reason`. Fails if another active
+    /// account claimed one of its verified emails meanwhile.
     pub(crate) async fn enable_user(
         &self,
         operator: &Operator,
         user_id: UserId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         match operator.lock(&mut tx, user_id).await?.status {
@@ -219,13 +221,8 @@ impl AdminService {
                 | DatabaseError::InvalidStoredData { .. }
                 | DatabaseError::Operation(_) => error.into(),
             })?;
-        Self::finish(
-            tx,
-            operator,
-            Some(user_id),
-            vec![DomainEvent::AccountEnabled {}],
-        )
-        .await
+        let enabled = DomainEvent::AccountEnabled {};
+        Self::finish(tx, operator, &reason, Some(user_id), vec![enabled]).await
     }
 
     /// Schedules the deletion of an active account, for `reason`: it can no longer
@@ -239,10 +236,10 @@ impl AdminService {
         reason: Reason,
     ) -> Result<(), AdminError> {
         let (mut tx, user) = self.lock_deletable(operator, user_id).await?;
-        Deletions::new(&mut tx, Self::context(operator, reason))
+        Deletions::new(&mut tx, operator.context(&reason))
             .schedule(&user)
             .await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 
     /// Purges an account now, in any status, without a grace period, for
@@ -254,10 +251,10 @@ impl AdminService {
         reason: Reason,
     ) -> Result<(), AdminError> {
         let (mut tx, user) = self.lock_deletable(operator, user_id).await?;
-        Deletions::new(&mut tx, Self::context(operator, reason))
+        Deletions::new(&mut tx, operator.context(&reason))
             .purge(&user)
             .await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 
     /// Restores an account scheduled for deletion, for `reason`. It can sign in
@@ -270,10 +267,10 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         let user = operator.lock(&mut tx, user_id).await?;
-        Deletions::new(&mut tx, Self::context(operator, reason))
+        Deletions::new(&mut tx, operator.context(&reason))
             .restore(&user)
             .await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 
     /// Opens the transaction of a deletion and locks its account as
@@ -313,43 +310,42 @@ impl AdminService {
             .await?
             .ok_or(AdminError::UserNotFound)?;
         let Letter { subject, body } = letter;
-        tx.record_message(&operator.context(), user_id, subject, body)
+        // Its text says why it was sent, so nobody writes a reason for it.
+        let reason = Reason::see_message();
+        tx.record_message(&operator.context(&reason), user_id, subject, body)
             .await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 
-    /// Ends every session and refresh grant of an account.
+    /// Ends every session and refresh grant of an account, for `reason`.
     pub(crate) async fn revoke_user_sessions(
         &self,
         operator: &Operator,
         user_id: UserId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         operator.lock(&mut tx, user_id).await?;
-        Session::end_all(
-            &mut tx,
-            &operator.context(),
-            user_id,
-            RevocationReason::Admin,
-        )
-        .await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        let context = operator.context(&reason);
+        Session::end_all(&mut tx, &context, user_id, RevocationReason::Admin).await?;
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 
     /// Ends `user_id`'s active session `session_id` and the refresh grants issued
-    /// from it. Another account's session is not found: the caller names the
-    /// account it means to sign out, as its page or command shows it.
+    /// from it, for `reason`. Another account's session is not found: the caller
+    /// names the account it means to sign out, as its page or command shows it.
     pub(crate) async fn revoke_session(
         &self,
         operator: &Operator,
         user_id: UserId,
         session_id: SessionId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         operator.lock(&mut tx, user_id).await?;
         if tx
             .revoke_sessions(
-                &operator.context(),
+                &operator.context(&reason),
                 user_id,
                 SessionScope::One(session_id),
                 &RevocationReason::Admin,
@@ -359,7 +355,7 @@ impl AdminService {
         {
             return Err(AdminError::SessionNotFound);
         }
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![]).await
     }
 
     /// Lists the accounts whose current handle is reserved, by the handle rules or
@@ -420,20 +416,15 @@ impl AdminService {
         }
         let mut tx = self.database.begin().await?;
         let user = operator.lock(&mut tx, user_id).await?;
-        let (mut tx, changed) = Handles::new(&self.database)
+        let (tx, changed) = Handles::new(&self.database)
             .rename(tx, &user, handle)
             .await?;
-        let context = EventContext {
-            reason: Some(reason.into_inner()),
-            ..operator.context()
-        };
-        tx.record(&context, Some(user_id), changed).await?;
-        Self::finish(tx, operator, Some(user_id), vec![]).await
+        Self::finish(tx, operator, &reason, Some(user_id), vec![changed]).await
     }
 
-    /// Deletes the released handle `handle`, or a purged account's last one, so
-    /// anyone may claim it again: the only way a handle returns to the pool, for
-    /// cases such as a trademark dispute.
+    /// Deletes the released handle `handle`, or a purged account's last one, for
+    /// `reason`, so anyone may claim it again: the only way a handle returns to
+    /// the pool, for cases such as a trademark dispute.
     ///
     /// # Errors
     /// Fails when no released handle, or purged account's, is `handle`.
@@ -441,6 +432,7 @@ impl AdminService {
         &self,
         operator: &Operator,
         handle: Handle,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         let released = tx
@@ -451,7 +443,7 @@ impl AdminService {
         let event = DomainEvent::HandleReleased {
             handle: Personal::Value(handle),
         };
-        Self::finish(tx, operator, released.user_id, vec![event]).await
+        Self::finish(tx, operator, &reason, released.user_id, vec![event]).await
     }
 
     /// Lists the handles no account holds but that are kept from others, by
@@ -497,18 +489,16 @@ impl AdminService {
         if handle.ensure_unreserved().is_err() {
             return Err(AdminError::HandleReserved);
         }
-        let context = Self::context(operator, reason);
         let mut tx = self.database.begin().await?;
-        let reason = context.reason.as_deref().unwrap_or_default();
-        if !tx.handles().reserve(&handle, reason).await? {
+        if !tx.handles().reserve(&handle, reason.as_str()).await? {
             return Err(AdminError::HandleReserved);
         }
-        tx.record(&context, None, DomainEvent::HandleReserved { handle })
-            .await?;
-        Self::finish(tx, operator, None, vec![]).await
+        let reserved = DomainEvent::HandleReserved { handle };
+        Self::finish(tx, operator, &reason, None, vec![reserved]).await
     }
 
-    /// Removes `handle` from the reserved list, so anyone may claim it again.
+    /// Removes `handle` from the reserved list, for `reason`, so anyone may claim
+    /// it again.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, or no administrator reserved
@@ -517,12 +507,13 @@ impl AdminService {
         &self,
         operator: &Operator,
         handle: Handle,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         if !tx.handles().unreserve(&handle).await? {
             return Err(AdminError::HandleNotReserved);
         }
         let event = DomainEvent::HandleUnreserved { handle };
-        Self::finish(tx, operator, None, vec![event]).await
+        Self::finish(tx, operator, &reason, None, vec![event]).await
     }
 }

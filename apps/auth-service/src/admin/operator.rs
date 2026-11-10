@@ -1,7 +1,7 @@
 //! Who runs an administrative operation: an administrator signed in to the admin
 //! dashboard, or an operator at the terminal.
 
-use super::AdminError;
+use super::{AdminError, Reason};
 use crate::security::{CONFIRMATION_MAX_AGE, RequestContext};
 use chrono::{DateTime, Duration, Utc};
 use sourceorigin_common::{
@@ -129,10 +129,23 @@ impl Operator {
         })
     }
 
-    /// Attributes events to this operator: an administrator from their browser's
-    /// request, an operator from the terminal, which has no client origin.
+    /// Attributes a change's events to this operator, with their `reason`: the
+    /// only way to attribute one, so no change is recorded without why. Its owner,
+    /// when it changes an account, sees the reason in their history.
     #[must_use]
-    pub fn context(&self) -> EventContext {
+    pub fn context(&self, reason: &Reason) -> EventContext {
+        EventContext {
+            reason: Some(reason.clone().into_inner()),
+            ..self.reading()
+        }
+    }
+
+    /// Attributes what a read records, a view of an account or an audit
+    /// verification, to this operator: an administrator from their browser's
+    /// request, an operator from the terminal, which has no client origin. A read
+    /// changes nothing, so it has no reason; a change takes [`Self::context`].
+    #[must_use]
+    pub(crate) fn reading(&self) -> EventContext {
         match self.clone() {
             Self::Admin(session) => session.context.actor(Actor::Admin {
                 user_id: session.user_id,
@@ -158,7 +171,7 @@ impl Operator {
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
     ) -> Result<(), DatabaseError> {
-        let context = self.context();
+        let context = self.reading();
         let event = DomainEvent::AccountViewed {};
         let since = Utc::now() - VIEW_WINDOW;
         if !tx

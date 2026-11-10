@@ -12,7 +12,12 @@ async fn revoked_invitations_cannot_be_redeemed() {
     let service = harness.service();
     let admin = operator(harness.admin().await, Utc::now());
     let created = service
-        .create_invitation(&admin, &origin(), "24h".parse().expect("expiry"))
+        .create_invitation(
+            &admin,
+            &origin(),
+            "24h".parse().expect("expiry"),
+            reason("Asked by email"),
+        )
         .await
         .expect("invitation");
     assert_eq!(created.url.path(), crate::routes::page::REGISTER);
@@ -30,7 +35,7 @@ async fn revoked_invitations_cannot_be_redeemed() {
             .expect("lookup")
     );
     service
-        .revoke_invitation(&admin, created.id)
+        .revoke_invitation(&admin, created.id, reason("Asked by email"))
         .await
         .expect("revoke");
     assert!(
@@ -45,7 +50,9 @@ async fn revoked_invitations_cannot_be_redeemed() {
         .find(|listed| listed.id == created.id)
         .expect("revoked invitation");
     assert!(Some(revoked.expires_at) <= revoked.revoked_at);
-    let again = service.revoke_invitation(&admin, created.id).await;
+    let again = service
+        .revoke_invitation(&admin, created.id, reason("Asked by email"))
+        .await;
     assert!(
         matches!(again, Err(AdminError::InvitationNotFound)),
         "{again:?}"
@@ -62,7 +69,12 @@ async fn invitation_revocation_waits_for_signup() {
     let admin = harness.admin().await;
     let service = harness.service();
     let invitation = service
-        .create_invitation(&cli(), &origin(), InviteExpiry::default())
+        .create_invitation(
+            &cli(),
+            &origin(),
+            InviteExpiry::default(),
+            reason("Asked by email"),
+        )
         .await
         .expect("invitation");
     let (_, encoded) = invitation
@@ -82,12 +94,15 @@ async fn invitation_revocation_waits_for_signup() {
             .expect("redeem")
     );
     let operator = operator(admin, Utc::now());
-    let (result, ()) = tokio::join!(service.revoke_invitation(&operator, invitation.id), async {
-        until_blocked(&mut signup, 1).await;
-        // The signup revokes the browser's session without a deadlock.
-        admin.sign_out(&mut signup).await;
-        signup.commit().await.expect("signup");
-    });
+    let (result, ()) = tokio::join!(
+        service.revoke_invitation(&operator, invitation.id, reason("Asked by email")),
+        async {
+            until_blocked(&mut signup, 1).await;
+            // The signup revokes the browser's session without a deadlock.
+            admin.sign_out(&mut signup).await;
+            signup.commit().await.expect("signup");
+        }
+    );
     assert!(
         matches!(result, Err(AdminError::InvitationNotFound)),
         "{result:?}"

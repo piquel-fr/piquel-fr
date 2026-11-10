@@ -218,14 +218,18 @@ a value, and a `data-replace-url` element makes a page that shows a secret reloa
 `GET`. The script is plain JavaScript, embedded as written: `tsc` checks its JSDoc
 types, and ESLint lints it as it does the browser tests.
 
-Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
+Administrative operations are methods of `AdminService` (`src/admin/service`);
 the admin dashboard's pages (`src/web/admin`) and the CLI's commands (`src/cli`)
 are thin adapters that
 say which `Operator` acts. Every method takes that `Operator` and checks it itself,
 so a caller in the same process needs no check of its own: a read first calls
 `Operator::authorize_read` (rights, session and a passkey sign-in), and a change
 calls `Operator::authorize` (the same, with a recent confirmation) after its last
-write. A test runs every read as an administrator who may no longer read. Each
+write. Every change also takes the operator's `Reason`: `Operator::context`, the
+only way to attribute a change's events, needs one, and so does
+`AdminService::finish`, which every change commits through. A read records with
+`Operator::reading`, which has none. A test runs every read as an administrator
+who may no longer read. Each
 operation joins `AdminOperation`: the admin router
 maps it to its route, or to none when only the CLI runs it, and every CLI command
 names the operation it runs. A test parses a command line for each operation and

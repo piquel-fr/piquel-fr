@@ -38,14 +38,15 @@ test-browser *ARGS:
 # confidential client, whose secret is in E2E_SERVER_CLIENT_SECRET.
 # Register the browser checks' OIDC clients with auth on localhost, as in CI.
 browser-client:
-    @just auth client create browser-e2e --name 'Browser E2E' \
+    @just auth client create browser-e2e --name 'Browser E2E' --reason 'Browser tests' \
         --redirect-uri https://browser-e2e.test/callback
     @just auth client create browser-e2e-sdk --name 'Browser E2E SDK' --trusted --require-par \
-        --redirect-uri https://sdk-e2e.test/callback
+        --reason 'Browser tests' --redirect-uri https://sdk-e2e.test/callback
     @just auth client create browser-e2e-inline --name 'Browser E2E inline' --trusted \
-        --redirect-uri https://localhost:4443/callback
-    @just auth client origin add browser-e2e-inline https://localhost:4443
+        --reason 'Browser tests' --redirect-uri https://localhost:4443/callback
+    @just auth client origin add browser-e2e-inline https://localhost:4443 --reason 'Browser tests'
     @just auth client apply browser-e2e-server --name 'Browser E2E server' --trusted --confidential \
+        --reason 'Browser tests' \
         --scope openid --scope profile --scope email --scope offline_access --refresh \
         --redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri http://127.0.0.1:4100/ \
         --secret env://E2E_SERVER_CLIENT_SECRET

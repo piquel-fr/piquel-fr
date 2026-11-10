@@ -5,7 +5,7 @@ use crate::{
     AdminError, AdminService, AuthConfig,
     alerts::Alerts,
     config::AuditConfig,
-    tests::{Replicas, operator},
+    tests::{Replicas, operator, reason},
 };
 use chrono::{SubsecRound, TimeDelta};
 use sourceorigin_common::alerts::{Alert, AlertKind};
@@ -456,7 +456,7 @@ async fn pruning_refuses_broken_chains_and_leaves_a_working_anchor() {
     let service = AdminService::new(broken.database.clone(), false);
     let prune = async |through| {
         service
-            .prune_audit_chain(&operator(), &broken.keys, through)
+            .prune_audit_chain(&operator(), &broken.keys, through, reason())
             .await
     };
     assert!(matches!(
@@ -473,7 +473,11 @@ async fn pruning_refuses_broken_chains_and_leaves_a_working_anchor() {
 
     let mut fixture = Fixture::sealed_six().await;
     let service = AdminService::new(fixture.database.clone(), false);
-    let prune = async |keys, through| service.prune_audit_chain(&operator(), keys, through).await;
+    let prune = async |keys, through| {
+        service
+            .prune_audit_chain(&operator(), keys, through, reason())
+            .await
+    };
     assert_eq!(prune(&fixture.keys, 3).await.expect("prune"), 3);
     let verification = fixture.verify().await;
     assert_eq!(verification.broken, None);
@@ -519,7 +523,7 @@ async fn pruning_refuses_broken_chains_and_leaves_a_working_anchor() {
 async fn signing_resumes_from_the_anchor_when_no_checkpoint_verifies() {
     let mut fixture = Fixture::sealed_six().await;
     AdminService::new(fixture.database.clone(), false)
-        .prune_audit_chain(&operator(), &fixture.keys, 3)
+        .prune_audit_chain(&operator(), &fixture.keys, 3, reason())
         .await
         .expect("prune");
     let key = NoteKey::generate("auth.example/audit").expect("new key");
@@ -599,7 +603,7 @@ async fn the_audit_page_shows_the_newest_recorded_verification() {
 
     let pruned = Fixture::sealed_six().await;
     AdminService::new(pruned.database.clone(), false)
-        .prune_audit_chain(&operator(), &pruned.keys, 3)
+        .prune_audit_chain(&operator(), &pruned.keys, 3, reason())
         .await
         .expect("prune");
     assert_eq!(

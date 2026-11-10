@@ -90,7 +90,7 @@ write:
 > Give the app a new secret:
 >
 > ```console
-> auth-service client rotate-secret notes --grace 24h
+> auth-service client rotate-secret notes --grace 24h --reason "Yearly rotation"
 > ```
 >
 > The command prints the new secret once. The app's earlier secrets keep

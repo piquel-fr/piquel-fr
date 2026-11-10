@@ -201,7 +201,9 @@ pub enum DomainEvent {
     },
     /// The account was disabled. Its sessions follow as [`Self::SessionRevoked`].
     AccountDisabled {
-        /// Why, as the administrator or operator wrote it. Free text may name people.
+        /// Why, as the administrator or operator wrote it: the same as its
+        /// context's reason, which the owner's history shows. Free text may name
+        /// people.
         reason: Personal<String>,
     },
     /// A disabled account was reactivated.

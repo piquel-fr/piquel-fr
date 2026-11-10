@@ -21,16 +21,14 @@ mod recovery;
 pub(crate) use alerts::ALERTS_SHOWN;
 
 use super::{AdminError, Operator, Reason};
-use sourceorigin_common::{
-    UserId,
-    events::{DomainEvent, EventContext},
-};
+use sourceorigin_common::{UserId, events::DomainEvent};
 use sourceorigin_repository::{Database, DatabaseTransaction};
 
 /// Owns each administrative operation. Dashboard pages and CLI commands are thin
 /// adapters that say which [`Operator`] acts. Every mutation, and viewing an
 /// account's details, records a domain event attributed to it in the same
-/// transaction.
+/// transaction. Every mutation that records one takes the operator's [`Reason`],
+/// which its events carry.
 ///
 /// Every operation takes its [`Operator`] and checks it, so a caller in the same
 /// process, such as the dashboard, needs no check of its own. Reads first require
@@ -59,17 +57,19 @@ impl AdminService {
         Self { database, mails }
     }
 
-    /// Ends every mutation: rechecks `operator`, records `events` about `subject`,
-    /// then commits. The check runs after the mutation's last write, so it waits
-    /// for nothing afterwards, and a failure rolls the writes back.
+    /// Ends every mutation: rechecks `operator`, records `events` about `subject`
+    /// with their `reason`, then commits. Every mutation ends here, so none
+    /// commits without a reason. The check runs after the mutation's last write,
+    /// so it waits for nothing afterwards, and a failure rolls the writes back.
     async fn finish(
         mut tx: DatabaseTransaction<'_>,
         operator: &Operator,
+        reason: &Reason,
         subject: Option<UserId>,
         events: Vec<DomainEvent>,
     ) -> Result<(), AdminError> {
         operator.authorize(&mut tx).await?;
-        let context = operator.context();
+        let context = operator.context(reason);
         for event in events {
             tx.record(&context, subject, event).await?;
         }
@@ -79,14 +79,5 @@ impl AdminService {
     /// Shows each stored record without what the dashboard and CLI never show.
     fn views<S: Into<T>, T>(records: Vec<S>) -> Vec<T> {
         records.into_iter().map(Into::into).collect()
-    }
-
-    /// Attributes a change to `operator`, with their `reason`, which the owner
-    /// sees in their history.
-    fn context(operator: &Operator, reason: Reason) -> EventContext {
-        EventContext {
-            reason: Some(reason.into_inner()),
-            ..operator.context()
-        }
     }
 }

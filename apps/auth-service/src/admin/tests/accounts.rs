@@ -1,6 +1,7 @@
 //! Disabling and enabling an account, and reading its event history.
 
 use super::*;
+use axum::http::{Method, StatusCode};
 use serde_json::json;
 use sourceorigin_common::events::RevocationReason;
 
@@ -80,7 +81,7 @@ async fn disabling_ends_sessions_and_is_recorded() {
             .is_some()
     );
     service
-        .enable_user(&administrator, user.user_id)
+        .enable_user(&administrator, user.user_id, reason("Asked by email"))
         .await
         .expect("enable");
     assert_eq!(
@@ -112,6 +113,74 @@ async fn disabling_ends_sessions_and_is_recorded() {
         page.events[0].event["data"]["reason"],
         json!({"$personal": "Spam"})
     );
+}
+
+/// Every change an administrator makes to an account records their reason, which
+/// the owner reads in their own security history: enabling it, signing out
+/// one session or every one, and granting and revoking its rights.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn every_change_to_an_account_shows_its_reason_to_the_owner() {
+    let harness = Harness::new().await;
+    let service = harness.service();
+    let administrator = operator(harness.admin().await, Utc::now());
+    let user = harness.account().await;
+    let id = user.user_id;
+    service
+        .disable_user(&cli(), id, reason("Spam"))
+        .await
+        .expect("disable");
+    service
+        .enable_user(&administrator, id, reason("Appealed"))
+        .await
+        .expect("enable");
+    let laptop = Browser::sign_in(&harness.database, id).await;
+    Browser::sign_in(&harness.database, id).await;
+    service
+        .revoke_session(
+            &administrator,
+            id,
+            laptop.session_id,
+            reason("Laptop stolen"),
+        )
+        .await
+        .expect("revoke one");
+    service
+        .revoke_user_sessions(&administrator, id, reason("Phone stolen too"))
+        .await
+        .expect("revoke all");
+    service
+        .grant_administrator(&cli(), id, reason("Joined support"))
+        .await
+        .expect("grant");
+    service
+        .revoke_administrator(&cli(), id, reason("Left support"))
+        .await
+        .expect("revoke rights");
+
+    // The owner reads them in their own history, signed in again.
+    let browser = Browser::sign_in(&harness.database, id).await;
+    let routes = crate::account::AccountApplication::new(harness.database.clone()).routes();
+    let (status, page) = browser
+        .call(&routes, Method::GET, crate::routes::history::LIST)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let entries = page["entries"].as_array().expect("entries");
+    let reasons = |kind: &str| {
+        entries
+            .iter()
+            .filter(|entry| entry["kind"] == kind)
+            .map(|entry| entry["reason"].as_str().expect("a reason"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(reasons("account.disabled"), ["Spam"]);
+    assert_eq!(reasons("account.enabled"), ["Appealed"]);
+    assert_eq!(
+        reasons("session.revoked"),
+        ["Phone stolen too", "Laptop stolen", "Spam"]
+    );
+    assert_eq!(reasons("administrator.granted"), ["Joined support"]);
+    assert_eq!(reasons("administrator.revoked"), ["Left support"]);
 }
 
 /// An event a newer release wrote, of a kind this one does not know, is listed

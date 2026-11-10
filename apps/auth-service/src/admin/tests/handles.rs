@@ -73,11 +73,13 @@ async fn operators_rename_and_release_handles() {
         .await
         .expect("reclaim");
     assert!(matches!(
-        service.release_handle(&cli(), handle("second")).await,
+        service
+            .release_handle(&cli(), handle("second"), reason("Asked by email"))
+            .await,
         Err(AdminError::HandleNotReleased)
     ));
     service
-        .release_handle(&cli(), handle("renamed"))
+        .release_handle(&cli(), handle("renamed"), reason("Asked by email"))
         .await
         .expect("release");
     assert_eq!(
@@ -108,7 +110,7 @@ async fn operators_rename_and_release_handles() {
         .expect("reclaim");
     assert!(!listed().await);
     service
-        .release_handle(&cli(), reserved)
+        .release_handle(&cli(), reserved, reason("Asked by email"))
         .await
         .expect("release");
 }
@@ -177,11 +179,13 @@ async fn administrators_reserve_handles_until_they_give_them_out() {
     assert!(problems.iter().any(|problem| problem.user_id == user));
 
     service
-        .unreserve_handle(&cli(), kept.clone())
+        .unreserve_handle(&cli(), kept.clone(), reason("Asked by email"))
         .await
         .expect("unreserve");
     assert!(matches!(
-        service.unreserve_handle(&cli(), kept.clone()).await,
+        service
+            .unreserve_handle(&cli(), kept.clone(), reason("Asked by email"))
+            .await,
         Err(AdminError::HandleNotReserved)
     ));
     assert!(handles.ensure_unreserved(&kept).await.is_ok());

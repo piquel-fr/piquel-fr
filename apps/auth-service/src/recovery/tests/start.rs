@@ -81,7 +81,10 @@ async fn what_a_start_replaces_and_refuses() {
         disabled,
         Err(AdminError::RecoveryOfDisabledAccount)
     ));
-    service.enable_user(&cli(), account).await.expect("enable");
+    service
+        .enable_user(&cli(), account, reason())
+        .await
+        .expect("enable");
     let accounts = AccountService::new(harness.database.clone());
     let opened = accounts.open_recovery(&recovery_token(&link)).await;
     assert!(

@@ -45,8 +45,8 @@ skipped there.
 | --- | --- | --- |
 | `E2E_AUTH_URL` | Auth's origin. | `http://localhost:3000` |
 | `E2E_ADMIN_URL` | The admin dashboard's origin. | The dashboard tests are skipped. |
-| `E2E_GRANT_ADMIN` | A command that makes the handle appended to it an administrator, such as `just auth admin grant` with the deployment's configuration. | The dashboard tests are skipped. |
-| `E2E_INVITE` | A command that prints a new signup link, for a deployment whose signup needs an invitation, as CI's does. Every signup runs it. | Signups go to `/register`, and the dashboard's invitation test is skipped. |
+| `E2E_GRANT_ADMIN` | A command that makes the handle appended to it an administrator, such as `just auth admin grant` with the deployment's configuration. The tests append a `--reason` before the handle. | The dashboard tests are skipped. |
+| `E2E_INVITE` | A command that prints a new signup link, for a deployment whose signup needs an invitation, as CI's does. Every signup runs it, with a `--reason` appended. | Signups go to `/register`, and the dashboard's invitation test is skipped. |
 | `E2E_MAIL_URL` | The API origin of a [Mailpit](https://mailpit.axllent.org) that receives the deployment's email. `just auth mailpit` runs one on `http://localhost:8025`. | The tests that read email are skipped. |
 | `E2E_RECOVER` | A command that runs `auth-service user recover` on the deployment. The test appends the handle, a reason and `--yes`. | The recovery test is skipped. |
 | `E2E_WEB_URL` | The origin of sourceorigin.dev's web server, `apps/web`. | The web test is skipped. |
@@ -81,7 +81,7 @@ unpadded base64url.
 Previews don't register them. Register them on the preview through its CLI:
 
 ```console
-cli() { piquelctl preview exec sourceorigin "$(git branch --show-current)" auth -- auth-service --operator e2e "$@"; }
+cli() { piquelctl preview exec sourceorigin "$(git branch --show-current)" auth -- auth-service --operator e2e "$@" --reason 'Browser tests'; }
 cli client create browser-e2e --name 'Browser E2E' \
     --redirect-uri https://browser-e2e.test/callback
 cli client create browser-e2e-sdk --name 'Browser E2E SDK' --trusted --require-par \

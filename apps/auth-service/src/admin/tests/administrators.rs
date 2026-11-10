@@ -16,7 +16,7 @@ async fn administrators_are_protected_until_revoked() {
     let other = harness.account().await;
     let (by_admin, by_other) = (operator(admin, Utc::now()), operator(other, Utc::now()));
     service
-        .grant_administrator(&by_admin, other.user_id)
+        .grant_administrator(&by_admin, other.user_id, reason("Asked by email"))
         .await
         .expect("grant");
     service
@@ -30,14 +30,18 @@ async fn administrators_are_protected_until_revoked() {
         matches!(refused, Err(AdminError::AdministratorTarget)),
         "{refused:?}"
     );
-    let refused = service.revoke_administrator(&by_admin, admin.user_id).await;
+    let refused = service
+        .revoke_administrator(&by_admin, admin.user_id, reason("Asked by email"))
+        .await;
     assert!(matches!(refused, Err(AdminError::OwnRights)), "{refused:?}");
     // Refused before any lock, so a grant queued behind the caller's own
     // revocation cannot restore their rights.
-    let refused = service.grant_administrator(&by_admin, admin.user_id).await;
+    let refused = service
+        .grant_administrator(&by_admin, admin.user_id, reason("Asked by email"))
+        .await;
     assert!(matches!(refused, Err(AdminError::OwnRights)), "{refused:?}");
     service
-        .revoke_administrator(&by_admin, other.user_id)
+        .revoke_administrator(&by_admin, other.user_id, reason("Asked by email"))
         .await
         .expect("revoke");
     let refused = service.search_users(&by_other, "", None).await;
@@ -114,7 +118,9 @@ async fn the_last_active_administrator_stays() {
             "delete",
         ),
         (
-            service.revoke_administrator(&cli, a.user_id).await,
+            service
+                .revoke_administrator(&cli, a.user_id, reason("Asked by email"))
+                .await,
             &last,
             "revoke",
         ),
@@ -123,12 +129,15 @@ async fn the_last_active_administrator_stays() {
         assert_refused(&refused.expect_err(case), expected, case);
     }
 
-    service.enable_user(&cli, b.user_id).await.expect("enable");
+    service
+        .enable_user(&cli, b.user_id, reason("Asked by email"))
+        .await
+        .expect("enable");
     let mut held = harness.database.begin().await.expect("transaction");
     held.administrators().lock().await.expect("lock");
     let (disabled, revoked, ()) = tokio::join!(
         service.disable_user(&cli, a.user_id, reason("Away")),
-        service.revoke_administrator(&cli, b.user_id),
+        service.revoke_administrator(&cli, b.user_id, reason("Asked by email")),
         async {
             until_blocked(&mut held, 2).await;
             held.commit().await.expect("commit");
@@ -161,13 +170,19 @@ async fn no_grant_while_a_recovery_can_be_undone() {
         .expect("recovery");
 
     let refused = service
-        .grant_administrator(&operator(admin, Utc::now()), target)
+        .grant_administrator(
+            &operator(admin, Utc::now()),
+            target,
+            reason("Asked by email"),
+        )
         .await;
     assert!(
         matches!(refused, Err(AdminError::GrantDuringRecovery)),
         "the dashboard refuses"
     );
-    let refused = service.grant_administrator(&cli(), target).await;
+    let refused = service
+        .grant_administrator(&cli(), target, reason("Asked by email"))
+        .await;
     assert!(
         matches!(refused, Err(AdminError::GrantDuringRecovery)),
         "the CLI too"
@@ -180,7 +195,7 @@ async fn no_grant_while_a_recovery_can_be_undone() {
         .await
         .expect("support cancels the unused link");
     service
-        .grant_administrator(&cli(), target)
+        .grant_administrator(&cli(), target, reason("Asked by email"))
         .await
         .expect("granted once nothing can be undone");
 }

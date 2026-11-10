@@ -50,7 +50,7 @@ too.
 3. Revoke it:
 
    ```sh
-   auth-service keys revoke <id>
+   auth-service keys revoke <id> --reason "Compromised"
    ```
 
    On the dashboard, select **Revoke** next to it on the **Signing keys** page.
@@ -104,7 +104,7 @@ with a code or a refresh token the app was given.
 2. Revoke every earlier secret at once, and get a new one:
 
    ```sh
-   auth-service client rotate-secret <client-id> --grace 0
+   auth-service client rotate-secret <client-id> --grace 0 --reason "Secret leaked"
    ```
 
    On the dashboard, open the client, select **Rotate the secret**, choose
@@ -118,7 +118,7 @@ with a code or a refresh token the app was given.
    instead: its next `client apply` would register the leaked value again.
 4. If more than the secret leaked, such as the app's server with the refresh
    tokens it holds, also stop the client until the server is clean:
-   `auth-service client disable <client-id>` stops it from authorizing and
+   `auth-service client disable <client-id> --reason "…"` stops it from authorizing and
    refreshing tokens at once. Deleting the client revokes its refresh tokens for
    good (see [OIDC clients](clients.md#disable-suspend-or-delete-a-client)).
 
@@ -219,15 +219,15 @@ while the command line may.
    request:
 
    ```sh
-   auth-service admin revoke <handle>
+   auth-service admin revoke <handle> --reason "Account compromised"
    ```
 
    If it holds the last rights, first grant them to an account you trust with
-   `auth-service admin grant <handle>`.
+   `auth-service admin grant <handle> --reason "…"`.
 2. End its sessions, which ends its dashboard session with them:
 
    ```sh
-   auth-service session revoke-all <handle>
+   auth-service session revoke-all <handle> --reason "Account compromised"
    ```
 
 3. If the account's passkey may be in someone else's hands, not just a session,
@@ -296,7 +296,7 @@ leaked, starting with the runbooks above.
 5. If they aren't ready because of their signing keys, the logs say which key
    failed. A replica that can't reload its keys fails readiness after 5 minutes,
    and answers `503` where it signs or verifies after 15. A key that won't open
-   is removed with `auth-service keys revoke <id>`, which works even when the
+   is removed with `auth-service keys revoke <id> --reason "…"`, which works even when the
    active key can't be opened (see
    [replace a key that doesn't open](signing-keys.md#replace-a-key-that-doesnt-open)).
 
@@ -351,7 +351,7 @@ tailnet, PostgreSQL, DNS, the tunnel, Grafana and Resend (see
 3. Once the cause is fixed, retry the failed deliveries still worth sending:
 
    ```sh
-   auth-service deliveries retry <id>
+   auth-service deliveries retry <id> --reason "Mail back up"
    ```
 
    A retry makes the delivery due now, and gives it another 24 hours. On the

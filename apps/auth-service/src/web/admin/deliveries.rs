@@ -1,7 +1,6 @@
 //! The outbound delivery queue: listing deliveries, retrying and cancelling one.
 
-use super::AdminApplication as App;
-use serde::de::IgnoredAny;
+use super::{AdminApplication as App, ReasonForm, Refused};
 use sourceorigin_common::{DeliveryId, admin::DeliveryStatus};
 use sourceorigin_ui::{Action, Change, DeliveryRow, Target};
 use topcoat::{
@@ -83,14 +82,14 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 /// `/deliveries/{delivery}/retry`: attempts a failed delivery, or a cancelled
 /// unordered one, again now.
 #[route([GET, POST] "/deliveries/{delivery}/retry")]
-pub(super) async fn retry(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn retry(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::RetryDelivery).await
 }
 
 /// `/deliveries/{delivery}/cancel`: cancels a pending or failed delivery, which
 /// unblocks the deliveries ordered after it.
 #[route([GET, POST] "/deliveries/{delivery}/cancel")]
-pub(super) async fn cancel(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn cancel(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::CancelDelivery).await
 }
 
@@ -99,7 +98,7 @@ impl App {
     /// which goes back to the list once made.
     async fn delivery_change(
         cx: &Cx,
-        form: Option<Form<IgnoredAny>>,
+        form: Option<Form<ReasonForm>>,
         change: Change,
     ) -> Result<Response> {
         let admin = Self::admin(cx).await?;
@@ -107,11 +106,11 @@ impl App {
         let service = &Self::of(cx).service;
         let id = *path_param::<Delivery>(cx)?;
         let back = href!(list).resolve(cx);
-        let refusal = Self::submit(cx, form, back.clone(), |_| async move {
+        let refusal = Self::submit_reason(cx, form, back.clone(), async |reason| {
             if change == Change::CancelDelivery {
-                service.cancel_delivery(&admin.operator, id).await
+                service.cancel_delivery(&admin.operator, id, reason).await
             } else {
-                service.retry_delivery(&admin.operator, id).await
+                service.retry_delivery(&admin.operator, id, reason).await
             }
         })
         .await?;
@@ -120,12 +119,15 @@ impl App {
             name: "Delivery",
             id: Some(&id),
         };
+        let reason = refusal.as_ref().map(Refused::reason);
+        let refusal = refusal.as_deref();
         let page = view! { cx =>
             sourceorigin_ui::dashboard_change(
                 change: change,
                 target: target,
                 back: back.as_str(),
-                refusal: refusal.as_deref(),
+                refusal: refusal,
+                reason: reason,
             )
         };
         Self::render(cx, StatusCode::OK, change.title(), page).await

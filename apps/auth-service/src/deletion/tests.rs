@@ -722,7 +722,7 @@ async fn operators_and_the_purge_job_delete_accounts() {
     let browser = Browser::new_account(&fixture.database).await;
     let owned = fixture.own_client(&browser).await;
     let cli = operator();
-    let as_cli = operator().context().actor;
+    let as_cli = operator().reading().actor;
 
     fixture
         .admin
@@ -828,7 +828,7 @@ async fn the_cli_purges_disabled_accounts_at_once() {
     assert_eq!(fixture.status(disabled.user_id).await, None);
     assert_eq!(
         fixture.events(disabled.user_id).await[0],
-        (DomainEvent::AccountPurged {}, operator().context().actor)
+        (DomainEvent::AccountPurged {}, operator().reading().actor)
     );
     let stored = fixture
         .database

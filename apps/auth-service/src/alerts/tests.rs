@@ -185,14 +185,14 @@ async fn updates_acknowledge_an_alert_until_its_condition_changes() {
     };
     found(database, Some(broken(5))).await;
     let id = current().await[0].alert.id;
-    let update = async |status, note: Option<&str>| {
-        let note = note.map(|note| Reason::parse(note.to_owned()).expect("note"));
+    let update = async |status, note: &str| {
+        let note = Reason::parse(note.to_owned()).expect("note");
         service.update_alert(&admin, id, status, note).await
     };
-    update(AlertStatus::Investigating, Some("Looking into it"))
+    update(AlertStatus::Investigating, "Looking into it")
         .await
         .expect("first update");
-    update(AlertStatus::Fixing, None)
+    update(AlertStatus::Fixing, "Alice is fixing it")
         .await
         .expect("second update");
     let [detail] = <[_; 1]>::try_from(current().await).expect("one current alert");
@@ -206,7 +206,7 @@ async fn updates_acknowledge_an_alert_until_its_condition_changes() {
         posted,
         [
             (AlertStatus::Investigating, Some("Looking into it")),
-            (AlertStatus::Fixing, None),
+            (AlertStatus::Fixing, Some("Alice is fixing it")),
         ]
     );
     assert!(matches!(
@@ -236,7 +236,7 @@ async fn updates_acknowledge_an_alert_until_its_condition_changes() {
     assert_eq!(raised.alert.alert, Some(broken(3)));
     assert_eq!(raised.alert.state(), AlertState::Open);
     assert!(matches!(
-        update(AlertStatus::Monitoring, None).await,
+        update(AlertStatus::Monitoring, "Watching it").await,
         Err(AdminError::AlertNotFound)
     ));
     let previous = service

@@ -142,7 +142,9 @@ async fn announcements_change_until_a_confirmed_administrator_sends_them() {
                 })
         })
         .expect("recorded");
-    assert_eq!(recorded.actor, administrator.context().actor);
+    assert_eq!(recorded.actor, administrator.reading().actor);
+    // Nobody writes a reason for it: its text says why.
+    assert_eq!(recorded.reason.as_deref(), Some("See message contents"));
     assert_refused(
         &service
             .view_announcement(&stale, AnnouncementId::new())

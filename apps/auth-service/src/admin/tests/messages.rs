@@ -92,7 +92,9 @@ async fn messages_reach_the_inbox_and_the_primary_address_until_purged() {
     let events = harness.database.events().list(&filter, 10).await;
     let [sent] = events.expect("events").try_into().expect("one event");
     assert_eq!(sent.event.known(), Some(&DomainEvent::MessageSent {}));
-    assert_eq!(sent.actor, admin.context().actor);
+    assert_eq!(sent.actor, admin.reading().actor);
+    // Nobody writes a reason for it: its text says why.
+    assert_eq!(sent.reason.as_deref(), Some("See message contents"));
 
     service
         .purge_user(&cli(), user, reason("Asked by email"))

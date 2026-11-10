@@ -41,7 +41,8 @@ pub(super) enum UserCommand {
     Disable {
         /// The account: its handle, ID or verified email.
         user: UserRef,
-        /// Why, kept with the event as personal data: 1 to 500 characters.
+        /// Why, recorded with the change and shown to the owner in their history:
+        /// 1 to 500 characters.
         #[arg(long)]
         reason: Reason,
         /// Confirmation.
@@ -52,6 +53,10 @@ pub(super) enum UserCommand {
     Enable {
         /// The account: its handle, ID or verified email.
         user: UserRef,
+        /// Why, recorded with the change and shown to the owner in their history:
+        /// 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
     /// Recover an account whose owner lost every passkey.
     ///
@@ -94,7 +99,8 @@ pub(super) enum UserCommand {
     Delete {
         /// The account: its handle, ID or verified email.
         user: UserRef,
-        /// Why, kept with the event as personal data: 1 to 500 characters.
+        /// Why, recorded with the change and shown to the owner in their history:
+        /// 1 to 500 characters.
         #[arg(long)]
         reason: Reason,
         /// Purge the account now, in any status, without a grace period. This
@@ -126,7 +132,8 @@ pub(super) enum UserCommand {
     Restore {
         /// The account: its handle, ID or verified email.
         user: UserRef,
-        /// Why, kept with the event as personal data: 1 to 500 characters.
+        /// Why, recorded with the change and shown to the owner in their history:
+        /// 1 to 500 characters.
         #[arg(long)]
         reason: Reason,
     },
@@ -160,9 +167,9 @@ impl UserCommand {
                 confirm.ask(&format!("Disable {user} ({id}) and end its sessions"))?;
                 service.disable_user(operator, id, reason).await?;
             }
-            Self::Enable { user } => {
+            Self::Enable { user, reason } => {
                 let id = console.user(&user).await?;
-                service.enable_user(operator, id).await?;
+                service.enable_user(operator, id, reason).await?;
             }
             Self::Recover {
                 user,

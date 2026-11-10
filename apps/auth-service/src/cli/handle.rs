@@ -19,7 +19,8 @@ pub(super) enum HandleCommand {
         /// Its new handle.
         #[arg(value_parser = Handle::parse)]
         new: Handle,
-        /// Why, kept with the event as personal data: 1 to 500 characters.
+        /// Why, recorded with the change and shown to the owner in their history:
+        /// 1 to 500 characters.
         #[arg(long)]
         reason: Reason,
         /// Allow a reserved name, or one that looks like it.
@@ -33,6 +34,9 @@ pub(super) enum HandleCommand {
         /// The released handle.
         #[arg(value_parser = Handle::parse)]
         handle: Handle,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
         /// Confirmation.
         #[command(flatten)]
         confirm: Confirm,
@@ -56,6 +60,9 @@ pub(super) enum HandleCommand {
         /// The handle.
         #[arg(value_parser = Handle::parse)]
         handle: Handle,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
 }
 
@@ -82,11 +89,15 @@ impl HandleCommand {
                     .rename_handle(operator, user, new, reason, allow_reserved)
                     .await?;
             }
-            Self::Release { handle, confirm } => {
+            Self::Release {
+                handle,
+                reason,
+                confirm,
+            } => {
                 confirm.ask(&format!(
                     "Release @{handle}: anyone may claim it, and it is no longer kept for the account that held it"
                 ))?;
-                service.release_handle(operator, handle).await?;
+                service.release_handle(operator, handle, reason).await?;
             }
             Self::Released => {
                 for released in service.list_released_handles(operator).await? {
@@ -115,7 +126,9 @@ impl HandleCommand {
             Self::Reserve { handle, reason } => {
                 service.reserve_handle(operator, handle, reason).await?;
             }
-            Self::Unreserve { handle } => service.unreserve_handle(operator, handle).await?,
+            Self::Unreserve { handle, reason } => {
+                service.unreserve_handle(operator, handle, reason).await?;
+            }
         }
         Ok(())
     }

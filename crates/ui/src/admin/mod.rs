@@ -671,24 +671,26 @@ impl Change {
         )
     }
 
-    /// The label of the reason its form asks for, if it asks for one.
+    /// The label of the reason its form asks for: every change's but an
+    /// announcement's or a message's, whose text says why, and an alert update's,
+    /// whose note is its reason.
     const fn reason(self) -> Option<&'static str> {
         match self {
-            Self::Disable => Some("Reason"),
-            Self::Delete | Self::Restore | Self::ChangeHandle | Self::ChangeDisplayName => {
-                Some("Reason, shown to the owner in their history")
-            }
+            Self::Disable
+            | Self::Enable
+            | Self::Delete
+            | Self::Restore
+            | Self::RevokeSessions
+            | Self::RevokeSession
+            | Self::RevokeAdministrator
+            | Self::GrantAdministrator
+            | Self::ChangeHandle
+            | Self::ChangeDisplayName => Some(OWNER_REASON),
             Self::ReserveHandle => Some("Who or what it is kept for"),
             Self::Recover | Self::UndoRecovery => Some(
                 "Reason, shown to the owner in their history: what was asked, never the evidence",
             ),
-            Self::Enable
-            | Self::RevokeSessions
-            | Self::RevokeSession
-            | Self::Message
-            | Self::RevokeAdministrator
-            | Self::GrantAdministrator
-            | Self::RevokeInvitation
+            Self::RevokeInvitation
             | Self::Invite
             | Self::ApproveOrigin
             | Self::RemoveOrigin
@@ -702,7 +704,11 @@ impl Change {
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RotateSigningKey
-            | Self::RevokeSigningKey
+            | Self::RevokeSigningKey => Some(REASON),
+            // A draft's own changes record nothing, and an announcement's or a
+            // message's text says why it is sent; an alert update's note is its
+            // reason, which its own fields ask for.
+            Self::Message
             | Self::DraftAnnouncement
             | Self::EditAnnouncement
             | Self::SendAnnouncement
@@ -711,6 +717,11 @@ impl Change {
         }
     }
 }
+
+/// The label of the reason a change that concerns no account asks for.
+pub(crate) const REASON: &str = "Reason";
+/// The label of the reason a change to an account asks for.
+const OWNER_REASON: &str = "Reason, shown to the owner in their history";
 
 /// A change's button on a row, with where it posts: its page, at `href`. A
 /// dashboard confirmed with a passkey makes the change `inline`, from a dialog
@@ -818,11 +829,27 @@ async fn reason_field<'a>(
 ) -> Result<impl View> {
     Ok(view! {
         if let Some(label) = change.reason() {
-            <label>
-                (label)
-                <input name="reason" required="" maxlength="500" value=(value) autofocus="">
-            </label>
+            reason_input(label: label, value: value, autofocus: true)
         }
+    })
+}
+
+/// The input of why a change is made, under `label`, holding `value`: 1 to 500
+/// characters, which the service checks again. A change's own form focuses it
+/// (`autofocus`); a longer form, which it ends, starts at its first field.
+#[component]
+pub(crate) async fn reason_input<'a>(
+    label: &'a str,
+    #[into]
+    #[default]
+    value: Option<&'a str>,
+    #[default] autofocus: bool,
+) -> Result<impl View> {
+    Ok(view! {
+        <label>
+            (label)
+            <input name="reason" required="" maxlength="500" value=(value) autofocus=(autofocus)>
+        </label>
     })
 }
 

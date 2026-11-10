@@ -15,17 +15,17 @@
 //! page at `/clients/new`, whatever the client's ID.
 
 use super::{
-    AdminApplication as App, Refusal,
+    AdminApplication as App, ReasonForm, Refusal, Refused,
     origins::{self, OriginQuery},
 };
 use crate::{
-    AdminError, AdminService, ClientDetails, ClientRegistryError, Operator,
+    AdminError, AdminService, ClientDetails, ClientRegistryError, Operator, Reason,
     admin::SignedInAdmin,
     clients::{ClientSettings, InvalidSetting, OperatorSettings},
     security::ApiError,
 };
 use chrono::Utc;
-use serde::de::IgnoredAny;
+use serde::Deserialize;
 use sourceorigin_common::{
     ClientId,
     clients::{ClientKind, ClientRegistration},
@@ -167,9 +167,10 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<NewClientForm>>) -> Result
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
     let created = App::change(cx, form, async |new: NewClientForm| {
+        let reason = Reason::parse(new.settings.reason.clone())?;
         let registration = App::registration(new)?;
         let secret = service
-            .create_client(&admin.operator, &registration)
+            .create_client(&admin.operator, &registration, reason)
             .await?;
         Ok::<_, Refusal>((registration.id, secret))
     })
@@ -203,8 +204,9 @@ pub(super) async fn edit(cx: &Cx, form: Option<Form<OperatorDraft>>) -> Result<R
     let id = stored.id.clone();
     let back = href!(detail, Client(id.clone())).resolve(cx);
     let refusal = App::submit(cx, form, back.clone(), async |draft: OperatorDraft| {
+        let reason = Reason::parse(draft.reason.clone())?;
         service
-            .update_client(&admin.operator, &id, |stored| {
+            .update_client(&admin.operator, &id, reason, |stored| {
                 OperatorSettings::from(draft)
                     .registration(stored.id.clone(), stored.kind)
                     .map_err(Refusal::from)
@@ -226,7 +228,7 @@ pub(super) async fn edit(cx: &Cx, form: Option<Form<OperatorDraft>>) -> Result<R
 /// `/clients/{client}/secret`: a confidential client's secrets, and rotating
 /// them. A rotation comes back here, which shows the new secret once.
 #[route([GET, POST] "/clients/{client}/secret")]
-pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result<Response> {
+pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     // The page showing a new secret needs no confirmation: sending the browser
     // to confirm would lose the secret.
@@ -241,22 +243,29 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
         return Err(AdminError::from(ClientRegistryError::Public(id)).into());
     }
     let here = href!(rotate, Client(id.clone())).resolve(cx);
-    let changed = App::change(cx, form, async |SecretsChange::Rotate { grace }| {
-        let grace = grace.unwrap_or_default().into();
+    let changed = App::change(cx, form, async |rotation: Rotation| {
+        let SecretsChange::Rotate { grace } = rotation.change;
+        let reason = Reason::parse(rotation.reason)?;
         service
-            .rotate_client_secret(&admin.operator, &id, grace)
+            .rotate_client_secret(
+                &admin.operator,
+                &id,
+                grace.unwrap_or_default().into(),
+                reason,
+            )
             .await
     })
     .await?;
-    let (state, refusal) = match changed {
+    let (state, reason, refusal) = match changed {
         Some(Ok(secret)) => return App::reveal(cx, admin, here, secret.expose()),
         Some(Err(refused)) => {
-            let SecretsChange::Rotate { grace } = refused.form;
+            let SecretsChange::Rotate { grace } = refused.form.change;
             (
                 SecretsState {
                     grace,
                     rotated: None,
                 },
+                refused.form.reason,
                 Some(refused.message),
             )
         }
@@ -265,6 +274,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
                 grace: None,
                 rotated,
             },
+            String::new(),
             None,
         ),
     };
@@ -276,11 +286,12 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
             expires_at: secret.expires_at,
         })
         .collect();
-    let (here, name, secrets, state, refusal) = (
+    let (here, name, secrets, state, reason, refusal) = (
         &here,
         App::title(&details.client),
         &secrets,
         &state,
+        &reason,
         refusal.as_deref(),
     );
     let page = view! { cx =>
@@ -290,10 +301,22 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
             secrets: secrets,
             now: Utc::now(),
             state: state,
+            reason: reason.as_str(),
             refusal: refusal,
         )
     };
     App::render(cx, StatusCode::OK, "Client secrets", page).await
+}
+
+/// The form rotating a client's secret: the developer console's, with why.
+#[derive(Clone, Deserialize)]
+pub(super) struct Rotation {
+    /// The rotation, as the developer console posts it.
+    #[serde(flatten)]
+    change: SecretsChange,
+    /// Why, as typed.
+    #[serde(default)]
+    reason: String,
 }
 
 /// A change to a client that only needs confirming, as its `client` command
@@ -324,26 +347,39 @@ impl Toggle {
         }
     }
 
-    /// Makes it to client `id`, as `operator`.
+    /// Makes it to client `id`, as `operator`, for `reason`.
     async fn make(
         self,
         service: &AdminService,
         operator: &Operator,
         id: &ClientId,
+        reason: Reason,
     ) -> Result<(), AdminError> {
         match self {
-            Self::Enable => service.set_client_enabled(operator, id, true).await,
-            Self::Disable => service.set_client_enabled(operator, id, false).await,
-            Self::Suspend => service.set_client_suspended(operator, id, true).await,
-            Self::Unsuspend => service.set_client_suspended(operator, id, false).await,
-            Self::Delete => service.delete_client(operator, id).await,
+            Self::Enable => service.set_client_enabled(operator, id, true, reason).await,
+            Self::Disable => {
+                service
+                    .set_client_enabled(operator, id, false, reason)
+                    .await
+            }
+            Self::Suspend => {
+                service
+                    .set_client_suspended(operator, id, true, reason)
+                    .await
+            }
+            Self::Unsuspend => {
+                service
+                    .set_client_suspended(operator, id, false, reason)
+                    .await
+            }
+            Self::Delete => service.delete_client(operator, id, reason).await,
         }
     }
 
     /// Its page, for the client the path names: a `GET` asks to confirm it, and a
     /// `POST` makes it, then goes back to the client's page, or to the clients
     /// once the client is deleted.
-    async fn page(self, cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+    async fn page(self, cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
         let admin = App::admin(cx).await?;
         App::confirm(cx, admin)?;
         let service = &App::of(cx).service;
@@ -353,16 +389,21 @@ impl Toggle {
             Self::Delete => href!(list).resolve(cx),
             Self::Enable | Self::Disable | Self::Suspend | Self::Unsuspend => back.clone(),
         };
-        let refusal =
-            App::submit(cx, form, done, |_| self.make(service, &admin.operator, &id)).await?;
+        let refusal = App::submit_reason(cx, form, done, async |reason| {
+            self.make(service, &admin.operator, &id, reason).await
+        })
+        .await?;
         let change = self.change();
         let target = App::target(cx).await;
+        let reason = refusal.as_ref().map(Refused::reason);
+        let refusal = refusal.as_deref();
         let page = view! { cx =>
             sourceorigin_ui::dashboard_change(
                 change: change,
                 target: target,
                 back: back.as_str(),
-                refusal: refusal.as_deref(),
+                refusal: refusal,
+                reason: reason,
             )
         };
         App::render(cx, StatusCode::OK, change.title(), page).await
@@ -371,32 +412,32 @@ impl Toggle {
 
 /// `/clients/{client}/enable`: lets a disabled client sign users in again.
 #[route([GET, POST] "/clients/{client}/enable")]
-pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn enable(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     Toggle::Enable.page(cx, form).await
 }
 
 /// `/clients/{client}/disable`: stops a client signing users in.
 #[route([GET, POST] "/clients/{client}/disable")]
-pub(super) async fn disable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn disable(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     Toggle::Disable.page(cx, form).await
 }
 
 /// `/clients/{client}/suspend`: blocks a client, so that its owner cannot enable
 /// it again.
 #[route([GET, POST] "/clients/{client}/suspend")]
-pub(super) async fn suspend(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn suspend(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     Toggle::Suspend.page(cx, form).await
 }
 
 /// `/clients/{client}/unsuspend`: lifts a client's suspension; it stays disabled.
 #[route([GET, POST] "/clients/{client}/unsuspend")]
-pub(super) async fn unsuspend(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn unsuspend(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     Toggle::Unsuspend.page(cx, form).await
 }
 
 /// `/clients/{client}/delete`: deletes a client for good.
 #[route([GET, POST] "/clients/{client}/delete")]
-pub(super) async fn delete(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
+pub(super) async fn delete(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     Toggle::Delete.page(cx, form).await
 }
 

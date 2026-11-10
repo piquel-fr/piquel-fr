@@ -177,6 +177,17 @@ impl Reason {
         Ok(Self(value))
     }
 
+    /// The reason of a change whose own content says why, such as an
+    /// announcement's text.
+    pub(crate) fn see_message() -> Self {
+        Self("See message contents".to_owned())
+    }
+
+    /// The validated text.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
     /// Unwraps the validated text.
     pub(crate) fn into_inner(self) -> String {
         self.0

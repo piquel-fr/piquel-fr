@@ -603,7 +603,7 @@ Administrators post updates on a current alert (`alert_updates`): a status and
 the administrator or operator as its author, an event's actor. `acknowledge`
 locks the alert, if it is still current, and acknowledges it (`acknowledged_at`)
 on its first update. The update is recorded as `AlertUpdated`, and its row names
-that event (`event_id`), whose reason holds the update's optional note: the
+that event (`event_id`), whose reason holds the update's note: the
 note is personal data, deleted with the event's after 90 days or when its
 author's account is purged. An acknowledged alert stays current, so finding the
 same condition again raises nothing until the condition changes or clears.

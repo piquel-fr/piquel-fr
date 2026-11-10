@@ -28,14 +28,14 @@ deployed. In production (for staging, use `--env staging` and its own hosts):
 1. Create an invitation, since signing up needs one:
 
    ```sh
-   piquelctl app exec sourceorigin auth --env production -- auth-service --operator alice invite create
+   piquelctl app exec sourceorigin auth --env production -- auth-service --operator alice invite create --reason "First administrator"
    ```
 
 2. Open the link it prints, and sign up with a passkey.
 3. Grant the new account administrator rights:
 
    ```sh
-   piquelctl app exec sourceorigin auth --env production -- auth-service --operator alice admin grant <handle>
+   piquelctl app exec sourceorigin auth --env production -- auth-service --operator alice admin grant <handle> --reason "First administrator"
    ```
 
 4. From a device on the tailnet, open `https://admin.sourceorigin.dev`, and sign in
@@ -66,8 +66,8 @@ and your **Devices** page lists the dashboard under the browser it runs in. See
 Signing up needs an invitation in staging and production.
 
 - **On the dashboard**, open **Invitations**, select **Invite someone**, choose
-  how long it's **Valid for**, and select **Create link**.
-- **At the terminal**, run `auth-service invite create --expires-in 7d`.
+  how long it's **Valid for**, give a **Reason**, and select **Create link**.
+- **At the terminal**, run `auth-service invite create --expires-in 7d --reason "For Jane"`.
 
 Either shows a single-use signup link once: send it to the person. It opens
 `/register` with the invitation filled in, and a signup through GitHub or Google
@@ -75,7 +75,7 @@ asks for it on its own page. A link lasts seven days unless you choose another
 time, in hours (`24h`) or days (`7d`).
 
 Revoke an unused link with **Revoke** on the **Invitations** page, or
-`auth-service invite revoke <id>`, with the ID `invite list` shows.
+`auth-service invite revoke <id> --reason "…"`, with the ID `invite list` shows.
 
 ## Find an account
 
@@ -95,12 +95,14 @@ owner.
 
 ```sh
 auth-service user disable alice --reason "Spam"
-auth-service user enable alice
+auth-service user enable alice --reason "Appealed by email"
 ```
 
 Disabling ends the account's sessions and refresh tokens, and it can't sign in
-until you enable it. On the dashboard, open the account and select **Disable**
-or **Enable**. Nobody can disable the last active administrator's account.
+until you enable it. On the dashboard, open the account, select **Disable** or
+**Enable**, and give a reason. The owner sees it in their security history, so
+write what was asked, never the evidence. Nobody can disable the last active
+administrator's account.
 
 ## Change an account's settings for its owner
 
@@ -145,7 +147,7 @@ every time.
 2. Confirm the request through a second channel that existed before it, as the
    evidence policy describes. Keep the evidence in support's own record.
 3. If the account holds administrator rights, revoke them first with
-   `auth-service admin revoke alice`. Grant another administrator first if it's
+   `auth-service admin revoke alice --reason "…"`. Grant another administrator first if it's
    the last.
 4. Start the recovery:
 
@@ -213,8 +215,8 @@ themselves, from the link in the recovery's emails.
 ## End sessions
 
 ```sh
-auth-service session revoke alice <session-id>  # one of its sessions, as `user show` lists them
-auth-service session revoke-all alice           # every session of the account
+auth-service session revoke alice <session-id> --reason "Phone stolen"  # one of its sessions, as `user show` lists them
+auth-service session revoke-all alice --reason "Phone stolen"           # every session of the account
 ```
 
 Each also ends the refresh tokens of the apps signed in through the session. A
@@ -336,8 +338,8 @@ recovery link (see
 auth-service handle rename old-name new-name --reason "…"
 auth-service handle reserve jane --reason "For Jane, joining in May"
 auth-service handle rename someone jane --allow-reserved --reason "Kept for this account"
-auth-service handle unreserve jane
-auth-service handle release old-name
+auth-service handle unreserve jane --reason "Jane joined as @jane-b"
+auth-service handle release old-name --reason "Trademark dispute"
 ```
 
 - **Rename** gives an account a new handle without the 30-day cooldown of the
@@ -370,8 +372,8 @@ in a queue until a worker sends them.
    ```
 
 2. Fix the cause, such as an app's logout endpoint or the Resend key.
-3. Retry each delivery with `auth-service deliveries retry <id>`, or give up on
-   one with `auth-service deliveries cancel <id>`.
+3. Retry each delivery with `auth-service deliveries retry <id> --reason "…"`,
+   or give up on one with `auth-service deliveries cancel <id> --reason "…"`.
 
 On the dashboard, the **Deliveries** page filters them, and offers **Retry**
 and **Cancel delivery**. A failed delivery with an ordering key holds back the
@@ -412,7 +414,7 @@ dashboard. An alert raises no new notification while it stays current, so
 follow it on the dashboard's **Alerts** tab, or with `auth-service alerts list`.
 
 Post updates on an alert to say where its handling stands: **Investigating**,
-**Fixing** or **Monitoring**, with an optional note such as who is on it. The
+**Fixing** or **Monitoring**, with a note such as who is on it, its reason. The
 first update acknowledges the alert: it stops counting as a warning, though it
 stays current while its condition holds.
 
@@ -423,8 +425,8 @@ On the dashboard:
 
 1. Open **Alerts**. Each current alert shows what it says, its ID, when it was
    raised and last seen, and its updates, newest first.
-2. Select **Post an update** on the alert, choose its **Status**, and add a
-   note if you want.
+2. Select **Post an update** on the alert, choose its **Status**, and write a
+   **Note**, such as who is on it.
 3. Select **Post an update** in the dialog to post it.
 4. Select **See previous alerts** to read the alerts that cleared, with the
    updates posted on them.

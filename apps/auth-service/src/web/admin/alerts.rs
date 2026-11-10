@@ -23,7 +23,7 @@ path_param!(pub alert: AlertId, error = not_found);
 pub(super) struct UpdateForm {
     /// Where the alert's handling stands.
     status: AlertStatus,
-    /// What the administrator adds, if anything.
+    /// What the administrator adds, such as who is on it: the update's reason.
     #[serde(default)]
     note: String,
 }
@@ -80,7 +80,7 @@ pub(super) async fn previous(cx: &Cx) -> Result<Response> {
 }
 
 /// `/alerts/{alert}/update`: posts an update on a current alert, saying where
-/// its handling stands, with an optional note. An alert that is not current is
+/// its handling stands, with a note, its reason. An alert that is not current is
 /// not found.
 #[route([GET, POST] "/alerts/{alert}/update")]
 pub(super) async fn update(cx: &Cx, form: Option<Form<UpdateForm>>) -> Result<Response> {
@@ -100,10 +100,7 @@ pub(super) async fn update(cx: &Cx, form: Option<Form<UpdateForm>>) -> Result<Re
         .subject();
     let back = href!(list).resolve(cx);
     let refused = App::submit(cx, form, back.clone(), |input: UpdateForm| async move {
-        let note = match input.note.trim() {
-            "" => None,
-            note => Some(Reason::parse(note.to_owned())?),
-        };
+        let note = Reason::parse(input.note)?;
         service
             .update_alert(&admin.operator, id, input.status, note)
             .await?;

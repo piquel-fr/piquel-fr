@@ -131,6 +131,9 @@ export async function expectAccepted(
   });
 }
 
+/** Why the tests make a change through a deployment's CLI, which every change needs. */
+export const reason = ['--reason', 'Browser tests'];
+
 /**
  * Runs `command`, a deployment's CLI named by an environment variable such as
  * `E2E_GRANT_ADMIN`, with `args` appended, and returns what it printed.
@@ -141,7 +144,7 @@ export function cli(command: string, ...args: string[]): string {
 }
 
 // A command printing a new signup link, e.g. `just auth invite create`, for a
-// deployment whose signup needs an invitation.
+// deployment whose signup needs an invitation. The tests append its reason.
 const invite = process.env.E2E_INVITE;
 
 /**
@@ -153,7 +156,7 @@ export async function signUp(
   page: Page,
   handle: string,
   passkey = 'Passkey',
-  link = invite ? cli(invite).trim() : undefined
+  link = invite ? cli(invite, ...reason).trim() : undefined
 ): Promise<void> {
   await page.goto(link ?? '/register');
   await page.getByLabel('Handle', { exact: true }).fill(handle);

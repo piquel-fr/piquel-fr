@@ -35,7 +35,7 @@ async fn delivery_changes_check_and_record_their_administrator() {
     let admin = harness.admin().await;
     let revoked = harness.admin().await;
     service
-        .revoke_administrator(&cli(), revoked.user_id)
+        .revoke_administrator(&cli(), revoked.user_id, reason("Asked by email"))
         .await
         .expect("revoke");
     let stale = Utc::now() - Duration::minutes(10);
@@ -79,12 +79,12 @@ async fn delivery_changes_check_and_record_their_administrator() {
         (operator(admin, stale), AdminError::StepUpRequired(step_up)),
     ] {
         let refused = service
-            .cancel_delivery(&operator, pending)
+            .cancel_delivery(&operator, pending, reason("Asked by email"))
             .await
             .expect_err("cancel");
         assert_refused(&refused, &refusal, "cancel");
         let refused = service
-            .retry_delivery(&operator, cancelled)
+            .retry_delivery(&operator, cancelled, reason("Asked by email"))
             .await
             .expect_err("retry");
         assert_refused(&refused, &refusal, "retry");
@@ -94,11 +94,11 @@ async fn delivery_changes_check_and_record_their_administrator() {
 
     let admin = operator(admin, Utc::now());
     service
-        .cancel_delivery(&admin, pending)
+        .cancel_delivery(&admin, pending, reason("Asked by email"))
         .await
         .expect("cancel");
     service
-        .retry_delivery(&admin, cancelled)
+        .retry_delivery(&admin, cancelled, reason("Asked by email"))
         .await
         .expect("retry");
     assert_eq!(status(pending).await, DeliveryStatus::Cancelled);
@@ -127,6 +127,6 @@ async fn delivery_changes_check_and_record_their_administrator() {
                 )
             })
             .unwrap_or_else(|| panic!("{kind} recorded"));
-        assert_eq!(recorded.actor, admin.context().actor, "{kind}");
+        assert_eq!(recorded.actor, admin.reading().actor, "{kind}");
     }
 }

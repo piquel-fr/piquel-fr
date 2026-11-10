@@ -18,7 +18,7 @@ async fn signing_key_changes_check_their_administrator() {
     let admin = harness.admin().await;
     let revoked = harness.admin().await;
     service
-        .revoke_administrator(&cli(), revoked.user_id)
+        .revoke_administrator(&cli(), revoked.user_id, reason("Asked by email"))
         .await
         .expect("revoke");
     let stale = Utc::now() - Duration::minutes(10);
@@ -28,7 +28,7 @@ async fn signing_key_changes_check_their_administrator() {
         (operator(admin, stale), AdminError::StepUpRequired(step_up)),
     ] {
         let refused = service
-            .rotate_signing_key(&operator, &keys, true)
+            .rotate_signing_key(&operator, &keys, true, reason("Asked by email"))
             .await
             .expect_err("rotate");
         assert_refused(&refused, &refusal, "rotate");

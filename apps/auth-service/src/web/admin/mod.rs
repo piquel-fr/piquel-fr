@@ -58,7 +58,7 @@ mod tests;
 mod users;
 
 use crate::{
-    AdminError, AdminService, AuthConfig, KeyStore, MAX_DASHBOARD_BODY_BYTES,
+    AdminError, AdminService, AuthConfig, KeyStore, MAX_DASHBOARD_BODY_BYTES, Reason,
     account::{AccountError, AccountService},
     admin::{AdminOperation, DashboardSignIn, Overview, Problem, SignedInAdmin},
     assets::EmbeddedAssets,
@@ -625,6 +625,26 @@ impl AdminApplication {
             .map(Body::new)
     }
 
+    /// [`Self::submit`] for a change whose form posts only why: parses the
+    /// reason and makes the change with it.
+    async fn submit_reason<F, Fut, E>(
+        cx: &Cx,
+        form: Option<Form<ReasonForm>>,
+        done: String,
+        call: F,
+    ) -> Result<Option<Refused<ReasonForm>>>
+    where
+        E: Into<Refusal>,
+        F: FnOnce(Reason) -> Fut,
+        Fut: Future<Output = Result<(), E>>,
+    {
+        Self::submit(cx, form, done, async |input: ReasonForm| {
+            let reason = Reason::parse(input.reason)?;
+            call(reason).await.map_err(Into::<Refusal>::into)
+        })
+        .await
+    }
+
     /// Like [`Self::change`], then goes to `done` once the change is made.
     async fn submit<I, E, F, Fut>(
         cx: &Cx,
@@ -680,6 +700,23 @@ struct Refused<I> {
     message: String,
     /// The form, as posted.
     form: I,
+}
+
+/// The form of a change that asks only why: its reason, recorded with it, which
+/// the owner of an account it changes sees in their history. A `GET`'s query,
+/// which the extractor reads as its form, has none.
+#[derive(Clone, Deserialize)]
+struct ReasonForm {
+    /// Why, as typed.
+    #[serde(default)]
+    reason: String,
+}
+
+impl Refused<ReasonForm> {
+    /// The reason as it was typed, which the page shows again.
+    fn reason(&self) -> &str {
+        &self.form.reason
+    }
 }
 
 impl<I> std::ops::Deref for Refused<I> {

@@ -1,11 +1,10 @@
 //! Account search, one account's page, and the changes made to an account.
 
-use super::{AdminApplication as App, Refused, invitations, lists, settings};
-use crate::{AdminError, Letter, Reason, deliveries::EmailSender, routes};
-use serde::de::IgnoredAny;
+use super::{AdminApplication as App, ReasonForm, Refused, invitations, lists, settings};
+use crate::{AdminError, Letter, Reason, admin::SignedInAdmin, deliveries::EmailSender, routes};
 use sourceorigin_common::{
     AccountStatus, PictureId, SessionId, UserId,
-    admin::{DisableUser, EventSearch, MessageIntent, MessageUser, User, UserSearch},
+    admin::{EventSearch, MessageIntent, MessageUser, User, UserSearch},
 };
 use sourceorigin_repository::{RecentRecovery, RecoveryState};
 use sourceorigin_ui::{
@@ -184,175 +183,43 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     .await
 }
 
-/// `/users/{account}/disable`: disables the account with a reason, ending its
-/// sessions.
+/// `/users/{account}/disable`: disables the account, ending its sessions.
 #[route([GET, POST] "/users/{account}/disable")]
-pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let service = &App::of(cx).service;
-    let id = *path_param::<Account>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |input: DisableUser| async move {
-        service
-            .disable_user(&admin.operator, id, Reason::parse(input.reason)?)
-            .await
-    })
-    .await?;
-    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
-    let refusal = refusal.as_deref();
-    let target = App::target(cx).await;
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::Disable,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal,
-            reason: reason,
-        )
-    };
-    App::render(cx, StatusCode::OK, "Disable", page).await
+pub(super) async fn disable(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
+    AccountChange::Disable.page(cx, form).await
 }
 
 /// `/users/{account}/enable`: reactivates a disabled account.
 #[route([GET, POST] "/users/{account}/enable")]
-pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let service = &App::of(cx).service;
-    let id = *path_param::<Account>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |_| {
-        service.enable_user(&admin.operator, id)
-    })
-    .await?;
-    let target = App::target(cx).await;
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::Enable,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal.as_deref(),
-        )
-    };
-    App::render(cx, StatusCode::OK, "Enable", page).await
+pub(super) async fn enable(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
+    AccountChange::Enable.page(cx, form).await
 }
 
-/// `/users/{account}/delete`: schedules the active account's deletion, with a
-/// reason the owner sees. Purging it at once is left to the terminal: it cannot
-/// be undone.
+/// `/users/{account}/delete`: schedules the active account's deletion. Purging
+/// it at once is left to the terminal: it cannot be undone.
 #[route([GET, POST] "/users/{account}/delete")]
 pub(super) async fn delete(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let service = &App::of(cx).service;
-    let id = *path_param::<Account>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
-        service
-            .schedule_deletion(&admin.operator, id, Reason::parse(input.reason)?)
-            .await
-    })
-    .await?;
-    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
-    let refusal = refusal.as_deref();
-    let target = App::target(cx).await;
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::Delete,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal,
-            reason: reason,
-        )
-    };
-    App::render(cx, StatusCode::OK, "Delete", page).await
+    AccountChange::Delete.page(cx, form).await
 }
 
-/// `/users/{account}/restore`: restores an account scheduled for deletion, with a
-/// reason the owner sees.
+/// `/users/{account}/restore`: restores an account scheduled for deletion.
 #[route([GET, POST] "/users/{account}/restore")]
 pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let service = &App::of(cx).service;
-    let id = *path_param::<Account>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
-        service
-            .restore_user(&admin.operator, id, Reason::parse(input.reason)?)
-            .await
-    })
-    .await?;
-    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
-    let refusal = refusal.as_deref();
-    let target = App::target(cx).await;
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::Restore,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal,
-            reason: reason,
-        )
-    };
-    App::render(cx, StatusCode::OK, "Restore", page).await
+    AccountChange::Restore.page(cx, form).await
 }
 
 /// `/users/{account}/sessions/revoke`: ends every session of the account.
 #[route([GET, POST] "/users/{account}/sessions/revoke")]
-pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let service = &App::of(cx).service;
-    let id = *path_param::<Account>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |_| {
-        service.revoke_user_sessions(&admin.operator, id)
-    })
-    .await?;
-    let target = App::target(cx).await;
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::RevokeSessions,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal.as_deref(),
-        )
-    };
-    App::render(cx, StatusCode::OK, "Revoke sessions", page).await
+pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
+    AccountChange::RevokeSessions.page(cx, form).await
 }
 
 /// `/users/{account}/sessions/{session}/revoke`: ends one session of the account;
 /// another account's is not found.
 #[route([GET, POST] "/users/{account}/sessions/{session}/revoke")]
-pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let service = &App::of(cx).service;
-    let id = *path_param::<Account>(cx)?;
+pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     let session = *path_param::<Session>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |_| {
-        service.revoke_session(&admin.operator, id, session)
-    })
-    .await?;
-    // The session, of the account the crumb names.
-    let (session, account) = (session.to_string(), App::target(cx).await);
-    let named = account.map(|account| format!("{}, session", account.name));
-    let target = named.as_deref().map(|name| Target {
-        name,
-        id: Some(&session),
-    });
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::RevokeSession,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal.as_deref(),
-        )
-    };
-    App::render(cx, StatusCode::OK, "Revoke a session", page).await
+    AccountChange::RevokeSession(session).page(cx, form).await
 }
 
 /// What a message's form asked for, once it was posted.
@@ -430,14 +297,6 @@ pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<
     App::render(cx, StatusCode::OK, "Send a message", page).await
 }
 
-/// The form of a change whose reason the owner sees in their history: starting
-/// or undoing a recovery, scheduling a deletion or restoring the account.
-#[derive(Clone, serde::Deserialize)]
-pub(super) struct ReasonForm {
-    /// Why, recorded with the change and shown to the owner in their history.
-    reason: String,
-}
-
 /// `/users/{account}/recover`: the account's recent recoveries, then starts one,
 /// whose link only its primary verified address is mailed, and goes on to the
 /// account's page. An account that was in someone else's hands needs `user
@@ -445,35 +304,7 @@ pub(super) struct ReasonForm {
 /// disabled.
 #[route([GET, POST] "/users/{account}/recover")]
 pub(super) async fn recover(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let app = App::of(cx);
-    let id = *path_param::<Account>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
-        let reason = Reason::parse(input.reason)?;
-        app.service
-            .recover_account(&admin.operator, id, reason, &app.links, None)
-            .await
-            .map(drop)
-    })
-    .await?;
-    let recent = app.service.recent_recoveries(&admin.operator, id).await?;
-    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
-    let refusal = refusal.as_deref();
-    let rows = &App::recovery_rows(&recent);
-    let target = App::target(cx).await;
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::Recover,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal,
-            reason: reason,
-            sourceorigin_ui::recovery_list(rows: rows)
-        )
-    };
-    App::render(cx, StatusCode::OK, "Recover", page).await
+    AccountChange::Recover.page(cx, form).await
 }
 
 /// `/users/{account}/undo-recovery`: the account's recent recoveries, then undoes
@@ -482,32 +313,126 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
 /// every consent and ends every session; its link unused, it cancels the link.
 #[route([GET, POST] "/users/{account}/undo-recovery")]
 pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
-    let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
-    let app = App::of(cx);
-    let id = *path_param::<Account>(cx)?;
-    let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
-        let reason = Reason::parse(input.reason)?;
-        app.service.undo_recovery(&admin.operator, id, reason).await
-    })
-    .await?;
-    let recent = app.service.recent_recoveries(&admin.operator, id).await?;
-    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
-    let refusal = refusal.as_deref();
-    let rows = &App::recovery_rows(&recent);
-    let target = App::target(cx).await;
-    let page = view! { cx =>
-        sourceorigin_ui::dashboard_change(
-            change: Change::UndoRecovery,
-            target: target,
-            back: back.as_str(),
-            refusal: refusal,
-            reason: reason,
-            sourceorigin_ui::recovery_list(rows: rows)
-        )
-    };
-    App::render(cx, StatusCode::OK, "Undo a recovery", page).await
+    AccountChange::UndoRecovery.page(cx, form).await
+}
+
+/// A change the dashboard makes to the account its path names, each on its own
+/// page, for the reason the administrator gives.
+#[derive(Clone, Copy)]
+enum AccountChange {
+    /// `user disable`.
+    Disable,
+    /// `user enable`.
+    Enable,
+    /// `user delete`, with a grace period.
+    Delete,
+    /// `user restore`.
+    Restore,
+    /// `session revoke-all`.
+    RevokeSessions,
+    /// `session revoke`, of this session.
+    RevokeSession(SessionId),
+    /// `user recover`, mailing the link.
+    Recover,
+    /// `user undo-recovery`.
+    UndoRecovery,
+}
+
+impl AccountChange {
+    /// What it does, in the dashboard's words, and its page's crumb.
+    const fn change(self) -> (Change, &'static str) {
+        match self {
+            Self::Disable => (Change::Disable, "Disable"),
+            Self::Enable => (Change::Enable, "Enable"),
+            Self::Delete => (Change::Delete, "Delete"),
+            Self::Restore => (Change::Restore, "Restore"),
+            Self::RevokeSessions => (Change::RevokeSessions, "Revoke sessions"),
+            Self::RevokeSession(_) => (Change::RevokeSession, "Revoke a session"),
+            Self::Recover => (Change::Recover, "Recover"),
+            Self::UndoRecovery => (Change::UndoRecovery, "Undo a recovery"),
+        }
+    }
+
+    /// Makes it to the account `id`, as `admin`, for `reason`.
+    async fn make(
+        self,
+        app: &App,
+        admin: &SignedInAdmin,
+        id: UserId,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        let (service, operator) = (&app.service, &admin.operator);
+        match self {
+            Self::Disable => service.disable_user(operator, id, reason).await,
+            Self::Enable => service.enable_user(operator, id, reason).await,
+            Self::Delete => service.schedule_deletion(operator, id, reason).await,
+            Self::Restore => service.restore_user(operator, id, reason).await,
+            Self::RevokeSessions => service.revoke_user_sessions(operator, id, reason).await,
+            Self::RevokeSession(session) => {
+                service.revoke_session(operator, id, session, reason).await
+            }
+            Self::Recover => service
+                .recover_account(operator, id, reason, &app.links, None)
+                .await
+                .map(drop),
+            Self::UndoRecovery => service.undo_recovery(operator, id, reason).await,
+        }
+    }
+
+    /// Its page: a `GET` asks for the reason, and a `POST` makes it, then goes
+    /// back to the account's page. It names the account the crumb names, or for
+    /// one session, that session of it. A recovery's pages list the account's
+    /// recent recoveries below the form.
+    async fn page(self, cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
+        let admin = App::admin(cx).await?;
+        App::confirm(cx, admin)?;
+        let app = App::of(cx);
+        let id = *path_param::<Account>(cx)?;
+        let back = App::account(cx, id);
+        let refusal = App::submit_reason(cx, form, back.clone(), async |reason| {
+            self.make(app, admin, id, reason).await
+        })
+        .await?;
+        let recent = if matches!(self, Self::Recover | Self::UndoRecovery) {
+            let recent = app.service.recent_recoveries(&admin.operator, id).await?;
+            Some(App::recovery_rows(&recent))
+        } else {
+            None
+        };
+        let (change, crumb) = self.change();
+        let reason = refusal.as_ref().map(Refused::reason);
+        let refusal = refusal.as_deref();
+        let account = App::target(cx).await;
+        // One session is named as that session of the account the crumb names.
+        let session = match self {
+            Self::RevokeSession(session) => Some(session.to_string()),
+            _ => None,
+        };
+        let named = session
+            .as_ref()
+            .zip(account.as_ref())
+            .map(|(_, account)| format!("{}, session", account.name));
+        let target = match &session {
+            Some(session) => named.as_deref().map(|name| Target {
+                name,
+                id: Some(session),
+            }),
+            None => account,
+        };
+        let page = view! { cx =>
+            sourceorigin_ui::dashboard_change(
+                change: change,
+                target: target,
+                back: back.as_str(),
+                refusal: refusal,
+                reason: reason,
+                if let Some(rows) = &recent {
+                    sourceorigin_ui::recovery_list(rows: rows)
+                }
+            )
+        };
+        App::render(cx, StatusCode::OK, crumb, page).await
+    }
 }
 
 impl App {

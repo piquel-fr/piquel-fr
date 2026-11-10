@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     ClientRegistry,
-    tests::{change, operator, register, until_blocked},
+    tests::{change, operator, reason, register, until_blocked},
 };
 use sourceorigin_common::clients::RelatedOrigin;
 
@@ -441,7 +441,7 @@ async fn removing_an_origin_during_a_sign_in_refuses_it() {
     let assertion = fixture.assertion_for(page.origin.url().clone(), &started);
     let database = fixture.app.database.clone();
     let mut removal = database.begin().await.expect("transaction");
-    ClientRegistry::new(&mut removal, operator().context())
+    ClientRegistry::new(&mut removal, operator().context(&reason()))
         .remove_origin(&page.client.id, &page.origin)
         .await
         .expect("removed");
