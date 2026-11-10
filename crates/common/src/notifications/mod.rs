@@ -434,14 +434,15 @@ impl Notification {
     }
 
     /// Whether it is about the account's security, rather than what
-    /// administrators announce or alert: then it is always emailed, and its email
-    /// carries a link that signs the account out everywhere. Every kind is named,
-    /// so a new one decides.
+    /// administrators announce, write or alert: then it is always emailed, and
+    /// its email carries a link that signs the account out everywhere. A
+    /// message, though always emailed, says what support wrote, and its email
+    /// reads as an announcement's. Every kind is named, so a new one decides.
     #[must_use]
     #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn security(&self) -> bool {
         match self {
-            Self::Announcement { .. } | Self::AlertRaised { .. } => false,
+            Self::Announcement { .. } | Self::Message { .. } | Self::AlertRaised { .. } => false,
             Self::PrimaryEmailChanged
             | Self::EmailRemoved
             | Self::AccountSecured { .. }

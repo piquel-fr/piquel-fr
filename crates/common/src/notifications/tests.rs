@@ -249,10 +249,10 @@ fn sessionless_steps_and_known_browsers_alert_no_one() {
     assert_eq!(known.notification(&owner()), None);
 }
 
-/// Only announcements and raised alerts are outside the security category:
-/// every other notification is about the account itself.
+/// Only announcements, messages and raised alerts are outside the security
+/// category: every other notification is about the account itself.
 #[test]
-fn only_announcements_and_alerts_are_outside_security() {
+fn only_administrators_words_are_outside_security() {
     let outside = [
         Notification::Announcement {
             announcement_id: crate::AnnouncementId::new(),
@@ -261,6 +261,10 @@ fn only_announcements_and_alerts_are_outside_security() {
         },
         Notification::AlertRaised {
             alert_id: crate::AlertId::new(),
+            title: String::new(),
+            text: String::new(),
+        },
+        Notification::Message {
             title: String::new(),
             text: String::new(),
         },

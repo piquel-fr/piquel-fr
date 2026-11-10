@@ -118,7 +118,8 @@ impl<'a> DatabaseTransaction<'a> {
         subject: Option<UserId>,
         event: DomainEvent,
     ) -> Result<EventId, DatabaseError> {
-        self.write::<Registered>(context, subject, event, None).await
+        self.write::<Registered>(context, subject, event, None)
+            .await
     }
 
     /// [`Self::record`], fanning out to the channels `C`, which tests replace.

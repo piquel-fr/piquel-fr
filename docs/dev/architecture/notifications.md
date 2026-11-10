@@ -48,9 +48,9 @@ message's: the inbox already shows it. The
 
 ## Security alerts
 
-Every notification but an announcement and a raised alert is about the account's
-security (`Notification::security`): it is always emailed, and its email
-carries a [sign-out link](#the-sign-out-link). Besides the account
+Every notification but an announcement, a message and a raised alert is about
+the account's security (`Notification::security`): it is always emailed, and
+its email carries a [sign-out link](#the-sign-out-link). Besides the account
 notices above, these events alert the owner:
 
 | Event | Notification |
