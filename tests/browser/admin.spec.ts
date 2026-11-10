@@ -468,7 +468,9 @@ test('an announcement is drafted, sent to a group found on its form, and read', 
   await expect(admin.getByRole('searchbox', { name: 'Find accounts' })).toBeHidden();
   await admin.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(admin.getByRole('heading', { name: subject, exact: true })).toBeVisible();
-  await expect(admin.locator('pre.email')).toContainText('Sign-in pauses tonight.');
+  await expect(
+    admin.locator('.email-preview').getByText('Sign-in pauses tonight.', { exact: true })
+  ).toBeVisible();
 
   // Its editor finds the reader and adds them, then sends it after the dialog.
   await admin.getByRole('link', { name: 'Edit', exact: true }).click();
@@ -514,7 +516,9 @@ test('a message is previewed, sent, and read in its owner inbox', async ({ brows
     .getByRole('textbox', { name: /^Text/ })
     .fill('Support needs a word with you.\n\nReply to support@sourceorigin.dev.');
   await admin.getByRole('button', { name: 'Preview the email', exact: true }).click();
-  await expect(admin.locator('pre.email')).toContainText('Support needs a word with you.');
+  await expect(
+    admin.locator('.email-preview').getByText('Support needs a word with you.', { exact: true })
+  ).toBeVisible();
 
   // A dashboard confirmed in the last minutes, as signing in to it is, sends at
   // once; otherwise its dialog asks for the passkey first.

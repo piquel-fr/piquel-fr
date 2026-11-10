@@ -266,8 +266,9 @@ On the dashboard:
 1. Open the account and select **Send a message**.
 2. Write the **Subject** and **Text**, then select **Preview the email**.
    Writing and previewing need no passkey.
-3. Check the email as it will be sent, and the address it goes to. Select
-   **Edit** to change the text.
+3. Check the email as it will be sent, as a mail app shows it, with its
+   **Plain-text version** below, and the address it goes to. Select **Edit**
+   to change the text.
 4. Select **Send**. It asks for your passkey, then goes back to the account's
    page.
 
@@ -330,8 +331,9 @@ auth-service announcement list
 ```
 
 A draft goes to nobody, and any administrator may change or discard it. Its page
-shows the email exactly as it will be sent, whether it is essential, and how
-many recipients its email reaches.
+shows the email exactly as it will be sent, as a mail app shows it, with its
+**Plain-text version** below, whether it is essential, and how many recipients
+its email reaches.
 Sending sends only the revision that was saved or checked: a draft changed
 meanwhile, by another administrator say, is refused, to be checked again. Once
 sent, its page says how many recipients read it. One to everyone goes to every

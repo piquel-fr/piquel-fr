@@ -43,7 +43,7 @@ use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::{
     Announcement, Database, DatabaseError, Delivery, Email, EmailMessage,
 };
-use sourceorigin_ui::EmailContent;
+use sourceorigin_ui::{EmailContent, Mail};
 use std::{fmt::Display, time::Duration};
 
 /// Sends a built message, classifying failures for the retry policy. The SMTP
@@ -399,17 +399,16 @@ impl<M: Mailer> Sender for EmailSender<M> {
 }
 
 impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
-    /// The plain-text body of the email sending `letter` as a message, linking
-    /// the inbox on `auth`, auth's origin, which the dashboard shows before it is
-    /// sent.
-    pub(crate) fn preview(letter: &Letter, auth: &Origin) -> String {
+    /// The email sending `letter` as a message, linking the inbox on `auth`,
+    /// auth's origin, which the dashboard shows before it is sent.
+    pub(crate) fn preview(letter: &Letter, auth: &Origin) -> Mail {
         let content = Content::message(
             String::new(),
             letter.subject.clone(),
             letter.body.clone(),
             auth,
         );
-        content.said.mail().text()
+        content.said.mail()
     }
 }
 
@@ -424,9 +423,9 @@ impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
         Self(EmailSender::new(database, config, None))
     }
 
-    /// The plain-text body of `announcement`'s email, linking the inbox on
-    /// `auth`, auth's origin, which the dashboard shows before it is sent.
-    pub(crate) fn preview(announcement: &admin::Announcement, auth: &Origin) -> String {
+    /// `announcement`'s email, linking the inbox on `auth`, auth's origin, which
+    /// the dashboard shows before it is sent.
+    pub(crate) fn preview(announcement: &admin::Announcement, auth: &Origin) -> Mail {
         // The unsubscribe link names the recipient, so the preview shows the
         // page it opens.
         let unsubscribe = (!announcement.essential).then(|| auth.join(page::UNSUBSCRIBE));
@@ -440,7 +439,7 @@ impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
             },
             auth,
         );
-        content.said.mail().text()
+        content.said.mail()
     }
 }
 

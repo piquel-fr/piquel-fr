@@ -835,7 +835,7 @@ async fn a_messages_email_is_its_preview() {
     let sender = EmailSender::with_mailer(database.clone(), Some(outbox.clone()), &config);
     let content = sender.content(user_id, &message).await.expect("content");
     let mail = content.expect("an email").said.mail();
-    assert_eq!(mail.text(), EmailSender::preview(&letter, &origin));
+    assert_eq!(mail, EmailSender::preview(&letter, &origin));
     let html = mail.html().await.expect("HTML");
     assert!(
         html.contains("<p>First line.<br>Second line.</p>"),

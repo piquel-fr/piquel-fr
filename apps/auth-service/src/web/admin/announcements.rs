@@ -31,7 +31,7 @@ use topcoat::{
         response::Response,
         route,
     },
-    view::view,
+    view::{Child, view},
 };
 
 path_param!(pub announcement: AnnouncementId, error = not_found);
@@ -93,15 +93,16 @@ pub(super) async fn show(cx: &Cx) -> Result<Response> {
             },
         }),
     };
-    let page = view! { cx =>
+    // The page, with its email and accounts, makes a large view and future,
+    // both boxed.
+    let page = Child::new(view! { cx =>
         sourceorigin_ui::announcement_page(
             detail: detail,
             accounts: &accounts,
-            preview: preview.as_str(),
+            preview: &preview,
             drafts: drafts,
         )
-    };
-    // The page, with its email and accounts, makes a large future.
+    });
     let title = Crumb::Name(&detail.announcement.subject);
     Box::pin(App::render(cx, StatusCode::OK, title, page)).await
 }

@@ -88,6 +88,50 @@ pre.email {
   font-family: var(--sans);
   font-size: 0.92rem;
 }
+/* An email before it is sent, as its HTML body draws it: the light page every
+   email is read on, whatever the theme, with the styles the email itself
+   inlines (`crates/ui/src/email/mod.rs`). */
+.email-preview {
+  max-width: 560px;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: #1a1a1a;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.email-preview p + p {
+  margin-top: 1em;
+}
+.email-preview a {
+  color: #1155cc;
+}
+.email-preview .email-button {
+  display: inline-block;
+  padding: 10px 18px;
+  border-radius: 8px;
+  background: #1a1a1a;
+  color: #ffffff;
+  text-decoration: none;
+}
+.email-preview .email-fine {
+  font-size: 14px;
+  color: #555555;
+}
+.email-text > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.email-text > pre.email {
+  margin-top: 0.6rem;
+}
 time {
   font-family: var(--mono);
   font-size: 0.86em;
