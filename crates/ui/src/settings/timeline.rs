@@ -9,7 +9,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
-    AuthenticationMethod, EmailId, EventId, PasskeyId, Provider,
+    AuthenticationMethod, EmailId, EventId, NotificationId, PasskeyId, Provider,
     events::{FollowUp, HistoryActor, HistoryEntry, RevocationReason, UserAgentFamily},
     protocol::api::Passkey,
 };
@@ -30,6 +30,10 @@ pub enum HistoryChange {
         /// The entry the page started after, to stay on it.
         #[serde(default)]
         before: Option<EventId>,
+        /// The unread notification that asked about it, which the report marks
+        /// read once made.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notification: Option<NotificationId>,
     },
 }
 
@@ -136,14 +140,11 @@ impl HistoryRow<'_> {
                     "Account created with social sign-in".to_owned()
                 }
             },
-            HistoryEntry::SignedIn { method, origin } => match (method, origin) {
-                // An application's own page signed in, with a passkey.
-                (_, Some(origin)) => format!("Signed in with a passkey on {}", origin.host()),
-                (AuthenticationMethod::Passkey, None) => "Signed in with a passkey".to_owned(),
-                (AuthenticationMethod::Federation, None) => {
-                    "Signed in with a social provider".to_owned()
-                }
-            },
+            HistoryEntry::SignedIn {
+                method,
+                origin,
+                new_device,
+            } => Self::signed_in(*method, origin.as_ref(), *new_device),
             HistoryEntry::SignedOut => "Signed out".to_owned(),
             HistoryEntry::SessionRevoked { reason } => Self::revocation(reason).to_owned(),
             HistoryEntry::PasskeyAdded { passkey_id } => {
@@ -210,6 +211,9 @@ impl HistoryRow<'_> {
             HistoryEntry::Recovered { .. } => "Account recovered: a passkey was added".to_owned(),
             HistoryEntry::RecoveryUndone => "Account recovery undone".to_owned(),
             HistoryEntry::AccountExported => "Account data downloaded".to_owned(),
+            HistoryEntry::SignedOutEverywhere => {
+                "Signed out everywhere with a security email's link".to_owned()
+            }
             HistoryEntry::NotificationPreferenceChanged(preference) => preference.change(),
             HistoryEntry::DeletionScheduled { purge_after } => format!(
                 "Account deletion scheduled for {}",
@@ -230,6 +234,28 @@ impl HistoryRow<'_> {
         }
     }
 
+    /// A sign-in with `method`, on an application's page at `origin` if it signed
+    /// in itself, from a `new_device` or not.
+    fn signed_in(
+        method: AuthenticationMethod,
+        origin: Option<&sourceorigin_common::clients::RelatedOrigin>,
+        new_device: bool,
+    ) -> String {
+        let signed_in = match (method, origin) {
+            // An application's own page signed in, with a passkey.
+            (_, Some(origin)) => format!("Signed in with a passkey on {}", origin.host()),
+            (AuthenticationMethod::Passkey, None) => "Signed in with a passkey".to_owned(),
+            (AuthenticationMethod::Federation, None) => {
+                "Signed in with a social provider".to_owned()
+            }
+        };
+        if new_device {
+            format!("{signed_in} on a new device")
+        } else {
+            signed_in
+        }
+    }
+
     /// Why a session was ended for the user.
     const fn revocation(reason: &RevocationReason) -> &'static str {
         match reason {
@@ -240,6 +266,7 @@ impl HistoryRow<'_> {
             RevocationReason::AccountDeletion => "Signed out because the account is being deleted",
             RevocationReason::CompromiseReported => "Signed out after you reported activity",
             RevocationReason::UserRevoked => "Signed out from your devices list",
+            RevocationReason::SignOutLink => "Signed out everywhere from an email’s link",
             RevocationReason::Logout
             | RevocationReason::AccountSwitched
             | RevocationReason::RelyingPartyLogout { .. }
@@ -271,6 +298,10 @@ impl HistoryRow<'_> {
         matches!(
             self.entry,
             HistoryEntry::TokenReused
+                | HistoryEntry::SignedIn {
+                    new_device: true,
+                    ..
+                }
                 | HistoryEntry::AccountDisabled
                 | HistoryEntry::CompromiseReported { .. }
                 | HistoryEntry::RecoveryStarted
@@ -474,7 +505,7 @@ async fn entry<'a>(
                     <small class="wrap">(by)</small>
                 }
                 if reporting {
-                    report_form(row: row, action: page.page, before: before, cancel: back)
+                    report_form(row: row, action: page.page, before: before, notification: None, cancel: back)
                 }
             </div>
             if reportable && !reporting {
@@ -490,13 +521,15 @@ async fn entry<'a>(
 }
 
 /// Confirming that `row` was not the owner's, which posts the report to the
-/// history page at `action`, staying on the page that started after `before`, or
-/// goes back to `cancel`. It takes the focus once open.
+/// history page at `action`, staying on the page that started after `before`, and
+/// marks the `notification` that asked about it read, or goes back to `cancel`. It
+/// takes the focus once open.
 #[component]
 pub(crate) async fn report_form<'a>(
     row: &'a HistoryRow<'a>,
     action: &'a str,
     before: Option<EventId>,
+    notification: Option<NotificationId>,
     cancel: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
@@ -510,7 +543,7 @@ pub(crate) async fn report_form<'a>(
             }
             change_form(
                 action: action,
-                change: HistoryChange::Report { event_id: row.id, before },
+                change: HistoryChange::Report { event_id: row.id, before, notification },
                 label: "Sign out everywhere else",
                 class: "danger",
                 cancel: cancel.to_owned(),

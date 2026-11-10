@@ -138,6 +138,7 @@ impl AdminService {
                     })
                     .collect()
             },
+            known_devices: tx.sessions().known_devices(user_id).await?,
             consents: tx.oidc().list_consents(user_id).await?,
             deletion: match tx.deletions().find(user_id).await? {
                 Some(deletion) => Some(ScheduledDeletion {

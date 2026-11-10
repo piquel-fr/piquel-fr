@@ -413,6 +413,17 @@ async fn logout_page_ends_the_session_from_its_own_form() {
             .to_str()
             .expect("Set-Cookie is text");
         assert!(cookie.contains("Max-Age=0"), "{cookie}");
+        // Signing out forgets the session, not the browser.
+        assert!(
+            signed_out
+                .headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .all(|cookie| !cookie
+                    .as_bytes()
+                    .starts_with(BrowserCookie::Device.as_str().as_bytes())),
+            "the device cookie is kept"
+        );
         let after = html(
             harness
                 .browser

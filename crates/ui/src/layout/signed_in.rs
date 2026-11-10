@@ -137,6 +137,72 @@ impl<'a> From<&'a str> for Crumb<'a> {
     }
 }
 
+/// What a [`Shortcut`] of the top bar leads to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortcutKind {
+    /// The signed-in account's inbox, counting its unread notifications.
+    Inbox,
+    /// The dashboard's alerts, counting the open ones.
+    Alerts,
+}
+
+impl ShortcutKind {
+    /// Its icon.
+    const fn icon(self) -> Icon {
+        match self {
+            Self::Inbox => Icon::Bell,
+            Self::Alerts => Icon::Warning,
+        }
+    }
+
+    /// Its name, as its title and label.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Inbox => "Notifications",
+            Self::Alerts => "Alerts",
+        }
+    }
+
+    /// What its count counts, after the number in its label.
+    const fn counted(self) -> &'static str {
+        match self {
+            Self::Inbox => "unread",
+            Self::Alerts => "open",
+        }
+    }
+
+    /// Its class, which the stylesheet colors its count by.
+    const fn class(self) -> &'static str {
+        match self {
+            Self::Inbox => "shortcut inbox",
+            Self::Alerts => "shortcut alerts",
+        }
+    }
+}
+
+/// An icon link of the top bar, before the avatar, with a count at its corner
+/// once there is something to count: the inbox's bell, on the account's pages
+/// and the dashboard, and the dashboard's alerts.
+#[derive(Clone, Copy, Debug)]
+pub struct Shortcut<'a> {
+    /// What it leads to.
+    pub kind: ShortcutKind,
+    /// Where it goes.
+    pub href: &'a str,
+    /// How many there are: unread notifications, or open alerts.
+    pub count: u64,
+}
+
+impl Shortcut<'_> {
+    /// Its label, with the count when there is one, as screen readers say it.
+    fn aria_label(&self) -> String {
+        match self.count {
+            0 => self.kind.label().to_owned(),
+            count => format!("{}, {count} {}", self.kind.label(), self.kind.counted()),
+        }
+    }
+}
+
 /// The frame of a signed-in page: what every part of the shell shows.
 #[derive(Clone, Copy, Debug)]
 pub struct Shell<'a> {
@@ -155,6 +221,8 @@ pub struct Shell<'a> {
     pub signal: Option<PasskeySignal<'a>>,
     /// Their own page, which the top bar's avatar links.
     pub me: Option<&'a str>,
+    /// The top bar's shortcuts, before the avatar.
+    pub shortcuts: &'a [Shortcut<'a>],
     /// The pages between the area and the page in the crumb, each named and
     /// linked: the tab the page belongs to, then the page it is under, if any.
     pub trail: &'a [(Crumb<'a>, &'a str)],
@@ -285,7 +353,7 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
 }
 
 /// The top bar of [`shell`]: the menu button of the drawer, the crumb, the search
-/// form, if the area has one, and the avatar.
+/// form, if the area has one, the shortcuts, and the avatar.
 #[component]
 async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
@@ -317,11 +385,27 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
                         </label>
                     </form>
                 }
-                if let Some(who) = frame.who {
-                    <a class="me" href=(frame.me.unwrap_or(frame.home)) title="Your account" aria-label="Your account">
-                        avatar(who: who)
-                    </a>
-                }
+                // One group, so phones keep the shortcuts and the avatar together.
+                <div class="links">
+                    for shortcut in frame.shortcuts {
+                        <a
+                            class=(shortcut.kind.class())
+                            href=(shortcut.href)
+                            title=(shortcut.kind.label())
+                            aria-label=(shortcut.aria_label())
+                        >
+                            icon(kind: shortcut.kind.icon())
+                            if shortcut.count > 0 {
+                                <span class="count" aria-hidden="true">(shortcut.count.to_string())</span>
+                            }
+                        </a>
+                    }
+                    if let Some(who) = frame.who {
+                        <a class="me" href=(frame.me.unwrap_or(frame.home)) title="Your account" aria-label="Your account">
+                            avatar(who: who)
+                        </a>
+                    }
+                </div>
             </div>
         </header>
     })

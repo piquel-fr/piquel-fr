@@ -6,7 +6,9 @@
 //! nothing, and derives the link's token again from the ID, under the key that
 //! made its stored digest, so it is stored nowhere and survives a change of token
 //! digest key. A notification's email carries the address it goes to and the
-//! notification, and says what the inbox says.
+//! notification, and says what the inbox says. A security notification's email
+//! also carries a link that signs the account out everywhere, derived from the
+//! notification's ID like an unsubscribe link from the account's.
 //!
 //! Every attempt sends the same content, with the delivery's ID as `Message-ID`.
 //! SMTP is at least once like the queue: if the connection breaks after the relay
@@ -18,7 +20,7 @@ use crate::{
     admin::Letter,
     config::{DashboardConfig, EmailConfig},
     emails::{VERIFICATION_LIFETIME, VerificationKeys},
-    notifications::UnsubscribeLinks,
+    notifications::{SignOutLinks, UnsubscribeLinks},
     recovery::{self, RecoveryLinks},
     routes::{
         self,
@@ -97,6 +99,8 @@ pub(crate) struct EmailSender<M> {
     recovery_links: RecoveryLinks,
     /// Builds announcements' unsubscribe links.
     unsubscribe_links: UnsubscribeLinks,
+    /// Builds security notifications' sign-out links.
+    sign_out_links: SignOutLinks,
     /// The admin dashboard's Alerts tab, which an alert's notification links,
     /// unless the dashboard is off.
     alerts: Option<String>,
@@ -126,6 +130,7 @@ impl<M: Mailer> EmailSender<M> {
             verification_keys: config.verification_keys.clone(),
             recovery_links: config.recovery_links.clone(),
             unsubscribe_links: config.unsubscribe_links.clone(),
+            sign_out_links: config.sign_out_links.clone(),
             alerts: None,
         }
     }
@@ -297,6 +302,12 @@ impl<M: Mailer> EmailSender<M> {
                     .join(&settings::NOTIFICATION.replace("{id}", &notification_id.to_string())),
                 undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
                 alerts: self.alerts.clone().filter(|_| notification.links_alerts()),
+                sign_out: if notification.security() {
+                    let link = self.sign_out_links.link(*notification_id).map(Some);
+                    Some(Self::rebuilt(link, "sign-out", notification_id)?)
+                } else {
+                    None
+                },
             },
         }))
     }
@@ -494,6 +505,9 @@ enum Content {
         undo: Option<String>,
         /// The dashboard's Alerts tab, for an alert's, unless the dashboard is off.
         alerts: Option<String>,
+        /// The link signing the account out everywhere, for a security
+        /// notification's.
+        sign_out: Option<String>,
     },
     /// A message administrators sent the account, to its primary address.
     Message {

@@ -50,18 +50,45 @@ disablement serialize. Then it reads the browser's current session:
 - **This account's:** it re-authenticates that session instead (see below), so
   the session ID, which tokens carry as `sid`, stays the same.
 
-Either way it records `SignedIn` and returns a new secret. The caller sets the
-cookie only after its transaction commits.
+Either way it records `SignedIn` and returns a `SignedIn` holding the new
+session secret and the browser's device secret (see
+[known devices](#known-devices)). The caller sets both cookies with
+`SignedIn::set_on`, only after its transaction commits.
 
-Two sign-ins differ:
+Three sign-ins differ:
 
-- A **recovery link** signs in with `Session::sign_in_anew`, which always revokes
-  the browser's session and creates a new one, so an existing session can
-  neither make it fail nor carry over.
+- **Signing up** and a **recovery link** sign in with `Session::sign_in_anew`,
+  which always revokes the browser's session and creates a new one, so an
+  existing session can neither make a recovery's link fail nor carry over. The
+  browser becomes known to the account without an alert.
 - A **passkey sign-in on an app's own page** (`src/passkey/related.rs`) creates a
   session with `Session::create_inline`, which has no browser secret and so no
   cookie: only the tokens the app gets from it use it. It is listed and signed
-  out like any other.
+  out like any other. It never sees the device cookie either, so it is never a
+  new device's: the related origin's passkey ceremony already needed the
+  passkey itself.
+
+## Known devices
+
+A browser keeps a second host-only cookie, `__Host-sourceorigin_device`: a
+random secret that lives 400 days, the most browsers allow, and is set again
+by every sign-in. Signing out deletes only the session cookie, so the browser
+stays known. `known_devices` stores, per account, the SHA-256 digest of each
+device secret that signed in, its last browser family, and when it was first
+and last seen.
+
+In the sign-in's transaction, `Session::sign_in` remembers the browser
+(`SessionRepository::remember_device`). A browser without a device cookie gets
+a new one. When the account did not know its digest, the sign-in is a new
+device's: `SignedIn` records `new_device: true`, which gives the owner a
+`NewDeviceSignIn` security notification (see
+[notifications](notifications.md#security-alerts)). `sign_in_anew` remembers the
+browser without the flag. Maintenance deletes a known device unused for 400
+days, by which time its cookie expired too. `GET /account/devices`,
+`auth-service account <user> sessions known`, the **Devices** settings tab and
+the dashboard's account page list those seen within 400 days. The data export
+holds every stored one, as it holds every ended record, until maintenance
+deletes it.
 
 ## Re-authenticating and confirming
 

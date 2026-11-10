@@ -62,6 +62,8 @@ sourceorigin_common::str_enum! {
         Handles = "handles",
         /// Signup invitations.
         Invitations = "invitations",
+        /// The browsers each account has signed in from.
+        KnownDevices = "known_devices",
         /// Which categories of notifications each account has emailed.
         NotificationPreferences = "notification_preferences",
         /// Accounts' inboxes.
@@ -137,6 +139,7 @@ impl Table {
             Self::ExternalLoginIdentities => Holds::Exported("identities"),
             Self::Sessions => Holds::Exported("sessions"),
             Self::OidcSessionClients => Holds::Exported("sessions/*/clients"),
+            Self::KnownDevices => Holds::Exported("known_devices"),
             Self::OidcConsents => Holds::Exported("consents"),
             Self::RefreshTokenFamilies => Holds::Exported("grants"),
             Self::OidcClients => Holds::Exported("clients"),

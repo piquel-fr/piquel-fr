@@ -24,6 +24,8 @@ pub struct DatabaseTransaction<'a> {
     pub(crate) inner: Transaction<'a, Postgres>,
     /// Events recorded so far, published to telemetry once the transaction commits.
     recorded: Vec<Committed>,
+    /// The accounts this transaction wrote a notification so far.
+    notified: Vec<UserId>,
 }
 
 impl<'a> DatabaseTransaction<'a> {
@@ -32,6 +34,7 @@ impl<'a> DatabaseTransaction<'a> {
         Self {
             inner,
             recorded: Vec::new(),
+            notified: Vec::new(),
         }
     }
 
@@ -101,6 +104,24 @@ impl<'a> DatabaseTransaction<'a> {
         .await
     }
 
+    /// Records `event` as [`Self::record`] does, but without the notification it
+    /// would give: for a step of an operation whose own event tells the account,
+    /// such as the passkeys support takes back while recovering it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the event or a delivery cannot be serialized or
+    /// written.
+    pub async fn record_quietly(
+        &mut self,
+        context: &EventContext,
+        subject: Option<UserId>,
+        event: DomainEvent,
+    ) -> Result<EventId, DatabaseError> {
+        self.write::<Registered>(context, subject, event, None)
+            .await
+    }
+
     /// [`Self::record`], fanning out to the channels `C`, which tests replace.
     pub(crate) async fn record_to<C: Channels>(
         &mut self,
@@ -141,7 +162,10 @@ impl<'a> DatabaseTransaction<'a> {
     }
 
     /// Writes `notification`, from the event `event_id` about `subject`, to the
-    /// inbox of each account of its audience, and returns what it wrote.
+    /// inbox of each account of its audience, and returns what it wrote. A
+    /// [`Notification::consequence`] is not written to an account this
+    /// transaction already notified: what it follows from told them, and one
+    /// operation ending several sessions tells them once.
     async fn notify(
         &mut self,
         event_id: EventId,
@@ -154,11 +178,15 @@ impl<'a> DatabaseTransaction<'a> {
         };
         let mut notified = Vec::new();
         for user_id in accounts {
+            if notification.consequence() && self.notified.contains(&user_id) {
+                continue;
+            }
             let written = self
                 .notifications()
                 .insert(user_id, Some(event_id), &notification)
                 .await?;
             if let Some(id) = written {
+                self.notified.push(user_id);
                 notified.push(Notified {
                     user_id,
                     id,

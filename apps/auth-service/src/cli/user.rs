@@ -28,7 +28,8 @@ pub(super) enum UserCommand {
         output: Output,
     },
     /// Show an account's profile, status, emails, passkeys, linked identities,
-    /// sessions and consents. Recorded, since it shows personal data.
+    /// sessions, known browsers and consents. Recorded, since it shows personal
+    /// data.
     Show {
         /// The account: its handle, ID or verified email.
         user: UserRef,
@@ -388,6 +389,8 @@ impl UserCommand {
                 session.expires_at.to_rfc3339()
             );
         }
+        println!();
+        super::account::AccountCommand::print_known_devices(&detail.known_devices);
         println!("\nCLIENT\tSCOPES");
         for consent in &detail.consents {
             println!("{}\t{}", consent.client_id, consent.scopes.join(" "));

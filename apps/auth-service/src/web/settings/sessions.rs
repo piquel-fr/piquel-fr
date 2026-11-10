@@ -1,4 +1,5 @@
-//! `/settings/sessions`: the browsers signed in to the account.
+//! `/settings/sessions`: the browsers signed in to the account, and those it
+//! knows.
 
 use crate::{
     account::{AccountError, Owner, Subject},
@@ -60,10 +61,12 @@ impl AccountPage for Devices {
         (): (),
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let sessions = web.account.sessions(&reader.viewer()).await?;
+        let viewer = reader.viewer();
+        let sessions = web.account.sessions(&viewer).await?;
         let rows: Vec<_> = sessions.iter().map(DeviceRow::from).collect();
+        let known = web.account.known_devices(&viewer).await?;
         let page = Child::new(view! { cx =>
-            sourceorigin_ui::devices(page: settings::SESSIONS, rows: &rows, now: Utc::now())
+            sourceorigin_ui::devices(page: settings::SESSIONS, rows: &rows, known: &known, now: Utc::now())
         });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await

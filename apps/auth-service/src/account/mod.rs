@@ -53,6 +53,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sourceorigin_common::{
     ClientId, EmailId, Handle, NotificationId, PasskeyId, Personal, PictureId, SessionId,
+    admin::KnownDevice,
     events::DomainEvent,
     notifications::NotificationPreference,
     protocol::api::{Identity, Passkey},
@@ -87,6 +88,8 @@ operations! {
         RevokeSession,
         /// Sign every other session out.
         RevokeOtherSessions,
+        /// List the browsers the account knows, whose sign-ins alert no one.
+        ListKnownDevices,
         /// List the apps that keep access to the account.
         ListApps,
         /// Remove one app's access.
@@ -260,6 +263,7 @@ impl AccountApplication {
             Op::ListSessions => (sessions::LIST, get(Self::sessions)),
             Op::RevokeSession => (sessions::ITEM, delete(Self::revoke_session)),
             Op::RevokeOtherSessions => (sessions::REVOKE_OTHERS, post(Self::revoke_other_sessions)),
+            Op::ListKnownDevices => (sessions::DEVICES, get(Self::known_devices)),
             Op::ListApps => (apps::LIST, get(Self::apps)),
             Op::RemoveApp => (apps::ITEM, delete(Self::remove_app)),
             Op::ViewHistory => (history::LIST, get(Self::history)),
@@ -361,6 +365,14 @@ impl AccountApplication {
         viewer: Viewer,
     ) -> Result<Json<Vec<SessionItem>>, AccountError> {
         Ok(Json(app.service.sessions(&viewer).await?))
+    }
+
+    /// Lists the browsers the account knows, most recently seen first.
+    async fn known_devices(
+        State(app): State<Self>,
+        viewer: Viewer,
+    ) -> Result<Json<Vec<KnownDevice>>, AccountError> {
+        Ok(Json(app.service.known_devices(&viewer).await?))
     }
 
     /// Signs one session out.

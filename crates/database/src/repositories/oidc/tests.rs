@@ -380,6 +380,7 @@ async fn purging_an_owner_erases_its_clients_origins() {
             client_id: client.id.clone(),
             origin,
         }),
+        new_device: false,
     };
     let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
     tx.record(&operator, None, approved(related.clone().into()))

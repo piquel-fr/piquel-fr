@@ -14,6 +14,7 @@
   - [Devices](user/account/devices.md)
   - [Connected apps](user/account/connected-apps.md)
   - [Notifications](user/account/notifications.md)
+  - [Security alerts](user/account/security-alerts.md)
   - [Security history](user/account/security-history.md)
 - [Your data]()
   - [Recover your account](user/your-data/recover-your-account.md)

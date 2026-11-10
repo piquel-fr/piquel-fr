@@ -36,13 +36,84 @@ name no account, rather than the `Alert`, so an older release's inbox never
 meets an alert it cannot decode. Today the variants are a replaced primary
 address, a removed address, a recovery that secured the account, enrolled a
 passkey or was undone, an account disabled, enabled, scheduled for deletion or restored,
-support changing the handle or display name or removing the picture,
+support changing the handle or display name, renaming a passkey or removing the
+picture,
 [administrators' announcements](../operations/administration.md#send-an-announcement)
 and messages, and, in administrators' inboxes, each
 [alert](../operations/administration.md#respond-to-an-alert) when it is raised,
 titled **Alert:** and the alert's subject. An alert's notification has no
 security history entry, since its event concerns no account, and neither has a
-message's: the inbox already shows it.
+message's: the inbox already shows it. The
+[security alerts](#security-alerts) are the rest.
+
+## Security alerts
+
+Every notification but an announcement, a message and a raised alert is about
+the account's security (`Notification::security`): it is always emailed, and
+its email carries a [sign-out link](#the-sign-out-link). Besides the account
+notices above, these events alert the owner:
+
+| Event | Notification |
+| --- | --- |
+| `SignedIn { new_device: true }` (see [known devices](sessions.md#known-devices)) | `NewDeviceSignIn` |
+| `PasskeyAdded`, `PasskeyRemoved` | `PasskeyAdded`, `PasskeyRemoved` |
+| `IdentityLinked`, `IdentityUnlinked` | `IdentityLinked`, `IdentityUnlinked`, naming the provider |
+| `EmailAdded` | `EmailAdded`, naming the provider an address imported on linking came from |
+| `GrantRevoked { reason: RefreshReplay }` | `TokenReused` |
+| `RecoveryStarted` without `--revoke` | `RecoveryStarted`, to every verified address, with the undo page |
+| `SessionRevoked { reason: Admin }` | `SignedOutBySupport` |
+| `CompromiseReported` | `CompromiseReported`, confirming the report |
+| `SignInFailed { reason: CounterRegression }` | `PasskeyCopied` |
+| `SignInFailed { reason: AccountUnavailable }` | `SignInRefused`: a credential was proven on an account that can't be signed in to that way, such as a disabled one |
+
+Two rules keep one operation from alerting several times:
+
+- **An operation without a session tells the owner as a whole.** Signing up, a
+  recovery's link and its undo page act as `Actor::User { session_id: None }`
+  or `Actor::Anonymous`, and the passkeys, identities and addresses they add or
+  remove alert no one: the account's creation needs no alert, and a recovery
+  has its own notifications. Support's own steps of a recovery, the passkeys
+  and identities `--revoke` and an undo take back, are recorded with
+  `DatabaseTransaction::record_quietly`, which writes no notification.
+- **A consequence is told once.** `SignedOutBySupport` is a
+  `Notification::consequence`: `record` skips it for an account the
+  transaction already notified. Support ending several sessions tells the owner
+  once, and ending them while recovering the account tells them nothing more
+  than the recovery's notification.
+
+### The sign-out link
+
+The email of every security notification carries
+`/sign-out-everywhere?id=<notification>&token=<token>`, for an owner whose session
+was stolen while their passkey is out of reach. The token is the HMAC of the
+notification's ID under a key derived from the token digest key, like an
+unsubscribe link's (`Links` in `src/notifications/links.rs`). Opening the link
+shows a page asking first, so a mail scanner changes nothing, and only while the
+link still works (`AccountService::sign_out_link_works`); otherwise it says the
+link doesn't work, with a 404. Its form, posted from that page without a
+session, runs `AccountService::sign_out_everywhere`: under the account lock, it
+marks the notification's `signed_out_at`, records
+`DomainEvent::SignedOutEverywhere`, even when no session is left, so the owner's
+history shows every use, then ends every session and refresh grant with
+`RevocationReason::SignOutLink`, as the owner without a session. It revokes no credential, so the worst a leaked link
+can do is sign the owner out. The link works once, within seven days of the
+notification (`SIGN_OUT_LINK_LIFETIME`).
+
+### The top bar's bell
+
+Every account page's top bar has a bell (a `Shortcut` of `ShortcutKind::Inbox`
+in `crates/ui/src/layout`) linking the inbox, with the unread count the
+sidebar's Notifications tab shows. The dashboard's top bar has the signed-in
+administrator's own bell, linking their inbox on auth: it reads the count as the
+owner, so it records no view of their account, and a failed read counts none
+rather than failing the page. Beside it, an **Alerts** shortcut
+(`ShortcutKind::Alerts`) counts the alerts with no update yet, from the
+overview the status bar already reads.
+The owner answers an alert from its page: opening it from auth's own pages marks
+it read, and **This wasn’t me**, where the security history lets the owner
+report the notification's event, reports it
+(`HistoryChange::Report { notification }`). Read state lives on the
+notification, so every device sees it.
 
 ## Storage
 
@@ -65,6 +136,7 @@ Each notification is a row of `notifications` (`NotificationRepository`):
 | `payload` | the serialized `Notification` |
 | `created_at` | when it was written |
 | `read_at` | when the owner read it, or none while unread |
+| `signed_out_at` | when its email's [sign-out link](#the-sign-out-link) was used |
 
 An account purged while a request was in flight gets no notification. Cleanup
 deletes a notification a year after it arrives, and an announcement's
@@ -84,8 +156,8 @@ notifications `record` just wrote, each with its account, and queues one
 `EmailMessage::Notification` per address of that account that
 `Notification::addressees` names, each once:
 
-- `Verified`: every verified address, for `AccountSecured` and `Recovered`, so
-  one compromised mailbox cannot hide a recovery. An undone recovery
+- `Verified`: every verified address, for `AccountSecured`, `Recovered` and
+  `RecoveryStarted`, so one compromised mailbox cannot hide a recovery. An undone recovery
   (`RecoveryUndone`) goes to the primary address, like the rest.
 - `Affected`: the address the event replaced or removed, so whoever reads that
   mailbox hears of it.
@@ -130,7 +202,7 @@ operators with `account <user> notifications preferences`: an operator turning
 email off could hide a notice from the owner. The data export includes them.
 
 An announcement's email that is not essential carries an unsubscribe link,
-`/unsubscribe?account=<id>&token=<token>`, in its body and in the
+`/unsubscribe?id=<account>&token=<token>`, in its body and in the
 `List-Unsubscribe` header, with `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
 (RFC 8058), so mail clients offer it in one click. They do so only when the
 relay's DKIM signature covers both headers, which the relay must be set up to

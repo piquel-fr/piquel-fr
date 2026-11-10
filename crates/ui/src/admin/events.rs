@@ -180,6 +180,7 @@ impl EventRow<'_> {
                 session_id,
                 method: how,
                 inline,
+                new_device,
             } => {
                 let summary = match &inline {
                     Some(inline) => format!(
@@ -189,7 +190,9 @@ impl EventRow<'_> {
                     ),
                     None => format!("Signed in with {}", method(how)),
                 };
-                Description::new(summary).with("session", session_id)
+                Description::new(summary)
+                    .with("session", session_id)
+                    .with("new device", if new_device { "yes" } else { "no" })
             }
             DomainEvent::SignInFailed {
                 method: how,
@@ -422,6 +425,10 @@ impl EventRow<'_> {
                 Description::new(format!("Signing key {change}")).with("key", key_id)
             }
             DomainEvent::AccountExported {} => Description::new("Account data downloaded"),
+            DomainEvent::SignedOutEverywhere { notification_id } => {
+                Description::new("Signed out everywhere with a security email's link")
+                    .with("notification", notification_id)
+            }
             DomainEvent::AccountDeletionScheduled { purge_after } => {
                 Description::new("Account deletion scheduled")
                     .with("purged after", purge_after.to_rfc3339())
@@ -516,6 +523,9 @@ impl EventRow<'_> {
             }
             RevocationReason::UserRevoked => {
                 "the owner signed it out from another device".to_owned()
+            }
+            RevocationReason::SignOutLink => {
+                "the owner signed out everywhere from an email's link".to_owned()
             }
         }
     }

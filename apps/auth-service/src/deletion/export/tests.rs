@@ -111,6 +111,11 @@ fn serializes_every_section_in_its_documented_shape() {
                 expires_at: at,
             }],
         }],
+        known_devices: vec![KnownDevice {
+            device: Some(device),
+            first_seen_at: at,
+            last_seen_at: at,
+        }],
         consents: vec![Consent {
             client_id: client.to_string(),
             audience: "notes".into(),
@@ -198,7 +203,7 @@ fn serializes_every_section_in_its_documented_shape() {
         serde_json::to_value(&records).expect("export"),
         json!({
             "format": "sourceorigin.account-export",
-            "version": 4,
+            "version": 5,
             "exported_at": time,
             "profile": {
                 "id": user,
@@ -255,6 +260,11 @@ fn serializes_every_section_in_its_documented_shape() {
                     "last_used_at": time,
                     "expires_at": time,
                 }],
+            }],
+            "known_devices": [{
+                "device": {"browser": "firefox", "platform": "linux"},
+                "first_seen_at": time,
+                "last_seen_at": time,
             }],
             "consents": [{"client_id": "notes", "audience": "notes", "scopes": ["openid"]}],
             "grants": [{

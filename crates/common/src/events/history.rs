@@ -23,8 +23,14 @@ impl DomainEvent {
     pub fn history_entry(&self) -> Option<HistoryEntry> {
         Some(match self {
             Self::AccountCreated { method, .. } => HistoryEntry::AccountCreated { method: *method },
-            Self::SignedIn { method, inline, .. } => HistoryEntry::SignedIn {
+            Self::SignedIn {
+                method,
+                inline,
+                new_device,
+                ..
+            } => HistoryEntry::SignedIn {
                 method: *method,
+                new_device: *new_device,
                 origin: inline
                     .as_ref()
                     .and_then(|inline| inline.origin.value().cloned()),
@@ -40,7 +46,8 @@ impl DomainEvent {
                 | RevocationReason::AccountDisabled
                 | RevocationReason::AccountDeletion
                 | RevocationReason::CompromiseReported
-                | RevocationReason::UserRevoked => HistoryEntry::SessionRevoked {
+                | RevocationReason::UserRevoked
+                | RevocationReason::SignOutLink => HistoryEntry::SessionRevoked {
                     reason: reason.clone(),
                 },
                 RevocationReason::Expired => return None,
@@ -114,6 +121,7 @@ impl DomainEvent {
                 event_id: *event_id,
             },
             Self::AccountExported {} => HistoryEntry::AccountExported,
+            Self::SignedOutEverywhere { .. } => HistoryEntry::SignedOutEverywhere,
             Self::NotificationPreferenceChanged(preference) => {
                 HistoryEntry::NotificationPreferenceChanged(*preference)
             }
@@ -193,6 +201,9 @@ pub enum HistoryEntry {
         /// the origin was not erased since.
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<RelatedOrigin>,
+        /// Whether the browser had never signed in to the account before.
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        new_device: bool,
     },
     /// A browser signed out, at the user's or an application's request, or by
     /// signing in to another account.
@@ -326,6 +337,9 @@ pub enum HistoryEntry {
     /// The user downloaded their data.
     #[serde(rename = "account.exported")]
     AccountExported,
+    /// A security email's sign-out link signed every device out.
+    #[serde(rename = "session.signed_out_everywhere")]
+    SignedOutEverywhere,
     /// The user turned a category of notifications' email on or off.
     #[serde(rename = "notifications.preference_changed")]
     NotificationPreferenceChanged(NotificationPreference),
@@ -390,6 +404,7 @@ impl HistoryEntry {
             | Self::PictureChanged
             | Self::PictureRemoved
             | Self::AccountExported
+            | Self::SignedOutEverywhere
             | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
@@ -442,6 +457,7 @@ impl HistoryEntry {
             | Self::RecoveryUndone
             | Self::CompromiseReported { .. }
             | Self::AccountExported
+            | Self::SignedOutEverywhere
             | Self::NotificationPreferenceChanged(_)
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored

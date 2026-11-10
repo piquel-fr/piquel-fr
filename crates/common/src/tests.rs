@@ -141,6 +141,7 @@ fn event_kinds_match_their_serde_tags() {
             session_id,
             method: AuthenticationMethod::Federation,
             inline: None,
+            new_device: true,
         },
         DomainEvent::SignInFailed {
             method: AuthenticationMethod::Passkey,
@@ -299,6 +300,9 @@ fn event_kinds_match_their_serde_tags() {
             change: SigningKeyChange::Generated,
         },
         DomainEvent::AccountExported {},
+        DomainEvent::SignedOutEverywhere {
+            notification_id: NotificationId::new(),
+        },
         DomainEvent::AccountDeletionScheduled {
             purge_after: chrono::Utc::now(),
         },

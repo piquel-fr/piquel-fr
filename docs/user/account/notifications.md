@@ -11,12 +11,17 @@ emails, you need a [confirmed email address](email-addresses.md).
 
 ## What SourceOrigin tells you
 
+- A [security alert](security-alerts.md): a new device signed in, a passkey,
+  social sign-in or email address was added or removed, an app's token was
+  reused, or a sign-in was refused because a passkey looked copied or your
+  account is disabled.
 - Your primary email address changed, or an address was removed.
-- SourceOrigin support changed your handle or display name, or removed your profile
-  picture. When you change these yourself, SourceOrigin doesn't tell you: you
-  already know.
-- SourceOrigin support secured your account, or someone used a recovery link to add
-  a passkey, or a recovery was undone.
+- SourceOrigin support changed your handle or display name, renamed one of your
+  passkeys, or removed your profile picture. When you change these yourself,
+  SourceOrigin doesn't tell you: you already know.
+- SourceOrigin support started a recovery or secured your account, someone used
+  a recovery link to add a passkey, or a recovery was undone.
+- SourceOrigin support signed your devices out.
 - Your account was disabled, enabled again, scheduled for deletion or
   restored.
 - SourceOrigin support sent you a message about your account, such as why it was
@@ -26,6 +31,10 @@ emails, you need a [confirmed email address](email-addresses.md).
   to its privacy policy, to every account or to yours.
 - If you administer Origin Auth, an alert about the service was raised, such as a
   broken audit chain. Its subject starts with **Alert:**.
+
+The bell at the top of every settings page counts your unread notifications,
+and opens your inbox. See
+[security alerts](security-alerts.md#answer-an-alert-in-your-settings).
 
 ## Read your inbox
 
@@ -49,15 +58,15 @@ To mark every notification read, select **Mark all as read** in the inbox.
 
 ## Emails
 
-Each notification is also emailed, in one of two categories:
+Notifications are also emailed. Most fall in one of two categories:
 
-- **Security:** everything about your account itself, messages from support
-  included. You always receive these, so nobody can hide one from you.
+- **Security:** everything about your account itself. You always receive
+  these, so nobody can hide one from you.
 - **Announcements:** news from SourceOrigin, such as a new feature. You receive these
   by default, and can [turn them off](#turn-announcement-emails-off).
 
-If you administer Origin Auth, you always receive alerts by email too, like
-**Security** notifications.
+You always receive messages from support by email too, and, if you administer
+Origin Auth, alerts.
 
 Some announcements are **essential**: a security incident, or a change to the
 privacy policy or terms. You receive those by email even with announcements
@@ -68,9 +77,13 @@ announcement's or a message's email links your inbox.
 
 - A change of primary address is emailed to the address that stopped being
   primary, and a removed address is told at that address.
-- A recovery that adds a passkey, or support securing your account, is emailed
-  to every confirmed address.
+- A recovery started, a recovery that adds a passkey, or support securing your
+  account, is emailed to every confirmed address.
 - Everything else goes to your primary address.
+
+A **Security** email also carries a link that signs your account out of every
+device and app without signing in, once, within 7 days. See
+[security alerts](security-alerts.md#answer-an-alert-by-email).
 
 SourceOrigin's emails carry no tracking and no remote images.
 

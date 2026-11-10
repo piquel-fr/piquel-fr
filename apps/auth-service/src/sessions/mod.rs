@@ -1,6 +1,7 @@
 //! The account's sessions, one per signed-in browser, and signing them out:
 //! settings any administrator may also change, and the browser's own sign-out,
-//! which [`AccountService`] serves.
+//! which [`AccountService`] serves. Also the browsers the account knows, whose
+//! sign-ins alert no one.
 use crate::account::{AccountError, AccountService, Subject, Viewer};
 use crate::admin::DashboardSignIn;
 use crate::security::{BrowserCookie, RequestContext, Session, SessionError};
@@ -9,7 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sourceorigin_common::{
     AuthenticationMethod, SessionId,
-    admin::DashboardSession,
+    admin::{DashboardSession, KnownDevice},
     events::{RevocationReason, UserAgentFamily},
 };
 use sourceorigin_repository::{SessionScope, StoredSession};
@@ -107,6 +108,19 @@ impl AccountService {
             .of_user(user, DashboardSignIn::idle_since())
             .await?;
         Ok(SessionItem::all(sessions, &dashboard, viewer.own_session()))
+    }
+
+    /// Lists the browsers the account knows, most recently seen first.
+    pub(crate) async fn known_devices(
+        &self,
+        viewer: &Viewer,
+    ) -> Result<Vec<KnownDevice>, AccountError> {
+        viewer.authorize(&self.database).await?;
+        Ok(self
+            .database
+            .sessions()
+            .known_devices(viewer.user())
+            .await?)
     }
 
     /// Signs one session of the account out, with its applications' refresh

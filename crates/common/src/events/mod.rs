@@ -26,7 +26,7 @@ pub use payload::{
 
 use crate::{
     AlertId, AnnouncementId, AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle,
-    PasskeyId, Personal, PictureId, Provider, RecoveryId, SessionId, TokenId,
+    NotificationId, PasskeyId, Personal, PictureId, Provider, RecoveryId, SessionId, TokenId,
     admin::{AuditVerification, ChainBreak, ChainProblem, VerificationKeys},
     alerts::{Alert, AlertStatus},
     clients::{ClientField, ClientKind},
@@ -62,6 +62,12 @@ pub enum DomainEvent {
         /// auth's pages. The session then has no browser cookie.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         inline: Option<InlineSignIn>,
+        /// Set when the browser had never signed in to the account, as far as
+        /// its device cookie tells: its owner is alerted. Signing up and a
+        /// recovery's link register the browser without it, and a sign-in on an
+        /// application's page, which sets no cookie, never has it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        new_device: bool,
     },
     /// A passkey or provider authentication was rejected, whether signing in or
     /// confirming a session. Only the rejected attempt is recorded; nothing changed.
@@ -397,6 +403,14 @@ pub enum DomainEvent {
     },
     /// The user downloaded a copy of their account's data.
     AccountExported {},
+    /// A security notification's "sign me out everywhere" link was used, which
+    /// works without signing in: every session and refresh grant of the account
+    /// ended, its sessions following as [`Self::SessionRevoked`]. Recorded even
+    /// when none was left, so the owner's history shows every use.
+    SignedOutEverywhere {
+        /// The notification whose email carried the link.
+        notification_id: NotificationId,
+    },
     /// The account was scheduled for deletion. Its sessions follow as
     /// [`Self::SessionRevoked`], and every refresh family is revoked with them.
     AccountDeletionScheduled {
@@ -493,6 +507,10 @@ impl DomainEvent {
                 reason: RevocationReason::UserRevoked,
                 ..
             } => 2,
+            Self::SessionRevoked {
+                reason: RevocationReason::SignOutLink,
+                ..
+            } => 3,
             Self::RelatedOriginApproved { origin, .. }
             | Self::RelatedOriginRemoved { origin, .. }
             | Self::SignedIn {
@@ -573,6 +591,7 @@ impl DomainEvent {
             | Self::CompromiseReported { .. }
             | Self::SigningKeyChanged { .. }
             | Self::AccountExported {}
+            | Self::SignedOutEverywhere { .. }
             | Self::AccountDeletionScheduled { .. }
             | Self::AccountRestored {}
             | Self::AccountPurged {}
@@ -646,6 +665,7 @@ impl DomainEvent {
             | Self::CompromiseReported { .. }
             | Self::SigningKeyChanged { .. }
             | Self::AccountExported {}
+            | Self::SignedOutEverywhere { .. }
             | Self::AccountDeletionScheduled { .. }
             | Self::AccountRestored {}
             | Self::AccountPurged {}
@@ -719,6 +739,7 @@ impl DomainEvent {
             Self::CompromiseReported { .. } => "compromise_reported",
             Self::SigningKeyChanged { .. } => "signing_key_changed",
             Self::AccountExported {} => "account_exported",
+            Self::SignedOutEverywhere { .. } => "signed_out_everywhere",
             Self::AccountDeletionScheduled { .. } => "account_deletion_scheduled",
             Self::AccountRestored {} => "account_restored",
             Self::AccountPurged {} => "account_purged",

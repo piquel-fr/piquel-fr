@@ -478,7 +478,7 @@ impl FederationApplication {
                 Err(error) => return Err(error),
             };
             let mut response = Redirect::to(&return_to).into_response();
-            BrowserCookie::Session.set_on(&mut response, &session)?;
+            session.set_on(&mut response)?;
             BrowserCookie::Federation.clear_on(&mut response)?;
             return Ok(response);
         }
@@ -495,15 +495,15 @@ impl FederationApplication {
             .await
     }
 
-    /// Signs this browser in to the account `existing` is linked to and returns the
-    /// session's cookie secret. The account must still be active, linked and hold a passkey, which is
+    /// Signs this browser in to the account `existing` is linked to and returns its
+    /// cookies' secrets. The account must still be active, linked and hold a passkey, which is
     /// rechecked under the account lock that unlinking also takes.
     async fn sign_in_linked(
         mut tx: DatabaseTransaction<'_>,
         context: RequestContext,
         headers: &HeaderMap,
         existing: StoredExternalIdentity,
-    ) -> Result<Secret, FederationError> {
+    ) -> Result<security::SignedIn, FederationError> {
         tx.users()
             .find_active_by_id_for_update(existing.user_id)
             .await?

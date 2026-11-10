@@ -231,6 +231,7 @@ impl AccountOperation {
                 "--reason",
                 "Lost",
             ],
+            Self::ListKnownDevices => &["account", "alice", "sessions", "known"],
             Self::ListApps => &["account", "alice", "apps", "list"],
             Self::RemoveApp => &[
                 "account", "alice", "apps", "remove", "notes", "--reason", "Asked",

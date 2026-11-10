@@ -25,15 +25,15 @@ pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, con
 pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use notifications::{
-    InboxChange, InboxPage, InboxRow, InboxState, NotificationPage, NotificationState,
-    UnsubscribeStep, inbox, notification, unsubscribe,
+    InboxChange, InboxPage, InboxRow, InboxState, NotificationPage, NotificationState, SignOutStep,
+    UnsubscribeStep, inbox, notification, sign_out_everywhere, unsubscribe,
 };
 pub use overview::{AccountOverview, OverviewLinks, account_overview};
 pub use profile::{
     CROP_SIZE, CROP_X, CROP_Y, PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog,
     ProfilePages, ProfileState, profile_settings,
 };
-pub use sessions::{DeviceChange, DeviceRow, devices};
+pub use sessions::{DeviceChange, DeviceRow, devices, known_devices};
 pub use sign_in::{ProviderRow, SignInChange, SignInState, sign_in_methods};
 pub use timeline::{HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, history};
 

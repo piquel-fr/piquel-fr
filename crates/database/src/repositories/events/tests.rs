@@ -216,6 +216,7 @@ async fn versions_are_per_event() {
     let events = [
         revoked(RevocationReason::Logout),
         revoked(RevocationReason::UserRevoked),
+        revoked(RevocationReason::SignOutLink),
     ];
     for event in events.clone() {
         record(&pool, user, event).await;
@@ -245,7 +246,7 @@ async fn versions_are_per_event() {
     .fetch_all(&pool)
     .await
     .expect("versions");
-    assert_eq!(versions, [1, 2]);
+    assert_eq!(versions, [1, 2, 3]);
 }
 
 /// A related origin is personal data, in an event's second payload version.

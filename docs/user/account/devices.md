@@ -45,6 +45,16 @@ the top of the page. The page says **Your other devices were signed out.**
 To sign out the device you are using, select **Sign out** at the bottom of the
 sidebar. See [signing in](signing-in.md#sign-out).
 
+## Known browsers
+
+Below the signed-in devices, **Known browsers** lists every browser that signed
+in to your account within the last 400 days, signed in now or not, with when it
+first and last signed in. A sign-in from any other browser sends you a
+[security alert](security-alerts.md). Signing out keeps a browser known; a
+private window, or clearing the browser's cookies, makes it new again. You
+can't remove a known browser yourself: it's forgotten once it goes 400 days
+without signing in.
+
 ## If you don't recognize a device
 
 1. Sign it out.

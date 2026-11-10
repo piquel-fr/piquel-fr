@@ -154,7 +154,7 @@ impl EmailMessage {
         let recovery_id = match (event, &notified.notification) {
             (
                 DomainEvent::RecoveryStarted { recovery_id, .. },
-                Notification::AccountSecured { kept: true },
+                Notification::AccountSecured { kept: true } | Notification::RecoveryStarted,
             )
             | (DomainEvent::RecoveryCompleted { recovery_id, .. }, Notification::Recovered) => {
                 Some(*recovery_id)

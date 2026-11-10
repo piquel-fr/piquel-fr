@@ -34,7 +34,7 @@ test('downloading the data, deleting the account and restoring it with its passk
   expect(download.suggestedFilename()).toBe(
     `sourceorigin-account-${handle}-${data.exported_at.slice(0, 10)}.json`
   );
-  expect(data.version).toBe(4);
+  expect(data.version).toBe(5);
   expect(data.profile.handle).toBe(handle);
   expect(data.events.map((event) => event.kind)).toContain('account_created');
 

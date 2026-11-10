@@ -77,7 +77,7 @@ impl AdminService {
             None => None,
         };
         for email in emails.iter().filter(|email| email.verified_at.is_none()) {
-            EmailApplication::delete(&mut tx, &context, user_id, email.id).await?;
+            EmailApplication::delete_quietly(&mut tx, &context, user_id, email.id).await?;
         }
         let id = RecoveryId::new();
         let token = links.token(id)?;
@@ -132,8 +132,9 @@ impl AdminService {
         }
         for identity in tx.federation().list_active(user_id).await? {
             let provider = identity.provider;
+            // The recovery's own notification tells the owner.
             if tx.federation().unlink(user_id, provider).await? {
-                tx.record(
+                tx.record_quietly(
                     context,
                     Some(user_id),
                     DomainEvent::IdentityUnlinked { provider },

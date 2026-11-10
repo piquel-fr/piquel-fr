@@ -81,7 +81,7 @@ Revoke an unused link with **Revoke** on the **Invitations** page, or
 
 ```sh
 auth-service user search ali     # by ID, or part of a handle, name or email
-auth-service user show alice     # the account's profile, emails, passkeys, sessions and consents
+auth-service user show alice     # the account's profile, emails, passkeys, sessions, known browsers and consents
 ```
 
 Commands name an account by its handle, its ID, or a verified email of an active
@@ -221,7 +221,17 @@ auth-service session revoke-all alice --reason "Phone stolen"           # every 
 
 Each also ends the refresh tokens of the apps signed in through the session. A
 session of another account is not found. On the dashboard, open the account and
-select **Revoke** next to a session, or **Revoke all**.
+select **Revoke** next to a session, or **Revoke all**. The owner receives one
+**SourceOrigin support signed your account out** notification, whatever the
+number of sessions.
+
+The browsers an account knows, whose sign-ins send its owner no
+[new-device alert](../architecture/sessions.md#known-devices), are listed under
+**Known browsers** on the account's dashboard page, and with:
+
+```sh
+auth-service account alice sessions known
+```
 
 ## Delete or restore an account
 
@@ -419,11 +429,13 @@ first update acknowledges the alert: it stops counting as a warning, though it
 stays current while its condition holds.
 
 While any alert has no update yet, the overview shows a banner counting them,
-the sidebar marks **Alerts**, and the status bar counts each one as a warning.
+the sidebar marks **Alerts**, the top bar's warning sign counts them, and the
+status bar counts each one as a warning. The top bar's bell beside it counts
+your own unread notifications, and opens your inbox on auth.
 
 On the dashboard:
 
-1. Open **Alerts**. Each current alert shows what it says, its ID, when it was
+1. Open **Alerts**, or select the warning sign in the top bar. Each current alert shows what it says, its ID, when it was
    raised and last seen, and its updates, newest first.
 2. Select **Post an update** on the alert, choose its **Status**, and write a
    **Note**, such as who is on it.

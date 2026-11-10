@@ -3,7 +3,10 @@
 //! the audit checkpoint key.
 
 use crate::{
-    AuditKeys, emails::VerificationKeys, notifications::UnsubscribeLinks, recovery::RecoveryLinks,
+    AuditKeys,
+    emails::VerificationKeys,
+    notifications::{SignOutLinks, UnsubscribeLinks},
+    recovery::RecoveryLinks,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sourceorigin_common::config::{
@@ -24,6 +27,9 @@ const RECOVERY_LINK_CONTEXT: &[u8] = b"sourceorigin-account-recovery-link-v1";
 /// Separates the unsubscribe link key from every other use of a token digest
 /// key, as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
 const UNSUBSCRIBE_LINK_CONTEXT: &[u8] = b"sourceorigin-email-unsubscribe-link-v1";
+/// Separates the sign-out link key from every other use of a token digest key,
+/// as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
+const SIGN_OUT_LINK_CONTEXT: &[u8] = b"sourceorigin-email-sign-out-link-v1";
 /// Fewest bytes a token digest key may have.
 const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
 /// Bytes of a token digest key's digest kept as its fingerprint.
@@ -69,11 +75,13 @@ pub(crate) struct TokenDigestKey {
     /// The unsubscribe link key, derived like [`Self::verification`]. Its links
     /// are checked by deriving them again, under either key.
     unsubscribe: Secret,
+    /// The sign-out link key, derived and checked like [`Self::unsubscribe`].
+    sign_out: Secret,
 }
 
 impl TokenDigestKey {
-    /// Derives the HMAC, verification, recovery and unsubscribe link keys from
-    /// configured bytes, as the PEM key's always were.
+    /// Derives the HMAC, verification, recovery, unsubscribe and sign-out link
+    /// keys from configured bytes, as the PEM key's always were.
     pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
         let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
         let fingerprint = URL_SAFE_NO_PAD
@@ -84,6 +92,7 @@ impl TokenDigestKey {
             verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT)?,
             recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT)?,
             unsubscribe: Secret::derive(bytes, UNSUBSCRIBE_LINK_CONTEXT)?,
+            sign_out: Secret::derive(bytes, SIGN_OUT_LINK_CONTEXT)?,
         })
     }
 
@@ -115,6 +124,12 @@ impl TokenDigestKeys {
     /// and accepted under the accepted one's.
     pub(crate) fn unsubscribe_links(&self, origin: &Origin) -> UnsubscribeLinks {
         UnsubscribeLinks::new(origin.clone(), self.link_keys(|key| &key.unsubscribe))
+    }
+
+    /// Sign-out links on `origin`, under the current key's sign-out key, and
+    /// accepted under the accepted one's.
+    pub(crate) fn sign_out_links(&self, origin: &Origin) -> SignOutLinks {
+        SignOutLinks::new(origin.clone(), self.link_keys(|key| &key.sign_out))
     }
 
     /// Verification tokens under the current key's verification key, rebuilt

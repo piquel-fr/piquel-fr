@@ -200,12 +200,22 @@ impl EmailApplication {
         user_id: UserId,
         id: EmailId,
     ) -> Result<(), DatabaseError> {
-        tx.record(
-            context,
-            Some(user_id),
-            DomainEvent::EmailRemoved { email_id: id },
-        )
-        .await?;
+        let removed = DomainEvent::EmailRemoved { email_id: id };
+        tx.record(context, Some(user_id), removed).await?;
+        tx.emails().remove(user_id, id).await
+    }
+
+    /// [`Self::delete`], without the notice of its removal: for a step of an
+    /// operation whose own notification tells the account, such as the
+    /// unverified addresses support's recovery removes.
+    pub(crate) async fn delete_quietly(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        user_id: UserId,
+        id: EmailId,
+    ) -> Result<(), DatabaseError> {
+        let removed = DomainEvent::EmailRemoved { email_id: id };
+        tx.record_quietly(context, Some(user_id), removed).await?;
         tx.emails().remove(user_id, id).await
     }
 

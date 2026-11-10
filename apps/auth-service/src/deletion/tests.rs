@@ -16,7 +16,7 @@ use serde_json::json;
 use sourceorigin_common::{
     AnnouncementId, AuthenticationMethod, PictureId, Provider, RecoveryId, TokenId,
     clients::{ClientKind, ClientOwner},
-    events::{JobName, RequestOrigin, SignInFailure},
+    events::{JobName, Platform, RequestOrigin, SignInFailure, UserAgentFamily},
     notifications::{EmailCategory, Notification, NotificationPreference},
 };
 use sourceorigin_repository::{
@@ -221,6 +221,16 @@ impl Fixture {
             .await
             .expect("identity");
         assert!((tx.federation().unlink(user_id, Provider::GitHub).await).expect("unlink"));
+        let device = UserAgentFamily {
+            browser: sourceorigin_common::events::Browser::Firefox,
+            platform: Platform::Linux,
+        };
+        assert!(
+            (tx.sessions()
+                .remember_device(user_id, &[7; 32], device)
+                .await)
+                .expect("known device")
+        );
         tx.pictures()
             .set(user_id, PictureId::new(), b"jpeg")
             .await

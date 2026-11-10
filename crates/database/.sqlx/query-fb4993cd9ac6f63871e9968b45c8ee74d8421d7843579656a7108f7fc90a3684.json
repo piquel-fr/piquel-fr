@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT FROM notifications\n                    WHERE id = $1 AND signed_out_at IS NULL AND created_at > $2\n                ) AS \"works!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "works!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fb4993cd9ac6f63871e9968b45c8ee74d8421d7843579656a7108f7fc90a3684"
+}

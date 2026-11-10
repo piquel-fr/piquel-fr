@@ -9,7 +9,7 @@ use sourceorigin_repository::SessionAuthentication;
 /// working. Its link goes to the primary address only. The link enrolls one
 /// passkey, once, and signs in with it without confirming the session: no
 /// confirmed change accepts it, and confirming with it is refused until the
-/// recovery settles. Every verified address hears of it.
+/// recovery settles. Every verified address hears of its start and its use.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_link_enrolls_one_passkey_that_signs_in_without_confirming() {
@@ -44,8 +44,8 @@ async fn a_link_enrolls_one_passkey_that_signs_in_without_confirming() {
     assert!(!emails.contains(&pending), "the unverified address is gone");
     assert_eq!(
         (scenario.sent(primary).await, scenario.sent(other).await),
-        (1, 0),
-        "the link goes to the primary address only"
+        (2, 1),
+        "the link goes to the primary address only, its notice to every verified one"
     );
     assert!(scenario.works(&token).await);
     let service = AccountService::new(scenario.database().clone());
@@ -66,7 +66,7 @@ async fn a_link_enrolls_one_passkey_that_signs_in_without_confirming() {
     assert_eq!(signed_by.expect("passkey"), Some(recovered));
     assert_eq!(
         (scenario.sent(primary).await, scenario.sent(other).await),
-        (2, 1),
+        (3, 2),
         "every verified address hears of it"
     );
     assert!(!scenario.works(&token).await, "used");

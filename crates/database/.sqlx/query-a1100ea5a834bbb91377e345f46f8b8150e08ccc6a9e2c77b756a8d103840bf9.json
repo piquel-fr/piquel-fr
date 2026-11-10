@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO known_devices (user_id, device_digest, user_agent_family)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (user_id, device_digest) DO UPDATE\n                SET last_seen_at = now(), user_agent_family = excluded.user_agent_family\n                RETURNING (xmax = 0) AS \"new!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "new!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a1100ea5a834bbb91377e345f46f8b8150e08ccc6a9e2c77b756a8d103840bf9"
+}

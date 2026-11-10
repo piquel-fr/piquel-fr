@@ -514,6 +514,147 @@ async fn notifications_are_read_by_opening_them() {
     assert_eq!(shown.status(), StatusCode::NOT_FOUND);
 }
 
+/// The top bar's bell on every settings page links the inbox and counts unread
+/// notifications, on every device. A notification's "This wasn't me" opens its
+/// page to report its event, which marks it read once made, not before.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_bell_counts_unread_notifications_and_a_report_reads_one() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let other = Browser::sign_in(&database, browser.user_id).await;
+    let context = EventContext {
+        actor: Actor::User {
+            user_id: browser.user_id,
+            session_id: Some(browser.session_id),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let add = async || {
+        let added = DomainEvent::PasskeyAdded {
+            passkey_id: sourceorigin_common::PasskeyId::new(),
+        };
+        let mut tx = database.begin().await.expect("transaction");
+        let event = tx
+            .record(&context, Some(browser.user_id), added)
+            .await
+            .expect("record");
+        tx.commit().await.expect("commit");
+        let id = database
+            .notifications()
+            .list(browser.user_id, None, 1)
+            .await
+            .expect("inbox")[0]
+            .id;
+        (event, id)
+    };
+    let unread = async || {
+        database
+            .notifications()
+            .unread(browser.user_id)
+            .await
+            .expect("unread")
+    };
+    let bell = |unread: &str| {
+        format!(
+            r#"<a class="shortcut inbox" href="{}" title="Notifications" aria-label="{unread}">"#,
+            settings::NOTIFICATIONS
+        )
+    };
+
+    add().await;
+    let page = html(other.visit(&replicas.a, settings::SIGN_IN).await).await;
+    assert!(page.contains(&bell("Notifications, 1 unread")), "{page}");
+    browser
+        .post(&replicas, settings::NOTIFICATIONS, &InboxChange::ReadAll)
+        .await;
+    assert_eq!(unread().await, 0);
+    let page = html(other.visit(&replicas.b, settings::SIGN_IN).await).await;
+    assert!(
+        page.contains(&bell("Notifications")),
+        "read on every device: {page}"
+    );
+
+    let (event_id, id) = add().await;
+    let item = settings::NOTIFICATION.replace("{id}", &id.to_string());
+    let reporting = NotificationState { reporting: true }
+        .on(&item)
+        .expect("link");
+    let page = html(browser.visit_from(&replicas.a, &reporting, OWN_PAGE).await).await;
+    assert!(page.contains("Secure your account?"), "{page}");
+    assert_eq!(unread().await, 1, "opening it to report marks nothing yet");
+    let report = HistoryChange::Report {
+        event_id,
+        before: None,
+        notification: Some(id),
+    };
+    browser.post(&replicas, settings::HISTORY, &report).await;
+    let reported = database
+        .notifications()
+        .find(browser.user_id, id)
+        .await
+        .expect("notification")
+        .expect("kept");
+    assert!(reported.read_at.is_some(), "the report marks it read");
+}
+
+/// A security notification's email links a page that signs the account out
+/// everywhere without signing in. Opening it changes nothing; its form signs
+/// every device out, once. A forged link does nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_sign_out_link_signs_every_device_out() {
+    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
+    let replicas = Replicas::of(&config).await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let context = EventContext {
+        actor: Actor::Cli {
+            os_user: "root".to_owned(),
+            host: "host".to_owned(),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    tx.record(
+        &context,
+        Some(browser.user_id),
+        DomainEvent::AccountEnabled {},
+    )
+    .await
+    .expect("record");
+    tx.commit().await.expect("commit");
+    let id = database
+        .notifications()
+        .list(browser.user_id, None, 1)
+        .await
+        .expect("inbox")[0]
+        .id;
+    let link = config.email.sign_out_links.link(id).expect("link");
+    let link = url::Url::parse(&link).expect("URL");
+    let path = &link[url::Position::BeforePath..];
+    let stranger = Browser::signed_out();
+    let opened = stranger.visit(&replicas.a, path).await;
+    assert_eq!(opened.status(), StatusCode::OK);
+    assert!(html(opened).await.contains("Sign out everywhere?"));
+    let signed_in = |page: &str| page.contains("Sign-in methods");
+    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    assert!(signed_in(&page), "opening the link changes nothing: {page}");
+    let done = stranger.submit(&replicas.b, path, &[], OWN_PAGE).await;
+    assert_eq!(done.status(), StatusCode::OK);
+    assert!(html(done).await.contains("signed out everywhere"));
+    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    assert!(!signed_in(&page), "{page}");
+    let again = stranger.submit(&replicas.b, path, &[], OWN_PAGE).await;
+    assert_eq!(again.status(), StatusCode::NOT_FOUND, "it works once");
+    let forged = format!("{}?id={id}&token=forged", page::SIGN_OUT);
+    let forged = stranger.visit(&replicas.a, &forged).await;
+    assert_eq!(forged.status(), StatusCode::NOT_FOUND);
+}
+
 /// The inbox turns announcements' email off and on. An announcement email's
 /// unsubscribe link asks first when opened, so a scanner following it changes
 /// nothing, and turns the email off when posted from anywhere without a session,
@@ -568,11 +709,7 @@ async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
         .await;
     assert_eq!(one_click.status(), StatusCode::OK);
     assert!(!emailed().await);
-    let forged = format!(
-        "{}?account={}&token=forged",
-        page::UNSUBSCRIBE,
-        browser.user_id
-    );
+    let forged = format!("{}?id={}&token=forged", page::UNSUBSCRIBE, browser.user_id);
     let forged = stranger.visit(&replicas.a, &forged).await;
     assert_eq!(forged.status(), StatusCode::NOT_FOUND);
 }
@@ -584,6 +721,11 @@ async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn history_reports_need_confirmation_and_cannot_be_forged() {
+    let report = |event_id, before| HistoryChange::Report {
+        event_id,
+        before,
+        notification: None,
+    };
     let replicas = Replicas::new().await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
@@ -633,11 +775,8 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     let signed_in: EventId = value_after(&page, marker).parse().expect("older entry");
     assert!(page.contains("Account created with a passkey"), "{page}");
     assert!(!page.contains(&format!("{marker}{created}")), "{page}");
-    let report = HistoryChange::Report {
-        event_id: created,
-        before: Some(added),
-    };
-    let refused = browser.post(&replicas, settings::HISTORY, &report).await;
+    let creation = report(created, Some(added));
+    let refused = browser.post(&replicas, settings::HISTORY, &creation).await;
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     let page = html(refused).await;
     assert!(
@@ -658,11 +797,8 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     let page = html(browser.visit(&replicas.a, &confirm).await).await;
     assert!(page.contains("Secure your account?"), "{page}");
 
-    let report = HistoryChange::Report {
-        event_id: added,
-        before: None,
-    };
-    let reported = browser.post(&replicas, settings::HISTORY, &report).await;
+    let addition = report(added, None);
+    let reported = browser.post(&replicas, settings::HISTORY, &addition).await;
     assert_eq!(redirect(&reported), forged);
     let page = html(browser.visit(&replicas.a, &forged).await).await;
     assert!(
@@ -676,11 +812,8 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     );
     assert!(page.contains(&format!("Remove {address}")), "{page}");
 
-    let report = HistoryChange::Report {
-        event_id: signed_in,
-        before: Some(added),
-    };
-    let reported = browser.post(&replicas, settings::HISTORY, &report).await;
+    let sign_in = report(signed_in, Some(added));
+    let reported = browser.post(&replicas, settings::HISTORY, &sign_in).await;
     let shown = link(HistoryState {
         before: Some(added),
         reporting: None,

@@ -54,7 +54,13 @@ Self::PictureRemoved {} if by_support => Notification::PictureRemoved,
 
 `by_support` is true when an administrator or an operator at the CLI acted. Guard
 on it when only support's change is news to the owner, and keep the owner's own
-case in the `return None` list, with a comment saying why.
+case in the `return None` list, with a comment saying why. `sessionless` is true
+when the owner acts without a session, signing up or through a recovery's link
+or undo page: guard on `!sessionless` when such an operation tells the owner as
+a whole, as the alerts of added passkeys do. A step that support takes inside
+an operation that notifies by itself is recorded with
+`DatabaseTransaction::record_quietly` instead. See
+[security alerts](../architecture/notifications.md#security-alerts).
 
 ## 3. Choose who receives it
 
@@ -80,9 +86,12 @@ the events whose address the `email` channel reads, in the `affected` match of
 Use `Verified` for what an attacker holding one mailbox would want to hide, as a
 recovery's notifications do.
 
-A notification about the account itself is always emailed, and no preference
-can turn it off. Only a kind that isn't about the account, as an announcement
-isn't, may belong to an `EmailCategory` (`crates/common/src/notifications`),
+A notification about the account itself is a security notification
+(`Notification::security`): it is always emailed, no preference can turn it off,
+and its email carries the "sign me out everywhere" link. `Notification::security`
+names every kind, so a new one decides. Only a kind that isn't about the
+account, as an announcement isn't, may belong to an `EmailCategory`
+(`crates/common/src/notifications`),
 whose email the owner turns off in their inbox's **Email preferences**. Only
 announcements are wired today. A new category needs more than its variant, with
 its `label` and `description`, which settings and the dashboard show:

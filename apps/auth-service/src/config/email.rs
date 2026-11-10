@@ -4,7 +4,11 @@
 #[cfg(test)]
 use super::LinkKeys;
 use super::TokenDigestKeys;
-use crate::{emails::VerificationKeys, notifications::UnsubscribeLinks, recovery::RecoveryLinks};
+use crate::{
+    emails::VerificationKeys,
+    notifications::{SignOutLinks, UnsubscribeLinks},
+    recovery::RecoveryLinks,
+};
 use lettre::{
     AsyncSmtpTransport, Tokio1Executor,
     message::Mailbox,
@@ -55,6 +59,9 @@ pub(crate) struct EmailConfig {
     pub recovery_links: RecoveryLinks,
     /// Derives and checks the unsubscribe links of announcements' emails.
     pub unsubscribe_links: UnsubscribeLinks,
+    /// Derives and checks the "sign me out everywhere" links of security
+    /// notifications' emails.
+    pub sign_out_links: SignOutLinks,
 }
 
 impl EmailConfig {
@@ -78,6 +85,7 @@ impl EmailConfig {
             verification_keys: digest_keys.verification_keys(),
             recovery_links: digest_keys.recovery_links(origin),
             unsubscribe_links: digest_keys.unsubscribe_links(origin),
+            sign_out_links: digest_keys.sign_out_links(origin),
         })
     }
 
@@ -175,6 +183,7 @@ impl EmailConfig {
             verification_keys: VerificationKeys::new(LinkKeys::generate()),
             recovery_links: RecoveryLinks::new(origin.clone(), LinkKeys::generate()),
             unsubscribe_links: UnsubscribeLinks::new(origin.clone(), LinkKeys::generate()),
+            sign_out_links: SignOutLinks::new(origin.clone(), LinkKeys::generate()),
         }
     }
 }

@@ -151,8 +151,8 @@ pub struct AccountPages<'a> {
 
 /// One account's page: `detail`, with its profile picture at `picture`, the
 /// `pages` changing it, or why there are none, the page sending it a `message`,
-/// which every account has, its `sessions`, and its `recent` events, linking
-/// `all_events`.
+/// which every account has, its `sessions`, the browsers it knows, and its
+/// `recent` events, linking `all_events`.
 #[component]
 pub async fn user_page<'a>(
     detail: &'a UserDetail,
@@ -205,6 +205,7 @@ pub async fn user_page<'a>(
             credentials(detail: detail)
         </div>
         session_list(sessions: sessions, pages: pages, account: named.as_str(), handle: user.handle.as_str())
+        crate::settings::known_devices(known: &detail.known_devices)
         <section class="card">
             <header><h2>"Consents " <span class="count">(detail.consents.len().to_string())</span></h2></header>
             if detail.consents.is_empty() {

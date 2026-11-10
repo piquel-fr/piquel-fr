@@ -268,11 +268,11 @@ async fn owners_choose_which_notifications_are_emailed() {
             .expect("query")
     };
     let token = query("token");
-    assert_eq!(query("account"), alice.user_id.to_string());
-    let checked = |account, token: &str| {
+    assert_eq!(query("id"), alice.user_id.to_string());
+    let checked = |id, token: &str| {
         links
-            .check(&Unsubscribe {
-                account,
+            .check(&Link {
+                id,
                 token: token.to_owned(),
             })
             .expect("check")
@@ -296,4 +296,228 @@ async fn owners_choose_which_notifications_are_emailed() {
         }
     );
     assert_eq!(preferences(&bob).await, announcements(true));
+}
+
+/// The sign-out link of a security notification's email signs its account out
+/// everywhere without a session, revoking sessions and refresh grants, never a
+/// credential. It works once, and not after 7 days.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_sign_out_link_works_once_within_seven_days() {
+    let harness = Harness::new().await;
+    let alice = Browser::new_account(&harness.database).await;
+    let other = Browser::sign_in(&harness.database, alice.user_id).await;
+    harness.enable(&alice).await;
+    let id = harness
+        .database
+        .notifications()
+        .list(alice.user_id, None, 1)
+        .await
+        .expect("inbox")[0]
+        .id;
+    let service = AccountService::new(harness.database.clone());
+    let context = crate::security::RequestContext::TEST;
+    let passkeys = harness
+        .database
+        .passkeys()
+        .list_active(alice.user_id)
+        .await
+        .expect("passkeys")
+        .len();
+    assert!(
+        service
+            .sign_out_everywhere(id, context)
+            .await
+            .expect("sign out")
+    );
+    for browser in [&alice, &other] {
+        let (status, _) = browser
+            .call(&harness.router, Method::GET, routes::notifications::UNREAD)
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "every session ended");
+    }
+    assert_eq!(
+        harness
+            .database
+            .passkeys()
+            .list_active(alice.user_id)
+            .await
+            .expect("passkeys")
+            .len(),
+        passkeys,
+        "credentials stay"
+    );
+    let reasons: Vec<_> = harness
+        .database
+        .events()
+        .history_for_user(alice.user_id, 50)
+        .await
+        .expect("history")
+        .into_iter()
+        .filter_map(|stored| match stored.event.known() {
+            Some(DomainEvent::SessionRevoked { reason, .. }) => {
+                Some((reason.clone(), stored.actor))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reasons.len(), 2, "{reasons:?}");
+    assert!(reasons.iter().all(|(reason, actor)| *reason
+        == sourceorigin_common::events::RevocationReason::SignOutLink
+        && *actor
+            == Actor::User {
+                user_id: alice.user_id,
+                session_id: None
+            }));
+    assert!(
+        !service
+            .sign_out_everywhere(id, context)
+            .await
+            .expect("again"),
+        "it works once"
+    );
+    harness.enable(&alice).await;
+    let stale = harness
+        .database
+        .notifications()
+        .list(alice.user_id, None, 1)
+        .await
+        .expect("inbox")[0]
+        .id;
+    sqlx_age(&harness.database, stale).await;
+    assert!(
+        !service
+            .sign_out_everywhere(stale, context)
+            .await
+            .expect("stale"),
+        "not after 7 days"
+    );
+    assert!(
+        !service
+            .sign_out_everywhere(NotificationId::new(), context)
+            .await
+            .expect("unknown"),
+        "nor for a notification that does not exist"
+    );
+}
+
+/// Ages the notification `id` past the sign-out link's lifetime.
+async fn sqlx_age(database: &Database, id: NotificationId) {
+    let mut tx = database.begin().await.expect("transaction");
+    tx.notifications()
+        .backdate(
+            id,
+            Utc::now() - SIGN_OUT_LINK_LIFETIME - chrono::Duration::minutes(1),
+        )
+        .await
+        .expect("backdate");
+    tx.commit().await.expect("commit");
+}
+
+/// Support ending every session of an account tells its owner once, and not at
+/// all when it ends them as part of a change that tells them already.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn support_signing_an_account_out_tells_its_owner_once() {
+    let harness = Harness::new().await;
+    let alice = Browser::new_account(&harness.database).await;
+    Browser::sign_in(&harness.database, alice.user_id).await;
+    let context = EventContext {
+        actor: Actor::Cli {
+            os_user: "root".to_owned(),
+            host: "host".to_owned(),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let revoke = async |tell_first: bool| {
+        let mut tx = harness.database.begin().await.expect("transaction");
+        if tell_first {
+            tx.record(
+                &context,
+                Some(alice.user_id),
+                DomainEvent::AccountEnabled {},
+            )
+            .await
+            .expect("record");
+        }
+        tx.revoke_sessions(
+            &context,
+            alice.user_id,
+            sourceorigin_repository::SessionScope::All,
+            &sourceorigin_common::events::RevocationReason::Admin,
+        )
+        .await
+        .expect("revoke");
+        tx.commit().await.expect("commit");
+    };
+    revoke(false).await;
+    Browser::sign_in(&harness.database, alice.user_id).await;
+    revoke(true).await;
+    let told: Vec<_> = harness
+        .database
+        .notifications()
+        .list(alice.user_id, None, 50)
+        .await
+        .expect("inbox")
+        .into_iter()
+        .filter_map(|stored| stored.notification)
+        .collect();
+    assert_eq!(
+        told,
+        [
+            Notification::AccountEnabled,
+            Notification::SignedOutBySupport
+        ]
+    );
+}
+
+/// Each use of the sign-out link is in the owner's history, by the notification
+/// whose email carried it, even with no session left to end.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn every_use_of_the_sign_out_link_is_in_the_history() {
+    let harness = Harness::new().await;
+    let alice = Browser::new_account(&harness.database).await;
+    let service = AccountService::new(harness.database.clone());
+    let latest = async || {
+        harness.enable(&alice).await;
+        let mut notifications = harness.database.notifications();
+        notifications
+            .list(alice.user_id, None, 1)
+            .await
+            .expect("inbox")[0]
+            .id
+    };
+    let uses = async || -> Vec<NotificationId> {
+        let mut events = harness.database.events();
+        let history = events.history_for_user(alice.user_id, 50).await;
+        history
+            .expect("history")
+            .into_iter()
+            .filter_map(|stored| match stored.event.known() {
+                Some(DomainEvent::SignedOutEverywhere { notification_id }) => {
+                    Some(*notification_id)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let context = crate::security::RequestContext::TEST;
+    let first = latest().await;
+    assert!(
+        service
+            .sign_out_everywhere(first, context)
+            .await
+            .expect("first")
+    );
+    // Every session already ended: its use still shows.
+    let second = latest().await;
+    assert!(
+        service
+            .sign_out_everywhere(second, context)
+            .await
+            .expect("second")
+    );
+    assert_eq!(uses().await, [second, first], "newest first");
 }

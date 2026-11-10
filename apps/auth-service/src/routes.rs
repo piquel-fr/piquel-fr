@@ -136,6 +136,8 @@ pub(crate) mod notifications {
 pub(crate) mod sessions {
     /// Lists the account's active sessions, most recently active first.
     pub(crate) const LIST: &str = "/account/sessions";
+    /// The browsers the account knows.
+    pub(crate) const DEVICES: &str = "/account/devices";
     /// Signs one other session out.
     pub(crate) const ITEM: &str = "/account/sessions/{id}";
     /// Signs every other session out.
@@ -248,6 +250,9 @@ pub(crate) mod page {
     /// query names the account and its token. Mail clients post to it in one
     /// click (RFC 8058).
     pub(crate) const UNSUBSCRIBE: &str = "/unsubscribe";
+    /// Signs the account out everywhere, from the link of a security
+    /// notification's email, whose query names the notification and its token.
+    pub(crate) const SIGN_OUT: &str = "/sign-out-everywhere";
     /// Hands an administrator's passkey session off to the admin dashboard.
     pub(crate) const ADMIN: &str = "/admin";
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
@@ -305,7 +310,7 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 25] = [
+    pub(crate) const ALL: [&str; 26] = [
         LOGIN,
         REGISTER,
         CONSENT,
@@ -331,6 +336,7 @@ pub(crate) mod page {
         RECOVER,
         RECOVER_UNDO,
         UNSUBSCRIBE,
+        SIGN_OUT,
     ];
 }
 

@@ -7,7 +7,7 @@ use crate::{
     account::{AccountError, AccountService, Owner, Viewer},
     history::HistoryItem,
     routes,
-    security::ApiError,
+    security::{ApiError, RequestContext, Session},
 };
 use axum::{
     Json, Router,
@@ -19,19 +19,23 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EventId, NotificationId,
+    events::{Actor, DomainEvent, RevocationReason},
     notifications::{Notification, NotificationPreference},
 };
 use sourceorigin_repository::{Database, StoredNotification};
 
 /// Notification failures and their response mapping.
 mod error;
-/// Email preferences and unsubscribe links.
+/// The links of notifications' emails that work without signing in.
+mod links;
+/// Email preferences.
 mod preferences;
 pub(crate) use error::NotificationError;
-pub(crate) use preferences::{Unsubscribe, UnsubscribeLinks};
+pub(crate) use links::{Link, LinkTarget, Links, SignOutLinks, UnsubscribeLinks};
 
 /// Notifications per page.
 const PAGE_SIZE: u16 = 50;
+pub(crate) use sourceorigin_common::notifications::SIGN_OUT_LINK_LIFETIME;
 
 /// The owner's routes that change their inbox's read state and email
 /// preferences, and count what is unread.
@@ -204,6 +208,74 @@ impl AccountService {
     pub(crate) async fn unread_notifications(&self, viewer: &Viewer) -> Result<u64, AccountError> {
         viewer.authorize(&self.database).await?;
         Ok(self.database.notifications().unread(viewer.user()).await?)
+    }
+}
+
+/// The "sign me out everywhere" link of security notifications' emails.
+impl AccountService {
+    /// Whether the sign-out link of notification `id`'s email still works,
+    /// which the page asking to use it reads first: unused, within
+    /// [`SIGN_OUT_LINK_LIFETIME`]. Reads only.
+    pub(crate) async fn sign_out_link_works(
+        &self,
+        id: NotificationId,
+    ) -> Result<bool, AccountError> {
+        let issued_after = Utc::now() - SIGN_OUT_LINK_LIFETIME;
+        Ok(self
+            .database
+            .notifications()
+            .sign_out_link_works(id, issued_after)
+            .await?)
+    }
+
+    /// Signs the account whose notification `id` is out everywhere, from the link
+    /// the notification's email carried, opened from `request`: as the owner,
+    /// without a session, for an owner whose session was stolen while their
+    /// passkey is out of reach. It ends every session and refresh grant, never a
+    /// credential, so the worst a leaked link can do is sign the owner out. The
+    /// link works once, within [`SIGN_OUT_LINK_LIFETIME`], and each use is
+    /// recorded as [`DomainEvent::SignedOutEverywhere`]; returns whether it still
+    /// did.
+    pub(crate) async fn sign_out_everywhere(
+        &self,
+        id: NotificationId,
+        request: RequestContext,
+    ) -> Result<bool, AccountError> {
+        let mut tx = self.database.begin().await?;
+        let Some(user) = tx.notifications().owner(id).await? else {
+            return Ok(false);
+        };
+        // The account first, as every change to its sessions locks it, then the
+        // link, which a concurrent use already used, or a purge deleted.
+        if tx.users().find_by_id_for_update(user).await?.is_none() {
+            return Ok(false);
+        }
+        let issued_after = Utc::now() - SIGN_OUT_LINK_LIFETIME;
+        if tx
+            .notifications()
+            .use_sign_out_link(id, issued_after)
+            .await?
+            .is_none()
+        {
+            return Ok(false);
+        }
+        let context = request.actor(Actor::User {
+            user_id: user,
+            session_id: None,
+        });
+        // Recorded even when no session was left, so the owner's history shows
+        // every use of the link, from where it was used.
+        tx.record(
+            &context,
+            Some(user),
+            DomainEvent::SignedOutEverywhere {
+                notification_id: id,
+            },
+        )
+        .await?;
+        Session::end_all(&mut tx, &context, user, RevocationReason::SignOutLink).await?;
+        tx.commit().await?;
+        Ok(true)
     }
 }
 

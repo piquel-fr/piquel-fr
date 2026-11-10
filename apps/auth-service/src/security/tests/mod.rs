@@ -31,6 +31,7 @@ use std::{
 use tower::ServiceExt;
 
 mod caching;
+mod devices;
 mod forwarding;
 mod origins;
 mod rate_limits;

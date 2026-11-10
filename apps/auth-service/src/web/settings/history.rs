@@ -2,6 +2,7 @@
 
 use crate::{
     account::{AccountError, Owner},
+    notifications::NotificationError,
     routes::page::settings,
     web::{
         Failure, WebApplication,
@@ -33,7 +34,11 @@ impl AccountPage for History {
     type Change = HistoryChange;
     type Row = HistoryState;
 
-    fn reopened(&HistoryChange::Report { event_id, before }: &HistoryChange) -> HistoryState {
+    fn reopened(
+        &HistoryChange::Report {
+            event_id, before, ..
+        }: &HistoryChange,
+    ) -> HistoryState {
         HistoryState {
             before,
             reporting: Some(event_id),
@@ -41,14 +46,31 @@ impl AccountPage for History {
         }
     }
 
-    /// A report goes on to what is left to undo, on the page it was made on.
+    /// A report goes on to what is left to undo, on the page it was made on. One
+    /// a notification asked for marks it read once made.
     async fn apply(
         web: &WebApplication,
         _: &Cx,
         owner: Owner,
-        HistoryChange::Report { event_id, before }: HistoryChange,
+        HistoryChange::Report {
+            event_id,
+            before,
+            notification,
+        }: HistoryChange,
     ) -> Result<Applied<HistoryState>, AccountError> {
         web.account.report(&owner, event_id).await?;
+        // The report went through; a notification gone since, or never the
+        // owner's, has nothing left to mark.
+        if let Some(notification) = notification {
+            match web
+                .account
+                .mark_notification(&owner, notification, true)
+                .await
+            {
+                Ok(()) | Err(AccountError::Notification(NotificationError::NotFound)) => {}
+                Err(error) => return Err(error),
+            }
+        }
         Ok(Applied::Opened(HistoryState {
             before,
             reporting: None,

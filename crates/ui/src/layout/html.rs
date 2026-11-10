@@ -43,6 +43,8 @@ pub enum Title {
     Preferences,
     /// Turning announcements' email off from an email's link.
     Unsubscribe,
+    /// Signing out everywhere from a security notification's email.
+    SignOut,
 }
 
 impl Title {
@@ -66,6 +68,7 @@ impl Title {
             Self::Restore => "Restore your account",
             Self::Preferences => "Preferences",
             Self::Unsubscribe => "Announcement emails",
+            Self::SignOut => "Sign out everywhere",
         }
     }
 }

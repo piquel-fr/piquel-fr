@@ -138,7 +138,8 @@
   .topbar .right {
     display: contents;
   }
-  .topbar .me {
+  /* The shortcuts and the avatar stay together, at the right of the crumb. */
+  .topbar .links {
     margin-left: auto;
   }
   .topbar .search {

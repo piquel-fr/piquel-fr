@@ -130,13 +130,14 @@ It holds every record auth keeps about the account, and no secret, digest or key
 material: passkeys show their label, dates and backup state only. Only the owner
 may download it, never an administrator, since it carries every IP address and
 every event about the account out of auth. Like every response, it is never
-cached. Version 4 holds:
+cached. Version 5 holds:
 
 - the profile, picture, handles, administrator rights, email addresses,
   consents and refresh grants;
 - passkeys, linked identities and sessions, ended ones included until cleanup
   deletes them, each session with its IP addresses, the apps it signed in to and
   the admin dashboard sessions resting on it;
+- the browsers the account knows ([known devices](sessions.md#known-devices));
 - the apps the account registered, deleted ones as their tombstones, with their
   related origins;
 - its recoveries (dates, state and the passkey each enrolled, never a link);
@@ -184,6 +185,7 @@ five minutes (`MaintenanceRepository::purge_expired_auth_state`):
 | Revoked passkeys, unlinked identities | 90 days after they end |
 | Recoveries | 90 days after they are undone or settle, or their unused link is cancelled or expires, whichever comes first |
 | Ended sessions, with their IP addresses | a day after they end, or once no refresh grant or code needs them: about 31 days at most |
+| Known devices, with their browser and platform | 400 days after they were last seen |
 | Notifications | a year after they arrive |
 | Who received an announcement | a year after it is sent; one to chosen accounts goes with its last recipient |
 | A purged account's handles | a year after the purge |

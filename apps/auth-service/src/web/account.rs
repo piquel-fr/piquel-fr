@@ -413,8 +413,9 @@ impl WebApplication {
 
     /// Answers with the account page `framed`, at the status and with the messages
     /// of `outcome`, in the account's shell: the sidebar of its sections, then
-    /// what the account's recovery that can still be undone asks, if any. Its
-    /// forms may redirect to `targets`.
+    /// what the account's recovery that can still be undone asks, if any. The top
+    /// bar's bell counts the unread notifications. Its forms may redirect to
+    /// `targets`.
     pub(super) async fn account_page(
         &self,
         cx: &Cx,

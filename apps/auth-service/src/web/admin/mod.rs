@@ -59,7 +59,7 @@ mod users;
 
 use crate::{
     AdminError, AdminService, AuthConfig, KeyStore, MAX_DASHBOARD_BODY_BYTES, Reason,
-    account::{AccountError, AccountService},
+    account::{AccountError, AccountService, Viewer},
     admin::{AdminOperation, DashboardSignIn, Overview, Problem, SignedInAdmin},
     assets::EmbeddedAssets,
     config::{DashboardConfig, PolicyLinks},
@@ -78,7 +78,7 @@ use sourceorigin_repository::Database;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{
     Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search,
-    Target, Who,
+    Shortcut, ShortcutKind, Target, Who,
 };
 use std::{
     future::Future,
@@ -115,8 +115,9 @@ const ATTENTION_FOR: StdDuration = StdDuration::from_secs(60);
 pub(super) struct Attention {
     /// How many things need attention: each open alert, and each other problem.
     count: u32,
-    /// Whether alerts are open, which marks the Alerts tab.
-    alerts: bool,
+    /// How many alerts are open, which mark the Alerts tab and its top bar
+    /// shortcut counts.
+    alerts: u64,
     /// Whether the overview found another problem, which marks its own tab.
     overview: bool,
 }
@@ -134,7 +135,7 @@ impl Attention {
             .saturating_add(u32::try_from(others).unwrap_or(u32::MAX));
         Self {
             count,
-            alerts: overview.open_alerts > 0,
+            alerts: overview.open_alerts,
             overview: others > 0,
         }
     }
@@ -147,11 +148,36 @@ impl Attention {
         }
     }
 
+    /// The top bar's shortcuts, to the Alerts tab of `tabs`, counting the open
+    /// alerts, and to the administrator's `inbox`, counting its `unread`
+    /// notifications.
+    fn shortcuts<'a>(
+        self,
+        tabs: &'a [(DashboardTab, &'a str)],
+        inbox: &'a str,
+        unread: u64,
+    ) -> Vec<Shortcut<'a>> {
+        let alerts = tabs
+            .iter()
+            .find(|(tab, _)| *tab == DashboardTab::Alerts)
+            .map(|(_, href)| Shortcut {
+                kind: ShortcutKind::Alerts,
+                href,
+                count: self.alerts,
+            });
+        let inbox = Shortcut {
+            kind: ShortcutKind::Inbox,
+            href: inbox,
+            count: unread,
+        };
+        alerts.into_iter().chain([inbox]).collect()
+    }
+
     /// The tabs the sidebar marks.
     fn tabs(self) -> Vec<DashboardTab> {
         [
             (self.overview, DashboardTab::Overview),
-            (self.alerts, DashboardTab::Alerts),
+            (self.alerts > 0, DashboardTab::Alerts),
         ]
         .into_iter()
         .filter_map(|(marked, tab)| marked.then_some(tab))
@@ -209,6 +235,8 @@ pub(crate) struct AdminApplication {
     /// Auth's origin: invitations link its registration page, and the dashboard
     /// links the account's settings and signing out of Origin Auth.
     auth: Origin,
+    /// The administrator's inbox, on auth, which the top bar's bell links.
+    inbox: String,
     /// Whether signup needs an invitation, so the dashboard manages them.
     invitations: bool,
     /// Derives the links recoveries mail.
@@ -325,6 +353,7 @@ impl AdminApplication {
             keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             passkeys,
+            inbox: auth.join(routes::page::settings::NOTIFICATIONS),
             auth,
             invitations: config.passkey.invite_required,
             links: config.email.recovery_links.clone(),
@@ -777,6 +806,30 @@ impl AdminApplication {
         }
     }
 
+    /// The top bar's shortcuts, among `tabs`, for the signed-in `admin`: none
+    /// for a browser that is not signed in. The bell counts their own
+    /// unread notifications, read as the owner; like the status bar, it never
+    /// costs the page, so a failed read is logged and counts none.
+    async fn shortcuts<'a>(
+        cx: &'a Cx,
+        admin: Option<&SignedInAdmin>,
+        tabs: &'a [(DashboardTab, &'a str)],
+        attention: Attention,
+    ) -> Vec<Shortcut<'a>> {
+        let app = Self::of(cx);
+        let Some(admin) = admin else {
+            return Vec::new();
+        };
+        let unread = match app.account.unread_notifications(&Viewer::from(admin)).await {
+            Ok(unread) => unread,
+            Err(error) => {
+                tracing::warn!(error = %ErrorChain(&error), "counting the unread notifications failed");
+                0
+            }
+        };
+        attention.shortcuts(tabs, &app.inbox, unread)
+    }
+
     /// The cache of what every page shows.
     fn attention_cache(cx: &Cx) -> MutexGuard<'_, AttentionCache> {
         Self::of(cx)
@@ -959,7 +1012,6 @@ impl AdminApplication {
         // The avatar leads to the administrator's own settings, on auth.
         let me = app.auth.join(routes::page::settings::HOME);
         let attention = Self::attention(cx).await;
-        let marked = attention.tabs();
         let environment = app.auth.host();
         let dashboard = Dashboard {
             title,
@@ -974,7 +1026,7 @@ impl AdminApplication {
             preferences_action: prefer,
             here,
             health: Some(attention.health()),
-            attention: &marked,
+            attention: &attention.tabs(),
             environment,
             policies: app.policies.links(),
             search: Search {
@@ -983,6 +1035,7 @@ impl AdminApplication {
                 placeholder: "Search by handle, name, email or ID",
                 value: &searched,
             },
+            shortcuts: &Self::shortcuts(cx, admin, links, attention).await,
             reference: HttpTelemetry::trace_id(status),
             confirmation: admin.map(|admin| DashboardConfirmation {
                 start,

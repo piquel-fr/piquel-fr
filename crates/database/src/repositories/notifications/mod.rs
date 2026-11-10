@@ -290,6 +290,98 @@ impl NotificationRepository<'_> {
         Ok(true)
     }
 
+    /// The account whose notification `id` is, if it exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn owner(&mut self, id: NotificationId) -> Result<Option<UserId>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"SELECT user_id AS "user_id: UserId" FROM notifications WHERE id = $1"#,
+                id.as_uuid(),
+            )
+        )
+    }
+
+    /// Uses the "sign me out everywhere" link of notification `id`'s email, once:
+    /// marks it used and returns its account, unless it was used already or the
+    /// notification was written before `issued_after`, when its link expired.
+    /// Run it in the transaction that signs the account out, holding the
+    /// account's lock, so a failure leaves the link unused.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn use_sign_out_link(
+        &mut self,
+        id: NotificationId,
+        issued_after: DateTime<Utc>,
+    ) -> Result<Option<UserId>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"UPDATE notifications SET signed_out_at = now()
+                WHERE id = $1 AND signed_out_at IS NULL AND created_at > $2
+                RETURNING user_id AS "user_id: UserId""#,
+                id.as_uuid(),
+                issued_after,
+            )
+        )
+    }
+
+    /// Whether the "sign me out everywhere" link of notification `id`'s email
+    /// still works: unused, and the notification written after `issued_after`.
+    /// Reads only, for the page that asks before using it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn sign_out_link_works(
+        &mut self,
+        id: NotificationId,
+        issued_after: DateTime<Utc>,
+    ) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                    SELECT FROM notifications
+                    WHERE id = $1 AND signed_out_at IS NULL AND created_at > $2
+                ) AS "works!""#,
+                id.as_uuid(),
+                issued_after,
+            )
+        )
+    }
+
+    /// Moves notification `id` back to `created_at`, for tests of what expires.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn backdate(
+        &mut self,
+        id: NotificationId,
+        created_at: DateTime<Utc>,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE notifications SET created_at = $2 WHERE id = $1",
+                id.as_uuid(),
+                created_at,
+            )
+        )?;
+        Ok(())
+    }
+
     /// Marks every unread notification of `user_id`'s read.
     ///
     /// # Errors

@@ -89,8 +89,8 @@ pub use developers::{
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{
     AccountNav, Crumb, Health, Pager, PasskeySignal, Policies, PreferenceChange, Preferences,
-    SOURCE, Search, Section, Sidebar, Theme, Title, Who, account, auth_shell, document, signed_out,
-    site_shell,
+    SOURCE, Search, Section, Shortcut, ShortcutKind, Sidebar, Theme, Title, Who, account,
+    auth_shell, document, signed_out, site_shell,
 };
 pub use login::{
     CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
@@ -106,7 +106,8 @@ pub use settings::{
     EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, InboxChange,
     InboxPage, InboxRow, InboxState, NotificationPage, NotificationState, OverviewLinks,
     PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
-    ProviderRow, SignInChange, SignInState, Tab, UnsubscribeStep, account_data, account_deleted,
-    account_overview, addresses, connected_apps, devices, history, inbox, notification,
-    profile_settings, sign_in_methods, unsubscribe, verified, verify,
+    ProviderRow, SignInChange, SignInState, SignOutStep, Tab, UnsubscribeStep, account_data,
+    account_deleted, account_overview, addresses, connected_apps, devices, history, inbox,
+    known_devices, notification, profile_settings, sign_in_methods, sign_out_everywhere,
+    unsubscribe, verified, verify,
 };

@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     NotificationId,
-    notifications::{EmailCategory, NotificationPreference},
+    notifications::{EmailCategory, NotificationPreference, SIGN_OUT_LINK_LIFETIME},
 };
 use topcoat::{
     Result,
@@ -336,6 +336,61 @@ pub(crate) async fn unread_hint(unread: u64, page: &str) -> Result<impl View> {
     })
 }
 
+/// What the page of a security notification's "sign me out everywhere" link
+/// shows.
+#[derive(Clone, Copy, Debug)]
+pub enum SignOutStep<'a> {
+    /// Asks to sign out everywhere, posting to `action`, the link itself.
+    Confirm {
+        /// The link.
+        action: &'a str,
+    },
+    /// Every device and app was signed out; signing in again goes on to the
+    /// security history at `history`.
+    Done {
+        /// The security history.
+        history: &'a str,
+    },
+    /// The link is not one Origin Auth made, or not whole, was used already, or
+    /// expired.
+    Invalid,
+}
+
+/// The page a security notification's email links to sign the account out
+/// everywhere, without signing in, at `step`.
+#[component]
+pub async fn sign_out_everywhere(step: SignOutStep<'_>) -> Result<impl View> {
+    Ok(view! {
+        match step {
+            SignOutStep::Confirm { action } => {
+                <h1>"Sign out everywhere?"</h1>
+                <p class="lead">
+                    "This signs your Origin Account out of every device, and every app you use with it must sign in again. Your passkeys and social sign-ins keep working, so you can sign back in. Anyone else signed in to your account loses access."
+                </p>
+                <form method="post" action=(action) data-submit-once="true">
+                    <button type="submit" class="danger">"Sign out everywhere"</button>
+                </form>
+            }
+            SignOutStep::Done { history } => {
+                <h1>"You’re signed out everywhere"</h1>
+                <p class="lead">
+                    "Every device and app was signed out of your Origin Account. Sign in again with your passkey, then check your security history for anything you don’t recognize."
+                </p>
+                <a class="button" href=(history)>"Sign in and review your history"</a>
+            }
+            SignOutStep::Invalid => {
+                <h1>"This link doesn’t work"</h1>
+                <p class="lead">
+                    (format!(
+                        "Each link signs you out once, within {} days of its email. Sign in to sign your other devices out from your settings, or use the link of a newer email.",
+                        SIGN_OUT_LINK_LIFETIME.num_days()
+                    ))
+                </p>
+            }
+        }
+    })
+}
+
 /// What a notification's page shows besides the notification.
 #[derive(Clone, Copy, Debug)]
 pub struct NotificationPage<'a> {
@@ -393,7 +448,7 @@ pub async fn notification<'a>(row: InboxRow<'a>, page: NotificationPage<'a>) -> 
                                 <small class="wrap">(by)</small>
                             }
                             if let Some(entry) = reportable.filter(|_| page.shown.reporting) {
-                                report_form(row: entry, action: page.history, before: None, cancel: page.here)
+                                report_form(row: entry, action: page.history, before: None, notification: Some(row.id), cancel: page.here)
                             }
                         </div>
                         if reportable.is_some() && !page.shown.reporting {

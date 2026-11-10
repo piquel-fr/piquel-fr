@@ -281,8 +281,8 @@ async fn links_verify_once_and_the_primary_address_moves() {
         .filter(|delivery| delivery.destination.ends_with(&format!("address {first}")))
         .count();
     assert_eq!(
-        to_first, 3,
-        "its link, then notices of its replacement and removal"
+        to_first, 4,
+        "its link, then alerts of the second address, its replacement and its removal"
     );
     let (status, _) = harness.remove(&account, second).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
