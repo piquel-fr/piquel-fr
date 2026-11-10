@@ -13,8 +13,8 @@ The code on this page comes from the SDK's example,
 2. Add the page that finishes sign-in as a redirect URI, such as
    `https://<your app>/callback`. Pages on its origin may then call auth's token
    endpoints from the browser.
-3. To keep users signed in for longer than an access token's five minutes, tick
-   the `offline_access` scope and **Allow refresh tokens**, and request
+3. To keep users signed in for longer than an access token's five minutes, turn
+   on the `offline_access` scope and **Allow refresh tokens**, and request
    `offline_access` when signing in.
 4. Add `@sourceorigin/auth` to your app. It is not on npm yet: build it from a checkout
    of the repository, then install it from there.

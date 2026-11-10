@@ -464,9 +464,12 @@ async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
     })
 }
 
-/// A checkbox sending `name`, or with a `value`, a radio button of the group
-/// `name` choosing it, `checked` or not, which takes the focus if `autofocus`:
-/// its `label` beside it, then its `detail` below, which describes it.
+/// A switch sending `name` when on, or with a `value`, a radio button of the
+/// group `name` choosing it, `checked` or not, which takes the focus if
+/// `autofocus`: its `label` beside it, then its `detail` below, which describes
+/// it. The switch is a checkbox with the `switch` role, which the stylesheet
+/// draws as a sliding toggle at the right end of a boxed row; switches inside a
+/// `choices` element share one box.
 #[component]
 pub(crate) async fn choice<'a>(
     name: &'a str,
@@ -482,6 +485,7 @@ pub(crate) async fn choice<'a>(
         <div class="choice">
             <input
                 type=(if value.is_some() { "radio" } else { "checkbox" })
+                role=(value.is_none().then_some("switch"))
                 id=(input.id.as_str())
                 name=(name)
                 value=(value)
@@ -525,22 +529,24 @@ async fn kind_question(chosen: ClientKind) -> Result<impl View> {
     })
 }
 
-/// A checkbox for each standard scope, those of `chosen` checked, and why the
+/// A switch for each standard scope, those of `chosen` checked, and why the
 /// service refused them, as `scopes` says, if it did.
 #[component]
 async fn scope_choices<'a>(chosen: ScopeChoice, scopes: &'a Described<'a>) -> Result<impl View> {
     Ok(view! {
         <fieldset aria-describedby=(scopes.refused().then(|| scopes.error()))>
             <legend>"Scopes"</legend>
-            for scope in Scope::ALL {
-                choice(
-                    name: scope.as_str(),
-                    checked: chosen.has(scope),
-                    autofocus: scopes.refused() && scope == Scope::ALL[0],
-                    label: view! { <code>(scope.as_str())</code> },
-                    detail: view! { (scope_description(scope)) },
-                )
-            }
+            <div class="choices">
+                for scope in Scope::ALL {
+                    choice(
+                        name: scope.as_str(),
+                        checked: chosen.has(scope),
+                        autofocus: scopes.refused() && scope == Scope::ALL[0],
+                        label: view! { <code>(scope.as_str())</code> },
+                        detail: view! { (scope_description(scope)) },
+                    )
+                }
+            </div>
         </fieldset>
         refusal(of: scopes)
     })
@@ -633,22 +639,24 @@ pub(crate) async fn client_form<'a>(
                 help(of: &logouts, "Optional, one per line: pages users may return to after signing out.")
                 refusal(of: &logouts)
                 scope_choices(chosen: draft.scopes, scopes: &scopes)
-                choice(
-                    name: "allow_refresh",
-                    checked: draft.allow_refresh.0,
-                    label: view! { "Allow refresh tokens" },
-                    detail: view! {
-                        "When your app requests " <code>"offline_access"</code> ", it can stay signed in without sending users back to Origin Auth."
-                    },
-                )
-                choice(
-                    name: "require_pushed_authorization_requests",
-                    checked: draft.require_pushed_authorization_requests.0,
-                    label: view! { "Require pushed authorization requests" },
-                    detail: view! {
-                        "Your app must post its sign-in requests to " <code>"/oauth/par"</code> " (RFC 9126), so none of their parameters travel through the browser."
-                    },
-                )
+                <div class="choices">
+                    choice(
+                        name: "allow_refresh",
+                        checked: draft.allow_refresh.0,
+                        label: view! { "Allow refresh tokens" },
+                        detail: view! {
+                            "When your app requests " <code>"offline_access"</code> ", it can stay signed in without sending users back to Origin Auth."
+                        },
+                    )
+                    choice(
+                        name: "require_pushed_authorization_requests",
+                        checked: draft.require_pushed_authorization_requests.0,
+                        label: view! { "Require pushed authorization requests" },
+                        detail: view! {
+                            "Your app must post its sign-in requests to " <code>"/oauth/par"</code> " (RFC 9126), so none of their parameters travel through the browser."
+                        },
+                    )
+                </div>
                 backchannel_input(uri: &draft.backchannel_logout_uri, of: &backchannel)
                 (child)
             )

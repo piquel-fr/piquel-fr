@@ -310,7 +310,7 @@ On the dashboard:
    accounts**: paste a list, one handle, verified email or account ID per line,
    or type into the search box and select **Find**, then **Add** beside each
    account. Finding and adding save nothing.
-3. Check **Essential** if every recipient must receive it by email.
+3. Turn on **Essential** if every recipient must receive it by email.
 4. Select **Save draft** to check the email first, or **Send** to send it now.
    Saving a draft needs no passkey; sending asks for one.
 

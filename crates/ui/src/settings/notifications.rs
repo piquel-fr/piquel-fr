@@ -3,7 +3,7 @@
 
 use super::{Audience, HistoryRow, Holdings, timeline::report_form};
 use crate::{
-    form::{Checkbox, Precision, Query, change_form, open, time},
+    form::{Checkbox, Precision, Query, change_form, open, switch, time},
     icons::{Icon, icon},
     layout::{announcement_text, dialog, page_head},
 };
@@ -232,14 +232,9 @@ async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
             <ul class="list">
                 for preference in page.preferences {
                     <li>
+                        let label = format!("Emails for {}", preference.category.label());
                         <div class="text">
                             <strong>(preference.category.label())</strong>
-                            " "
-                            if preference.email {
-                                <span class="badge ok">"Emailed"</span>
-                            } else {
-                                <span class="badge">"Not emailed"</span>
-                            }
                             <small>(preference.category.description())</small>
                         </div>
                         if owner {
@@ -249,14 +244,11 @@ async fn email_preferences<'a>(page: InboxPage<'a>) -> Result<impl View> {
                                     category: preference.category,
                                     email: Checkbox(!preference.email),
                                 },
-                                label: if preference.email { "Turn off" } else { "Turn on" },
-                                class: "secondary small",
-                                aria_label: format!(
-                                    "Turn {} emails for {}",
-                                    if preference.email { "off" } else { "on" },
-                                    preference.category.label(),
-                                ),
+                                label: label,
+                                on: Some(preference.email),
                             )
+                        } else {
+                            switch(on: preference.email, label: label.as_str(), disabled: true)
                         }
                     </li>
                 }
