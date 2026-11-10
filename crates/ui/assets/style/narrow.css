@@ -138,15 +138,9 @@
   .topbar .right {
     display: contents;
   }
-  .topbar .me {
+  /* The shortcuts and the avatar stay together, at the right of the crumb. */
+  .topbar .links {
     margin-left: auto;
-  }
-  /* The bell, when there is one, goes right first, and the avatar beside it. */
-  .topbar .shortcut {
-    margin-left: auto;
-  }
-  .topbar .shortcut + .me {
-    margin-left: 0;
   }
   .topbar .search {
     order: 10;

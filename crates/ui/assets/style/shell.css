@@ -337,35 +337,70 @@ body.admin .main::before {
   width: min(320px, 40vw);
   flex-wrap: nowrap;
 }
+/* The shortcuts and the avatar, one group at the bar's end. */
+.topbar .links {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
 .topbar .me {
   display: inline-flex;
+  margin-left: 0.45rem;
   border-radius: 50%;
+  text-decoration: none;
 }
-/* The inbox's bell, with the unread count over its corner. */
+/* The ring of an administrator's avatar stays inside the focus ring. */
+.topbar .me:has(.avatar.admin):focus-visible {
+  outline-offset: 5px;
+}
+/* A shortcut: an icon the height of the search box, with its count at the
+   icon's corner. The count is in the flow, so a long one widens the shortcut
+   and never runs over its neighbour. */
 .topbar .shortcut {
-  position: relative;
+  --under: var(--surface);
   display: inline-flex;
-  padding: 0.3rem;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
   border-radius: 6px;
   color: var(--muted);
+  text-decoration: none;
 }
 .topbar .shortcut:hover {
+  --under: var(--surface-2);
   color: var(--fg);
   background: var(--surface-2);
 }
+/* The focus ring stays inside the shortcut, clear of the one beside it. */
+.topbar .shortcut:focus-visible {
+  outline-offset: -2px;
+}
 .topbar .shortcut .count {
-  position: absolute;
-  top: -0.2rem;
-  right: -0.35rem;
-  min-width: 1.1rem;
+  align-self: flex-start;
+  min-width: 1rem;
+  margin: 1px -5px 0 -3px;
   padding: 0 0.25rem;
   border: 0;
   border-radius: 999px;
+  /* A ring of the bar's own colour, between the count and the icon under it. */
+  box-shadow: 0 0 0 2px var(--under);
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 0.68rem;
-  line-height: 1.1rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  line-height: 1rem;
   text-align: center;
+}
+/* Open alerts are a warning, down to the icon; unread notifications are new. */
+.topbar .shortcut.alerts:has(.count) {
+  color: var(--warning);
+}
+.topbar .shortcut.alerts .count {
+  background: var(--warning);
+  color: var(--surface);
 }
 .topbar .me:hover .avatar {
   filter: brightness(1.12);

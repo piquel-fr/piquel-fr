@@ -180,7 +180,7 @@ impl ShortcutKind {
     }
 }
 
-/// An icon link of the top bar, before the avatar, with a count over its corner
+/// An icon link of the top bar, before the avatar, with a count at its corner
 /// once there is something to count: the inbox's bell, on the account's pages
 /// and the dashboard, and the dashboard's alerts.
 #[derive(Clone, Copy, Debug)]
@@ -385,24 +385,27 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
                         </label>
                     </form>
                 }
-                for shortcut in frame.shortcuts {
-                    <a
-                        class=(shortcut.kind.class())
-                        href=(shortcut.href)
-                        title=(shortcut.kind.label())
-                        aria-label=(shortcut.aria_label())
-                    >
-                        icon(kind: shortcut.kind.icon())
-                        if shortcut.count > 0 {
-                            <span class="count" aria-hidden="true">(shortcut.count.to_string())</span>
-                        }
-                    </a>
-                }
-                if let Some(who) = frame.who {
-                    <a class="me" href=(frame.me.unwrap_or(frame.home)) title="Your account" aria-label="Your account">
-                        avatar(who: who)
-                    </a>
-                }
+                // One group, so phones keep the shortcuts and the avatar together.
+                <div class="links">
+                    for shortcut in frame.shortcuts {
+                        <a
+                            class=(shortcut.kind.class())
+                            href=(shortcut.href)
+                            title=(shortcut.kind.label())
+                            aria-label=(shortcut.aria_label())
+                        >
+                            icon(kind: shortcut.kind.icon())
+                            if shortcut.count > 0 {
+                                <span class="count" aria-hidden="true">(shortcut.count.to_string())</span>
+                            }
+                        </a>
+                    }
+                    if let Some(who) = frame.who {
+                        <a class="me" href=(frame.me.unwrap_or(frame.home)) title="Your account" aria-label="Your account">
+                            avatar(who: who)
+                        </a>
+                    }
+                </div>
             </div>
         </header>
     })
