@@ -281,24 +281,21 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
 
     // Every column with a foreign key to users(id), and how many rows hold the account.
     // Only this schema's: audit tests migrate schemas of their own beside it.
+    // Read from the catalog: joining information_schema's views for the same
+    // rows takes a minute against a migrated test database.
     let references = || async {
         sqlx::query_as::<_, (String, String, i64)>(
             "SELECT
-            source.table_name::text, source.column_name::text,
+            c.conrelid::regclass::text, source.attname::text,
             (xpath('/row/c/text()', query_to_xml(format(
-                'SELECT count(*) AS c FROM %I.%I WHERE %I = %L',
-                source.table_schema, source.table_name, source.column_name, $1
+                'SELECT count(*) AS c FROM %s WHERE %I = %L',
+                c.conrelid::regclass, source.attname, $1
             ), FALSE, TRUE, '')))[1]::text::bigint
-        FROM information_schema.referential_constraints r
-        JOIN information_schema.key_column_usage source
-            ON source.constraint_name = r.constraint_name
-            AND source.constraint_schema = r.constraint_schema
-        JOIN information_schema.key_column_usage target
-            ON target.constraint_name = r.unique_constraint_name
-            AND target.constraint_schema = r.unique_constraint_schema
-            AND target.ordinal_position = source.position_in_unique_constraint
-        WHERE target.table_schema = current_schema()
-            AND target.table_name = 'users' AND target.column_name = 'id'",
+        FROM pg_constraint c
+        CROSS JOIN unnest(c.conkey, c.confkey) AS k(source_key, target_key)
+        JOIN pg_attribute source ON source.attrelid = c.conrelid AND source.attnum = k.source_key
+        JOIN pg_attribute target ON target.attrelid = c.confrelid AND target.attnum = k.target_key
+        WHERE c.contype = 'f' AND c.confrelid = 'users'::regclass AND target.attname = 'id'",
         )
         .bind(user.to_string())
         .fetch_all(&pool)
