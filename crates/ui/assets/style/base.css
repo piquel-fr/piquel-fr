@@ -419,7 +419,7 @@ legend {
   padding: 0;
   border: 1px solid transparent;
   border-radius: 999px;
-  background: var(--line);
+  background: var(--muted);
   cursor: pointer;
   transition: background-color 0.15s;
 }
@@ -443,7 +443,7 @@ legend {
 [role='switch'][aria-checked='true']::before {
   transform: translateX(18px);
 }
-[role='switch']:hover {
+[role='switch']:not(:disabled):hover {
   filter: brightness(1.08);
 }
 .search input,
