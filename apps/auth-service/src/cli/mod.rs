@@ -80,8 +80,9 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     operator: Option<OperatorName>,
     /// Print the result as JSON for scripts, and every message, prompt and
-    /// failure as one JSON object per line on standard error. A result has the
-    /// shape of the view the admin dashboard shows, where it has one.
+    /// failure as one JSON object per line on standard error, among the
+    /// service's log lines: read only the lines that start with `{`. A result
+    /// has the shape of the view the admin dashboard shows, where it has one.
     #[arg(long, global = true)]
     json: bool,
     /// Defaults to serving when no administrative command is supplied.

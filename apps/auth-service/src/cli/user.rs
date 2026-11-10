@@ -5,7 +5,9 @@ use super::{
     CliError, Confirm, Console,
     output::{Cell, Joined, Single, Style, Time, report},
 };
-use crate::{AdminError, AuthConfig, Reason, UserRef, recovery::Revoke};
+use crate::{
+    AdminError, AuthConfig, Reason, UserRef, deletion::GRACE_PERIOD_DAYS, recovery::Revoke,
+};
 use clap::Subcommand;
 use sourceorigin_common::{
     PasskeyId,
@@ -305,7 +307,7 @@ impl UserCommand {
             confirm.ask(out, &format!("Schedule the deletion of {user} ({id})"))?;
             service.schedule_deletion(operator, id, reason).await?;
             out.info(format_args!(
-                "Scheduled the deletion of {user}: it is purged in 30 days unless restored."
+                "Scheduled the deletion of {user}: it is purged in {GRACE_PERIOD_DAYS} days unless restored."
             ))
         }
     }

@@ -185,15 +185,14 @@ enum Event<'a> {
     },
 }
 
-/// The kind of a message on standard error, which labels it.
+/// The kind of a message on standard error, which labels it. A failure has its
+/// own, [`Output::error`].
 #[derive(Clone, Copy)]
 enum Role {
     /// What a command did, or how to go on.
     Info,
     /// Something surprising.
     Warning,
-    /// The command's failure.
-    Error,
 }
 
 impl Role {
@@ -202,7 +201,6 @@ impl Role {
         match self {
             Self::Info => "Info",
             Self::Warning => "Warning",
-            Self::Error => "Error",
         }
     }
 
@@ -211,7 +209,6 @@ impl Role {
         match self {
             Self::Info => Style::Label,
             Self::Warning => Style::Notice,
-            Self::Error => Style::Bad,
         }
     }
 }
@@ -281,7 +278,7 @@ impl Output {
         } else {
             lock(&self.0.stderr)
                 .human(|out| {
-                    out.label(Role::Error.label(), Role::Error.style(), error)?;
+                    out.label("Error", Style::Bad, error)?;
                     for cause in causes {
                         out.label("  Caused by", Style::Muted, cause)?;
                     }
@@ -320,10 +317,6 @@ impl Output {
             return self.event(&match role {
                 Role::Info => Event::Info { message },
                 Role::Warning => Event::Warning { message },
-                Role::Error => Event::Error {
-                    message,
-                    causes: Vec::new(),
-                },
             });
         }
         lock(&self.0.stderr)

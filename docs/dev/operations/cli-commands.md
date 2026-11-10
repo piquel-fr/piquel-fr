@@ -21,7 +21,7 @@ auth-service [OPTIONS] [COMMAND]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -51,7 +51,7 @@ auth-service serve [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service migrate`
 
@@ -64,7 +64,7 @@ auth-service migrate [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service keys`
 
@@ -77,7 +77,7 @@ auth-service keys [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -99,7 +99,7 @@ auth-service keys list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service keys rotate`
 
@@ -115,7 +115,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service keys revoke`
 
@@ -134,7 +134,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service keys digest-usage`
 
@@ -147,7 +147,7 @@ auth-service keys digest-usage [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service keys import`
 
@@ -166,7 +166,7 @@ Options:
 - `--id <ID>`: The key's ID, as tokens it signed name it. Default: `primary`.
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service keys audit`
 
@@ -179,7 +179,7 @@ auth-service keys audit [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user`
 
@@ -192,7 +192,7 @@ auth-service user [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -221,7 +221,7 @@ Options:
 
 - `--page <PAGE>`: The page to list, counting from 1.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user show`
 
@@ -238,7 +238,7 @@ Arguments:
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user disable`
 
@@ -257,7 +257,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user enable`
 
@@ -275,7 +275,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user recover`
 
@@ -298,7 +298,7 @@ Options:
 - `--keep <KEEP>`: With `--revoke`, a passkey the owner vouches for, which stays and can still undo the recovery. Repeatable.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user delete`
 
@@ -318,7 +318,7 @@ Options:
 - `--immediately`: Purge the account now, in any status, without a grace period. This cannot be undone.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user undo-recovery`
 
@@ -339,7 +339,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with each change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service user restore`
 
@@ -357,7 +357,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service session`
 
@@ -370,7 +370,7 @@ auth-service session [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -394,7 +394,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service session revoke-all`
 
@@ -413,7 +413,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service invite`
 
@@ -426,7 +426,7 @@ auth-service invite [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -447,7 +447,7 @@ Options:
 - `--expires-in <EXPIRES_IN>`: How long the link stays valid, e.g. 24h or 7d. Default: `7d`.
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service invite list`
 
@@ -460,7 +460,7 @@ auth-service invite list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service invite revoke`
 
@@ -478,7 +478,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client`
 
@@ -491,7 +491,7 @@ auth-service client [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -533,7 +533,7 @@ Options:
 - `--backchannel-logout-uri <BACKCHANNEL_LOGOUT_URI>`: Where auth posts a logout token when a session the client holds tokens from ends (OIDC Back-Channel Logout); HTTPS with a public address.
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client apply`
 
@@ -562,7 +562,7 @@ Options:
 - `--secret <REFERENCE>`: A confidential client's secret, at `file://PATH` or `env://NAME`: 32 random bytes in unpadded base64url, generated by its deployment. Never printed.
 - `--grace <GRACE>`: How long earlier secrets keep working once the secret changes, so the running deployment keeps signing in until it rolls out. Default: `1h`.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client list`
 
@@ -575,7 +575,7 @@ auth-service client list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client show`
 
@@ -592,7 +592,7 @@ Arguments:
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client update`
 
@@ -624,7 +624,7 @@ Options:
 - `--no-backchannel-logout-uri`: Stop posting logout tokens to the client.
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client disable`
 
@@ -643,7 +643,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client delete`
 
@@ -662,7 +662,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client enable`
 
@@ -680,7 +680,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client suspend`
 
@@ -699,7 +699,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client unsuspend`
 
@@ -717,7 +717,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client rotate-secret`
 
@@ -737,7 +737,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client origin`
 
@@ -750,7 +750,7 @@ auth-service client origin [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -775,7 +775,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client origin remove`
 
@@ -794,7 +794,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service client origin list`
 
@@ -807,7 +807,7 @@ auth-service client origin list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service audit`
 
@@ -820,7 +820,7 @@ auth-service audit [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -843,7 +843,7 @@ Options:
 - `--views`: List administrators' and operators' views of accounts too, which are left out unless `--kind account_viewed` asks for them.
 - `--page <PAGE>`: The page to list, counting from 1 at the newest events.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service audit verify`
 
@@ -857,7 +857,7 @@ Options:
 
 - `--key <KEY>`: A file of verifier keys, one per line, to use instead of the keys committed to the repository for `AUTH_PUBLIC_BASE_URL`'s host, e.g. a preview's, as `keys audit` prints it.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service audit prune`
 
@@ -874,7 +874,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service admin`
 
@@ -887,7 +887,7 @@ auth-service admin [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -913,7 +913,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service admin revoke`
 
@@ -932,7 +932,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service admin list`
 
@@ -945,7 +945,7 @@ auth-service admin list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service handle`
 
@@ -958,7 +958,7 @@ auth-service handle [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -981,7 +981,7 @@ auth-service handle check [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service handle rename`
 
@@ -1001,7 +1001,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change and shown to the owner in their history: 1 to 500 characters. Required.
 - `--allow-reserved`: Allow a reserved name, or one that looks like it.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service handle release`
 
@@ -1020,7 +1020,7 @@ Options:
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service handle released`
 
@@ -1033,7 +1033,7 @@ auth-service handle released [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service handle reserved`
 
@@ -1046,7 +1046,7 @@ auth-service handle reserved [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service handle reserve`
 
@@ -1064,7 +1064,7 @@ Options:
 
 - `--reason <REASON>`: Who or what it is kept for: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service handle unreserve`
 
@@ -1082,7 +1082,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service deliveries`
 
@@ -1095,7 +1095,7 @@ auth-service deliveries [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1117,7 +1117,7 @@ Options:
 - `--channel <CHANNEL>`: Only deliveries on this channel.
 - `--limit <LIMIT>`: The most deliveries to list. Default: `100`.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service deliveries retry`
 
@@ -1135,7 +1135,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service deliveries cancel`
 
@@ -1153,7 +1153,7 @@ Options:
 
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service announcement`
 
@@ -1166,7 +1166,7 @@ auth-service announcement [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1188,7 +1188,7 @@ auth-service announcement list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service announcement show`
 
@@ -1205,7 +1205,7 @@ Arguments:
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service announcement draft`
 
@@ -1223,7 +1223,7 @@ Options:
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
 - `--essential`: Email it to every recipient with a primary verified address, even those who turned announcements' email off: for a security incident, or a change to the privacy policy or terms. Without it, they only find it in their inbox.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service announcement edit`
 
@@ -1245,7 +1245,7 @@ Options:
 - `--to <TO>`: Send it to this account, by handle, ID or verified email. Repeat for up to 1,000 accounts.
 - `--essential`: Email it to every recipient with a primary verified address, even those who turned announcements' email off: for a security incident, or a change to the privacy policy or terms. Without it, they only find it in their inbox.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service announcement discard`
 
@@ -1262,7 +1262,7 @@ Arguments:
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service announcement send`
 
@@ -1281,7 +1281,7 @@ Options:
 - `--revision <REVISION>`: The revision `announcement show` printed, which is sent only if the draft has not changed since. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service alerts`
 
@@ -1294,7 +1294,7 @@ auth-service alerts [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1313,7 +1313,7 @@ Options:
 
 - `--previous`: List the alerts that cleared instead, the most recently cleared first, at most 100.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service alerts update`
 
@@ -1332,7 +1332,7 @@ Options:
 - `--status <STATUS>`: Where its handling stands: investigating, fixing or monitoring. Required.
 - `--note <NOTE>`: What to add, such as who is on it, recorded as the update's reason: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account`
 
@@ -1349,7 +1349,7 @@ Arguments:
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1375,7 +1375,7 @@ auth-service account <USER> name [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1397,7 +1397,7 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account passkeys`
 
@@ -1410,7 +1410,7 @@ auth-service account <USER> passkeys [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1429,7 +1429,7 @@ auth-service account <USER> passkeys list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account passkeys rename`
 
@@ -1448,7 +1448,7 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account passkeys revoke`
 
@@ -1467,7 +1467,7 @@ Options:
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account identities`
 
@@ -1480,7 +1480,7 @@ auth-service account <USER> identities [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1498,7 +1498,7 @@ auth-service account <USER> identities list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account identities unlink`
 
@@ -1517,7 +1517,7 @@ Options:
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account emails`
 
@@ -1530,7 +1530,7 @@ auth-service account <USER> emails [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1549,7 +1549,7 @@ auth-service account <USER> emails list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account emails primary`
 
@@ -1567,7 +1567,7 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account emails remove`
 
@@ -1585,7 +1585,7 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account sessions`
 
@@ -1598,7 +1598,7 @@ auth-service account <USER> sessions [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1618,7 +1618,7 @@ auth-service account <USER> sessions list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account sessions revoke`
 
@@ -1636,7 +1636,7 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account sessions revoke-all`
 
@@ -1651,7 +1651,7 @@ Options:
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account sessions known`
 
@@ -1664,7 +1664,7 @@ auth-service account <USER> sessions known [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account apps`
 
@@ -1677,7 +1677,7 @@ auth-service account <USER> apps [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1695,7 +1695,7 @@ auth-service account <USER> apps list [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account apps remove`
 
@@ -1713,7 +1713,7 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account picture`
 
@@ -1726,7 +1726,7 @@ auth-service account <USER> picture [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1744,7 +1744,7 @@ auth-service account <USER> picture show [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account picture remove`
 
@@ -1758,7 +1758,7 @@ Options:
 
 - `--reason <REASON>`: Why: 1 to 500 characters, recorded with the change. The account's owner sees it in their security history. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account history`
 
@@ -1772,7 +1772,7 @@ Options:
 
 - `--before <BEFORE>`: Continue with entries older than this one, the last one listed.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account notifications`
 
@@ -1785,7 +1785,7 @@ auth-service account <USER> notifications [OPTIONS] <COMMAND>
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 Commands:
 
@@ -1805,7 +1805,7 @@ Options:
 
 - `--before <BEFORE>`: Continue with notifications older than this one, the last one listed.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account notifications show`
 
@@ -1822,7 +1822,7 @@ Arguments:
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account notifications preferences`
 
@@ -1835,7 +1835,7 @@ auth-service account <USER> notifications preferences [OPTIONS]
 Options:
 
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 
 ## `auth-service account message`
 
@@ -1851,4 +1851,4 @@ Options:
 - `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "SourceOrigin". Required.
 - `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error. A result has the shape of the view the admin dashboard shows, where it has one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.

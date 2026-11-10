@@ -494,7 +494,9 @@ Each alert says what to look at. Auth raises these:
   unless `NO_COLOR` is set or `TERM` is `dumb`.
 - `--json` prints the result as JSON for scripts, and each message, question
   and failure as one JSON object per line on standard error, such as
-  `{"info":{"message":"Disabled alice and ended its sessions."}}`. A result
+  `{"info":{"message":"Disabled alice and ended its sessions."}}`. The
+  service's log lines, such as `INFO event recorded`, share standard error, so
+  read only the lines that start with `{`. A usage error is clap's own text. A result
   has the shape of the view the dashboard shows, as defined in
   `sourceorigin_common::admin`: `user search` (`UserPage`), `user show`
   (`UserDetail`), `audit list` (`EventPage`), `client list`, `invite list`,
