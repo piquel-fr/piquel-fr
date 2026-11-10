@@ -726,9 +726,10 @@ async fn security_emails_carry_the_sign_out_link() {
     ));
 }
 
-/// An announcement's email offers a one-click unsubscribe (RFC 8058) whose
-/// link turns only its recipient's announcements' email off, in its headers and
-/// its body; an essential one, which its recipient cannot turn off, offers none.
+/// An announcement's email names its list (RFC 2919) and offers a one-click
+/// unsubscribe (RFC 8058) whose link turns only its recipient's announcements'
+/// email off, in its headers and its body; an essential one, which its
+/// recipient cannot turn off, offers none.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn announcement_emails_offer_unsubscribing_unless_essential() {
@@ -792,6 +793,12 @@ async fn announcement_emails_offer_unsubscribing_unless_essential() {
         .replace("&amp;", "&");
     assert!(body.contains(link), "{body}");
     assert_eq!(header(essential, "List-Unsubscribe"), None);
+    for announcement in [news, essential] {
+        assert_eq!(
+            header(announcement, "List-Id").as_deref(),
+            Some("SourceOrigin announcements <announcements.sourceorigin.dev>")
+        );
+    }
     assert!(
         !String::from_utf8_lossy(&essential.formatted()).contains("/unsubscribe"),
         "no link in its body"
@@ -799,8 +806,8 @@ async fn announcement_emails_offer_unsubscribing_unless_essential() {
 }
 
 /// A message's email says what administrators wrote, in its paragraphs, exactly
-/// as the dashboard previewed it, and offers no unsubscribing: it is about the
-/// account itself.
+/// as the dashboard previewed it, and is neither on a list nor offers
+/// unsubscribing: it is about the account itself.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_messages_email_is_its_preview() {
@@ -840,7 +847,9 @@ async fn a_messages_email_is_its_preview() {
     let [email] = sent.as_slice() else {
         panic!("one message");
     };
-    assert_eq!(email.headers().get_raw("List-Unsubscribe"), None);
+    for header in ["List-Id", "List-Unsubscribe"] {
+        assert_eq!(email.headers().get_raw(header), None, "{header}");
+    }
 }
 
 /// Every kind of email, as its recipient reads it: its subject, then its

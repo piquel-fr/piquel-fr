@@ -167,9 +167,13 @@ records `AnnouncementSent`, whose fan-out creates one unordered delivery per
 recipient with a primary verified address, leaving out, unless the announcement
 is essential, those who turned announcements' email off
 ([email preferences](notifications.md#email-preferences)). These emails go out
-here, never on the `email` channel, and link the inbox; one that is not
-essential also carries the recipient's one-click unsubscribe link, in its body
-and its `List-Unsubscribe` headers. A delivery stores only the account's ID
+here, never on the `email` channel, and link the inbox. Each names its list in
+a `List-Id` header (RFC 2919), `<announcements.<sender's domain>>`, so mail
+clients can sort and filter announcements, and one that is not essential also
+carries the recipient's one-click unsubscribe link, in its body and its
+`List-Unsubscribe` headers. The sender's `Stream` decides these headers for
+every kind of email: bulk mail gets them, and transactional mail, every email
+about the account itself, none. A delivery stores only the account's ID
 as its recipient and the announcement's ID as its payload, and its `destination`
 names both. The sender reads the account's primary verified address and the text
 when it sends, so an address changed meanwhile gets it, and an account with none

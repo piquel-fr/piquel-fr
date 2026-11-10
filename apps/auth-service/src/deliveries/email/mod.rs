@@ -361,29 +361,19 @@ impl<M: Mailer> EmailSender<M> {
             .address
             .parse()
             .map_err(|_| DeliveryError::Permanent(Failure::InvalidAddress))?;
+        let domain = self.from.email.domain();
         let mut message = Message::builder();
-        // RFC 8058: mail clients offer to unsubscribe, posting to the link in one
-        // click.
-        if let EmailContent::Announcement {
-            unsubscribe: Some(link),
-            ..
-        } = &content.said
-        {
-            message = message
-                .raw_header(HeaderValue::new(
-                    HeaderName::new_from_ascii_str("List-Unsubscribe"),
-                    format!("<{link}>"),
-                ))
-                .raw_header(HeaderValue::new(
-                    HeaderName::new_from_ascii_str("List-Unsubscribe-Post"),
-                    "List-Unsubscribe=One-Click".to_owned(),
-                ));
+        for (name, value) in content.stream().headers(domain) {
+            message = message.raw_header(HeaderValue::new(
+                HeaderName::new_from_ascii_str(name),
+                value,
+            ));
         }
         message
             .from(self.from.clone())
             .to(Mailbox::new(None, to))
             .subject(&mail.subject)
-            .message_id(Some(format!("<{id}@{}>", self.from.email.domain())))
+            .message_id(Some(format!("<{id}@{domain}>")))
             .multipart(MultiPart::alternative_plain_html(mail.text(), html))
             .map_err(|error| built(&error))
     }
@@ -468,6 +458,40 @@ struct Content {
     said: EmailContent,
 }
 
+/// The kind of mail an email is, which decides the headers that tell mail
+/// clients how to treat it.
+enum Stream<'a> {
+    /// About the account itself: links, notices and support's messages, which
+    /// its owner cannot turn off.
+    Transactional,
+    /// Sent to many accounts at once: announcements.
+    Bulk {
+        /// The recipient's one-click unsubscribe link, unless they cannot turn
+        /// it off, as for an essential announcement.
+        unsubscribe: Option<&'a str>,
+    },
+}
+
+impl Stream<'_> {
+    /// The headers of mail sent from `domain` in this stream. Bulk mail names
+    /// its list (RFC 2919), so mail clients can sort and filter it, and offers
+    /// its unsubscribe link, which clients post to in one click (RFC 8058).
+    fn headers(&self, domain: &str) -> Vec<(&'static str, String)> {
+        let Self::Bulk { unsubscribe } = self else {
+            return Vec::new();
+        };
+        let mut headers = vec![(
+            "List-Id",
+            format!("SourceOrigin announcements <announcements.{domain}>"),
+        )];
+        if let Some(link) = unsubscribe {
+            headers.push(("List-Unsubscribe", format!("<{link}>")));
+            headers.push(("List-Unsubscribe-Post", "List-Unsubscribe=One-Click".into()));
+        }
+        headers
+    }
+}
+
 /// What an announcement's email says, whoever it goes to.
 struct Announced {
     /// Its subject, as administrators wrote it.
@@ -481,6 +505,21 @@ struct Announced {
 }
 
 impl Content {
+    /// The kind of mail it is. Every kind of email is named, so a new one
+    /// decides.
+    #[deny(clippy::wildcard_enum_match_arm)]
+    fn stream(&self) -> Stream<'_> {
+        match &self.said {
+            EmailContent::Announcement { unsubscribe, .. } => Stream::Bulk {
+                unsubscribe: unsubscribe.as_deref(),
+            },
+            EmailContent::VerifyAddress { .. }
+            | EmailContent::RecoveryLink { .. }
+            | EmailContent::Notification { .. }
+            | EmailContent::Message { .. } => Stream::Transactional,
+        }
+    }
+
     /// An announcement's email to `address`, saying what was `announced`, which
     /// links the account's inbox on `origin`.
     fn announcement(address: String, announced: Announced, origin: &Origin) -> Self {
