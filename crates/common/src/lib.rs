@@ -11,6 +11,8 @@
 //! - `email`: email address normalization.
 //! - `events`: the domain events auth records, the notifications they give
 //!   owners, and the alerts administrators are shown.
+//! - `similarity`: look-alike detection, and the handle and client name checks
+//!   built on it.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
 
 /// The views of administration: what the admin dashboard shows and the CLI prints.
@@ -44,6 +46,7 @@ pub mod notifications;
 /// The auth protocol's wire documents, shared by auth and the SDKs.
 pub mod protocol;
 /// Look-alike detection for handles, client names and the names reserved from them.
+#[cfg(feature = "similarity")]
 pub mod similarity;
 
 use serde::{Deserialize, Serialize};

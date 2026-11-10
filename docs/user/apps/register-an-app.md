@@ -74,7 +74,7 @@ Back in the console, **Your apps** lists the app with the day it was last used.
 - **A setting is refused.** The form says what to fix beside its input. Common
   refusals are a redirect URI that isn't HTTPS, and a name containing SourceOrigin or
   another well-known brand, such as Google or GitHub, even disguised
-  (`S0urce0r1gin`). [App settings](app-settings.md#settings) lists every rule.
+  (`S0urce0r1gin`, or with look-alike letters from another alphabet). [App settings](app-settings.md#settings) lists every rule.
 - **Signing in to your app fails with `invalid_scope`, "scope includes values
   this client may not request".** The app asks for a scope its registration
   doesn't allow, often `offline_access`, which the SDKs' login routes always

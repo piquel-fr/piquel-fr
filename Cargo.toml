@@ -93,6 +93,7 @@ tracing-opentelemetry = { version = "0.34", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = { version = "2.5", features = ["serde"] }
 unicode-normalization = "0.1"
+unicode-security = "0.1"
 uuid = { version = "1.19", features = ["v7", "serde"] }
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "conditional-ui", "workaround-google-passkey-specific-issues"] }
 

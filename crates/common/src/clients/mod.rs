@@ -22,7 +22,6 @@
 use crate::{
     UserId,
     protocol::oauth::{ClientAuthMethod, Scope, Scopes},
-    similarity::Skeleton,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, str::FromStr};
@@ -35,9 +34,9 @@ const MAX_IDENTIFIER_LENGTH: usize = 64;
 const MAX_DISPLAY_NAME_CHARS: usize = 80;
 /// Brands only operators may name a client after, since an account's client with
 /// one would read as theirs on the consent page. A name containing one, or a
-/// look-alike, is refused for clients accounts own: see
-/// [`DisplayName::ensure_unreserved`]. Short common words, such as "apple" or
-/// "meta", are left out, since they appear inside ordinary names.
+/// look-alike, is refused for clients accounts own (see
+/// `DisplayName::ensure_unreserved` in `similarity`). Short common words, such as
+/// "apple" or "meta", are left out, since they appear inside ordinary names.
 pub const RESERVED_BRANDS: &[&str] = &[
     "sourceorigin",
     "originauth",
@@ -253,28 +252,13 @@ pub struct InvalidDisplayName(String);
 /// A display name containing a brand of [`RESERVED_BRANDS`], or a look-alike.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[error("names containing \"{0}\", or a look-alike, are reserved")]
-pub struct ReservedDisplayName(&'static str);
+pub struct ReservedDisplayName(pub(crate) &'static str);
 
 impl DisplayName {
     /// The name as shown.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    /// Refuses a name containing a brand of [`RESERVED_BRANDS`], as clients accounts
-    /// own must. The name is compared by its [skeleton](Skeleton), without case,
-    /// spaces or punctuation, so "S0urce0r1gin-Settings" and "G00gle" are refused
-    /// too. Letters outside ASCII are dropped, not folded.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ReservedDisplayName`] with the brand the name contains.
-    pub fn ensure_unreserved(&self) -> Result<(), ReservedDisplayName> {
-        match Skeleton::of(&self.0).find_contained(RESERVED_BRANDS) {
-            Some(brand) => Err(ReservedDisplayName(brand)),
-            None => Ok(()),
-        }
     }
 }
 

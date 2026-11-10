@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-sourceorigin-common = { workspace = true, features = ["admin", "config", "email", "events"] }
+sourceorigin-common = { workspace = true, features = ["admin", "config", "email", "events", "similarity"] }
 sourceorigin-crypto.workspace = true
 sourceorigin-repository.workspace = true
 sourceorigin-telemetry.workspace = true
