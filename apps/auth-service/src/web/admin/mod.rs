@@ -806,17 +806,18 @@ impl AdminApplication {
         }
     }
 
-    /// The top bar's shortcuts, among `tabs`, for the signed-in administrator:
-    /// none for a browser that is not signed in. The bell counts their own
+    /// The top bar's shortcuts, among `tabs`, for the signed-in `admin`: none
+    /// for a browser that is not signed in. The bell counts their own
     /// unread notifications, read as the owner; like the status bar, it never
     /// costs the page, so a failed read is logged and counts none.
     async fn shortcuts<'a>(
         cx: &'a Cx,
+        admin: Option<&SignedInAdmin>,
         tabs: &'a [(DashboardTab, &'a str)],
         attention: Attention,
     ) -> Vec<Shortcut<'a>> {
         let app = Self::of(cx);
-        let Ok(admin) = Self::admin(cx).await else {
+        let Some(admin) = admin else {
             return Vec::new();
         };
         let unread = match app.account.unread_notifications(&Viewer::from(admin)).await {
@@ -1034,7 +1035,7 @@ impl AdminApplication {
                 placeholder: "Search by handle, name, email or ID",
                 value: &searched,
             },
-            shortcuts: &Self::shortcuts(cx, links, attention).await,
+            shortcuts: &Self::shortcuts(cx, admin, links, attention).await,
             reference: HttpTelemetry::trace_id(status),
             confirmation: admin.map(|admin| DashboardConfirmation {
                 start,

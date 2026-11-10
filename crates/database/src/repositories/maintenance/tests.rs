@@ -13,10 +13,11 @@ async fn insert_user(pool: &PgPool, prefix: &str) -> UserId {
 }
 
 /// Revoked passkeys, unlinked identities and ended recoveries go 90 days after
-/// they end, even a link cancelled after it expired, notifications and an
-/// announcement's recipients a year after it arrives, with an announcement to
-/// chosen accounts left without one, and a purged account's handles a year after
-/// its purge, which released them. Newer ones stay.
+/// they end, even a link cancelled after it expired, known browsers 400 days
+/// after they were last seen, notifications and an announcement's recipients a
+/// year after it arrives, with an announcement to chosen accounts left without
+/// one, and a purged account's handles a year after its purge, which released
+/// them. Newer ones stay.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 #[expect(
@@ -42,6 +43,9 @@ async fn ended_records_go_after_their_retention() {
         INSERT INTO account_recoveries (id, user_id, secret_digest, started_at, expires_at)
         VALUES (uuidv7(), '{user}', uuid_send(uuidv7()), now() - interval '90 days',
             now() - interval '89 days');
+        INSERT INTO known_devices (user_id, device_digest, user_agent_family, last_seen_at)
+        SELECT '{user}', sha256(convert_to(label || '{user}', 'UTF8')), label, now() - age
+        FROM (VALUES ('old', interval '401 days'), ('new', interval '399 days')) v (label, age);
         INSERT INTO notifications (id, user_id, payload, created_at)
         SELECT uuidv7(), '{user}', jsonb_build_object('kind', label), now() - age
         FROM (VALUES ('old', interval '366 days'), ('new', interval '364 days')) v (label, age);
@@ -75,6 +79,7 @@ async fn ended_records_go_after_their_retention() {
             FROM external_login_identities WHERE user_id = $1
             UNION ALL SELECT 'recovery ' || CASE WHEN cancelled_at IS NULL THEN 'new' ELSE 'old' END
             FROM account_recoveries WHERE user_id = $1
+            UNION ALL SELECT 'device ' || user_agent_family FROM known_devices WHERE user_id = $1
             UNION ALL SELECT 'notification ' || (payload ->> 'kind') FROM notifications
             WHERE user_id = $1 AND payload ->> 'kind' IN ('old', 'new')
             UNION ALL SELECT 'announcement ' || subject FROM announcements WHERE body = $1::text
@@ -119,6 +124,7 @@ async fn ended_records_go_after_their_retention() {
         [
             "announcement new",
             "announcement old to everyone",
+            "device new",
             purged_handle.as_str(),
             "identity new",
             "notification new",
@@ -138,6 +144,7 @@ async fn ended_records_go_after_their_retention() {
         [
             "announcement new",
             "announcement old to everyone",
+            "device new",
             "identity new",
             "notification new",
             "passkey new",

@@ -146,7 +146,6 @@ pub struct UserDetail {
     /// Active sessions, newest first.
     pub sessions: Vec<Session>,
     /// The browsers it knows, most recently seen first.
-    #[serde(default)]
     pub known_devices: Vec<KnownDevice>,
     /// Remembered consents to applications.
     pub consents: Vec<Consent>,

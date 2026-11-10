@@ -345,9 +345,11 @@ body.admin .main::before {
 }
 .topbar .me {
   display: inline-flex;
-  margin-left: 0.45rem;
   border-radius: 50%;
   text-decoration: none;
+}
+.topbar .shortcut + .me {
+  margin-left: 0.45rem;
 }
 /* The ring of an administrator's avatar stays inside the focus ring. */
 .topbar .me:has(.avatar.admin):focus-visible {

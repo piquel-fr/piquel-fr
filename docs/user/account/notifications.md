@@ -60,13 +60,13 @@ To mark every notification read, select **Mark all as read** in the inbox.
 
 Each notification is also emailed, in one of two categories:
 
-- **Security:** everything about your account itself, messages from support
-  included. You always receive these, so nobody can hide one from you.
+- **Security:** everything about your account itself. You always receive
+  these, so nobody can hide one from you.
 - **Announcements:** news from SourceOrigin, such as a new feature. You receive these
   by default, and can [turn them off](#turn-announcement-emails-off).
 
-If you administer Origin Auth, you always receive alerts by email too, like
-**Security** notifications.
+You always receive messages from support by email too, and, if you administer
+Origin Auth, alerts.
 
 Some announcements are **essential**: a security incident, or a change to the
 privacy policy or terms. You receive those by email even with announcements

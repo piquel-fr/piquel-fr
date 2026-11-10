@@ -64,7 +64,7 @@ notices above, these events alert the owner:
 | `SessionRevoked { reason: Admin }` | `SignedOutBySupport` |
 | `CompromiseReported` | `CompromiseReported`, confirming the report |
 | `SignInFailed { reason: CounterRegression }` | `PasskeyCopied` |
-| `SignInFailed { reason: AccountUnavailable }` | `SignInRefused`: a credential was proven on a disabled account |
+| `SignInFailed { reason: AccountUnavailable }` | `SignInRefused`: a credential was proven on an account that can't be signed in to that way, such as a disabled one |
 
 Two rules keep one operation from alerting several times:
 

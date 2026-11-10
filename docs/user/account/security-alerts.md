@@ -31,7 +31,8 @@ You need an Origin Account. To receive alerts by email, you need a
   of your passkeys, removed your picture, or signed your devices out.
 - **A copy of one of your passkeys was refused.** Its signature showed it may
   have been copied.
-- **A sign-in to your disabled account was refused**, which means someone holds
+- **A sign-in to your account was refused** because your account can't be
+  signed in to that way right now, such as while it is disabled. Someone holds
   one of your passkeys or social sign-ins.
 - **You reported activity that wasn't you**, as a confirmation.
 

@@ -709,11 +709,7 @@ async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
         .await;
     assert_eq!(one_click.status(), StatusCode::OK);
     assert!(!emailed().await);
-    let forged = format!(
-        "{}?account={}&token=forged",
-        page::UNSUBSCRIBE,
-        browser.user_id
-    );
+    let forged = format!("{}?id={}&token=forged", page::UNSUBSCRIBE, browser.user_id);
     let forged = stranger.visit(&replicas.a, &forged).await;
     assert_eq!(forged.status(), StatusCode::NOT_FOUND);
 }

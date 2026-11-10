@@ -64,9 +64,7 @@ impl<T> Clone for Links<T> {
 /// What a link's query names: the `T`, and its token.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Link<T> {
-    /// What it acts on. Unsubscribe links named it `account` before the two
-    /// kinds of links shared their form.
-    #[serde(alias = "account")]
+    /// What it acts on.
     pub(crate) id: T,
     /// Its token, encoded.
     pub(crate) token: String,

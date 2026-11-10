@@ -41,7 +41,6 @@ use crate::{
     icons::Icon,
     layout::{Label, navigation},
 };
-use serde::{Deserialize, Serialize};
 use sourceorigin_common::events::{Browser, Platform, UserAgentFamily};
 use topcoat::{
     Result,
@@ -91,10 +90,8 @@ impl<'a> Audience<'a> {
     }
 }
 
-/// The settings pages, in the order the sidebar lists them. A form names one,
-/// e.g. `sign_in`, to come back to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// The settings pages, in the order the sidebar lists them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     /// The account at a glance.
     Overview,
