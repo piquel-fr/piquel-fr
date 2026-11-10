@@ -351,14 +351,14 @@ jobs:
           file: infra/rust.Dockerfile
           target: auth
           cache-from: type=gha,scope=auth
-          cache-to: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'chore/speed-up-ci') && 'type=gha,mode=max,scope=auth,ignore-error=true' || '' }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=auth,ignore-error=true' || '' }}
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: infra/rust.Dockerfile
           target: web
           cache-from: type=gha,scope=web
-          cache-to: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'chore/speed-up-ci') && 'type=gha,mode=max,scope=web,ignore-error=true' || '' }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=web,ignore-error=true' || '' }}
 
   # piquelctl publishes no prebuilt binaries either. rust-cache keeps it as it
   # keeps sqlx-cli in `rust`, and `cargo install` upgrades it when a newer
