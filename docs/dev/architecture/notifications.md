@@ -101,8 +101,14 @@ notification (`SIGN_OUT_LINK_LIFETIME`).
 
 ### The top bar's bell
 
-Every account page's top bar has a bell (`InboxLink` in `crates/ui/src/layout`)
-linking the inbox, with the unread count the sidebar's Notifications tab shows.
+Every account page's top bar has a bell (a `Shortcut` of `ShortcutKind::Inbox`
+in `crates/ui/src/layout`) linking the inbox, with the unread count the
+sidebar's Notifications tab shows. The dashboard's top bar has the signed-in
+administrator's own bell, linking their inbox on auth: it reads the count as the
+owner, so it records no view of their account, and a failed read counts none
+rather than failing the page. Beside it, an **Alerts** shortcut
+(`ShortcutKind::Alerts`) counts the alerts with no update yet, from the
+overview the status bar already reads.
 The owner answers an alert from its page: opening it from auth's own pages marks
 it read, and **This wasn’t me**, where the security history lets the owner
 report the notification's event, reports it

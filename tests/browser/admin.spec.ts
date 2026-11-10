@@ -95,9 +95,10 @@ function entry(page: Page, change: string, reason: string) {
 }
 
 /**
- * The top bar at every size: the crumb, the search box and the avatar each keep
- * their own room. The search box has run under the avatar on tablets before, as
- * its input refused to shrink with the form.
+ * The top bar at every size: the crumb, the search box, the alerts and inbox
+ * shortcuts and the avatar each keep their own room. The search box has run under
+ * the avatar on tablets before, as its input refused to shrink with the form, and
+ * the bell's count over the avatar's ring.
  */
 test("the dashboard's top bar fits every window size", async ({ browser }) => {
   const admin = await administrator(browser, `bar-${Date.now().toString(36)}`);
@@ -106,6 +107,8 @@ test("the dashboard's top bar fits every window size", async ({ browser }) => {
   const parts = {
     crumb: bar.locator('.crumb'),
     search: bar.locator('.search-box'),
+    alerts: bar.getByRole('link', { name: /^Alerts/ }),
+    inbox: bar.getByRole('link', { name: /^Notifications/ }),
     avatar: bar.getByRole('link', { name: 'Your account', exact: true })
   };
   for (const viewport of viewports) {

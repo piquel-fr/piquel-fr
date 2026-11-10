@@ -429,11 +429,13 @@ first update acknowledges the alert: it stops counting as a warning, though it
 stays current while its condition holds.
 
 While any alert has no update yet, the overview shows a banner counting them,
-the sidebar marks **Alerts**, and the status bar counts each one as a warning.
+the sidebar marks **Alerts**, the top bar's warning sign counts them, and the
+status bar counts each one as a warning. The top bar's bell beside it counts
+your own unread notifications, and opens your inbox on auth.
 
 On the dashboard:
 
-1. Open **Alerts**. Each current alert shows what it says, its ID, when it was
+1. Open **Alerts**, or select the warning sign in the top bar. Each current alert shows what it says, its ID, when it was
    raised and last seen, and its updates, newest first.
 2. Select **Post an update** on the alert, choose its **Status**, and write a
    **Note**, such as who is on it.

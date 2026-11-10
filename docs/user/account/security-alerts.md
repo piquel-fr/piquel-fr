@@ -42,6 +42,7 @@ already used, doesn't alert either.
 ## Answer an alert in your settings
 
 The bell at the top of every settings page counts your unread notifications.
+If you administer Origin Auth, the admin dashboard's top bar has it too.
 
 ![The settings' top bar, with the bell counting one unread notification beside the avatar](../../images/account/notification-bell.png)
 
