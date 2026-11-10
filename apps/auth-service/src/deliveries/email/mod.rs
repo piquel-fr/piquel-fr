@@ -27,7 +27,6 @@ use crate::{
         page::{self, settings},
     },
 };
-use askama::Template;
 use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
     message::{
@@ -36,13 +35,14 @@ use lettre::{
     },
 };
 use sourceorigin_common::{
-    AnnouncementId, DeliveryId, ErrorChain, Handle, UserId, admin, config::Origin,
+    AnnouncementId, DeliveryId, ErrorChain, UserId, admin, config::Origin,
     notifications::Notification,
 };
 use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::{
     Announcement, Database, DatabaseError, Delivery, Email, EmailMessage,
 };
+use sourceorigin_ui::EmailContent;
 use std::{fmt::Display, time::Duration};
 
 /// Sends a built message, classifying failures for the retry policy. The SMTP
@@ -161,7 +161,7 @@ impl<M: Mailer> EmailSender<M> {
             tracing::info!(%id, "link is no longer needed; delivery dropped");
             return Ok(());
         };
-        mailer.send(self.compose(id, &content)?).await
+        mailer.send(self.compose(id, &content).await?).await
     }
 
     /// Sends the announcement `announcement` to `user_id`'s primary verified
@@ -182,7 +182,7 @@ impl<M: Mailer> EmailSender<M> {
             tracing::info!(%id, "the account has no primary address to announce to; delivery dropped");
             return Ok(());
         };
-        mailer.send(self.compose(id, &content)?).await
+        mailer.send(self.compose(id, &content).await?).await
     }
 
     /// What the announcement `id` says to `user_id`, at its primary verified
@@ -244,15 +244,18 @@ impl<M: Mailer> EmailSender<M> {
                     "verification",
                     email_id,
                 )?;
-                Content::VerifyAddress {
+                Content {
+                    said: EmailContent::VerifyAddress {
+                        address: pending.address.clone(),
+                        handle: pending.handle,
+                        link: format!(
+                            "{}#token={}",
+                            self.origin.join(settings::VERIFY),
+                            token.encoded()
+                        ),
+                        hours: VERIFICATION_LIFETIME.num_hours(),
+                    },
                     address: pending.address,
-                    handle: pending.handle,
-                    link: format!(
-                        "{}#token={}",
-                        self.origin.join(settings::VERIFY),
-                        token.encoded()
-                    ),
-                    hours: VERIFICATION_LIFETIME.num_hours(),
                 }
             }
             EmailMessage::RecoveryLink {
@@ -274,12 +277,14 @@ impl<M: Mailer> EmailSender<M> {
                     "recovery",
                     recovery_id,
                 )?;
-                Content::RecoveryLink {
+                Content {
                     address: pending.address,
-                    handle: pending.handle,
-                    link: link.into(),
-                    hours: recovery::LINK_LIFETIME.num_hours(),
-                    undo: self.recovery_links.undo_url(*recovery_id).into(),
+                    said: EmailContent::RecoveryLink {
+                        handle: pending.handle,
+                        link: link.into(),
+                        hours: recovery::LINK_LIFETIME.num_hours(),
+                        undo: self.recovery_links.undo_url(*recovery_id).into(),
+                    },
                 }
             }
             // Administrators' own words, which read as their announcements do.
@@ -293,20 +298,22 @@ impl<M: Mailer> EmailSender<M> {
                 notification_id,
                 notification,
                 recovery_id,
-            } => Content::Notification {
+            } => Content {
                 address: address.clone(),
-                subject: notification.subject().to_owned(),
-                body: notification.body(),
-                page: self
-                    .origin
-                    .join(&settings::NOTIFICATION.replace("{id}", &notification_id.to_string())),
-                undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
-                alerts: self.alerts.clone().filter(|_| notification.links_alerts()),
-                sign_out: if notification.security() {
-                    let link = self.sign_out_links.link(*notification_id).map(Some);
-                    Some(Self::rebuilt(link, "sign-out", notification_id)?)
-                } else {
-                    None
+                said: EmailContent::Notification {
+                    subject: notification.subject().to_owned(),
+                    body: notification.body(),
+                    page: self.origin.join(
+                        &settings::NOTIFICATION.replace("{id}", &notification_id.to_string()),
+                    ),
+                    undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
+                    alerts: self.alerts.clone().filter(|_| notification.links_alerts()),
+                    sign_out: if notification.security() {
+                        let link = self.sign_out_links.link(*notification_id).map(Some);
+                        Some(Self::rebuilt(link, "sign-out", notification_id)?)
+                    } else {
+                        None
+                    },
                 },
             },
         }))
@@ -343,24 +350,24 @@ impl<M: Mailer> EmailSender<M> {
 
     /// Builds the message. Every attempt of a delivery builds the same one, with
     /// its ID as `Message-ID`.
-    fn compose(&self, id: DeliveryId, content: &Content) -> Result<Message, DeliveryError> {
+    async fn compose(&self, id: DeliveryId, content: &Content) -> Result<Message, DeliveryError> {
         let built = |error: &dyn std::error::Error| {
             tracing::error!(error = %ErrorChain(error), %id, "could not build email");
             DeliveryError::Permanent(Failure::Message)
         };
-        let text = Text { content }.render().map_err(|error| built(&error))?;
-        let html = Html { content }.render().map_err(|error| built(&error))?;
+        let mail = content.said.mail();
+        let html = mail.html().await.map_err(|error| built(&*error))?;
         let to: Address = content
-            .address()
+            .address
             .parse()
             .map_err(|_| DeliveryError::Permanent(Failure::InvalidAddress))?;
         let mut message = Message::builder();
         // RFC 8058: mail clients offer to unsubscribe, posting to the link in one
         // click.
-        if let Content::Announcement {
+        if let EmailContent::Announcement {
             unsubscribe: Some(link),
             ..
-        } = content
+        } = &content.said
         {
             message = message
                 .raw_header(HeaderValue::new(
@@ -375,9 +382,9 @@ impl<M: Mailer> EmailSender<M> {
         message
             .from(self.from.clone())
             .to(Mailbox::new(None, to))
-            .subject(content.subject())
+            .subject(&mail.subject)
             .message_id(Some(format!("<{id}@{}>", self.from.email.domain())))
-            .multipart(MultiPart::alternative_plain_html(text, html))
+            .multipart(MultiPart::alternative_plain_html(mail.text(), html))
             .map_err(|error| built(&error))
     }
 }
@@ -397,17 +404,14 @@ impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
     /// The plain-text body of the email sending `letter` as a message, linking
     /// the inbox on `auth`, auth's origin, which the dashboard shows before it is
     /// sent.
-    ///
-    /// # Errors
-    /// Fails when the template cannot render.
-    pub(crate) fn preview(letter: &Letter, auth: &Origin) -> Result<String, askama::Error> {
+    pub(crate) fn preview(letter: &Letter, auth: &Origin) -> String {
         let content = Content::message(
             String::new(),
             letter.subject.clone(),
             letter.body.clone(),
             auth,
         );
-        Text { content: &content }.render()
+        content.said.mail().text()
     }
 }
 
@@ -424,13 +428,7 @@ impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
 
     /// The plain-text body of `announcement`'s email, linking the inbox on
     /// `auth`, auth's origin, which the dashboard shows before it is sent.
-    ///
-    /// # Errors
-    /// Fails when the template cannot render.
-    pub(crate) fn preview(
-        announcement: &admin::Announcement,
-        auth: &Origin,
-    ) -> Result<String, askama::Error> {
+    pub(crate) fn preview(announcement: &admin::Announcement, auth: &Origin) -> String {
         // The unsubscribe link names the recipient, so the preview shows the
         // page it opens.
         let unsubscribe = (!announcement.essential).then(|| auth.join(page::UNSUBSCRIBE));
@@ -444,7 +442,7 @@ impl AnnouncementSender<AsyncSmtpTransport<Tokio1Executor>> {
             },
             auth,
         );
-        Text { content: &content }.render()
+        content.said.mail().text()
     }
 }
 
@@ -461,84 +459,13 @@ impl<M: Mailer> Sender for AnnouncementSender<M> {
     }
 }
 
-/// What an email says, with everything its templates show. Each
-/// [`EmailMessage`], and each announcement's email, becomes one of these.
-enum Content {
-    /// A verification link.
-    VerifyAddress {
-        /// The address to verify.
-        address: String,
-        /// The account it would join, named so its reader can tell whether they
-        /// added it themselves.
-        handle: Handle,
-        /// The settings page that verifies it, with the token in its fragment, so
-        /// it never reaches a server log.
-        link: String,
-        /// How many hours the link works.
-        hours: i64,
-    },
-    /// A recovery's link, to the account's primary address.
-    RecoveryLink {
-        /// The primary address.
-        address: String,
-        /// The account it recovers.
-        handle: Handle,
-        /// The recovery page, with the token in its fragment.
-        link: String,
-        /// How many hours the link works.
-        hours: i64,
-        /// The recovery's undo page, where a passkey the owner still has cancels
-        /// it.
-        undo: String,
-    },
-    /// A notification of the account's.
-    Notification {
-        /// The address it goes to.
-        address: String,
-        /// Its subject, which the email's is.
-        subject: String,
-        /// What it says.
-        body: String,
-        /// Its page in the inbox.
-        page: String,
-        /// The undo page of the recovery it is about, while a passkey can undo it.
-        undo: Option<String>,
-        /// The dashboard's Alerts tab, for an alert's, unless the dashboard is off.
-        alerts: Option<String>,
-        /// The link signing the account out everywhere, for a security
-        /// notification's.
-        sign_out: Option<String>,
-    },
-    /// A message administrators sent the account, to its primary address.
-    Message {
-        /// The primary address.
-        address: String,
-        /// Its subject, as they wrote it.
-        subject: String,
-        /// Its text, as they wrote it, for the plain-text body.
-        body: String,
-        /// The same text as paragraphs of lines, for the HTML body.
-        paragraphs: Vec<Vec<String>>,
-        /// The inbox, where the account reads it again.
-        inbox: String,
-    },
-    /// An announcement administrators sent, to the account's primary address.
-    Announcement {
-        /// The primary address.
-        address: String,
-        /// Its subject, as they wrote it.
-        subject: String,
-        /// Its text, as they wrote it, for the plain-text body.
-        body: String,
-        /// The same text as paragraphs of lines, for the HTML body.
-        paragraphs: Vec<Vec<String>>,
-        /// Whether it went to every account, rather than to chosen ones.
-        everyone: bool,
-        /// The inbox, where the account reads it again.
-        inbox: String,
-        /// The link turning announcements' email off, unless it is essential.
-        unsubscribe: Option<String>,
-    },
+/// An email to send: where it goes, and what it says. Each [`EmailMessage`],
+/// and each announcement's email, becomes one of these.
+struct Content {
+    /// Where it goes.
+    address: String,
+    /// What it says.
+    said: EmailContent,
 }
 
 /// What an announcement's email says, whoever it goes to.
@@ -563,75 +490,30 @@ impl Content {
             everyone,
             unsubscribe,
         } = announced;
-        Self::Announcement {
+        Self {
             address,
-            subject,
-            paragraphs: Self::paragraphs(&body),
-            body,
-            everyone,
-            inbox: origin.join(settings::NOTIFICATIONS),
-            unsubscribe,
+            said: EmailContent::Announcement {
+                subject,
+                body,
+                everyone,
+                inbox: origin.join(settings::NOTIFICATIONS),
+                unsubscribe,
+            },
         }
     }
 
     /// A message's email to `address`, with its `subject` and `body` as
     /// administrators wrote them, which links the account's inbox on `origin`.
     fn message(address: String, subject: String, body: String, origin: &Origin) -> Self {
-        Self::Message {
+        Self {
             address,
-            subject,
-            paragraphs: Self::paragraphs(&body),
-            body,
-            inbox: origin.join(settings::NOTIFICATIONS),
+            said: EmailContent::Message {
+                subject,
+                body,
+                inbox: origin.join(settings::NOTIFICATIONS),
+            },
         }
     }
-
-    /// Administrators' text `body` as paragraphs of lines, for an HTML body.
-    fn paragraphs(body: &str) -> Vec<Vec<String>> {
-        admin::Announcement::paragraphs(body)
-            .into_iter()
-            .map(|lines| lines.into_iter().map(str::to_owned).collect())
-            .collect()
-    }
-
-    /// Where the message goes.
-    fn address(&self) -> &str {
-        match self {
-            Self::VerifyAddress { address, .. }
-            | Self::RecoveryLink { address, .. }
-            | Self::Notification { address, .. }
-            | Self::Message { address, .. }
-            | Self::Announcement { address, .. } => address,
-        }
-    }
-
-    /// The message's subject.
-    fn subject(&self) -> &str {
-        match self {
-            Self::VerifyAddress { .. } => "Confirm your email address for your Origin Account",
-            Self::RecoveryLink { .. } => "Recover your Origin Account",
-            Self::Notification { subject, .. }
-            | Self::Message { subject, .. }
-            | Self::Announcement { subject, .. } => subject,
-        }
-    }
-}
-
-/// The plain-text body, from `templates/email/message.txt`.
-#[derive(Template)]
-#[template(path = "email/message.txt")]
-struct Text<'a> {
-    /// What it says.
-    content: &'a Content,
-}
-
-/// The HTML body, from `templates/email/message.html`: no images, no tracking,
-/// links only to auth's settings pages.
-#[derive(Template)]
-#[template(path = "email/message.html")]
-struct Html<'a> {
-    /// What it says.
-    content: &'a Content,
 }
 
 /// Retries, address resolution and rendering, with a fake relay.

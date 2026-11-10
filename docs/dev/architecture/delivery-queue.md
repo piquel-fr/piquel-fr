@@ -143,9 +143,14 @@ key, not the message, so sending resumes once the key is fixed. The error record
 the recipient and is never logged either. Without `AUTH_SMTP_URL`, the workers still run and drop every
 delivery, so none waits forever.
 
-Templates live in `apps/auth-service/templates/email/` and are checked at
-compile time: each `EmailMessage`, and each announcement's email, becomes a
-`Content` variant, which both the plain-text and the HTML template must match.
+Each `EmailMessage`, and each announcement's email, becomes an `EmailContent`
+(`crates/ui/src/email/content.rs`), which says what that kind of email says as
+blocks: paragraphs, text kept as written, an action and small print. A `Mail`
+renders the blocks twice, as the plain-text body and as the HTML body, styled
+inline, so every sentence is written once and the two bodies always agree. Each
+kind's subject and bodies are a snapshot in
+`apps/auth-service/src/deliveries/email/snapshots/`, so a change to what an
+email says shows in review.
 
 ## Announcements
 
@@ -153,8 +158,8 @@ The `announcement` channel (`deliveries/announcement.rs` in the database crate,
 `AnnouncementSender` beside `EmailSender` in auth-service) emails the
 announcements administrators send. It is a channel of its own, with workers of
 its own, so an announcement to every account never holds back a verification or
-recovery link on the `email` channel; it shares the relay, templates and
-`Message-ID` scheme with it.
+recovery link on the `email` channel; it shares the relay, the email bodies and
+the `Message-ID` scheme with it.
 
 Sending an announcement writes a notification of kind `announcement`, with its
 subject and text, to each recipient's inbox, from the recipients it locked, and

@@ -12,7 +12,7 @@ use sourceorigin_ui::{
     RecoveryStanding, SessionRow, Target, UserRow,
 };
 use topcoat::{
-    Error, Result,
+    Result,
     context::Cx,
     router::{
         StatusCode, content::Form, error::see_other, href, path_param, query_params,
@@ -270,10 +270,7 @@ pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<
             (form.clone(), Letter::try_from(&form).ok(), Some(message))
         }
     };
-    let email = letter
-        .map(|letter| EmailSender::preview(&letter, &app.auth))
-        .transpose()
-        .map_err(|error| Error::msg(format!("could not render a message: {error}")))?;
+    let email = letter.map(|letter| EmailSender::preview(&letter, &app.auth));
     let preview = email.as_deref().map(|email| MessagePreview {
         email,
         address: account

@@ -12,14 +12,13 @@ Second line.
 
 Write to <support@example.com>.
 
-SourceOrigin support wrote this message about your Origin Account. It is also in your Origin Account notifications whenever you can sign in:
+SourceOrigin support wrote this message about your Origin Account. It is also in your Origin Account notifications whenever you can sign in.
 
 https://auth.sourceorigin.dev/settings/notifications
 
 SourceOrigin
 
 --- text/html ---
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,7 +30,7 @@ SourceOrigin
 <div style="max-width:560px;margin:0 auto">
 <p>Hello,</p>
 <p>First line.<br>Second line.</p>
-<p>Write to &#60;support@example.com&#62;.</p>
+<p>Write to &lt;support@example.com&gt;.</p>
 <p style="font-size:14px;color:#555555">SourceOrigin support wrote this message about your Origin Account. It is also in <a href="https://auth.sourceorigin.dev/settings/notifications">your Origin Account notifications</a> whenever you can sign in.</p>
 <p>SourceOrigin</p>
 </div>
