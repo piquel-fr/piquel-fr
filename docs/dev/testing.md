@@ -43,6 +43,21 @@ They need no network. Passkey ceremonies use a software authenticator
 (`SoftPasskey`), GitHub sign-in a local HTTP server that stands in for GitHub's
 API, and Google sign-in ID tokens signed with keys the test generates.
 
+### Snapshot tests
+
+Some output is easier to review whole than through assertions, such as every
+kind of email Origin Auth sends. A snapshot test renders it and compares it with
+a file under `snapshots/` beside the test, with [insta](https://insta.rs). When
+the output changes on purpose, accept the new one, then review its diff with the
+rest of the change:
+
+```console
+INSTA_UPDATE=always just test -p auth-service -E 'test(every_email_reads_as_its_snapshot)'
+```
+
+Without `INSTA_UPDATE`, a test whose output differs from its snapshot fails and
+shows the difference.
+
 ### Database tests
 
 ```console

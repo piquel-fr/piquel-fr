@@ -46,6 +46,7 @@ tokio-rustls.workspace = true
 sourceorigin-repository = { workspace = true, features = ["test-util"] }
 sourceorigin-telemetry = { workspace = true, features = ["test-util"] }
 serde_urlencoded.workspace = true
+insta.workspace = true
 webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
 
 [lints]

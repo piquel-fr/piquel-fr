@@ -122,6 +122,9 @@ secrecy = "0.10"
 # vocabulary values without changing the type, so its warnings are off.
 ts-rs = { version = "12.0", features = ["url-impl", "no-serde-warnings"] }
 trybuild = "1.0"
+# Test-only: snapshots of rendered output, such as every email kind's bodies, so
+# a change to what they say shows in review. No colored diffs, so no `console`.
+insta = { version = "1.49", default-features = false }
 # Test-only: a self-signed certificate and TLS listener so tests reach auth over HTTPS.
 rcgen = "0.14"
 tokio-rustls = "0.26"
