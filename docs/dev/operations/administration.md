@@ -485,12 +485,25 @@ Each alert says what to look at. Auth raises these:
   message`, `passkeys revoke`,
   `identities unlink` and `sessions revoke-all`. Without a terminal, they
   refuse unless given `--yes`.
-- `--output json` prints the views the dashboard shows, as defined in
+- A command prints its result on standard output: a table, an account's or a
+  client's details, or a single value, such as `invite create`'s link or a new
+  client secret, alone on its line so a script can capture it. Everything else
+  goes to standard error: what a change did, as `Info:`, something surprising,
+  as `Warning:`, the question before a change, and a failure, as `Error:` with
+  each of its causes. Times are in UTC, and colour is used only on a terminal,
+  unless `NO_COLOR` is set or `TERM` is `dumb`.
+- `--json` prints the result as JSON for scripts, and each message, question
+  and failure as one JSON object per line on standard error, such as
+  `{"info":{"message":"Disabled alice and ended its sessions."}}`. The
+  service's log lines, such as `INFO event recorded`, share standard error, so
+  read only the lines that start with `{`. A usage error is clap's own text.
+  A result has the shape of the view the dashboard shows, as defined in
   `sourceorigin_common::admin`: `user search` (`UserPage`), `user show`
   (`UserDetail`), `audit list` (`EventPage`), `client list`, `invite list`,
   `admin list`, `announcement list`, `announcement show`
   (`AnnouncementDetail`), `audit verify`'s result, and `alerts list`
-  (`AlertDetail`, from `sourceorigin_common::alerts`).
+  (`AlertDetail`, from `sourceorigin_common::alerts`). A single value is an
+  object with one key, such as `{"link":"…"}`.
 - Each change, and each view of an account, is recorded as an event with its
   operator: `--operator`, else `AUTH_OPERATOR`, else `$USER`, and the host name.
   Without any of them, as inside `piquelctl app exec`, which sets no `$USER`,

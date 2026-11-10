@@ -1,10 +1,16 @@
 //! Announcements to accounts, such as a security incident or a change to the
 //! privacy policy: drafted first, then sent.
 
-use super::{CliError, Confirm, Console, Output};
+use super::{
+    CliError, Confirm, Console,
+    output::{Cell, Single, Style, Time, report},
+};
 use crate::{AnnouncementDraft, AnnouncementRecipients, Letter, UserRef};
 use clap::{Args, Subcommand};
-use sourceorigin_common::{AnnouncementId, admin::AnnouncementDetail};
+use sourceorigin_common::{
+    AnnouncementId,
+    admin::{Announcement, AnnouncementDetail},
+};
 use std::{io::Read, path::PathBuf};
 
 /// Drafting, sending and reading announcements. A draft goes to nobody until
@@ -12,19 +18,12 @@ use std::{io::Read, path::PathBuf};
 #[derive(Subcommand)]
 pub(super) enum AnnouncementCommand {
     /// List announcements, drafts and sent ones, newest first.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
     /// Show an announcement: its text, whom it goes to, how many of them its
     /// email reaches, and once sent, how its emails fared.
     Show {
         /// The announcement's ID, as `announcement list` shows it.
         id: AnnouncementId,
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
     },
     /// Draft an announcement, and print its ID. Nothing is sent yet.
     Draft(DraftArgs),
@@ -123,90 +122,38 @@ impl DraftArgs {
 }
 
 impl AnnouncementCommand {
-    /// Prints `detail` as `announcement show` does: one fact per line, then its
-    /// text. Whom a year-old announcement went to was deleted, so its counts are
-    /// left out.
-    fn print_detail(detail: &AnnouncementDetail) {
-        let announcement = &detail.announcement;
-        let to = if announcement.everyone {
-            "everyone"
-        } else {
-            "chosen accounts"
-        };
-        println!("ID\t{}", announcement.id);
-        println!("SUBJECT\t{}", announcement.subject);
-        println!("REVISION\t{}", announcement.revision);
-        println!("ESSENTIAL\t{}", announcement.essentiality());
-        if announcement.recipients_kept {
-            println!("TO\t{to}: {} accounts", announcement.recipients);
-            println!("EMAILED\t{} {}", detail.mailed, announcement.emailed());
-        } else {
-            println!("TO\t{to}: recipients deleted a year after sending");
-        }
-        match announcement.sent_at {
-            Some(at) => {
-                let emails = detail.emails;
-                println!("SENT\t{}", at.to_rfc3339());
-                if announcement.recipients_kept {
-                    println!("READ\t{} of {}", detail.read, announcement.recipients);
-                }
-                println!(
-                    "EMAILS\t{} pending, {} succeeded, {} failed, {} cancelled",
-                    emails.pending, emails.succeeded, emails.failed, emails.cancelled
-                );
-            }
-            None => println!("SENT\tnot yet: a draft"),
-        }
-        for account in &detail.accounts {
-            println!("ACCOUNT\t{}\t{}", account.handle, account.id);
-        }
-        println!("\n{}", announcement.body);
-    }
-
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         match self {
-            Self::List { output } => {
-                let announcements = service.list_announcements(operator).await?;
-                output.print(&announcements, |announcements| {
-                    println!("ID\tSTATUS\tRECIPIENTS\tSUBJECT");
-                    for announcement in announcements {
-                        let status = announcement.sent_at.map_or_else(
-                            || "draft".to_owned(),
-                            |at| format!("sent {}", at.to_rfc3339()),
-                        );
-                        let recipients = if announcement.recipients_kept {
-                            announcement.recipients.to_string()
-                        } else {
-                            "deleted".to_owned()
-                        };
-                        println!(
-                            "{}\t{status}\t{recipients}\t{}",
-                            announcement.id, announcement.subject
-                        );
-                    }
-                })?;
-            }
-            Self::Show { id, output } => {
-                let detail = service.view_announcement(operator, id).await?;
-                output.print(&detail, Self::print_detail)?;
-            }
+            Self::List => out.emit(&service.list_announcements(operator).await?[..])?,
+            Self::Show { id } => out.emit(&service.view_announcement(operator, id).await?)?,
             Self::Draft(draft) => {
                 let id = service
                     .draft_announcement(operator, &draft.draft()?)
                     .await?;
-                println!("{id}");
+                out.emit(&Single {
+                    name: "id",
+                    value: id,
+                })?;
             }
             Self::Edit { id, draft } => {
                 let revision = service
                     .edit_announcement(operator, id, &draft.draft()?)
                     .await?;
-                eprintln!("Saved as revision {revision}: send it with --revision {revision}.");
+                out.info(format_args!(
+                    "Saved as revision {revision}: send it with --revision {revision}."
+                ))?;
             }
-            Self::Discard { id } => service.discard_announcement(operator, id).await?,
+            Self::Discard { id } => {
+                service.discard_announcement(operator, id).await?;
+                out.info(format_args!("Discarded draft {id}."))?;
+            }
             Self::Send {
                 id,
                 revision,
@@ -219,17 +166,116 @@ impl AnnouncementCommand {
                 } else {
                     ""
                 };
-                confirm.ask(&format!(
-                    "Send the {essential}announcement \"{}\" to {} accounts, emailing the {} {}",
-                    announcement.subject,
-                    announcement.recipients,
-                    detail.mailed,
-                    announcement.emailed()
-                ))?;
+                confirm.ask(
+                    out,
+                    &format!(
+                        "Send the {essential}announcement \"{}\" to {} accounts, emailing the {} {}",
+                        announcement.subject,
+                        announcement.recipients,
+                        detail.mailed,
+                        announcement.emailed()
+                    ),
+                )?;
                 let recipients = service.send_announcement(operator, id, revision).await?;
-                println!("Sent to {recipients} accounts");
+                out.info(format_args!("Sent to {recipients} accounts."))?;
             }
         }
         Ok(())
     }
 }
+
+// Announcements, newest first: drafts, and when the others were sent.
+report!([Announcement], self, out, {
+    out.table(
+        ["ID", "STATUS", "RECIPIENTS", "SUBJECT"],
+        "No announcements.",
+        self.iter().map(|announcement| {
+            let status = announcement.sent_at.map_or_else(
+                || Cell::new("draft").style(Style::Notice),
+                |at| Cell::new(format_args!("sent {}", Time(at))),
+            );
+            let recipients = if announcement.recipients_kept {
+                Cell::new(announcement.recipients)
+            } else {
+                Cell::new("deleted").style(Style::Muted)
+            };
+            [
+                Cell::new(announcement.id),
+                status,
+                recipients,
+                Cell::new(&announcement.subject),
+            ]
+        }),
+    )
+});
+
+// An announcement: one fact per line, the accounts it was chosen for, then its
+// text. Whom a year-old announcement went to was deleted, so its counts are
+// left out.
+report!(AnnouncementDetail, self, out, {
+    let announcement = &self.announcement;
+    let to = if announcement.everyone {
+        "everyone"
+    } else {
+        "chosen accounts"
+    };
+    out.title(&announcement.subject)?;
+    let mut fields = vec![
+        ("ID", Cell::new(announcement.id)),
+        ("Revision", Cell::new(announcement.revision)),
+        ("Essential", Cell::new(announcement.essentiality())),
+    ];
+    if announcement.recipients_kept {
+        fields.extend([
+            (
+                "To",
+                Cell::new(format_args!("{to}: {} accounts", announcement.recipients)),
+            ),
+            (
+                "Emailed",
+                Cell::new(format_args!("{} {}", self.mailed, announcement.emailed())),
+            ),
+        ]);
+    } else {
+        fields.push((
+            "To",
+            Cell::new(format_args!(
+                "{to}: recipients deleted a year after sending"
+            )),
+        ));
+    }
+    match announcement.sent_at {
+        Some(at) => {
+            fields.push(("Sent", at.into()));
+            if announcement.recipients_kept {
+                fields.push((
+                    "Read",
+                    Cell::new(format_args!("{} of {}", self.read, announcement.recipients)),
+                ));
+            }
+            let emails = self.emails;
+            fields.push((
+                "Emails",
+                Cell::new(format_args!(
+                    "{} pending, {} succeeded, {} failed, {} cancelled",
+                    emails.pending, emails.succeeded, emails.failed, emails.cancelled
+                )),
+            ));
+        }
+        None => fields.push(("Sent", Cell::new("not yet: a draft").style(Style::Notice))),
+    }
+    out.fields(&fields)?;
+    if !self.accounts.is_empty() {
+        out.section("Accounts")?;
+        out.table(
+            ["HANDLE", "ID"],
+            "",
+            self.accounts
+                .iter()
+                .map(|account| [Cell::new(&account.handle), Cell::new(account.id)]),
+        )?;
+    }
+    out.blank()?;
+    out.text(&announcement.body)?;
+    out.blank()
+});

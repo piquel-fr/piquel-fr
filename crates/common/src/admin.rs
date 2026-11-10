@@ -1,5 +1,5 @@
 //! The views of administration: what the admin dashboard shows and posts, and
-//! what the CLI's `--output json` prints. Auth's service returns them, and its
+//! what the CLI's `--json` prints. Auth's service returns them, and its
 //! database crate decodes some straight into them.
 //!
 //! Bodies the account settings also return come from [`crate::protocol::api`]

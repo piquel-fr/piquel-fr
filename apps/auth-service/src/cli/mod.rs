@@ -17,7 +17,7 @@ mod announcement;
 mod audit;
 /// Registering, inspecting and changing OIDC clients.
 mod client;
-/// The service and operator, output formats and confirmation.
+/// The service and operator, and confirmation.
 mod console;
 /// The outbound delivery queue.
 mod deliveries;
@@ -29,6 +29,8 @@ mod handle;
 mod invite;
 /// Signing keys and token digest keys.
 mod keys;
+/// Results, messages and failures, for people or as JSON.
+mod output;
 /// The generated command reference.
 #[cfg(test)]
 mod reference;
@@ -51,12 +53,13 @@ use announcement::AnnouncementCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
 use client::{ClientCommand, OriginCommand};
-use console::{Confirm, Console, Output};
+use console::{Confirm, Console};
 use deliveries::DeliveriesCommand;
 use error::CliError;
 use handle::HandleCommand;
 use invite::InviteCommand;
 use keys::KeysCommand;
+use output::Output;
 use session::SessionCommand;
 use sourceorigin_common::ErrorChain;
 use sourceorigin_repository::Database;
@@ -76,6 +79,12 @@ pub struct Cli {
     /// Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
     #[arg(long, global = true, value_name = "NAME")]
     operator: Option<OperatorName>,
+    /// Print the result as JSON for scripts, and every message, prompt and
+    /// failure as one JSON object per line on standard error, among the
+    /// service's log lines: read only the lines that start with `{`. A result
+    /// has the shape of the view the admin dashboard shows, where it has one.
+    #[arg(long, global = true)]
+    json: bool,
     /// Defaults to serving when no administrative command is supplied.
     #[command(subcommand)]
     command: Option<Command>,
@@ -151,9 +160,9 @@ enum Operation {
 }
 
 impl Command {
-    /// Executes this command, an administrative one as `operator` when given, and
-    /// returns the original startup or operation failure.
-    async fn run(self, operator: Option<OperatorName>) -> Result<(), CliError> {
+    /// Executes this command, an administrative one as `operator` when given,
+    /// printing to `out`, and returns the original startup or operation failure.
+    async fn run(self, operator: Option<OperatorName>, out: Output) -> Result<(), CliError> {
         // `migrate` connects as the schema owner when one is configured, then
         // provisions the role every other command connects as. Pruning connects
         // as the owner too, since that role may not delete events.
@@ -177,9 +186,11 @@ impl Command {
             }
             Self::Keys(command) => {
                 let span = tracing::info_span!("keys command", admin.operation = ?operation);
-                command.run(database, operator).instrument(span).await
+                command.run(database, operator, out).instrument(span).await
             }
-            Self::Administration(command) => command.run(&Console::new(database, operator)?).await,
+            Self::Administration(command) => {
+                command.run(&Console::new(database, operator, out)?).await
+            }
         }
     }
 
@@ -224,15 +235,13 @@ impl Administration {
             },
             Self::Invite(command) => match command {
                 InviteCommand::Create { .. } => Op::CreateInvitation,
-                InviteCommand::List { .. } => Op::ListInvitations,
+                InviteCommand::List => Op::ListInvitations,
                 InviteCommand::Revoke { .. } => Op::RevokeInvitation,
             },
             Self::Client(command) => match **command {
                 ClientCommand::Create(_) => Op::CreateClient,
                 ClientCommand::Apply(_) => Op::ApplyClient,
-                ClientCommand::List { .. } | ClientCommand::Origin(OriginCommand::List { .. }) => {
-                    Op::ListClients
-                }
+                ClientCommand::List | ClientCommand::Origin(OriginCommand::List) => Op::ListClients,
                 ClientCommand::Show { .. } => Op::ViewClient,
                 ClientCommand::Update(_) => Op::UpdateClient,
                 ClientCommand::Disable { .. } => Op::DisableClient,
@@ -252,7 +261,7 @@ impl Administration {
             Self::Admin(command) => match command {
                 AdminCommand::Grant { .. } => Op::GrantAdministrator,
                 AdminCommand::Revoke { .. } => Op::RevokeAdministrator,
-                AdminCommand::List { .. } => Op::ListAdministrators,
+                AdminCommand::List => Op::ListAdministrators,
             },
             Self::Handle(command) => match command {
                 HandleCommand::Check | HandleCommand::Released | HandleCommand::Reserved => {
@@ -269,7 +278,7 @@ impl Administration {
                 DeliveriesCommand::Cancel { .. } => Op::CancelDelivery,
             },
             Self::Announcement(command) => match command {
-                AnnouncementCommand::List { .. } => Op::ListAnnouncements,
+                AnnouncementCommand::List => Op::ListAnnouncements,
                 AnnouncementCommand::Show { .. } => Op::ViewAnnouncement,
                 AnnouncementCommand::Draft(_) => Op::DraftAnnouncement,
                 AnnouncementCommand::Edit { .. } => Op::EditAnnouncement,
@@ -315,12 +324,14 @@ const TELEMETRY_FLUSH: Duration = Duration::from_secs(3);
 
 impl Cli {
     /// Installs telemetry, runs the selected command, then flushes telemetry for up
-    /// to `TELEMETRY_FLUSH`, and prints any failure with its causes. OTLP export
+    /// to `TELEMETRY_FLUSH`, and prints any failure with its causes, as JSON with
+    /// `--json`. OTLP export
     /// never stops a command other than `serve`: when it cannot start, the command
     /// logs to stderr only, and a failed or late flush, such as to an unreachable
     /// collector, is only reported, so a deploy's migration job and break-glass
     /// repairs still run. An unparseable `RUST_LOG` stops every command.
     pub async fn run(self) -> ExitCode {
+        let out = Output::new(self.json);
         let result = async {
             let command = self.command.unwrap_or(Command::Serve);
             let export = match command {
@@ -330,16 +341,18 @@ impl Cli {
                 }
             };
             let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER, export)?;
-            let result = command.run(self.operator).await;
-            if let Err(error) = telemetry.shutdown(TELEMETRY_FLUSH).await {
-                eprintln!("warning: {}", ErrorChain(&error));
-            }
-            result
+            let result = command.run(self.operator, out.clone()).await;
+            let flushed = match telemetry.shutdown(TELEMETRY_FLUSH).await {
+                Ok(()) => Ok(()),
+                Err(error) => out.warning(ErrorChain(&error)),
+            };
+            // The command's own failure wins over one to print the warning.
+            result.and(flushed)
         };
         match result.await {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                eprintln!("error: {}", ErrorChain(&error));
+                out.error(&error);
                 ExitCode::FAILURE
             }
         }

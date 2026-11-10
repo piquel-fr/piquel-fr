@@ -1,8 +1,12 @@
 //! Granting, revoking and listing administrators.
 
-use super::{CliError, Confirm, Console, Output};
+use super::{
+    CliError, Confirm, Console,
+    output::{Cell, report},
+};
 use crate::{Reason, UserRef};
 use clap::Subcommand;
+use sourceorigin_common::admin::Administrator;
 
 /// Changes to the administrator list. The CLI may act on any account, and is how
 /// the first administrator is granted.
@@ -35,23 +39,23 @@ pub(super) enum AdminCommand {
         confirm: Confirm,
     },
     /// List administrators, oldest grant first.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
 }
 
 impl AdminCommand {
     /// Runs the change as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         match self {
             Self::Grant { user, reason } => {
-                let user = console.user(&user).await?;
-                service.grant_administrator(operator, user, reason).await?;
+                let id = console.user(&user).await?;
+                service.grant_administrator(operator, id, reason).await?;
+                out.info(format_args!("Made {user} an administrator."))?;
             }
             Self::Revoke {
                 user,
@@ -59,26 +63,30 @@ impl AdminCommand {
                 confirm,
             } => {
                 let id = console.user(&user).await?;
-                confirm.ask(&format!("Remove the administrator rights of {user} ({id})"))?;
-                service.revoke_administrator(operator, id, reason).await?;
-            }
-            Self::List { output } => {
-                output.print(
-                    &service.list_administrators(operator).await?,
-                    |administrators| {
-                        println!("HANDLE\tID\tGRANTED");
-                        for administrator in administrators {
-                            println!(
-                                "{}\t{}\t{}",
-                                administrator.handle,
-                                administrator.user_id,
-                                administrator.granted_at.to_rfc3339()
-                            );
-                        }
-                    },
+                confirm.ask(
+                    out,
+                    &format!("Remove the administrator rights of {user} ({id})"),
                 )?;
+                service.revoke_administrator(operator, id, reason).await?;
+                out.info(format_args!("Removed the administrator rights of {user}."))?;
             }
+            Self::List => out.emit(&service.list_administrators(operator).await?[..])?,
         }
         Ok(())
     }
 }
+
+// One administrator per line, oldest grant first.
+report!([Administrator], self, out, {
+    out.table(
+        ["HANDLE", "ID", "GRANTED"],
+        "No administrators.",
+        self.iter().map(|administrator| {
+            [
+                Cell::new(&administrator.handle),
+                Cell::new(administrator.user_id),
+                administrator.granted_at.into(),
+            ]
+        }),
+    )
+});

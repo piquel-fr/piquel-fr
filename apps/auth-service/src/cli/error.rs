@@ -104,6 +104,9 @@ pub(super) enum CliError {
     /// Command output could not be encoded.
     #[error("could not encode JSON output")]
     Json(#[from] serde_json::Error),
+    /// Command output could not be written.
+    #[error("could not write the command's output")]
+    Output(#[source] std::io::Error),
     /// HTTP applications or embedded assets could not be initialized.
     #[error(transparent)]
     Startup(#[from] StartupError),

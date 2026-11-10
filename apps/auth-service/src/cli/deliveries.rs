@@ -1,9 +1,12 @@
 //! The break-glass view of the outbound delivery queue.
 
-use super::{CliError, Console};
+use super::{
+    CliError, Console,
+    output::{Cell, Style, report},
+};
 use crate::Reason;
 use clap::Subcommand;
-use sourceorigin_common::DeliveryId;
+use sourceorigin_common::{DeliveryId, admin::DeliverySummary};
 use sourceorigin_repository::DeliveryStatus;
 
 /// Inspecting, retrying and cancelling outbound deliveries.
@@ -45,6 +48,7 @@ impl DeliveriesCommand {
         let Console {
             service: admin,
             operator,
+            out,
             ..
         } = console;
         match self {
@@ -52,33 +56,60 @@ impl DeliveriesCommand {
                 status,
                 channel,
                 limit,
-            } => {
-                let deliveries = admin
+            } => out.emit(
+                &admin
                     .list_deliveries(operator, status, channel.as_deref(), limit)
-                    .await?;
-                println!(
-                    "ID\tCHANNEL\tSTATUS\tATTEMPTS\tORDER\tDUE OR FINISHED\tLAST ERROR\tDESTINATION"
-                );
-                for delivery in deliveries {
-                    let order = delivery.ordering.map_or_else(
-                        || "-".to_owned(),
-                        |(key, ordinal)| format!("{key}#{ordinal}"),
-                    );
-                    println!(
-                        "{}\t{}\t{}\t{}\t{order}\t{}\t{}\t{}",
-                        delivery.id,
-                        delivery.channel,
-                        delivery.status,
-                        delivery.attempts,
-                        delivery.finished_at.unwrap_or(delivery.next_attempt_at),
-                        delivery.last_error.as_deref().unwrap_or("-"),
-                        delivery.destination,
-                    );
-                }
+                    .await?[..],
+            )?,
+            Self::Retry { id, reason } => {
+                admin.retry_delivery(operator, id, reason).await?;
+                out.info(format_args!("Delivery {id} will be attempted again now."))?;
             }
-            Self::Retry { id, reason } => admin.retry_delivery(operator, id, reason).await?,
-            Self::Cancel { id, reason } => admin.cancel_delivery(operator, id, reason).await?,
+            Self::Cancel { id, reason } => {
+                admin.cancel_delivery(operator, id, reason).await?;
+                out.info(format_args!("Cancelled delivery {id}."))?;
+            }
         }
         Ok(())
     }
 }
+
+// One delivery per line, newest first.
+report!([DeliverySummary], self, out, {
+    out.table(
+        [
+            "ID",
+            "CHANNEL",
+            "STATUS",
+            "ATTEMPTS",
+            "ORDER",
+            "DUE OR FINISHED",
+            "LAST ERROR",
+            "DESTINATION",
+        ],
+        "No deliveries.",
+        self.iter().map(|delivery| {
+            [
+                Cell::new(delivery.id),
+                Cell::new(&delivery.channel),
+                delivery.status.into(),
+                delivery.attempts.into(),
+                delivery
+                    .ordering
+                    .as_ref()
+                    .map(|(key, ordinal)| Cell::new(format_args!("{key}#{ordinal}")))
+                    .into(),
+                delivery
+                    .finished_at
+                    .unwrap_or(delivery.next_attempt_at)
+                    .into(),
+                delivery
+                    .last_error
+                    .as_deref()
+                    .map(|error| Cell::new(error).style(Style::Bad))
+                    .into(),
+                Cell::new(&delivery.destination),
+            ]
+        }),
+    )
+});

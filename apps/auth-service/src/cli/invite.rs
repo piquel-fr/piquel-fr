@@ -1,9 +1,12 @@
 //! Signup invitations.
 
-use super::{CliError, Console, Output};
+use super::{
+    CliError, Console,
+    output::{Cell, Single, report},
+};
 use crate::{InviteExpiry, PUBLIC_BASE_URL, Reason};
 use clap::Subcommand;
-use sourceorigin_common::TokenId;
+use sourceorigin_common::{TokenId, admin::Invitation};
 
 /// Creating, listing and revoking single-use signup links.
 #[derive(Subcommand)]
@@ -19,11 +22,7 @@ pub(super) enum InviteCommand {
         reason: Reason,
     },
     /// List invitations, newest first, without their links.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
     /// Revoke an unredeemed invitation.
     Revoke {
         /// The invitation's ID, as `invite list` shows it.
@@ -38,35 +37,44 @@ impl InviteCommand {
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         match self {
             Self::Create { expires_in, reason } => {
                 let invitation = service
                     .create_invitation(operator, &PUBLIC_BASE_URL.parse()?, expires_in, reason)
                     .await?;
-                println!("{}", invitation.url);
-            }
-            Self::List { output } => {
-                output.print(&service.list_invitations(operator).await?, |invitations| {
-                    println!("ID\tCREATED\tEXPIRES\tREDEEMED\tREVOKED");
-                    for invitation in invitations {
-                        let time = |at: Option<chrono::DateTime<chrono::Utc>>| {
-                            at.map_or_else(|| "-".to_owned(), |at| at.to_rfc3339())
-                        };
-                        println!(
-                            "{}\t{}\t{}\t{}\t{}",
-                            invitation.id,
-                            invitation.created_at.to_rfc3339(),
-                            invitation.expires_at.to_rfc3339(),
-                            time(invitation.redeemed_at),
-                            time(invitation.revoked_at)
-                        );
-                    }
+                out.emit(&Single {
+                    name: "link",
+                    value: invitation.url,
                 })?;
             }
-            Self::Revoke { id, reason } => service.revoke_invitation(operator, id, reason).await?,
+            Self::List => out.emit(&service.list_invitations(operator).await?[..])?,
+            Self::Revoke { id, reason } => {
+                service.revoke_invitation(operator, id, reason).await?;
+                out.info(format_args!("Revoked invitation {id}."))?;
+            }
         }
         Ok(())
     }
 }
+
+// One invitation per line, newest first, without its link.
+report!([Invitation], self, out, {
+    out.table(
+        ["ID", "CREATED", "EXPIRES", "REDEEMED", "REVOKED"],
+        "No invitations.",
+        self.iter().map(|invitation| {
+            [
+                Cell::new(invitation.id),
+                invitation.created_at.into(),
+                invitation.expires_at.into(),
+                invitation.redeemed_at.into(),
+                invitation.revoked_at.into(),
+            ]
+        }),
+    )
+});

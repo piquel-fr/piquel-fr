@@ -1,10 +1,14 @@
 //! Changing one account's settings on its owner's behalf, with the owner's own
 //! operations.
 
-use super::{CliError, Confirm, Console, Operation, Output, announcement::LetterArgs};
+use super::{
+    CliError, Confirm, Console, Operation,
+    announcement::LetterArgs,
+    output::{Cell, Joined, Style, report},
+};
 use crate::{
     Reason, UserRef,
-    account::{AccountOperation, AccountService, Subject, Viewer},
+    account::{AccountOperation, Subject, Viewer},
     admin::AdminOperation,
     emails::EmailView,
     grants::ConnectedApp,
@@ -63,9 +67,6 @@ enum Setting {
         /// Continue with entries older than this one, the last one listed.
         #[arg(long)]
         before: Option<EventId>,
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
     },
     /// Read the account's notifications, as its inbox shows them. Reading one
     /// never marks it read.
@@ -93,26 +94,16 @@ enum Notifications {
         /// Continue with notifications older than this one, the last one listed.
         #[arg(long)]
         before: Option<NotificationId>,
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
     },
     /// Show one notification, with its security history entry while kept.
     Show {
         /// The notification, as `list` shows it.
         notification: NotificationId,
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
     },
     /// Show which categories of notifications the account receives by email.
     /// Only the owner changes them, since turning one off could hide a notice
     /// from them.
-    Preferences {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    Preferences,
 }
 
 /// The account's display name, which `user show` shows.
@@ -133,11 +124,7 @@ enum Name {
 #[derive(Subcommand)]
 enum Passkeys {
     /// List the active passkeys.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
     /// Rename a passkey.
     Rename {
         /// The passkey's ID, as `list` shows it.
@@ -166,11 +153,7 @@ enum Passkeys {
 #[derive(Subcommand)]
 enum Identities {
     /// List the linked providers.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
     /// Unlink a provider and sign the account out everywhere.
     Unlink {
         /// The provider: `github` or `google`.
@@ -188,11 +171,7 @@ enum Identities {
 #[derive(Subcommand)]
 enum Emails {
     /// List the addresses, primary first.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
     /// Make a verified address the primary one, which applications receive. The
     /// previous one is told.
     Primary {
@@ -217,11 +196,7 @@ enum Emails {
 #[derive(Subcommand)]
 enum Sessions {
     /// List the active sessions, most recently active first.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
     /// Sign one session out, with its applications' refresh tokens.
     Revoke {
         /// The session's ID, as `list` shows it.
@@ -242,11 +217,7 @@ enum Sessions {
     /// List the browsers that signed in within the last 400 days, most recently
     /// seen first. A sign-in from any other browser sends the owner a security
     /// notification.
-    Known {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    Known,
 }
 
 /// The apps that keep access to the account: those it consented to, and those
@@ -254,11 +225,7 @@ enum Sessions {
 #[derive(Subcommand)]
 enum Apps {
     /// List the apps, by name.
-    List {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    List,
     /// Remove an app's access: its refresh grants end and it asks for consent
     /// again. The account's sessions stay signed in.
     Remove {
@@ -274,11 +241,7 @@ enum Apps {
 #[derive(Subcommand)]
 enum Picture {
     /// Show the picture's ID, path on auth and when it was uploaded.
-    Show {
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
-    },
+    Show,
     /// Remove the picture, such as one that impersonates someone.
     Remove {
         /// Why.
@@ -313,38 +276,38 @@ impl AccountCommand {
             Setting::Message { .. } => return Operation::Admin(AdminOperation::MessageUser),
             Setting::Name(Name::Set { .. }) => Op::ChangeDisplayName,
             Setting::Passkeys(command) => match command {
-                Passkeys::List { .. } => Op::ListPasskeys,
+                Passkeys::List => Op::ListPasskeys,
                 Passkeys::Rename { .. } => Op::RenamePasskey,
                 Passkeys::Revoke { .. } => Op::RevokePasskey,
             },
             Setting::Identities(command) => match command {
-                Identities::List { .. } => Op::ListIdentities,
+                Identities::List => Op::ListIdentities,
                 Identities::Unlink { .. } => Op::UnlinkIdentity,
             },
             Setting::Emails(command) => match command {
-                Emails::List { .. } => Op::ListEmails,
+                Emails::List => Op::ListEmails,
                 Emails::Primary { .. } => Op::MakeEmailPrimary,
                 Emails::Remove { .. } => Op::RemoveEmail,
             },
             Setting::Sessions(command) => match command {
-                Sessions::List { .. } => Op::ListSessions,
+                Sessions::List => Op::ListSessions,
                 Sessions::Revoke { .. } => Op::RevokeSession,
                 Sessions::RevokeAll { .. } => Op::RevokeOtherSessions,
-                Sessions::Known { .. } => Op::ListKnownDevices,
+                Sessions::Known => Op::ListKnownDevices,
             },
             Setting::Apps(command) => match command {
-                Apps::List { .. } => Op::ListApps,
+                Apps::List => Op::ListApps,
                 Apps::Remove { .. } => Op::RemoveApp,
             },
             Setting::Picture(command) => match command {
-                Picture::Show { .. } => Op::ViewPicture,
+                Picture::Show => Op::ViewPicture,
                 Picture::Remove { .. } => Op::RemovePicture,
             },
             Setting::History { .. } => Op::ViewHistory,
             Setting::Notifications(notifications) => match notifications {
                 Notifications::List { .. } => Op::ListNotifications,
                 Notifications::Show { .. } => Op::ViewNotification,
-                Notifications::Preferences { .. } => Op::ViewNotificationPreferences,
+                Notifications::Preferences => Op::ViewNotificationPreferences,
             },
         })
     }
@@ -358,17 +321,16 @@ impl AccountCommand {
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Self { user, setting } = self;
         let id = console.user(&user).await?;
-        let account = &console.account;
+        let Console { account, out, .. } = console;
         let read = || Viewer::operator(id, console.operator.clone());
         match setting {
             Setting::Name(Name::Set { name, change }) => {
                 account
                     .change_display_name(&change.on(id, console), name)
                     .await?;
+                out.info(format_args!("Changed the display name of {user}."))?;
             }
-            Setting::Passkeys(Passkeys::List { output }) => {
-                output.print(&account.passkeys(&read()).await?[..], Self::print_passkeys)?;
-            }
+            Setting::Passkeys(Passkeys::List) => out.emit(&account.passkeys(&read()).await?[..])?,
             Setting::Passkeys(Passkeys::Rename {
                 passkey,
                 name,
@@ -377,298 +339,324 @@ impl AccountCommand {
                 account
                     .rename_passkey(&change.on(id, console), passkey, name)
                     .await?;
+                out.info(format_args!("Renamed passkey {passkey} of {user}."))?;
             }
             Setting::Passkeys(Passkeys::Revoke {
                 passkey,
                 change,
                 confirm,
             }) => {
-                confirm.ask(&format!(
-                    "Remove passkey {passkey} of {user} ({id}) and sign it out everywhere"
-                ))?;
+                confirm.ask(
+                    out,
+                    &format!(
+                        "Remove passkey {passkey} of {user} ({id}) and sign it out everywhere"
+                    ),
+                )?;
                 let subject = change.on(id, console);
                 account.revoke_passkey(&subject, passkey).await?;
+                out.info(format_args!(
+                    "Removed passkey {passkey} of {user} and signed it out everywhere."
+                ))?;
             }
-            Setting::Identities(Identities::List { output }) => {
-                output.print(
-                    &account.identities(&read()).await?[..],
-                    Self::print_identities,
-                )?;
+            Setting::Identities(Identities::List) => {
+                out.emit(&account.identities(&read()).await?[..])?;
             }
             Setting::Identities(Identities::Unlink {
                 provider,
                 change,
                 confirm,
             }) => {
-                confirm.ask(&format!(
-                    "Unlink {provider} from {user} ({id}) and sign it out everywhere"
-                ))?;
+                confirm.ask(
+                    out,
+                    &format!("Unlink {provider} from {user} ({id}) and sign it out everywhere"),
+                )?;
                 let subject = change.on(id, console);
                 account.unlink_identity(&subject, provider).await?;
+                out.info(format_args!(
+                    "Unlinked {provider} from {user} and signed it out everywhere."
+                ))?;
             }
-            Setting::Emails(Emails::List { output }) => {
-                output.print(&account.emails(&read()).await?[..], Self::print_emails)?;
-            }
+            Setting::Emails(Emails::List) => out.emit(&account.emails(&read()).await?[..])?,
             Setting::Emails(Emails::Primary { email, change }) => {
                 let subject = change.on(id, console);
                 account.make_primary_email(&subject, email).await?;
+                out.info(format_args!(
+                    "Made address {email} the primary one of {user}."
+                ))?;
             }
             Setting::Emails(Emails::Remove { email, change }) => {
                 let subject = change.on(id, console);
                 account.remove_email(&subject, email).await?;
+                out.info(format_args!("Removed address {email} from {user}."))?;
             }
-            Setting::Sessions(Sessions::List { output }) => {
-                output.print(&account.sessions(&read()).await?[..], Self::print_sessions)?;
-            }
+            Setting::Sessions(Sessions::List) => out.emit(&account.sessions(&read()).await?[..])?,
             Setting::Sessions(Sessions::Revoke { session, change }) => {
                 account
                     .revoke_session(&change.on(id, console), session)
                     .await?;
+                out.info(format_args!("Signed session {session} of {user} out."))?;
             }
             Setting::Sessions(Sessions::RevokeAll { change, confirm }) => {
-                confirm.ask(&format!("Sign {user} ({id}) out everywhere"))?;
+                confirm.ask(out, &format!("Sign {user} ({id}) out everywhere"))?;
                 let Revoked { revoked } = account
                     .revoke_other_sessions(&change.on(id, console))
                     .await?;
-                eprintln!("Signed out {revoked} sessions.");
+                out.info(format_args!("Signed {user} out of {revoked} sessions."))?;
             }
-            Setting::Sessions(Sessions::Known { output }) => {
-                output.print(
-                    &account.known_devices(&read()).await?[..],
-                    Self::print_known_devices,
-                )?;
+            Setting::Sessions(Sessions::Known) => {
+                out.emit(&account.known_devices(&read()).await?[..])?;
             }
-            Setting::Apps(Apps::List { output }) => {
-                output.print(&account.apps(&read()).await?[..], Self::print_apps)?;
-            }
+            Setting::Apps(Apps::List) => out.emit(&account.apps(&read()).await?[..])?,
             Setting::Apps(Apps::Remove { client, change }) => {
                 account.remove_app(&change.on(id, console), &client).await?;
+                out.info(format_args!("Removed the access of {client} to {user}."))?;
             }
-            Setting::Picture(Picture::Show { output }) => {
-                output.print(&account.picture(&read()).await?, |picture| {
-                    Self::print_picture(picture.as_ref());
-                })?;
-            }
+            Setting::Picture(Picture::Show) => out.emit(&account.picture(&read()).await?)?,
             Setting::Picture(Picture::Remove { change }) => {
                 account.remove_picture(&change.on(id, console)).await?;
+                out.info(format_args!("Removed the profile picture of {user}."))?;
             }
-            Setting::History { before, output } => {
-                output.print(
-                    &account.history(&read(), before).await?,
-                    Self::print_history,
-                )?;
+            Setting::History { before } => {
+                out.emit(&account.history(&read(), before).await?)?;
             }
-            Setting::Notifications(notifications) => notifications.run(account, &read()).await?,
+            Setting::Notifications(notifications) => {
+                notifications.run(console, &read()).await?;
+            }
             Setting::Message { letter, confirm } => {
                 let letter = letter.letter()?;
-                confirm.ask(&format!(
-                    "Send the message \"{}\" to {user} ({id}), emailing its primary verified address",
-                    letter.subject
-                ))?;
+                confirm.ask(
+                    out,
+                    &format!(
+                        "Send the message \"{}\" to {user} ({id}), emailing its primary verified address",
+                        letter.subject
+                    ),
+                )?;
                 console
                     .service
                     .message_user(&console.operator, id, letter)
                     .await?;
-                eprintln!("Sent.");
+                out.info(format_args!("Sent the message to {user}."))?;
             }
         }
         Ok(())
-    }
-
-    /// Prints the picture, or that there is none.
-    fn print_picture(picture: Option<&PictureView>) {
-        match picture {
-            Some(picture) => println!(
-                "ID:\t{}\nPath:\t{}\nUploaded:\t{}",
-                picture.id, picture.url, picture.created_at
-            ),
-            None => println!("No profile picture."),
-        }
-    }
-
-    /// Prints one passkey per line.
-    fn print_passkeys(passkeys: &[Passkey]) {
-        println!("ID\tNAME");
-        for passkey in passkeys {
-            println!("{}\t{}", passkey.id, passkey.friendly_name);
-        }
-    }
-
-    /// Prints one linked provider per line.
-    fn print_identities(identities: &[Identity]) {
-        println!("PROVIDER\tEMAIL");
-        for identity in identities {
-            println!(
-                "{}\t{}",
-                identity.provider,
-                identity.linked_email.as_deref().unwrap_or("-")
-            );
-        }
-    }
-
-    /// Prints one address per line.
-    fn print_emails(emails: &[EmailView]) {
-        println!("ID\tADDRESS\tVERIFIED\tPRIMARY");
-        for email in emails {
-            println!(
-                "{}\t{}\t{}\t{}",
-                email.id, email.address, email.verified, email.primary
-            );
-        }
-    }
-
-    /// Prints one session per line, then one per dashboard session resting on
-    /// it, indented, with when it signed in, was last used and ends.
-    fn print_sessions(sessions: &[SessionItem]) {
-        println!("ID\tMETHODS\tDEVICE\tIP\tSIGNED IN\tLAST SEEN\tEXPIRES");
-        for session in sessions {
-            let methods: Vec<_> = session.methods.iter().map(ToString::to_string).collect();
-            println!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                session.id,
-                methods.join(","),
-                session
-                    .device
-                    .map_or_else(|| "-".to_owned(), |device| device.to_string()),
-                session
-                    .ip
-                    .map_or_else(|| "-".to_owned(), |ip| ip.to_string()),
-                session.authenticated_at.to_rfc3339(),
-                session.last_seen_at.to_rfc3339(),
-                session.expires_at.to_rfc3339()
-            );
-            for dashboard in &session.dashboard {
-                println!(
-                    "  dashboard\t-\t-\t-\t{}\t{}\t{}",
-                    dashboard.signed_in_at.to_rfc3339(),
-                    dashboard.last_used_at.to_rfc3339(),
-                    dashboard.expires_at.to_rfc3339()
-                );
-            }
-        }
-    }
-
-    /// Prints one known browser per line, as `user show` does too.
-    pub(super) fn print_known_devices(devices: &[KnownDevice]) {
-        println!("DEVICE\tFIRST SEEN\tLAST SEEN");
-        for device in devices {
-            println!(
-                "{}\t{}\t{}",
-                device
-                    .device
-                    .map_or_else(|| "-".to_owned(), |device| device.to_string()),
-                device.first_seen_at.to_rfc3339(),
-                device.last_seen_at.to_rfc3339()
-            );
-        }
-    }
-
-    /// Prints one app per line. `OFFLINE` says whether it holds a refresh grant, to
-    /// act while the owner is away.
-    fn print_apps(apps: &[ConnectedApp]) {
-        println!("CLIENT ID\tNAME\tFIRST PARTY\tOFFLINE\tSCOPES");
-        for app in apps {
-            println!(
-                "{}\t{}\t{}\t{}\t{}",
-                app.client_id,
-                app.name,
-                app.first_party,
-                app.offline,
-                app.scopes.join(" ")
-            );
-        }
-    }
-
-    /// Prints one entry per line, by its `kind`, and how to continue if there may
-    /// be more.
-    fn print_history(page: &HistoryPage) {
-        println!("ID\tTIME\tKIND\tBY\tREASON");
-        for item in &page.entries {
-            // An entry holds no map, so it always serializes.
-            let entry = serde_json::to_value(&item.entry).unwrap_or_default();
-            println!(
-                "{}\t{}\t{}\t{}\t{}",
-                item.id,
-                item.occurred_at.to_rfc3339(),
-                entry["kind"].as_str().unwrap_or("-"),
-                item.actor,
-                item.reason.as_deref().unwrap_or("-")
-            );
-        }
-        if let Some(next) = page.next {
-            eprintln!("More may follow: --before {next}");
-        }
     }
 }
 
 impl Notifications {
     /// Prints the inbox, one notification, or the email preferences, as `viewer`
     /// reads them, marking nothing read.
-    async fn run(self, account: &AccountService, viewer: &Viewer) -> Result<(), CliError> {
+    async fn run(self, console: &Console, viewer: &Viewer) -> Result<(), CliError> {
+        let Console { account, out, .. } = console;
         match self {
-            Self::List { before, output } => output.print(
-                &account.notifications(viewer, before).await?,
-                Self::print_list,
-            )?,
-            Self::Show {
-                notification,
-                output,
-            } => output.print(
-                &account.notification(viewer, notification).await?,
-                Self::print_one,
-            )?,
-            Self::Preferences { output } => output.print(
-                &account.notification_preferences(viewer).await?[..],
-                Self::print_preferences,
-            )?,
-        }
-        Ok(())
-    }
-
-    /// Prints each category and whether it is emailed. Everything about the
-    /// account itself always is.
-    fn print_preferences(preferences: &[NotificationPreference]) {
-        println!("CATEGORY\tEMAIL");
-        println!("security\talways");
-        for preference in preferences {
-            let email = if preference.email { "on" } else { "off" };
-            println!("{}\t{email}", preference.category);
-        }
-    }
-
-    /// Prints one notification per line, and how to continue if there may be more.
-    fn print_list(page: &NotificationPage) {
-        println!("ID\tTIME\tREAD\tSUBJECT");
-        for item in &page.notifications {
-            println!(
-                "{}\t{}\t{}\t{}",
-                item.id,
-                item.created_at.to_rfc3339(),
-                item.read(),
-                item.subject
-            );
-        }
-        if let Some(next) = page.next {
-            eprintln!("More may follow: --before {next}");
-        }
-    }
-
-    /// Prints a notification: its subject, when, whether it was read, what it
-    /// says, and its history entry's ID while the history keeps it.
-    fn print_one(view: &NotificationView) {
-        let NotificationItem {
-            subject,
-            body,
-            created_at,
-            ..
-        } = &view.item;
-        println!("{subject}");
-        println!("{}  read: {}", created_at.to_rfc3339(), view.item.read());
-        println!();
-        println!("{body}");
-        if let Some(entry) = &view.history {
-            println!();
-            println!("History entry: {} (by {})", entry.id, entry.actor);
+            Self::List { before } => out.emit(&account.notifications(viewer, before).await?),
+            Self::Show { notification } => {
+                out.emit(&account.notification(viewer, notification).await?)
+            }
+            Self::Preferences => out.emit(&account.notification_preferences(viewer).await?[..]),
         }
     }
 }
+
+// The profile picture, or that there is none.
+report!(Option<PictureView>, self, out, {
+    match self {
+        Some(picture) => out.fields(&[
+            ("ID", Cell::new(picture.id)),
+            ("Path", Cell::new(&picture.url)),
+            ("Uploaded", picture.created_at.into()),
+        ]),
+        None => out.line("No profile picture."),
+    }
+});
+
+// One passkey per line.
+report!([Passkey], self, out, {
+    out.table(
+        ["ID", "NAME"],
+        "No passkeys.",
+        self.iter()
+            .map(|passkey| [Cell::new(passkey.id), Cell::new(&passkey.friendly_name)]),
+    )
+});
+
+// One linked provider per line.
+report!([Identity], self, out, {
+    out.table(
+        ["PROVIDER", "EMAIL"],
+        "No linked identities.",
+        self.iter().map(|identity| {
+            [
+                Cell::new(identity.provider),
+                identity.linked_email.as_deref().into(),
+            ]
+        }),
+    )
+});
+
+// One address per line.
+report!([EmailView], self, out, {
+    out.table(
+        ["ID", "ADDRESS", "VERIFIED", "PRIMARY"],
+        "No addresses.",
+        self.iter().map(|email| {
+            [
+                Cell::new(email.id),
+                Cell::new(&email.address),
+                email.verified.into(),
+                email.primary.into(),
+            ]
+        }),
+    )
+});
+
+// One session per line, then one per dashboard session resting on it, indented,
+// with when it signed in, was last used and ends.
+report!([SessionItem], self, out, {
+    out.table(
+        [
+            "ID",
+            "METHODS",
+            "DEVICE",
+            "IP",
+            "SIGNED IN",
+            "LAST SEEN",
+            "EXPIRES",
+        ],
+        "No sessions.",
+        self.iter().flat_map(|session| {
+            let row = [
+                Cell::new(session.id),
+                Cell::new(Joined(&session.methods, ", ")),
+                session.device.map(Cell::new).into(),
+                session.ip.map(Cell::new).into(),
+                session.authenticated_at.into(),
+                session.last_seen_at.into(),
+                session.expires_at.into(),
+            ];
+            let dashboard = session.dashboard.iter().map(|dashboard| {
+                [
+                    Cell::new("  dashboard").style(Style::Muted),
+                    Cell::none(),
+                    Cell::none(),
+                    Cell::none(),
+                    dashboard.signed_in_at.into(),
+                    dashboard.last_used_at.into(),
+                    dashboard.expires_at.into(),
+                ]
+            });
+            std::iter::once(row).chain(dashboard)
+        }),
+    )
+});
+
+// One known browser per line, as `user show` lists them too.
+report!([KnownDevice], self, out, {
+    out.table(
+        ["DEVICE", "FIRST SEEN", "LAST SEEN"],
+        "No known browsers.",
+        self.iter().map(|device| {
+            [
+                device.device.map(Cell::new).into(),
+                device.first_seen_at.into(),
+                device.last_seen_at.into(),
+            ]
+        }),
+    )
+});
+
+// One app per line. `OFFLINE` says whether it holds a refresh grant, to act
+// while the owner is away.
+report!([ConnectedApp], self, out, {
+    out.table(
+        ["CLIENT ID", "NAME", "FIRST PARTY", "OFFLINE", "SCOPES"],
+        "No apps.",
+        self.iter().map(|app| {
+            [
+                Cell::new(&app.client_id),
+                Cell::new(&app.name),
+                app.first_party.into(),
+                app.offline.into(),
+                Cell::new(app.scopes.join(" ")),
+            ]
+        }),
+    )
+});
+
+// One entry per line, by its `kind`, and how to list what follows.
+report!(HistoryPage, self, out, {
+    out.table(
+        ["ID", "TIME", "KIND", "BY", "REASON"],
+        "No history.",
+        self.entries.iter().map(|item| {
+            // An entry holds no map, so it always serializes.
+            let entry = serde_json::to_value(&item.entry).unwrap_or_default();
+            [
+                Cell::new(item.id),
+                item.occurred_at.into(),
+                entry["kind"].as_str().into(),
+                Cell::new(item.actor),
+                item.reason.as_deref().into(),
+            ]
+        }),
+    )?;
+    out.more(self.next)
+});
+
+// Each category and whether it is emailed. Everything about the account itself
+// always is.
+report!([NotificationPreference], self, out, {
+    let category = |category, email| [Cell::new(category), Cell::new(email)];
+    out.table(
+        ["CATEGORY", "EMAIL"],
+        "",
+        std::iter::once(category("security".to_owned(), "always")).chain(self.iter().map(
+            |preference| {
+                let email = if preference.email { "on" } else { "off" };
+                category(preference.category.to_string(), email)
+            },
+        )),
+    )
+});
+
+// One notification per line, and how to list what follows.
+report!(NotificationPage, self, out, {
+    out.table(
+        ["ID", "TIME", "READ", "SUBJECT"],
+        "No notifications.",
+        self.notifications.iter().map(|item| {
+            [
+                Cell::new(item.id),
+                item.created_at.into(),
+                item.read().into(),
+                Cell::new(&item.subject),
+            ]
+        }),
+    )?;
+    out.more(self.next)
+});
+
+// A notification: its subject, when, whether it was read, what it says, and its
+// history entry while the history keeps it.
+report!(NotificationView, self, out, {
+    let NotificationItem {
+        subject,
+        body,
+        created_at,
+        ..
+    } = &self.item;
+    out.title(subject)?;
+    let mut fields = vec![
+        ("Sent", Cell::from(*created_at)),
+        ("Read", self.item.read().into()),
+    ];
+    if let Some(entry) = &self.history {
+        fields.push((
+            "History entry",
+            Cell::new(format_args!("{} (by {})", entry.id, entry.actor)),
+        ));
+    }
+    out.fields(&fields)?;
+    out.blank()?;
+    out.text(body)?;
+    out.blank()
+});

@@ -25,7 +25,7 @@ On the admin dashboard:
 
 ```sh
 just auth client origin add blog https://blog.example --reason "Blog sign-in"
-just auth client origin list         # --output json for scripts
+just auth client origin list         # --json for scripts
 just auth client origin remove blog https://blog.example --reason "Blog moved"
 ```
 

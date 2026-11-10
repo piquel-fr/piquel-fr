@@ -24,7 +24,7 @@ fn commands_run_when_export_cannot_start() {
         "{stderr}"
     );
     assert!(
-        stderr.contains("error: AUTH_DATABASE_URL is required"),
+        stderr.contains("Error: AUTH_DATABASE_URL is required"),
         "{stderr}"
     );
 }
@@ -36,7 +36,7 @@ fn serve_fails_when_export_cannot_start() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(
-        stderr.contains("error: could not configure OTLP export"),
+        stderr.contains("Error: could not configure OTLP export"),
         "{stderr}"
     );
 }

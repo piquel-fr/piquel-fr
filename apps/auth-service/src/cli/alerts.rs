@@ -1,26 +1,26 @@
 //! The alerts administrators are shown, and the updates they post on them.
 
-use super::{CliError, Console, Output};
+use super::{
+    CliError, Console,
+    output::{Cell, report},
+};
 use crate::Reason;
 use clap::Subcommand;
 use sourceorigin_common::{
     AlertId,
-    alerts::{Alert, AlertDetail, AlertState, AlertStatus, AlertsShown},
+    alerts::{Alert, AlertDetail, AlertStatus, AlertsShown},
 };
 
 /// Listing alerts and posting updates on them.
 #[derive(Subcommand)]
 pub(super) enum AlertsCommand {
     /// List the current alerts, newest first, each with where its handling
-    /// stands.
+    /// stands. `--json` lists every update too.
     List {
         /// List the alerts that cleared instead, the most recently cleared
         /// first, at most 100.
         #[arg(long)]
         previous: bool,
-        /// Output format. JSON lists every update.
-        #[command(flatten)]
-        output: Output,
     },
     /// Post an update on a current alert, saying where its handling stands. The
     /// first acknowledges it: it stops counting as a warning, though it stays
@@ -43,54 +43,61 @@ impl AlertsCommand {
     /// Runs this command through the console's service.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         match self {
-            Self::List { previous, output } => {
+            Self::List { previous } => {
                 let shown = if previous {
                     AlertsShown::Previous
                 } else {
                     AlertsShown::Current
                 };
-                let alerts = service.alerts(operator, shown).await?;
-                output.print(&alerts, |alerts| {
-                    println!("ID\tSTATE\tSTATUS\tRAISED\tLAST SEEN\tCLEARED\tALERT");
-                    for alert in alerts {
-                        Self::print(alert);
-                    }
-                })?;
+                out.emit(&service.alerts(operator, shown).await?[..])?;
             }
             Self::Update { id, status, note } => {
                 service.update_alert(operator, id, status, note).await?;
-                eprintln!("Alert {id} updated: {status}.");
+                out.info(format_args!("Alert {id} updated: {status}."))?;
             }
         }
         Ok(())
     }
-
-    /// Prints one alert as a table row: where it and its handling stand, and
-    /// what it says.
-    fn print(detail: &AlertDetail) {
-        let alert = &detail.alert;
-        let state = match alert.state() {
-            AlertState::Open => "open",
-            AlertState::Acknowledged => "acknowledged",
-            AlertState::Cleared => "cleared",
-        };
-        let status = detail
-            .updates
-            .last()
-            .map_or("-", |update| update.status.as_str());
-        let says = alert.alert.as_ref().map_or_else(
-            || Alert::UNKNOWN.to_owned(),
-            |alert| format!("{}. {}", alert.subject(), alert.body()),
-        );
-        let cleared = alert
-            .cleared_at
-            .map_or_else(|| "-".to_owned(), |at| at.to_string());
-        println!(
-            "{}\t{state}\t{status}\t{}\t{}\t{cleared}\t{says}",
-            alert.id, alert.raised_at, alert.seen_at
-        );
-    }
 }
+
+// One alert per line: where it and its handling stand, and what it says.
+report!([AlertDetail], self, out, {
+    out.table(
+        [
+            "ID",
+            "STATE",
+            "STATUS",
+            "RAISED",
+            "LAST SEEN",
+            "CLEARED",
+            "ALERT",
+        ],
+        "No alerts.",
+        self.iter().map(|detail| {
+            let alert = &detail.alert;
+            let says = alert.alert.as_ref().map_or_else(
+                || Cell::new(Alert::UNKNOWN),
+                |alert| Cell::new(format_args!("{}. {}", alert.subject(), alert.body())),
+            );
+            [
+                Cell::new(alert.id),
+                alert.state().into(),
+                detail
+                    .updates
+                    .last()
+                    .map(|update| update.status.as_str())
+                    .into(),
+                alert.raised_at.into(),
+                alert.seen_at.into(),
+                alert.cleared_at.into(),
+                says,
+            ]
+        }),
+    )
+});
