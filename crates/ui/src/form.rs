@@ -418,13 +418,16 @@ pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
 /// the user fills in as `child`, the reason an administrator gives when `reason`
 /// asks for one, holding what they typed last, and a button labelled `label`, of `class`, beside a link back to
 /// `cancel` when there is one. With `confirm`, the passkey script first confirms
-/// the session with a passkey; a ceremony that fails says why in the form.
+/// the session with a passkey; a ceremony that fails says why in the form. With
+/// `on`, the button is instead a [`switch`] named `label`, showing whether the
+/// setting `change` toggles is on.
 #[component]
 pub(crate) async fn change_form<'a>(
     action: &'a str,
     #[into] change: Fields,
     #[into] label: String,
     #[default] class: &'a str,
+    #[default] on: Option<bool>,
     #[into]
     #[default]
     aria_label: Option<String>,
@@ -456,12 +459,32 @@ pub(crate) async fn change_form<'a>(
                 <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
             }
             <div class="row actions">
-                <button class=(class) aria-label=(aria_label.as_deref())>(label.as_str())</button>
+                if let Some(on) = on {
+                    switch(on: on, label: label.as_str())
+                } else {
+                    <button class=(class) aria-label=(aria_label.as_deref())>(label.as_str())</button>
+                }
                 if let Some(cancel) = &cancel {
                     <a class="button secondary" href=(cancel.as_str())>"Cancel"</a>
                 }
             </div>
         </form>
+    })
+}
+
+/// A switch named `label`, showing whether its setting is `on`: a button the
+/// stylesheet draws as a sliding toggle, which posts its form, or with
+/// `disabled`, only shows the setting to whom cannot change it.
+#[component]
+pub(crate) async fn switch<'a>(
+    on: bool,
+    label: &'a str,
+    #[default] disabled: bool,
+) -> Result<impl View> {
+    Ok(view! {
+        <button role="switch" aria-checked=(if on { "true" } else { "false" }) disabled=(disabled)>
+            <span class="visually-hidden">(label)</span>
+        </button>
     })
 }
 

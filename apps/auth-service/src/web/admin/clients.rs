@@ -305,7 +305,8 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<Rotation>>) -> Result<Resp
             refusal: refusal,
         )
     };
-    App::render(cx, StatusCode::OK, "Client secrets", page).await
+    // A large page: its future is boxed, off the handler's stack.
+    Box::pin(App::render(cx, StatusCode::OK, "Client secrets", page)).await
 }
 
 /// The form rotating a client's secret: the developer console's, with why.

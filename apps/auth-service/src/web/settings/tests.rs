@@ -672,7 +672,12 @@ async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
         preferences.expect("preferences")[0].email
     };
     let page = html(browser.visit(&replicas.a, settings::NOTIFICATIONS).await).await;
-    assert!(page.contains("Turn off emails for Announcements"), "{page}");
+    assert!(
+        page.contains(
+            r#"aria-checked="true"><span class="visually-hidden">Emails for Announcements"#
+        ),
+        "{page}"
+    );
     for email in [false, true] {
         let change = InboxChange::Email {
             category: EmailCategory::Announcements,

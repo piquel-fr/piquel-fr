@@ -44,7 +44,7 @@ this machine:
   there after signing out.
 - **Scopes**: the app's scopes, and `offline_access`, which the SDKs' login
   routes always request.
-- **Allow refresh tokens**: checked.
+- **Allow refresh tokens**: on.
 - **Back-channel logout URI**: empty. Auth posts logout tokens only to HTTPS
   URIs with public addresses, so it can't reach this machine.
 

@@ -39,7 +39,7 @@ https://auth.sourceorigin.dev/developers/new and fill in:
   `email` only if the app needs it, and `offline_access`. The login routes
   request `offline_access` on every sign-in, and auth refuses a sign-in that
   asks for a scope the app may not request.
-- **Allow refresh tokens**: checked. Without refresh tokens, a session ends
+- **Allow refresh tokens**: on. Without refresh tokens, a session ends
   with its access token, within five minutes.
 
 After **Register app**, the console shows the client secret once. Ask the

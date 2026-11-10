@@ -626,8 +626,7 @@ impl WebApplication {
                 alert: alert,
             )
         };
-        Ok(self
-            .render(cx, status, step.title().as_str(), &targets, view)
-            .await?)
+        // A large page: its future is boxed, off the handler's stack.
+        Ok(Box::pin(self.render(cx, status, step.title().as_str(), &targets, view)).await?)
     }
 }

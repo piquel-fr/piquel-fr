@@ -16,8 +16,8 @@ which runs on Node's `http` server.
    a `TypeError` for a browser or native app.
 2. In its settings, add the redirect URI `https://<your app>/auth/callback`.
    Every login requests `offline_access`, so the session can refresh its access
-   token: tick the `offline_access` scope, or sign-in fails, and **Allow refresh
-   tokens**, or each session lasts only as long as its first access token, five
+   token: turn on the `offline_access` scope, or sign-in fails, and **Allow
+   refresh tokens**, or each session lasts only as long as its first access token, five
    minutes.
 3. Generate a cookie key, which seals the session cookies:
 
@@ -191,7 +191,7 @@ a back-channel logout token.
   app with a backend.
 - **Sign-in answers `502`, "Sign-in could not start":** auth refused the
   sign-in request, and the message says why, such as a scope the app may not
-  request: `offline_access` when its scope is left unticked.
+  request: `offline_access` when its scope is left off.
 - **Sign-in answers `400`, "This sign-in has no pending login":** the browser lost
   the login's cookie, or opened the callback twice. Start again from
   `/auth/login`.
