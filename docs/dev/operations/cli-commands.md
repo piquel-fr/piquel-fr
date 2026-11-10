@@ -786,13 +786,13 @@ Options:
 
 Commands:
 
-- [`auth-service audit list`](#auth-service-audit-list): Page through recorded events, newest first.
+- [`auth-service audit list`](#auth-service-audit-list): Page through recorded events, newest first, with who caused each and why.
 - [`auth-service audit verify`](#auth-service-audit-verify): Recompute the chain and check every checkpoint against it, and record what it found, which the dashboard's Audit tab shows. Exits non-zero, naming the first position that does not match, when the chain is broken.
 - [`auth-service audit prune`](#auth-service-audit-prune): Delete the events through a checkpoint, once the chain verifies through it. The checkpoint becomes the anchor the remaining chain extends. Connects as the schema owner when `AUTH_DATABASE_OWNER_URL` is set: auth's own role may not delete events.
 
 ## `auth-service audit list`
 
-Page through recorded events, newest first.
+Page through recorded events, newest first, with who caused each and why.
 
 ```text
 auth-service audit list [OPTIONS]

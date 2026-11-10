@@ -175,7 +175,7 @@ pub async fn settings_tabs<'a>(tabs: &'a [(Tab, &'a str)], current: Tab) -> Resu
 
 /// A device's name, from the browser and platform it signed in with, e.g.
 /// "Firefox on Linux".
-fn device_name(device: UserAgentFamily) -> String {
+pub(crate) fn device_name(device: UserAgentFamily) -> String {
     let browser = match device.browser {
         Browser::Chrome => "Chrome",
         Browser::Edge => "Edge",

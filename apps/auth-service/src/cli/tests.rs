@@ -9,7 +9,8 @@ use crate::{
     tests::{Browser, Replicas, operator},
 };
 use sourceorigin_common::{
-    AccountStatus, Handle, UserId,
+    AccountStatus, EventId, Handle, SessionId, UserId,
+    admin::Event,
     clients::ClientKind,
     config::ConfigurationError,
     events::{Actor, DomainEvent},
@@ -455,6 +456,35 @@ impl Administration {
         };
         self.run(&console).await.expect("command");
     }
+}
+
+/// `audit list` names an administrator by their handle, and prints why they
+/// acted.
+#[test]
+fn audit_list_names_the_administrator_and_their_reason() {
+    let actor = Actor::Admin {
+        user_id: UserId::new(),
+        session_id: SessionId::new(),
+    };
+    let event = Event {
+        id: EventId::new(),
+        occurred_at: chrono::Utc::now(),
+        actor: serde_json::to_value(actor).expect("actor"),
+        administrator: Some(Handle::parse("alice").expect("handle")),
+        subject: None,
+        trace_id: None,
+        event: serde_json::json!({"kind": "recovery_started"}),
+        reason: Some("Lost every passkey".into()),
+        ip: None,
+        device: None,
+        erased: false,
+    };
+    let line = audit::ListEvents::line(&event);
+    assert!(line.contains("\tadmin @alice\t"), "{line}");
+    assert!(
+        line.ends_with("\trecovery_started\tLost every passkey"),
+        "{line}"
+    );
 }
 
 /// The first event of `kind` in `user`'s history, newest first, which must exist.

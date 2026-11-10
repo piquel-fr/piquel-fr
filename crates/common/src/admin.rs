@@ -10,11 +10,13 @@ use crate::{
     AccountStatus, AnnouncementId, AuthenticationMethod, ClientId, DeliveryId, EventId, Handle,
     PictureId, SessionId, TokenId, TraceId, UserId,
     clients::RelatedOrigin,
+    events::UserAgentFamily,
     form::Checkbox,
     protocol::{jwt::KeyId, oauth::ClientAuthMethod},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use url::Url;
 
 /// An account, as search results and its detail page show it.
@@ -378,6 +380,10 @@ pub struct Event {
     pub occurred_at: DateTime<Utc>,
     /// Who caused it, e.g. `{"type": "admin", "user_id": …, "session_id": …}`.
     pub actor: serde_json::Value,
+    /// The current handle of the administrator who caused it, when one did and
+    /// their account still exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub administrator: Option<Handle>,
     /// The account it concerns, if any.
     pub subject: Option<UserId>,
     /// The trace of the request or job that recorded it, to look up in telemetry
@@ -390,6 +396,20 @@ pub struct Event {
     /// or payload version the serving release does not know, written by a newer
     /// one, also carries its `version`.
     pub event: serde_json::Value,
+    /// Why the administrator or operator who caused it did, as they wrote it,
+    /// while kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The request's IP address, while kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip: Option<IpAddr>,
+    /// The request's browser and platform, while kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<UserAgentFamily>,
+    /// Whether retention or a purge deleted its personal data: the IP address,
+    /// device and reason.
+    #[serde(default)]
+    pub erased: bool,
 }
 
 /// An origin approved for a client's pages to sign users in with passkeys, which

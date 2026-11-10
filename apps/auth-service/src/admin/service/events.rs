@@ -8,11 +8,12 @@ use crate::{
     audit::{AuditChain, AuditPage, AuditVerification},
 };
 use sourceorigin_common::{
-    DeliveryId,
+    DeliveryId, Handle, Personal, UserId,
     admin::{Event, EventPage, EventSearch, Paging},
-    events::DomainEvent,
+    events::{Actor, DomainEvent, RequestOrigin},
 };
-use sourceorigin_repository::{DeliveryStatus, DeliverySummary, EventFilter};
+use sourceorigin_repository::{DeliveryStatus, DeliverySummary, EventFilter, StoredEvent};
+use std::collections::HashMap;
 
 /// Events per page.
 const EVENT_PAGE_SIZE: u16 = 50;
@@ -37,20 +38,52 @@ impl AdminService {
         let paging = Paging::new(search.page, total, u32::from(EVENT_PAGE_SIZE));
         filter.offset = u32::try_from(paging.offset()).unwrap_or(u32::MAX);
         let stored = events.list(&filter, u32::from(EVENT_PAGE_SIZE)).await?;
+        let administrators = self.administrators_of(&stored).await?;
         let events = stored
             .into_iter()
             .map(|stored| {
+                let (origin, erased) = match stored.origin {
+                    Personal::Value(origin) => (origin, false),
+                    Personal::Erased => (RequestOrigin::default(), true),
+                };
+                let administrator = match &stored.actor {
+                    Actor::Admin { user_id, .. } => administrators.get(user_id).cloned().flatten(),
+                    _ => None,
+                };
                 Ok(Event {
                     id: stored.id,
                     occurred_at: stored.occurred_at,
                     actor: serde_json::to_value(stored.actor)?,
+                    administrator,
                     subject: stored.subject,
                     trace_id: stored.trace_id,
                     event: serde_json::to_value(stored.event)?,
+                    reason: stored.reason,
+                    ip: origin.client_ip,
+                    device: origin.user_agent_family,
+                    erased,
                 })
             })
             .collect::<Result<_, serde_json::Error>>()?;
         Ok(EventPage { events, paging })
+    }
+
+    /// The current handles of the administrators who caused `events`, by account,
+    /// each looked up once. An account purged since has none.
+    async fn administrators_of(
+        &self,
+        events: &[StoredEvent],
+    ) -> Result<HashMap<UserId, Option<Handle>>, AdminError> {
+        let mut handles = HashMap::new();
+        for event in events {
+            if let Actor::Admin { user_id, .. } = event.actor
+                && !handles.contains_key(&user_id)
+            {
+                let user = self.database.users().find_by_id(user_id).await?;
+                handles.insert(user_id, user.map(|user| user.handle));
+            }
+        }
+        Ok(handles)
     }
 
     /// Recomputes the audit chain and checks every checkpoint against `keys`, and

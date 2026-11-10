@@ -385,7 +385,7 @@ it and cancels the ones behind it. See
 ## Check the audit history
 
 ```sh
-auth-service audit list --user alice --kind session_revoked
+auth-service audit list --user alice --kind session_revoked   # who caused each, and why
 auth-service audit list --user alice --views   # with administrators' views of the account
 auth-service audit verify                      # recompute the tamper-evident chain
 ```
