@@ -30,7 +30,7 @@ pub use service::AdminService;
 pub(crate) use sign_in::{DashboardSignIn, SignedInAdmin};
 pub use types::{
     AnnouncementDraft, AnnouncementRecipients, GracePeriod, HandleProblem, InvalidLifetime,
-    InviteExpiry, Reason, UserRef,
+    InviteExpiry, Letter, Reason, UserRef,
 };
 
 /// Administrative scenarios over the service, and the harness the shared

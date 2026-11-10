@@ -723,3 +723,51 @@ async fn announcement_emails_offer_unsubscribing_unless_essential() {
         "no link in its body"
     );
 }
+
+/// A message's email says what administrators wrote, in its paragraphs, exactly
+/// as the dashboard previewed it, and offers no unsubscribing: it is about the
+/// account itself.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_messages_email_is_its_preview() {
+    let database = Replicas::database().await;
+    let user_id = account(&database).await;
+    let origin: Origin = AUTH_ORIGIN.parse().expect("origin");
+    let config = EmailConfig::test(&origin, true);
+    let letter = Letter::new(
+        "About your account",
+        "First line.\nSecond line.\n\nWrite to support@example.com.",
+    )
+    .expect("letter");
+    let message = EmailMessage::Notification {
+        address: format!("{user_id}@example.com"),
+        notification_id: NotificationId::new(),
+        notification: Notification::Message {
+            title: letter.subject.clone(),
+            text: letter.body.clone(),
+        },
+        recovery_id: None,
+    };
+    let outbox = Arc::new(Outbox::default());
+    let sender = EmailSender::with_mailer(database.clone(), Some(outbox.clone()), &config);
+    let content = sender.content(user_id, &message).await.expect("content");
+    let content = content.expect("an email");
+    assert_eq!(
+        Text { content: &content }.render().expect("text"),
+        EmailSender::preview(&letter, &origin).expect("preview")
+    );
+    let html = Html { content: &content }.render().expect("HTML");
+    assert!(
+        html.contains("<p>First line.<br>Second line.</p>"),
+        "{html}"
+    );
+    sender
+        .deliver(DeliveryId::new(), user_id, &message)
+        .await
+        .expect("sent");
+    let sent = outbox.sent.lock().expect("outbox");
+    let [email] = sent.as_slice() else {
+        panic!("one message");
+    };
+    assert_eq!(email.headers().get_raw("List-Unsubscribe"), None);
+}

@@ -25,6 +25,7 @@ use chrono::{DateTime, Utc};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, PictureId, UserId,
     events::{Actor, DomainEvent},
+    notifications::Notification,
 };
 use sourceorigin_repository::{
     Channel, Database, DatabaseError, DatabaseTransaction, EventFilter, NewDelivery,
@@ -2202,4 +2203,102 @@ fn a_read_started_before_forgetting_is_not_kept() {
     };
     cache.keep(now, super::Attention::default());
     assert!(cache.fresh().is_ok(), "a read started since is kept");
+}
+
+/// An administrator writes a message from an account's page and sees its email
+/// as it will be sent, without a fresh confirmation. Sending it needs one, then
+/// goes back to the account's page, and its owner reads it in their inbox. An
+/// administrator's account takes one too.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn messages_are_previewed_then_sent_from_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let account = format!("/users/{}", owner.user_id);
+    let message = format!("{account}/message");
+    let unconfirmed = harness.sign_in(&admin, &account).await;
+    let page = html(harness.visit(&unconfirmed, &account).await).await;
+    assert!(page.contains(&format!(r#"href="{message}""#)), "{page}");
+    let typed = |intent| {
+        [
+            ("subject", "About your account"),
+            (
+                "body",
+                "Support needs a word.\r\n\r\nWrite to support@example.com.",
+            ),
+            ("intent", intent),
+        ]
+    };
+    let post = async |browser: &Browser, intent| {
+        let url = format!("{DASHBOARD}{message}");
+        browser
+            .submit(&harness.dashboard, &url, &typed(intent), OWN_PAGE)
+            .await
+    };
+    let preview = html(post(&unconfirmed, "preview").await).await;
+    assert!(
+        preview.contains("Hello,\n\nSupport needs a word.\n\nWrite to support@example.com."),
+        "{preview}"
+    );
+    assert!(preview.contains(r#"value="send""#), "{preview}");
+    // Its Send names the account, beside it and to the passkey dialog.
+    let handle = format!("browser-{}", &owner.user_id.to_string()[24..]);
+    let target = format!(
+        r#"<p class="target"><strong>{handle}</strong> <code>{}</code></p>"#,
+        owner.user_id
+    );
+    assert!(preview.contains(&target), "{preview}");
+    let confirming = format!(
+        r#"data-confirming="Send a message: {handle} ({})""#,
+        owner.user_id
+    );
+    assert!(preview.contains(&confirming), "{preview}");
+    let inbox = async || {
+        let mut notifications = harness.database.notifications();
+        let received = notifications.list(owner.user_id, None, 10).await;
+        received.expect("inbox")
+    };
+    // Sending without a confirmation confirms on auth's handoff page first.
+    let unconfirmed_send = post(&unconfirmed, "send").await;
+    assert_eq!(location(&unconfirmed_send).path(), routes::page::ADMIN);
+    assert_eq!(inbox().await.len(), 0);
+
+    let confirmed = harness.confirmed(&admin, &message, Utc::now()).await;
+    assert_eq!(redirect(&post(&confirmed, "send").await), account);
+    let [received] = <[_; 1]>::try_from(inbox().await).expect("one notification");
+    let item = routes::page::settings::NOTIFICATION.replace("{id}", &received.id.to_string());
+    let shown = html(owner.visit(&harness.auth.a, &item).await).await;
+    assert!(shown.contains("About your account"), "{shown}");
+    assert!(shown.contains("<p>Support needs a word.</p>"), "{shown}");
+
+    // An administrator's account takes one too: it changes nothing.
+    let administrator = format!("/users/{}", admin.user_id);
+    let page = html(harness.visit(&confirmed, &administrator).await).await;
+    assert!(
+        page.contains(&format!(r#"href="{administrator}/message""#)),
+        "{page}"
+    );
+    let form = harness
+        .visit(&confirmed, &format!("{administrator}/message"))
+        .await;
+    assert_eq!(form.status(), StatusCode::OK);
+    let to_administrator = format!("{DASHBOARD}{administrator}/message");
+    let sent = confirmed
+        .submit(
+            &harness.dashboard,
+            &to_administrator,
+            &typed("send"),
+            OWN_PAGE,
+        )
+        .await;
+    assert_eq!(redirect(&sent), administrator);
+    let mut notifications = harness.database.notifications();
+    let received = notifications.list(admin.user_id, None, 10).await;
+    let messages = received
+        .expect("inbox")
+        .into_iter()
+        .filter(|stored| matches!(stored.notification, Some(Notification::Message { .. })))
+        .count();
+    assert_eq!(messages, 1, "the administrator reads it in their inbox");
 }

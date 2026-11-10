@@ -6,7 +6,8 @@ use sourceorigin_repository::{EventFilter, InsertVerifiedEmail};
 
 /// An announcement's draft to `recipients`.
 pub(super) fn announcement(recipients: AnnouncementRecipients) -> AnnouncementDraft {
-    AnnouncementDraft::new("Incident", "What happened.", recipients, false).expect("draft")
+    let letter = Letter::new("Incident", "What happened.").expect("letter");
+    AnnouncementDraft::new(letter, recipients, false).expect("draft")
 }
 
 /// A draft needs no recent confirmation, and changes until it is sent, which

@@ -47,45 +47,41 @@ fn rotation_choices_are_the_periods_they_name() {
     }
 }
 
-/// An announcement's subject is one line, and its text keeps its line breaks
-/// as `\n`; both are trimmed and bounded, and chosen accounts are too.
+/// A letter's subject is one line, and its text keeps its line breaks as `\n`;
+/// both are trimmed and bounded.
 #[test]
-fn announcements_are_bounded_text_to_bounded_accounts() {
-    let everyone = || AnnouncementRecipients::Everyone;
-    let draft = AnnouncementDraft::new(
-        " Incident ",
-        "\r\nFirst.\r\n\r\n\tSecond.\n",
-        everyone(),
-        false,
-    )
-    .expect("a draft");
+fn letters_are_bounded_text() {
+    let letter = Letter::new(" Incident ", "\r\nFirst.\r\n\r\n\tSecond.\n").expect("a letter");
     assert_eq!(
-        (draft.subject.as_str(), draft.body.as_str()),
+        (letter.subject.as_str(), letter.body.as_str()),
         ("Incident", "First.\n\n\tSecond.")
     );
     for subject in ["", "  ", "Two\nlines", &"é".repeat(151)] {
         assert!(matches!(
-            AnnouncementDraft::new(subject, "Text", everyone(), false),
+            Letter::new(subject, "Text"),
             Err(AdminError::InvalidSubject)
         ));
     }
     for body in ["", " \n ", "Bell\u{7}", &"é".repeat(20_001)] {
         assert!(matches!(
-            AnnouncementDraft::new("Incident", body, everyone(), false),
+            Letter::new("Incident", body),
             Err(AdminError::InvalidBody)
         ));
     }
-    let chosen =
-        |count| AnnouncementRecipients::Accounts(vec![UserRef::Handle("ada".into()); count]);
-    assert!(AnnouncementDraft::new("Incident", "Text", chosen(1_000), false).is_ok());
-    assert!(matches!(
-        AnnouncementDraft::new("Incident", "Text", chosen(0), false),
-        Err(AdminError::NoRecipients)
-    ));
-    assert!(matches!(
-        AnnouncementDraft::new("Incident", "Text", chosen(1_001), false),
-        Err(AdminError::TooManyRecipients)
-    ));
+}
+
+/// An announcement goes to everyone, or to 1 to 1,000 chosen accounts.
+#[test]
+fn announcements_go_to_bounded_accounts() {
+    let draft = |count| {
+        let letter = Letter::new("Incident", "Text").expect("a letter");
+        let recipients =
+            AnnouncementRecipients::Accounts(vec![UserRef::Handle("ada".into()); count]);
+        AnnouncementDraft::new(letter, recipients, false)
+    };
+    assert!(draft(1_000).is_ok());
+    assert!(matches!(draft(0), Err(AdminError::NoRecipients)));
+    assert!(matches!(draft(1_001), Err(AdminError::TooManyRecipients)));
 }
 
 /// The form lists one account per line, by handle, `@handle` as the dashboard

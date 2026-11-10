@@ -116,10 +116,12 @@ it; a replaced or removed address's to that address, so whoever reads it hears
 of it; any other to the primary verified address, and an account without one
 gets no email. The message copies the address and the notification, read in the
 event's transaction, so removing the address right after cannot cancel it, and
-says what the inbox says. It links the notification's page. A recovery's also
+says what the inbox says. It links the notification's page, except a message's,
+which reads like an announcement's and links the inbox. A recovery's also
 links its undo page while a passkey can still undo it, and an alert's links the
-dashboard's Alerts tab while auth serves one. The copied addresses are the
-channel's only personal data, deleted with the delivery. The `destination`
+dashboard's Alerts tab while auth serves one. The copied addresses, and a
+message's text, which may be personal, are the channel's only personal data,
+deleted with the delivery. The `destination`
 column names the account and the address's ID, for operators.
 
 A link's token is never stored, not even in the payload: it is an HMAC of the

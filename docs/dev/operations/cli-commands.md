@@ -37,7 +37,7 @@ Commands:
 - [`auth-service deliveries`](#auth-service-deliveries): Inspect, retry and cancel outbound deliveries.
 - [`auth-service announcement`](#auth-service-announcement): Draft, send and read announcements to accounts, such as a security incident or a change to the privacy policy.
 - [`auth-service alerts`](#auth-service-alerts): List the alerts that need an administrator's attention, and post updates on them.
-- [`auth-service account`](#auth-service-account): Read or change one account's settings on its owner's behalf.
+- [`auth-service account`](#auth-service-account): Read or change one account's settings on its owner's behalf, or send it a message.
 
 ## `auth-service serve`
 
@@ -1249,7 +1249,7 @@ Options:
 
 ## `auth-service account`
 
-Read or change one account's settings on its owner's behalf.
+Read or change one account's settings on its owner's behalf, or send it a message.
 
 ```text
 auth-service account [OPTIONS] <USER> <COMMAND>
@@ -1274,6 +1274,7 @@ Commands:
 - [`auth-service account picture`](#auth-service-account-picture): Show or remove the profile picture.
 - [`auth-service account history`](#auth-service-account-history): Page through the security history as the owner sees it, newest first.
 - [`auth-service account notifications`](#auth-service-account-notifications): Read the account's notifications, as its inbox shows them. Reading one never marks it read.
+- [`auth-service account message`](#auth-service-account-message): Send the account a message, such as why it was disabled or what support needs from its owner. It lands in the account's inbox, and is emailed to its primary verified address whatever the owner's email preferences. The owner cannot reply, so say how to reach support. It cannot be taken back.
 
 ## `auth-service account name`
 
@@ -1714,4 +1715,19 @@ auth-service account <USER> notifications preferences [OPTIONS]
 Options:
 
 - `--output <OUTPUT>`: A table for people, or JSON for scripts. Default: `table`. Values: `table` (Tab-separated lines for people), `json` (The view the admin dashboard shows, as JSON, for scripts: its shape is `sourceorigin_common`'s, as its `admin` and `alerts` modules define it).
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+
+## `auth-service account message`
+
+Send the account a message, such as why it was disabled or what support needs from its owner. It lands in the account's inbox, and is emailed to its primary verified address whatever the owner's email preferences. The owner cannot reply, so say how to reach support. It cannot be taken back.
+
+```text
+auth-service account <USER> message [OPTIONS] --subject <SUBJECT> --body-file <BODY_FILE>
+```
+
+Options:
+
+- `--subject <SUBJECT>`: The email's subject: one line of up to 150 characters. Required.
+- `--body-file <BODY_FILE>`: The file holding the text, or `-` for standard input: up to 20,000 characters, paragraphs separated by blank lines. The email starts with "Hello," and ends with "SourceOrigin". Required.
+- `--yes`: Do not ask for confirmation. Required when standard input is not a terminal.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.

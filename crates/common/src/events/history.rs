@@ -161,8 +161,9 @@ impl DomainEvent {
             // A read may be a misclick or a confidential inquiry; the owner sees
             // changes, each with its reason, not what an administrator looked at.
             | Self::AccountViewed {}
-            // Recipients read announcements in their inbox.
+            // Recipients read announcements and messages in their inbox.
             | Self::AnnouncementSent { .. }
+            | Self::MessageSent {}
             // Nobody can read the history of an account that no longer exists.
             | Self::AccountPurged {} => return None,
         })

@@ -2,7 +2,8 @@
  * The admin dashboard, on an origin of its own: signing in through auth's handoff
  * page, confirming changes with a passkey, and what administrators change from it,
  * on accounts, rights, invitations, clients, origins, signing keys and handles,
- * and an announcement drafted, sent and read in the recipient's inbox. CI
+ * an announcement drafted, sent and read in the recipient's inbox, and a
+ * message previewed, sent and read in its owner's. CI
  * serves the dashboard on auth's host, `localhost`, so its passkey dialog needs no
  * list of related origins; a preview's dashboard has a host of its own, so there
  * the browser reads auth's `/.well-known/webauthn` first. Skipped without
@@ -484,4 +485,47 @@ test('an announcement is drafted, sent to a group found on its form, and read', 
   await reader.getByRole('link', { name: subject, exact: true }).click();
   const announcement = reader.getByRole('article', { name: subject });
   await expect(announcement.getByText('Nothing else changes.', { exact: true })).toBeVisible();
+});
+
+/**
+ * A message's journey: written on the account's page, previewed as the email it
+ * becomes, which carries its text through hidden fields, sent with the
+ * dashboard's passkey confirmation, and read in the owner's inbox, its
+ * paragraphs kept.
+ */
+test('a message is previewed, sent, and read in its owner inbox', async ({ browser }) => {
+  const suffix = Date.now().toString(36);
+  const handle = `owner-${suffix}`;
+  const admin = await administrator(browser, `messenger-${suffix}`);
+  const owner = await signedUp(browser, handle);
+  const subject = `About your account ${suffix}`;
+
+  await openAccount(admin, handle);
+  await admin.getByRole('link', { name: 'Send a message', exact: true }).click();
+  await admin.getByRole('textbox', { name: /^Subject/ }).fill(subject);
+  await admin
+    .getByRole('textbox', { name: /^Text/ })
+    .fill('Support needs a word with you.\n\nReply to support@sourceorigin.dev.');
+  await admin.getByRole('button', { name: 'Preview the email', exact: true }).click();
+  await expect(admin.locator('pre.email')).toContainText('Support needs a word with you.');
+
+  // A dashboard confirmed in the last minutes, as signing in to it is, sends at
+  // once; otherwise its dialog asks for the passkey first.
+  const sent = /\/users\/[0-9a-f-]+$/;
+  const dialog = admin.getByRole('dialog', { name: "Confirm it's you" });
+  await admin.getByRole('button', { name: 'Send', exact: true }).click();
+  await Promise.race([admin.waitForURL(sent), dialog.waitFor()]);
+  if (await dialog.isVisible()) {
+    await dialog.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  }
+  // Sent, it goes back to the account's page.
+  await expect(admin).toHaveURL(sent);
+
+  await owner.goto('/settings/notifications');
+  await owner.getByRole('link', { name: subject, exact: true }).click();
+  const message = owner.getByRole('article', { name: subject });
+  await expect(message.getByText('Support needs a word with you.', { exact: true })).toBeVisible();
+  await expect(
+    message.getByText('Reply to support@sourceorigin.dev.', { exact: true })
+  ).toBeVisible();
 });

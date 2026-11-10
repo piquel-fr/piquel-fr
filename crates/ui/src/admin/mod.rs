@@ -56,7 +56,9 @@ pub use lists::{
 };
 pub use overview::{AdminOverview, Measure, Problem, admin_overview};
 pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
-pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
+pub use users::{
+    AccountPages, MessagePreview, SessionRow, UserRow, message_page, user_page, user_search,
+};
 
 use crate::{
     Query,
@@ -355,6 +357,8 @@ pub enum Change {
     RevokeSessions,
     /// Ending one session.
     RevokeSession,
+    /// Sending an account a message.
+    Message,
     /// Revoking an administrator's rights.
     RevokeAdministrator,
     /// Granting administrator rights.
@@ -422,6 +426,7 @@ impl Change {
             Self::Restore => "Restore this account",
             Self::RevokeSessions => "Revoke every session",
             Self::RevokeSession => "Revoke this session",
+            Self::Message => "Send a message",
             Self::RevokeAdministrator => "Revoke administrator rights",
             Self::GrantAdministrator => "Grant administrator rights",
             Self::RevokeInvitation => "Revoke this invitation",
@@ -470,6 +475,9 @@ impl Change {
             }
             Self::RevokeSession => {
                 "The browser is signed out, and applications signed in through it lose their refresh grants."
+            }
+            Self::Message => {
+                "It lands in the account's inbox, and is emailed to its primary verified address whatever the owner's email preferences. The owner cannot reply, so say how to reach support. Nobody can change or take it back once it is sent."
             }
             Self::RevokeAdministrator => {
                 "The account keeps its sessions, but can no longer use this dashboard."
@@ -575,7 +583,7 @@ impl Change {
             Self::CancelDelivery => "Cancel delivery",
             Self::RotateSigningKey => "Rotate",
             Self::DraftAnnouncement | Self::EditAnnouncement => "Save draft",
-            Self::SendAnnouncement => "Send",
+            Self::SendAnnouncement | Self::Message => "Send",
             Self::DiscardAnnouncement => "Discard",
             Self::UpdateAlert => "Post an update",
         }
@@ -595,6 +603,7 @@ impl Change {
             | Self::Restore
             | Self::RevokeSessions
             | Self::RevokeSession
+            | Self::Message
             | Self::RevokeAdministrator
             | Self::RevokeInvitation
             | Self::ApproveOrigin
@@ -676,6 +685,7 @@ impl Change {
             Self::Enable
             | Self::RevokeSessions
             | Self::RevokeSession
+            | Self::Message
             | Self::RevokeAdministrator
             | Self::GrantAdministrator
             | Self::RevokeInvitation

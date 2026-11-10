@@ -15,6 +15,7 @@
 
 use super::{DeliveryError, Failure, Sender};
 use crate::{
+    admin::Letter,
     config::{DashboardConfig, EmailConfig},
     emails::{VERIFICATION_LIFETIME, VerificationKeys},
     notifications::UnsubscribeLinks,
@@ -34,6 +35,7 @@ use lettre::{
 };
 use sourceorigin_common::{
     AnnouncementId, DeliveryId, ErrorChain, Handle, UserId, admin, config::Origin,
+    notifications::Notification,
 };
 use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::{
@@ -275,6 +277,12 @@ impl<M: Mailer> EmailSender<M> {
                     undo: self.recovery_links.undo_url(*recovery_id).into(),
                 }
             }
+            // Administrators' own words, which read as their announcements do.
+            EmailMessage::Notification {
+                address,
+                notification: Notification::Message { title, text },
+                ..
+            } => Content::message(address.clone(), title.clone(), text.clone(), &self.origin),
             EmailMessage::Notification {
                 address,
                 notification_id,
@@ -374,6 +382,24 @@ impl<M: Mailer> Sender for EmailSender<M> {
     }
 }
 
+impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
+    /// The plain-text body of the email sending `letter` as a message, linking
+    /// the inbox on `auth`, auth's origin, which the dashboard shows before it is
+    /// sent.
+    ///
+    /// # Errors
+    /// Fails when the template cannot render.
+    pub(crate) fn preview(letter: &Letter, auth: &Origin) -> Result<String, askama::Error> {
+        let content = Content::message(
+            String::new(),
+            letter.subject.clone(),
+            letter.body.clone(),
+            auth,
+        );
+        Text { content: &content }.render()
+    }
+}
+
 /// Sends announcements' email through `M`, as [`EmailSender`] sends account
 /// holders', on a channel of their own, so an announcement to every account never
 /// holds back a verification or recovery link.
@@ -424,7 +450,7 @@ impl<M: Mailer> Sender for AnnouncementSender<M> {
     }
 }
 
-/// What a message says, with everything its templates show. Each
+/// What an email says, with everything its templates show. Each
 /// [`EmailMessage`], and each announcement's email, becomes one of these.
 enum Content {
     /// A verification link.
@@ -469,6 +495,19 @@ enum Content {
         /// The dashboard's Alerts tab, for an alert's, unless the dashboard is off.
         alerts: Option<String>,
     },
+    /// A message administrators sent the account, to its primary address.
+    Message {
+        /// The primary address.
+        address: String,
+        /// Its subject, as they wrote it.
+        subject: String,
+        /// Its text, as they wrote it, for the plain-text body.
+        body: String,
+        /// The same text as paragraphs of lines, for the HTML body.
+        paragraphs: Vec<Vec<String>>,
+        /// The inbox, where the account reads it again.
+        inbox: String,
+    },
     /// An announcement administrators sent, to the account's primary address.
     Announcement {
         /// The primary address.
@@ -510,19 +549,35 @@ impl Content {
             everyone,
             unsubscribe,
         } = announced;
-        let paragraphs = admin::Announcement::paragraphs(&body)
-            .into_iter()
-            .map(|lines| lines.into_iter().map(str::to_owned).collect())
-            .collect();
         Self::Announcement {
             address,
             subject,
+            paragraphs: Self::paragraphs(&body),
             body,
-            paragraphs,
             everyone,
             inbox: origin.join(settings::NOTIFICATIONS),
             unsubscribe,
         }
+    }
+
+    /// A message's email to `address`, with its `subject` and `body` as
+    /// administrators wrote them, which links the account's inbox on `origin`.
+    fn message(address: String, subject: String, body: String, origin: &Origin) -> Self {
+        Self::Message {
+            address,
+            subject,
+            paragraphs: Self::paragraphs(&body),
+            body,
+            inbox: origin.join(settings::NOTIFICATIONS),
+        }
+    }
+
+    /// Administrators' text `body` as paragraphs of lines, for an HTML body.
+    fn paragraphs(body: &str) -> Vec<Vec<String>> {
+        admin::Announcement::paragraphs(body)
+            .into_iter()
+            .map(|lines| lines.into_iter().map(str::to_owned).collect())
+            .collect()
     }
 
     /// Where the message goes.
@@ -531,6 +586,7 @@ impl Content {
             Self::VerifyAddress { address, .. }
             | Self::RecoveryLink { address, .. }
             | Self::Notification { address, .. }
+            | Self::Message { address, .. }
             | Self::Announcement { address, .. } => address,
         }
     }
@@ -540,7 +596,9 @@ impl Content {
         match self {
             Self::VerifyAddress { .. } => "Confirm your email address for your Origin Account",
             Self::RecoveryLink { .. } => "Recover your Origin Account",
-            Self::Notification { subject, .. } | Self::Announcement { subject, .. } => subject,
+            Self::Notification { subject, .. }
+            | Self::Message { subject, .. }
+            | Self::Announcement { subject, .. } => subject,
         }
     }
 }

@@ -9,7 +9,9 @@ it before adding an event that should notify someone, or changing the inbox.
 
 A notification comes from a domain event, except an announcement: sending one
 writes each recipient's notification directly, since no event about the account
-does. Every other notification comes from a domain event.
+does. A message to one account comes with its `MessageSent` event, but the event
+holds no text, so `DatabaseTransaction::record_message` gives the account the
+message itself, with the event. Every other notification comes from its event.
 `DomainEvent::notification(&actor)` (`crates/common/src/notifications`) decides
 which events tell someone something, and what. It names every variant under
 `#[deny(clippy::wildcard_enum_match_arm)]`, so a new event does not compile until
@@ -21,21 +23,26 @@ but one changed by an administrator or operator does.
 
 `Notification` is a closed enum, serialized with a `kind` tag. A variant holds
 only IDs, enums, flags and timestamps, never a secret, an address or a `Personal`
-value, so a notification renders from itself alone. There are two exceptions.
+value, so a notification renders from itself alone. There are three exceptions.
 `Announcement` holds the subject and text administrators wrote. A targeted
 announcement's text may name its recipients, so it goes with them: purging an
 account deletes its notifications, and the announcement once its last
-recipient is purged. `AlertRaised` holds the alert's subject and text, which
+recipient is purged. `Message` holds the subject and text of
+[a message to the account](../operations/administration.md#message-an-account),
+which may be personal: it and its queued email hold the message's only copies,
+so purging the account deletes both, and its `message_sent` event, which the audit chain keeps, records
+only who sent it. `AlertRaised` holds the alert's subject and text, which
 name no account, rather than the `Alert`, so an older release's inbox never
 meets an alert it cannot decode. Today the variants are a replaced primary
 address, a removed address, a recovery that secured the account, enrolled a
 passkey or was undone, an account disabled, enabled, scheduled for deletion or restored,
 support changing the handle or display name or removing the picture,
-[administrators' announcements](../operations/administration.md#send-an-announcement),
-and, in administrators' inboxes, each
+[administrators' announcements](../operations/administration.md#send-an-announcement)
+and messages, and, in administrators' inboxes, each
 [alert](../operations/administration.md#respond-to-an-alert) when it is raised,
 titled **Alert:** and the alert's subject. An alert's notification has no
-security history entry, since its event concerns no account.
+security history entry, since its event concerns no account, and neither has a
+message's: the inbox already shows it.
 
 ## Storage
 
@@ -83,11 +90,14 @@ notifications `record` just wrote, each with its account, and queues one
 - `Affected`: the address the event replaced or removed, so whoever reads that
   mailbox hears of it.
 - `Primary`: the primary verified address, for every other notification, an
-  alert's included. An account without one gets no email.
+  alert's and a message's included. An account without one gets no email.
 
 An announcement's email goes out on the `announcement` channel instead, which
 has workers of its own and links the inbox (see
-[announcements](delivery-queue.md#announcements)).
+[announcements](delivery-queue.md#announcements)). A message's email reads like
+an announcement's: the text administrators wrote, in its paragraphs, then a line
+linking the inbox, which lets the dashboard show the email exactly as it will be
+sent. It carries no unsubscribe link.
 
 The delivery copies the address and the notification when they are written, so
 removing the address right after cannot cancel it. The email links the

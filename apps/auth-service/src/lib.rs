@@ -65,7 +65,7 @@ mod web;
 
 pub use admin::{
     AdminError, AdminService, AnnouncementDraft, AnnouncementRecipients, GracePeriod,
-    HandleProblem, InviteExpiry, Operator, Reason, UserRef,
+    HandleProblem, InviteExpiry, Letter, Operator, Reason, UserRef,
 };
 use audit::AuditApplication;
 pub use audit::{AuditError, AuditKeys};

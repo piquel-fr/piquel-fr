@@ -2,7 +2,7 @@
 //! privacy policy: drafted first, then sent.
 
 use super::{CliError, Confirm, Console, Output};
-use crate::{AnnouncementDraft, AnnouncementRecipients, UserRef};
+use crate::{AnnouncementDraft, AnnouncementRecipients, Letter, UserRef};
 use clap::{Args, Subcommand};
 use sourceorigin_common::{AnnouncementId, admin::AnnouncementDetail};
 use std::{io::Read, path::PathBuf};
@@ -59,14 +59,9 @@ pub(super) enum AnnouncementCommand {
 /// What a draft says, and whom it goes to.
 #[derive(Args)]
 pub(super) struct DraftArgs {
-    /// The email's subject: one line of up to 150 characters.
-    #[arg(long)]
-    subject: String,
-    /// The file holding the text, or `-` for standard input: up to 20,000
-    /// characters, paragraphs separated by blank lines. The email starts with
-    /// "Hello," and ends with "SourceOrigin".
-    #[arg(long)]
-    body_file: PathBuf,
+    /// Its subject and text.
+    #[command(flatten)]
+    letter: LetterArgs,
     /// Send it to every account, as of its sending.
     #[arg(long, conflicts_with = "to", required_unless_present = "to")]
     everyone: bool,
@@ -82,9 +77,22 @@ pub(super) struct DraftArgs {
     essential: bool,
 }
 
-impl DraftArgs {
-    /// The draft, with its text read from `--body-file`.
-    fn draft(self) -> Result<AnnouncementDraft, CliError> {
+/// What an announcement or a message says.
+#[derive(Args)]
+pub(super) struct LetterArgs {
+    /// The email's subject: one line of up to 150 characters.
+    #[arg(long)]
+    subject: String,
+    /// The file holding the text, or `-` for standard input: up to 20,000
+    /// characters, paragraphs separated by blank lines. The email starts with
+    /// "Hello," and ends with "SourceOrigin".
+    #[arg(long)]
+    body_file: PathBuf,
+}
+
+impl LetterArgs {
+    /// The letter, with its text read from `--body-file`.
+    pub(super) fn letter(self) -> Result<Letter, CliError> {
         let body = if self.body_file.as_os_str() == "-" {
             let mut body = String::new();
             std::io::stdin()
@@ -94,14 +102,20 @@ impl DraftArgs {
         } else {
             std::fs::read_to_string(&self.body_file).map_err(CliError::BodyFile)?
         };
+        Ok(Letter::new(&self.subject, &body)?)
+    }
+}
+
+impl DraftArgs {
+    /// The draft, with its text read from `--body-file`.
+    fn draft(self) -> Result<AnnouncementDraft, CliError> {
         let recipients = if self.everyone {
             AnnouncementRecipients::Everyone
         } else {
             AnnouncementRecipients::Accounts(self.to)
         };
         Ok(AnnouncementDraft::new(
-            &self.subject,
-            &body,
+            self.letter.letter()?,
             recipients,
             self.essential,
         )?)

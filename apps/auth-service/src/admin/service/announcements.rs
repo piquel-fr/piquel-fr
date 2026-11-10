@@ -167,8 +167,8 @@ impl AdminService {
     ) -> DraftedAnnouncement<'a> {
         DraftedAnnouncement {
             id,
-            subject: &draft.subject,
-            body: &draft.body,
+            subject: &draft.letter.subject,
+            body: &draft.letter.body,
             recipients: accounts.map_or(Recipients::Everyone, Recipients::Accounts),
             essential: draft.essential,
         }

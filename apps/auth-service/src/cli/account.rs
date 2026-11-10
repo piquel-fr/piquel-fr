@@ -1,10 +1,11 @@
 //! Changing one account's settings on its owner's behalf, with the owner's own
 //! operations.
 
-use super::{CliError, Confirm, Console, Output};
+use super::{CliError, Confirm, Console, Operation, Output, announcement::LetterArgs};
 use crate::{
     Reason, UserRef,
     account::{AccountOperation, AccountService, Subject, Viewer},
+    admin::AdminOperation,
     emails::EmailView,
     grants::ConnectedApp,
     history::HistoryPage,
@@ -19,8 +20,9 @@ use sourceorigin_common::{
     protocol::api::{Identity, Passkey},
 };
 
-/// One account's settings, as its owner sees and changes them. Every change needs
-/// a reason, recorded with it and shown to the owner in their security history.
+/// One account's settings, as its owner sees and changes them, and messages to
+/// it. Every change needs a reason, recorded with it and shown to the owner in
+/// their security history.
 #[derive(Args)]
 pub(super) struct AccountCommand {
     /// The account: its handle, ID or verified email.
@@ -68,6 +70,18 @@ enum Setting {
     /// never marks it read.
     #[command(subcommand)]
     Notifications(Notifications),
+    /// Send the account a message, such as why it was disabled or what support
+    /// needs from its owner. It lands in the account's inbox, and is emailed to
+    /// its primary verified address whatever the owner's email preferences. The
+    /// owner cannot reply, so say how to reach support. It cannot be taken back.
+    Message {
+        /// Its subject and text.
+        #[command(flatten)]
+        letter: LetterArgs,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
+    },
 }
 
 /// The account's inbox.
@@ -281,11 +295,13 @@ impl Change {
 }
 
 impl AccountCommand {
-    /// The operation this command runs. The match is exhaustive, so a new command
-    /// does not compile until it names one.
-    pub(super) const fn operation(&self) -> AccountOperation {
+    /// The operation this command runs: a shared settings operation, or sending
+    /// a message, an administrative one. The match is exhaustive, so a new
+    /// command does not compile until it names one.
+    pub(super) const fn operation(&self) -> Operation {
         type Op = AccountOperation;
-        match &self.setting {
+        Operation::Account(match &self.setting {
+            Setting::Message { .. } => return Operation::Admin(AdminOperation::MessageUser),
             Setting::Name(Name::Set { .. }) => Op::ChangeDisplayName,
             Setting::Passkeys(command) => match command {
                 Passkeys::List { .. } => Op::ListPasskeys,
@@ -320,7 +336,7 @@ impl AccountCommand {
                 Notifications::Show { .. } => Op::ViewNotification,
                 Notifications::Preferences { .. } => Op::ViewNotificationPreferences,
             },
-        }
+        })
     }
 
     /// Runs this command as the operator at this terminal. Reads are recorded as
@@ -427,6 +443,18 @@ impl AccountCommand {
                 )?;
             }
             Setting::Notifications(notifications) => notifications.run(account, &read()).await?,
+            Setting::Message { letter, confirm } => {
+                let letter = letter.letter()?;
+                confirm.ask(&format!(
+                    "Send the message \"{}\" to {user} ({id}), emailing its primary verified address",
+                    letter.subject
+                ))?;
+                console
+                    .service
+                    .message_user(&console.operator, id, letter)
+                    .await?;
+                eprintln!("Sent.");
+            }
         }
         Ok(())
     }

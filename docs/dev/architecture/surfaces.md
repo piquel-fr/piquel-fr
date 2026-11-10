@@ -165,6 +165,15 @@ it, unless they turned announcements' email off and it is not essential, which
 its sender chooses on the draft (see
 [the delivery queue](delivery-queue.md#announcements)).
 
+Administrators also message one account, such as to say why it was disabled. A
+message has no draft: the account's page links a form whose text, once written,
+shows as its email will be sent, and sending it needs the dashboard's recent
+confirmation. Writing and previewing need none, so the text is never lost to a
+confirmation that ran out while it was written, as long as the dashboard's
+script asks for one before sending. Unlike the dashboard's changes, a message
+also goes to an administrator's account, since it changes nothing about it (see
+[message an account](../operations/administration.md#message-an-account)).
+
 Administrators also follow alerts: conditions auth's background jobs find that
 need their attention, such as a broken audit chain. The dashboard's **Alerts**
 page lists the current ones, on which administrators post status updates until

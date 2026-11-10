@@ -1,12 +1,12 @@
 //! Account search and one account's page.
 
 use super::{
-    Action, Change, EventRow, account_status, confirm, event_rows, moment, refused_action,
+    Action, Change, EventRow, Target, account_status, confirm, event_rows, moment, refused_action,
 };
 use crate::layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod,
-    admin::{Session, User, UserDetail},
+    admin::{MessageUser, Session, User, UserDetail},
 };
 use topcoat::{
     Result,
@@ -150,13 +150,15 @@ pub struct AccountPages<'a> {
 }
 
 /// One account's page: `detail`, with its profile picture at `picture`, the
-/// `pages` changing it, or why there are none, its `sessions`, and its `recent`
-/// events, linking `all_events`.
+/// `pages` changing it, or why there are none, the page sending it a `message`,
+/// which every account has, its `sessions`, and its `recent` events, linking
+/// `all_events`.
 #[component]
 pub async fn user_page<'a>(
     detail: &'a UserDetail,
     picture: Option<&'a str>,
     pages: Result<AccountPages<'a>, &'a str>,
+    message: &'a str,
     sessions: &'a [SessionRow<'a>],
     recent: &'a [EventRow<'a>],
     all_events: &'a str,
@@ -196,7 +198,7 @@ pub async fn user_page<'a>(
                         }
                     }
                 </dl>
-                account_actions(user: user, pages: pages, named: named.as_str())
+                account_actions(user: user, pages: pages, message: message, named: named.as_str())
             </div>
         </section>
         <div class="two">
@@ -293,12 +295,14 @@ async fn session_list<'a>(
         })
 }
 
-/// What may be done to `user`, by its `pages`, or why nothing may. The passkey
-/// dialog names the account as `named`.
+/// What may be done to `user`, by its `pages`, or why nothing may, and sending
+/// it a `message`, which even an administrator's account takes: it changes
+/// nothing. The passkey dialog names the account as `named`.
 #[component]
 async fn account_actions<'a>(
     user: &'a User,
     pages: Result<AccountPages<'a>, &'a str>,
+    message: &'a str,
     named: &'a str,
 ) -> Result<impl View> {
     let target = Some(named);
@@ -334,7 +338,101 @@ async fn account_actions<'a>(
                     refused_action(label: "Change", reason: reason)
                 },
             }
+            <a class="button secondary small" href=(message)>"Send a message"</a>
         </div>
+    })
+}
+
+/// A message's email, as it will be sent.
+#[derive(Clone, Copy, Debug)]
+pub struct MessagePreview<'a> {
+    /// Its plain-text body.
+    pub email: &'a str,
+    /// The account's primary verified address, which it is emailed to, if the
+    /// account has one.
+    pub address: Option<&'a str>,
+}
+
+/// A message to the account `handle`, `form` as typed, with a link `back` to
+/// the account's page and why the last attempt was refused, if it was. Without
+/// a `preview`, the form writing it, whose button shows its email; with one,
+/// that email, with buttons sending it, which needs the dashboard's passkey
+/// confirmation, and changing its text again.
+#[component]
+pub async fn message_page<'a>(
+    handle: &'a str,
+    back: &'a str,
+    form: &'a MessageUser,
+    #[into]
+    #[default]
+    target: Option<Target<'a>>,
+    #[into]
+    #[default]
+    preview: Option<MessagePreview<'a>>,
+    #[into]
+    #[default]
+    refusal: Option<&'a str>,
+) -> Result<impl View> {
+    let change = Change::Message;
+    // What its Send asks a passkey for: the account, by handle and ID.
+    let named = target.map(Target::text);
+    let confirming = change.confirming(named.as_deref());
+    Ok(view! {
+        page_head(title: change.title(), lead: format!("To @{handle}. {}", change.description()))
+        if let Some(refusal) = refusal {
+            <p class="notice error" role="alert">(refusal)</p>
+        }
+        <section class="card">
+            <form class="stack" method="post" data-submit-once="" data-unconfirmed="" data-confirming=(confirming.as_str())>
+                match preview {
+                    None => {
+                        <label>
+                            "Subject"
+                            <input name="subject" required="" maxlength="150" value=(form.subject.as_str()) autofocus="">
+                        </label>
+                        <label>
+                            "Text"
+                            <textarea name="body" required="" rows="14" maxlength="20000">(form.body.as_str())</textarea>
+                            <small>"The email starts with “Hello,” and ends with “SourceOrigin”. Separate paragraphs with a blank line. Links are written out in full: mail apps make them clickable."</small>
+                        </label>
+                        <div class="row actions">
+                            <button name="intent" value="preview">"Preview the email"</button>
+                            <a class="button secondary" href=(back)>"Cancel"</a>
+                        </div>
+                    },
+                    Some(preview) => {
+                        <input type="hidden" name="subject" value=(form.subject.as_str())>
+                        <input type="hidden" name="body" value=(form.body.as_str())>
+                        <dl class="facts">
+                            <dt>"To"</dt><dd>(format!("@{handle}"))</dd>
+                            <dt>"Subject"</dt><dd>(form.subject.as_str())</dd>
+                            <dt>"Emailed to"</dt>
+                            <dd>
+                                match preview.address {
+                                    Some(address) => private_address(address: address),
+                                    None => "Nobody: the account has no primary verified address. Its owner finds it in their inbox.",
+                                }
+                            </dd>
+                        </dl>
+                        <p class="help">"Its plain-text version. The HTML version says the same, with the same line breaks."</p>
+                        <pre class="email">(preview.email)</pre>
+                        if let Some(target) = target {
+                            <p class="target">
+                                <strong>(target.name)</strong>
+                                if let Some(id) = target.id {
+                                    " " <code>(id)</code>
+                                }
+                            </p>
+                        }
+                        <div class="row actions">
+                            <button name="intent" value="send" data-confirms="">(change.button())</button>
+                            <button class="secondary" name="intent" value="edit">"Edit"</button>
+                            <a class="button secondary" href=(back)>"Cancel"</a>
+                        </div>
+                    },
+                }
+            </form>
+        </section>
     })
 }
 

@@ -3,7 +3,7 @@
 
 use super::AdminService;
 use crate::{
-    admin::{AdminError, DashboardSignIn, HandleProblem, Operator, Reason, UserRef},
+    admin::{AdminError, DashboardSignIn, HandleProblem, Letter, Operator, Reason, UserRef},
     deletion::Deletions,
     handles::Handles,
     security::Session,
@@ -290,6 +290,32 @@ impl AdminService {
             return Err(AdminError::AdministratorTarget);
         }
         Ok((tx, user))
+    }
+
+    /// Sends the account `user_id` the message `letter`, in any status, so the
+    /// owner of a disabled account can learn why: it lands in the account's
+    /// inbox, and is emailed to its primary verified address whatever the
+    /// owner's email preferences, since it is about the account itself.
+    /// Recorded as [`DomainEvent::MessageSent`], without its text, which the
+    /// notification alone holds. An administrator's account takes one too,
+    /// from the dashboard as from the CLI: unlike the changes
+    /// [`Operator::lock`] refuses them, a message changes nothing about it.
+    pub(crate) async fn message_user(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        letter: Letter,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        // The account's lock, as every change takes it, so a purge waits or wins.
+        tx.users()
+            .find_by_id_for_update(user_id)
+            .await?
+            .ok_or(AdminError::UserNotFound)?;
+        let Letter { subject, body } = letter;
+        tx.record_message(&operator.context(), user_id, subject, body)
+            .await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
     /// Ends every session and refresh grant of an account.

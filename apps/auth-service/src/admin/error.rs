@@ -138,12 +138,12 @@ pub enum AdminError {
     /// No administrator reserved this handle.
     #[error("this handle is not on the reserved list")]
     HandleNotReserved,
-    /// An announcement's subject is blank, longer than 150 characters, or not one
-    /// line.
+    /// An announcement's or a message's subject is blank, longer than 150
+    /// characters, or not one line.
     #[error("give a subject of 1 to 150 characters, on one line")]
     InvalidSubject,
-    /// An announcement's text is blank, longer than 20,000 characters, or holds
-    /// control characters other than line breaks and tabs.
+    /// An announcement's or a message's text is blank, longer than 20,000
+    /// characters, or holds control characters other than line breaks and tabs.
     #[error("give a text of 1 to 20,000 characters, without control characters")]
     InvalidBody,
     /// An announcement to chosen accounts names none.
