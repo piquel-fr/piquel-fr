@@ -14,6 +14,7 @@
 //! # Ok::<(), HandleError>(())
 //! ```
 
+use crate::similarity::Skeleton;
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 use thiserror::Error;
@@ -122,43 +123,29 @@ impl Handle {
     ///
     /// Returns [`HandleError::Reserved`] with the reserved name it matches.
     pub fn ensure_unreserved(&self) -> Result<(), HandleError> {
-        let skeleton = self.skeleton();
-        match RESERVED.iter().find(|name| Self::fold(name) == skeleton) {
+        match self.skeleton().find_alike(RESERVED) {
             Some(name) => Err(HandleError::Reserved((*name).to_owned())),
             None => Ok(()),
         }
     }
 
-    /// The key two handles collide on when they look alike: hyphens dropped, `0`
-    /// read as `o`, `1` and `i` as `l`, `5` as `s`, then `rn` as `m` and `vv` as
-    /// `w`. Handles are ASCII, so this small table stands in for a UTS #39 skeleton.
-    /// No two accounts' handles may share one; `auth-service handle check` lists
-    /// those that do.
+    /// The key two handles collide on when they look alike. No two accounts'
+    /// handles may share one; `auth-service handle check` lists those that do.
     #[must_use]
-    pub fn skeleton(&self) -> String {
-        Self::fold(&self.0)
-    }
-
-    /// Computes the [skeleton](Self::skeleton) of a valid handle, or of any
-    /// lowercase ASCII text, as client names are compared with reserved brands.
-    pub(crate) fn fold(handle: &str) -> String {
-        handle
-            .chars()
-            .filter_map(|character| match character {
-                '-' => None,
-                '0' => Some('o'),
-                '1' | 'i' => Some('l'),
-                '5' => Some('s'),
-                other => Some(other),
-            })
-            .collect::<String>()
-            .replace("rn", "m")
-            .replace("vv", "w")
+    pub fn skeleton(&self) -> Skeleton {
+        Skeleton::of(&self.0)
     }
 
     /// Borrows the handle.
     #[must_use]
     pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for Handle {
+    /// Borrows the handle, so lists of handles can be compared for look-alikes.
+    fn as_ref(&self) -> &str {
         &self.0
     }
 }
@@ -200,6 +187,6 @@ impl From<Handle> for String {
 
 crate::__str_enum_sqlx!(Handle);
 
-/// Syntax, reservation and skeleton vectors.
+/// Syntax and reservation vectors.
 #[cfg(test)]
 mod tests;
