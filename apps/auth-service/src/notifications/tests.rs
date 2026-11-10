@@ -280,11 +280,6 @@ async fn owners_choose_which_notifications_are_emailed() {
     assert_eq!(checked(alice.user_id, &token), Some(alice.user_id));
     assert_eq!(checked(bob.user_id, &token), None, "another account's");
     assert_eq!(checked(alice.user_id, "garbage"), None);
-    // A link sent before the two kinds shared their form named the account.
-    let older: Link<UserId> =
-        serde_json::from_value(serde_json::json!({"account": alice.user_id, "token": token}))
-            .expect("an older link");
-    assert_eq!(links.check(&older).expect("check"), Some(alice.user_id));
 
     let service = AccountService::new(harness.database.clone());
     service

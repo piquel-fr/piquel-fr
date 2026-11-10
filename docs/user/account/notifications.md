@@ -58,7 +58,7 @@ To mark every notification read, select **Mark all as read** in the inbox.
 
 ## Emails
 
-Each notification is also emailed, in one of two categories:
+Notifications are also emailed. Most fall in one of two categories:
 
 - **Security:** everything about your account itself. You always receive
   these, so nobody can hide one from you.
