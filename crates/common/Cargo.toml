@@ -18,6 +18,8 @@ email = ["dep:unicode-normalization"]
 # Domain events recorded by auth. Audit chain verifications are recorded as the
 # admin view `AuditVerification`.
 events = ["dep:serde_json", "admin", "email"]
+# Look-alike detection for handles, client names and the names reserved from them.
+similarity = ["dep:unicode-security"]
 # SQLx decoding for identifiers and `str_enum!` vocabularies; only `crates/database` enables it.
 sqlx = ["dep:sqlx"]
 
@@ -30,6 +32,7 @@ sqlx = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 unicode-normalization = { workspace = true, optional = true }
+unicode-security = { workspace = true, optional = true }
 url.workspace = true
 uuid.workspace = true
 

@@ -98,7 +98,7 @@ at auth, which answers instead of sending the browser back to your app:
 
 | Setting | What it does |
 | --- | --- |
-| **App name** | The name the consent screen shows: at most 80 characters, without SourceOrigin or another well-known brand, such as Google or GitHub, even disguised (`S0urce0r1gin`). |
+| **App name** | The name the consent screen shows: at most 80 characters, without SourceOrigin or another well-known brand, such as Google or GitHub, even disguised (`S0urce0r1gin`, or with look-alike letters from another alphabet). |
 | **Redirect URIs** | 1 to 16 places, one per line, where Origin Auth sends users back after they sign in. Each is matched exactly, and must use HTTPS, or HTTP on a loopback IP such as `127.0.0.1` ([local development](local-development.md)). It can't contain a user name, a password or a fragment. |
 | **Post-logout URIs** | Up to 16 pages, one per line, where users may return after signing out, under the same rules. None by default. |
 | **Scopes** | What the app may ask for: `openid` (the user's stable ID), `profile` (their handle, display name and profile picture), `email` (their email address, when they have one) and `offline_access` (refresh tokens, if refresh is allowed). `openid`, `profile` and `email` by default. |

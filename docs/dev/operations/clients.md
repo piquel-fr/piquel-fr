@@ -172,8 +172,10 @@ them.
 Auth generates the IDs of the clients accounts register in the developer
 console, and limits their scopes to `openid`, `profile`, `email` and
 `offline_access`. They are never trusted. Their names can't contain SourceOrigin's or
-another well-known brand (`RESERVED_BRANDS` in `sourceorigin_common::clients`). An
-account can have 10, and register 20 a day.
+another well-known brand (`RESERVED_BRANDS` in `sourceorigin_common::clients`), or a
+look-alike: `sourceorigin_common::similarity` reads digits such as `0` as letters,
+and letters of other scripts, such as a Cyrillic `о`, as the Latin ones they look
+like. An account can have 10, and register 20 a day.
 
 They never appear in other accounts' consoles, while `client list` and the
 dashboard show every client. Owners can disable, enable and delete their

@@ -6,15 +6,9 @@
 //! let handle = Handle::parse(" Alice-B ")?;
 //! assert_eq!(handle.as_str(), "alice-b");
 //! assert_eq!(Handle::parse("a_b"), Err(HandleError::Charset));
-//! // Confusables of a reserved name are reserved too.
-//! assert_eq!(
-//!     Handle::parse("adm1n")?.ensure_unreserved(),
-//!     Err(HandleError::Reserved("admin".into()))
-//! );
 //! # Ok::<(), HandleError>(())
 //! ```
 
-use crate::similarity::Skeleton;
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 use thiserror::Error;
@@ -24,9 +18,9 @@ pub const MIN_LENGTH: usize = 3;
 /// Longest handle, in characters.
 pub const MAX_LENGTH: usize = 32;
 
-/// Names signup and self-service renames refuse, along with every handle sharing
-/// one's [skeleton](Handle::skeleton). Operators may still assign them, and
-/// administrators reserve more, which auth keeps in its database.
+/// Names signup and self-service renames refuse, along with their look-alikes (see
+/// `Handle::ensure_unreserved` in `similarity`). Operators may still assign them,
+/// and administrators reserve more, which auth keeps in its database.
 pub const RESERVED: &[&str] = &[
     // Infrastructure labels: a handle may become a subdomain of sourceorigin.dev.
     "auth",
@@ -94,7 +88,7 @@ pub enum HandleError {
 
 impl Handle {
     /// Trims `input`, lowercases its ASCII letters and checks the syntax. Whether
-    /// the handle is reserved is [`Self::ensure_unreserved`]'s concern.
+    /// the handle is reserved is `Self::ensure_unreserved`'s concern.
     ///
     /// # Errors
     ///
@@ -114,26 +108,6 @@ impl Handle {
             return Err(HandleError::Charset);
         }
         Ok(Self(handle))
-    }
-
-    /// Refuses reserved names and their look-alikes, by comparing skeletons. Signup
-    /// and self-service renames call it; operators may skip it.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HandleError::Reserved`] with the reserved name it matches.
-    pub fn ensure_unreserved(&self) -> Result<(), HandleError> {
-        match self.skeleton().find_alike(RESERVED) {
-            Some(name) => Err(HandleError::Reserved((*name).to_owned())),
-            None => Ok(()),
-        }
-    }
-
-    /// The key two handles collide on when they look alike. No two accounts'
-    /// handles may share one; `auth-service handle check` lists those that do.
-    #[must_use]
-    pub fn skeleton(&self) -> Skeleton {
-        Skeleton::of(&self.0)
     }
 
     /// Borrows the handle.
