@@ -3,6 +3,7 @@
 
 use super::moment;
 use crate::layout::{Pager, page_head, pager};
+use crate::settings::device_name;
 use serde_json::Value;
 use sourceorigin_common::{
     AlertId, AuthenticationMethod, Personal, Provider,
@@ -88,11 +89,18 @@ impl EventRow<'_> {
     }
 
     /// Who caused it, in a few words, and whether that is an administrator's or
-    /// operator's doing.
+    /// operator's doing. An administrator is named by their handle while their
+    /// account exists.
     fn actor(&self) -> (String, bool) {
         match serde_json::from_value(self.event.actor.clone()) {
             Ok(Actor::User { .. }) => ("the account".to_owned(), false),
-            Ok(Actor::Admin { .. }) => ("an administrator".to_owned(), true),
+            Ok(Actor::Admin { .. }) => (
+                self.event.administrator.as_ref().map_or_else(
+                    || "an administrator".to_owned(),
+                    |handle| format!("@{handle}"),
+                ),
+                true,
+            ),
             Ok(Actor::Cli { os_user, host }) => (format!("the terminal, {os_user}@{host}"), true),
             Ok(Actor::Client { client_id }) => (format!("the app {client_id}"), false),
             Ok(Actor::System { job }) => (format!("the {} job", Self::job(job)), false),
@@ -107,6 +115,20 @@ impl EventRow<'_> {
             .ok()
             .and_then(|name| name.as_str().map(ToOwned::to_owned))
             .unwrap_or_else(|| format!("{job:?}").to_lowercase())
+    }
+
+    /// Where its request came from, as the owner's history says it, or that
+    /// retention or a purge erased it with the reason.
+    fn request(&self) -> Vec<(&'static str, String)> {
+        if self.event.erased {
+            return vec![("personal data", "erased".to_owned())];
+        }
+        let device = self
+            .event
+            .device
+            .map(|device| ("device", device_name(device)));
+        let ip = self.event.ip.map(|ip| ("IP", ip.to_string()));
+        device.into_iter().chain(ip).collect()
     }
 
     /// Its stored JSON, pretty-printed.
@@ -274,9 +296,12 @@ impl EventRow<'_> {
             DomainEvent::InvitationRevoked { invitation_id } => {
                 Description::new("Invitation revoked").with("invitation", invitation_id)
             }
-            DomainEvent::AccountDisabled { reason } => {
+            // Its reason shows beside its administrator, as every change's does;
+            // only one recorded before changes carried theirs keeps it here.
+            DomainEvent::AccountDisabled { reason } if self.event.reason.is_none() => {
                 Description::new("Account disabled").personal("reason", &reason)
             }
+            DomainEvent::AccountDisabled { .. } => Description::new("Account disabled"),
             DomainEvent::AccountEnabled {} => Description::new("Account enabled again"),
             DomainEvent::AccountViewed {} => Description::new("Account details viewed"),
             DomainEvent::AdministratorGranted {} => {
@@ -551,6 +576,7 @@ pub async fn event_rows<'a>(rows: &'a [EventRow<'a>]) -> Result<impl View> {
             <ul class="events">
                 for row in rows {
                     let described = row.describe();
+                    let request = row.request();
                     let (actor, _) = row.actor();
                     <li>
                         moment(at: row.event.occurred_at)
@@ -563,11 +589,14 @@ pub async fn event_rows<'a>(rows: &'a [EventRow<'a>]) -> Result<impl View> {
                                     Some(href) => <a href=(href.as_str())>(actor.as_str())</a>,
                                     None => (actor.as_str()),
                                 }
+                                if let Some(reason) = &row.event.reason {
+                                    ": “" <span class="fact">(reason.as_str())</span> "”"
+                                }
                                 // The account it concerns, unless that is who caused it.
                                 if let Some(account) = row.account.as_ref().filter(|account| row.actor.as_ref() != Some(account)) {
                                     " · " <a href=(account.as_str())>"account"</a>
                                 }
-                                for (name, value) in &described.facts {
+                                for (name, value) in described.facts.iter().chain(&request) {
                                     " · " (*name) " " <span class="fact">(value.as_str())</span>
                                 }
                             </small>

@@ -8,7 +8,7 @@ use crate::{
 };
 use clap::{Args, Subcommand};
 use sourceorigin_common::{
-    admin::{EventPage, EventSearch},
+    admin::{Event, EventPage, EventSearch},
     events::Actor,
 };
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use std::path::PathBuf;
 /// Paging through, verifying and pruning the audit history.
 #[derive(Subcommand)]
 pub(super) enum AuditCommand {
-    /// Page through recorded events, newest first.
+    /// Page through recorded events, newest first, with who caused each and why.
     List(ListEvents),
     /// Recompute the chain and check every checkpoint against it, and record what
     /// it found, which the dashboard's Audit tab shows. Exits non-zero, naming the
@@ -175,36 +175,51 @@ impl ListEvents {
         )
     }
 
-    /// Prints one event per line, and how to continue if there may be more.
+    /// Prints one event per line, with who caused it and why, and how to continue
+    /// if there may be more. `--output json` adds where its request came from.
     fn print_page(page: &EventPage) {
-        println!("ID\tOCCURRED\tACTOR\tSUBJECT\tKIND");
+        println!("ID\tOCCURRED\tACTOR\tSUBJECT\tKIND\tREASON");
         for event in &page.events {
-            println!(
-                "{}\t{}\t{}\t{}\t{}",
-                event.id,
-                event.occurred_at.to_rfc3339(),
-                Self::actor(&event.actor),
-                event
-                    .subject
-                    .map_or_else(|| "-".to_owned(), |id| id.to_string()),
-                event.event["kind"].as_str().unwrap_or("-"),
-            );
+            println!("{}", Self::line(event));
         }
         Output::paging(page.paging, "events");
     }
 
-    /// Names who acted in a few words, or as the stored JSON when this release
-    /// does not know the kind of actor.
-    fn actor(actor: &serde_json::Value) -> String {
-        match serde_json::from_value(actor.clone()) {
+    /// `event` as one tab-separated line. A reason has no tab or line break.
+    pub(super) fn line(event: &Event) -> String {
+        let reason = match (&event.reason, event.erased) {
+            (Some(reason), _) => reason.as_str(),
+            (None, true) => "erased",
+            (None, false) => "-",
+        };
+        format!(
+            "{}\t{}\t{}\t{}\t{}\t{reason}",
+            event.id,
+            event.occurred_at.to_rfc3339(),
+            Self::actor(event),
+            event
+                .subject
+                .map_or_else(|| "-".to_owned(), |id| id.to_string()),
+            event.event["kind"].as_str().unwrap_or("-"),
+        )
+    }
+
+    /// Names who caused `event` in a few words, an administrator by their handle
+    /// while their account exists, or as the stored JSON when this release does
+    /// not know the kind of actor.
+    fn actor(event: &Event) -> String {
+        match serde_json::from_value(event.actor.clone()) {
             Ok(Actor::User { user_id, .. }) => format!("user {user_id}"),
-            Ok(Actor::Admin { user_id, .. }) => format!("admin {user_id}"),
+            Ok(Actor::Admin { user_id, .. }) => match &event.administrator {
+                Some(handle) => format!("admin @{handle}"),
+                None => format!("admin {user_id}"),
+            },
             Ok(Actor::Cli { os_user, host }) => format!("cli {os_user}@{host}"),
             Ok(Actor::Client { client_id }) => format!("client {client_id}"),
             Ok(Actor::System { job }) => format!("job {job:?}"),
             Ok(Actor::Anonymous) => "anonymous".to_owned(),
             Ok(Actor::Unrecorded) => "unrecorded".to_owned(),
-            Err(_) => actor.to_string(),
+            Err(_) => event.actor.to_string(),
         }
     }
 }

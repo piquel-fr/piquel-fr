@@ -24,6 +24,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, PictureId, UserId,
+    admin::EventSearch,
     events::{Actor, DomainEvent},
     notifications::Notification,
 };
@@ -966,7 +967,8 @@ async fn the_admin_listener_keeps_to_its_host_forms_and_session() {
 
 /// Recovering an account mails its primary verified address a link, which the
 /// recovery pages then list, and undoing it cancels the unused link; both go on
-/// to the account's page. Until then, the account's sign-in methods say no
+/// to the account's page, whose events say which administrator started it and
+/// why, as `audit list` does. Until then, the account's sign-in methods say no
 /// passkey can be removed. An account whose link would not be mailed is left
 /// alone, saying why.
 #[tokio::test]
@@ -992,6 +994,38 @@ async fn recoveries_are_started_and_undone_from_the_dashboard() {
     assert_eq!(redirect(&post(&recover).await), account);
     let page = html(harness.visit(&dashboard, &recover).await).await;
     assert!(page.contains("Link sent, not used"), "{page}");
+    let handle = harness
+        .database
+        .users()
+        .find_by_id(admin.user_id)
+        .await
+        .expect("lookup")
+        .expect("administrator")
+        .handle;
+    let page = html(harness.visit(&dashboard, &account).await).await;
+    // The recovery's row links its administrator by handle, then says why.
+    let who_and_why = format!(
+        r#"<a href="/users/{}">@{handle}</a>: “<span class="fact">Lost every passkey</span>”"#,
+        admin.user_id
+    );
+    assert!(page.contains(&who_and_why), "{who_and_why}: {page}");
+    let started = AdminService::new(harness.database.clone(), true)
+        .events(
+            &operator(),
+            EventSearch {
+                user: Some(owner.user_id),
+                kind: Some("recovery_started".into()),
+                ..EventSearch::default()
+            },
+        )
+        .await
+        .expect("events");
+    let [started] = started.events.as_slice() else {
+        panic!("one recovery started: {started:?}");
+    };
+    assert_eq!(started.administrator, Some(handle));
+    assert_eq!(started.reason.as_deref(), Some("Lost every passkey"));
+    assert!(!started.erased && started.ip.is_some(), "{started:?}");
     let sign_in = format!("/users/{}/sign-in", owner.user_id);
     let page = html(harness.visit(&dashboard, &sign_in).await).await;
     assert!(
