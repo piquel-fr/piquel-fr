@@ -38,8 +38,9 @@ pub use sign_in::{ProviderRow, SignInChange, SignInState, sign_in_methods};
 pub use timeline::{HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, history};
 
 use crate::{
+    form::Query,
     icons::Icon,
-    layout::{Label, navigation},
+    layout::{Destination, Label, Searchable, Spot, navigation},
 };
 use sourceorigin_common::events::{Browser, Platform, UserAgentFamily};
 use topcoat::{
@@ -161,6 +162,196 @@ impl Label for Tab {
             self,
             Self::SignIn | Self::Profile | Self::Emails | Self::Apps
         )
+    }
+}
+
+impl Searchable for Tab {
+    fn icon(self) -> Icon {
+        Self::icon(self)
+    }
+
+    fn terms(self) -> &'static str {
+        match self {
+            Self::Overview => "home account summary dashboard",
+            Self::Notifications => "inbox messages announcements alerts unread",
+            Self::SignIn => {
+                "security login log in passkeys webauthn social providers google github password"
+            }
+            Self::Profile => "handle username display name picture avatar photo",
+            Self::Emails => "email addresses mail primary verify",
+            Self::Devices => "sessions browsers phones computers signed in sign out log out",
+            Self::Apps => "consent authorized third party permissions access oauth",
+            Self::History => "security log activity events audit timeline",
+            Self::Data => "download export delete account gdpr privacy",
+        }
+    }
+}
+
+impl Tab {
+    /// What the top bar's search finds within the settings pages, `tabs` linking
+    /// each: every [`Part`], by the ID its page gives it, and every dialog, by the
+    /// query opening it.
+    pub(crate) fn spots<'a>(tabs: &[(Self, &'a str)]) -> Vec<Destination<'a>> {
+        let page = |tab: Self| {
+            tabs.iter()
+                .find(|(each, _)| *each == tab)
+                .map(|(_, href)| *href)
+        };
+        let spot = |tab: Self, at: String, spot: Spot| {
+            page(tab)
+                .map(|href| Destination::spot(tab.label(), tab.icon(), format!("{href}{at}"), spot))
+        };
+        let parts = Part::ALL
+            .into_iter()
+            .filter_map(|part| spot(part.tab(), format!("#{}", part.id()), part.spot()));
+        // A dialog whose query cannot be written is left out; none fails.
+        let dialogs = ProfileDialog::ALL.into_iter().filter_map(|dialog| {
+            let state = ProfileState {
+                open: Some(dialog),
+                ..ProfileState::default()
+            };
+            spot(Self::Profile, state.on("").ok()?, dialog.spot()?)
+        });
+        let email = InboxState {
+            email: true,
+            ..InboxState::default()
+        };
+        let preferences = email.on("").ok().and_then(|at| {
+            spot(
+                Self::Notifications,
+                at,
+                Spot::setting(
+                    "Email preferences",
+                    "announcement emails unsubscribe newsletter mail notifications",
+                ),
+            )
+        });
+        parts.chain(dialogs).chain(preferences).collect()
+    }
+}
+
+/// A part of a settings page, a section or what opens with a link to it: its
+/// heading, or its disclosure, takes its ID from here, and the top bar's search
+/// finds it by that ID, so a link to it never goes stale. A settings page's
+/// every section heading is one, which a test checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Part {
+    /// The overview's recent security activity.
+    Activity,
+    /// The inbox.
+    Inbox,
+    /// The passkeys.
+    Passkeys,
+    /// Adding a passkey, folded below them.
+    AddPasskey,
+    /// Social sign-in.
+    Social,
+    /// The email addresses.
+    Addresses,
+    /// Adding an address, folded below them.
+    AddAddress,
+    /// The signed-in devices.
+    Devices,
+    /// The browsers the account signed in with before, which a new one is not.
+    KnownBrowsers,
+    /// The connected apps.
+    Apps,
+    /// Downloading the account's data.
+    Export,
+    /// Deleting the account.
+    Delete,
+}
+
+impl Part {
+    /// Every part.
+    const ALL: [Self; 12] = [
+        Self::Activity,
+        Self::Inbox,
+        Self::Passkeys,
+        Self::AddPasskey,
+        Self::Social,
+        Self::Addresses,
+        Self::AddAddress,
+        Self::Devices,
+        Self::KnownBrowsers,
+        Self::Apps,
+        Self::Export,
+        Self::Delete,
+    ];
+
+    /// The ID its heading or disclosure takes, which links it.
+    pub(crate) const fn id(self) -> &'static str {
+        match self {
+            Self::Activity => "activity-heading",
+            Self::Inbox => "inbox-heading",
+            Self::Passkeys => "passkeys-heading",
+            Self::AddPasskey => "add-passkey",
+            Self::Social => "social-heading",
+            Self::Addresses => "emails-heading",
+            Self::AddAddress => "add-email",
+            Self::Devices => "sessions-heading",
+            Self::KnownBrowsers => "known-heading",
+            Self::Apps => "apps-heading",
+            Self::Export => "export-heading",
+            Self::Delete => "delete-heading",
+        }
+    }
+
+    /// The tab whose page it is on.
+    const fn tab(self) -> Tab {
+        match self {
+            Self::Activity => Tab::Overview,
+            Self::Inbox => Tab::Notifications,
+            Self::Passkeys | Self::AddPasskey | Self::Social => Tab::SignIn,
+            Self::Addresses | Self::AddAddress => Tab::Emails,
+            Self::Devices | Self::KnownBrowsers => Tab::Devices,
+            Self::Apps => Tab::Apps,
+            Self::Export | Self::Delete => Tab::Data,
+        }
+    }
+
+    /// What search finds it by.
+    const fn spot(self) -> Spot {
+        match self {
+            Self::Activity => Spot::setting("Recent security activity", "latest events sign-ins"),
+            Self::Inbox => Spot::setting("Inbox", "messages notifications unread"),
+            Self::Passkeys => Spot::setting(
+                "Passkeys",
+                "webauthn security key face id touch id windows hello fingerprint biometrics password rename remove",
+            ),
+            Self::AddPasskey => Spot::setting(
+                "Add a passkey",
+                "new passkey webauthn security key register device",
+            ),
+            Self::Social => Spot::setting(
+                "Social sign-in",
+                "google github apple microsoft providers linked accounts oauth link unlink",
+            ),
+            Self::Addresses => Spot::setting("Your addresses", "email primary verified remove"),
+            Self::AddAddress => {
+                Spot::setting("Add an email address", "new email address mail verify")
+            }
+            Self::Devices => Spot::setting(
+                "Signed-in devices",
+                "sessions browsers sign out everywhere log out revoke",
+            ),
+            Self::KnownBrowsers => Spot::setting(
+                "Known browsers",
+                "remembered devices new device sign-in alerts",
+            ),
+            Self::Apps => Spot::setting(
+                "Apps with access",
+                "connected authorized consent revoke access remove permissions",
+            ),
+            Self::Export => Spot::setting(
+                "Download your data",
+                "export takeout archive json backup gdpr copy",
+            ),
+            Self::Delete => Spot::setting(
+                "Delete your account",
+                "remove close erase account deletion gdpr",
+            ),
+        }
     }
 }
 

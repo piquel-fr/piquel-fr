@@ -1,6 +1,6 @@
 //! Signed-in devices, and the browsers the account knows.
 
-use super::device_name;
+use super::{Part, device_name};
 use crate::{
     form::{Precision, change_form, time},
     layout::page_head,
@@ -127,9 +127,9 @@ impl DeviceRow<'_> {
 #[component]
 pub async fn known_devices<'a>(known: &'a [KnownDevice]) -> Result<impl View> {
     Ok(view! {
-        <section class="card" aria-labelledby="known-heading">
+        <section class="card" aria-labelledby=(Part::KnownBrowsers.id())>
             <header>
-                <h2 id="known-heading">"Known browsers " <span class="count">(known.len().to_string())</span></h2>
+                <h2 id=(Part::KnownBrowsers.id())>"Known browsers " <span class="count">(known.len().to_string())</span></h2>
             </header>
             <p class="help">
                 "Browsers that signed in to this account within the last 400 days. A sign-in from any other browser sends a security notification."
@@ -181,9 +181,9 @@ pub async fn devices<'a>(
                 }
             },
         )
-        <section class="card" aria-labelledby="sessions-heading">
+        <section class="card" aria-labelledby=(Part::Devices.id())>
             <header>
-                <h2 id="sessions-heading">"Signed-in devices " <span class="count">(rows.len().to_string())</span></h2>
+                <h2 id=(Part::Devices.id())>"Signed-in devices " <span class="count">(rows.len().to_string())</span></h2>
             </header>
             <ul class="list">
                 for row in rows {

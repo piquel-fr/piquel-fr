@@ -8,7 +8,7 @@ use crate::repositories::{
 };
 use chrono::Utc;
 use sourceorigin_common::{
-    SessionId, UserId,
+    Handle, SessionId, UserId,
     events::{Browser, Platform, UserAgentFamily},
 };
 use sqlx::PgPool;
@@ -183,4 +183,47 @@ async fn touch_records_activity_at_most_once_per_interval() {
     let (at, ip) = last_seen(session.id).await;
     assert!(at > session.last_seen_at);
     assert_eq!(ip, Some(elsewhere));
+}
+
+/// A search lists the closest accounts first: the one whose handle is the
+/// query, then handles starting with it, then display names with a word
+/// starting with it, then the rest.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn search_lists_the_closest_accounts_first() {
+    let pool = Database::test_pool().await;
+    // Unique to this test, so accounts other tests insert never match.
+    let query = format!("rank{}", &UserId::new().to_string().replace('-', "")[..10]);
+    let account = |handle: String, display_name: String| InsertUser {
+        id: UserId::new(),
+        handle: Handle::parse(&handle).expect("a handle"),
+        display_name,
+    };
+    let expected = [
+        account(query.clone(), "Exact".to_owned()),
+        account(format!("{query}-b"), "Prefix".to_owned()),
+        account(format!("named-{query}x"), format!("Someone {query}")),
+        account(format!("within{query}"), "Within".to_owned()),
+    ];
+    // Inserted in reverse, so the order is the search's, not the insertion's.
+    for input in expected.iter().rev() {
+        UserRepository::from_pool(&pool)
+            .insert(input)
+            .await
+            .expect("user");
+    }
+    let found = UserRepository::from_pool(&pool)
+        .search(&query.to_uppercase(), 0, 10)
+        .await
+        .expect("search");
+    let found: Vec<_> = found.iter().map(|user| user.id).collect();
+    let expected: Vec<_> = expected.iter().map(|input| input.id).collect();
+    assert_eq!(found, expected);
+    // An ID matches whole, in either case, as one pasted from elsewhere.
+    let pasted = expected[1].to_string().to_uppercase();
+    let found = UserRepository::from_pool(&pool)
+        .search(&pasted, 0, 10)
+        .await
+        .expect("search by ID");
+    assert_eq!(found.first().map(|user| user.id), Some(expected[1]));
 }

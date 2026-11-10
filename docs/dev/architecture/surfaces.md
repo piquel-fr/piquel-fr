@@ -30,8 +30,24 @@ as several replicas (see [running several replicas](../operations/replicas.md)).
 serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
 never cached. Their scripts are the passkey script, which runs the passkey
-ceremonies their forms need and keeps a form from posting twice, and the picture
-script, which lets the picture form choose its crop.
+ceremonies their forms need and keeps a form from posting twice, the picture
+script, which lets the picture form choose its crop, and the search script.
+
+The search script ranks the top bar's results as the user types. Every signed-in
+page holds its area's pages, settings and actions as results
+(`crates/ui/src/layout/search.rs`), so ranking them needs no request. Each comes
+from what renders or routes it, never a copied link: the sidebar's tabs, the
+settings' `Part`s, whose IDs their headings take, the profile's dialogs, by the
+query opening them, the account's apps, and the dashboard's `SearchAction`s, by their
+routes. On the dashboard, the script also fetches `/search?q=` once a query
+has two letters, unless a shorter query it contains found nothing. It answers
+with the accounts and clients the query finds, in the same markup, and spends a
+budget of its own (see [rate limit](request-lifecycle.md#rate-limit)). A search field marked
+`data-live` refreshes its form's results as the user types, by submitting the
+form in the background and swapping in the regions it names; on the dashboard,
+these refreshes spend the search budget too. Without the
+script, the dashboard's search goes to **Users**, and the settings' search is
+hidden: the sidebar still reaches every page.
 
 Passkeys are bound to the `auth.sourceorigin.dev` RP ID, so passkey ceremonies always
 run on auth. A settings change that needs a recent passkey confirmation asks for
@@ -72,9 +88,9 @@ The admin listener has a security layer of its own. It answers only requests tha
 name the dashboard's host, takes a form only from the dashboard's own pages (the
 same-origin rule auth's pages follow), spends a request budget of its own, and
 limits bodies to 512 KiB, which an announcement's text and accounts need. Every
-page loads only the stylesheet and the dashboard's own script, which its
-Content-Security-Policy names alone, and its forms post only to the dashboard,
-whose answer may go on to auth's handoff page.
+page loads only the stylesheet, the dashboard's own script and the search
+script, which its Content-Security-Policy names alone, and its forms post only
+to the dashboard, whose answer may go on to auth's handoff page.
 
 The dashboard is no OIDC client. An administrator signs in by a handoff from auth:
 

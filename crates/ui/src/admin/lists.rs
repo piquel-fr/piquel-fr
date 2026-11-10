@@ -132,45 +132,49 @@ pub async fn grant_search<'a>(
                     aria-label="Search accounts"
                     autocomplete="off"
                     autofocus=""
+                    data-live="grant-results"
                 >
             </label>
             <button class="secondary">"Search"</button>
         </form>
-        if q.is_empty() {
-            <section class="card"><p class="empty">"Search for the account to make an administrator."</p></section>
-        } else {
-            <section class="card">
-                if rows.is_empty() {
-                    <p class="empty">(format!("No account matches “{q}”."))</p>
-                } else {
-                    <ul class="list">
-                        for row in rows {
-                            let subject = format!("@{}", row.user.handle);
-                            <li>
-                                avatar(who: row.who())
-                                <div class="text">
-                                    <a href=(row.href.as_str())><strong>(format!("@{}", row.user.handle))</strong></a>
-                                    <small>(row.user.display_name.as_str()) " · " (row.user.id.to_string())</small>
-                                </div>
-                                if row.administrator {
-                                    <span class="badge admin"><span class="dot"></span>"Administrator"</span>
-                                } else if row.user.status != AccountStatus::Active {
-                                    account_status(status: row.user.status)
-                                } else {
-                                    confirm(
-                                        action: &grant,
-                                        change: change,
-                                        subject: subject.as_str(),
-                                        <input type="hidden" name="user_id" value=(row.user.id.to_string())>
-                                    )
-                                }
-                            </li>
-                        }
-                    </ul>
-                }
-            </section>
-            pager(pages: pages, what: "accounts")
-        }
+        // What the search script swaps in as the administrator types.
+        <div class="stack" id="grant-results">
+            if q.is_empty() {
+                <section class="card"><p class="empty">"Search for the account to make an administrator."</p></section>
+            } else {
+                <section class="card">
+                    if rows.is_empty() {
+                        <p class="empty">(format!("No account matches “{q}”."))</p>
+                    } else {
+                        <ul class="list">
+                            for row in rows {
+                                let subject = format!("@{}", row.user.handle);
+                                <li>
+                                    avatar(who: row.who())
+                                    <div class="text">
+                                        <a href=(row.href.as_str())><strong>(format!("@{}", row.user.handle))</strong></a>
+                                        <small>(row.user.display_name.as_str()) " · " (row.user.id.to_string())</small>
+                                    </div>
+                                    if row.administrator {
+                                        <span class="badge admin"><span class="dot"></span>"Administrator"</span>
+                                    } else if row.user.status != AccountStatus::Active {
+                                        account_status(status: row.user.status)
+                                    } else {
+                                        confirm(
+                                            action: &grant,
+                                            change: change,
+                                            subject: subject.as_str(),
+                                            <input type="hidden" name="user_id" value=(row.user.id.to_string())>
+                                        )
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
+                pager(pages: pages, what: "accounts")
+            }
+        </div>
     })
 }
 

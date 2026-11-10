@@ -138,8 +138,11 @@ A matched route with a rate category spends one request of its client's budget:
 `AUTH_REQUESTS_PER_MINUTE` (120 by default) per category and client IP, in a fixed
 one-minute window, counted in PostgreSQL (`SecurityRepository::allow_request`)
 under a SHA-256 of `<category>:<ip>`, so every replica shares it. Categories are
-independent: an app's userinfo calls never block its code exchanges, and browsing
-auth's pages never blocks a passkey ceremony. An exhausted budget answers `429`
+independent: an app's userinfo calls never block its code exchanges, browsing
+auth's pages never blocks a passkey ceremony, and the dashboard's searches never
+block its pages: `/search`, which the top bar asks as the administrator types,
+and the live searches' refreshes, which the search script marks with
+`x-sourceorigin-live`, spend the `search` budget. An exhausted budget answers `429`
 with `Retry-After: 60` and counts `sourceorigin.auth.throttled{category}`. Discovery and
 health probes spend nothing, and an unmatched path has no route, so it spends
 nothing either.

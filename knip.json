@@ -5,7 +5,8 @@
       "entry": [
         "apps/auth-service/assets/passkey.js",
         "apps/auth-service/assets/picture.js",
-        "apps/auth-service/assets/dashboard.js"
+        "apps/auth-service/assets/dashboard.js",
+        "apps/auth-service/assets/search.js"
       ]
     },
     "packages/auth": {

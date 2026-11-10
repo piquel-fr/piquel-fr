@@ -1,7 +1,7 @@
 //! The inbox: the account's notifications, newest first, and one notification's
 //! own page.
 
-use super::{Audience, HistoryRow, Holdings, timeline::report_form};
+use super::{Audience, HistoryRow, Holdings, Part, timeline::report_form};
 use crate::{
     form::{Checkbox, Precision, Query, change_form, open, switch, time},
     icons::{Icon, icon},
@@ -149,9 +149,9 @@ pub async fn inbox<'a>(rows: &'a [InboxRow<'a>], page: InboxPage<'a>) -> Result<
                 actions: view! { email_button() },
             )
         }
-        <section class="card" aria-labelledby="inbox-heading">
+        <section class="card" aria-labelledby=(Part::Inbox.id())>
             <header>
-                <h2 id="inbox-heading">
+                <h2 id=(Part::Inbox.id())>
                     "Notifications"
                     if page.unread > 0 {
                         " " <span class="count">(format!("{} unread", page.unread))</span>

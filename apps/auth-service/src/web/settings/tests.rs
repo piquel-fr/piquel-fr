@@ -1126,3 +1126,36 @@ async fn profile_page_sets_serves_and_removes_the_picture() {
         "{page}"
     );
 }
+
+/// Every section heading on a settings page, whose ID ends in `-heading`, and
+/// every disclosure a link opens is a result of the top bar's search, linking
+/// its ID: a section added without a `Part` for its heading fails here.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_top_bar_finds_every_section_of_the_settings() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let mut checked = 0;
+    for (_, path) in super::TABS {
+        let page = html(browser.visit(&replicas.a, path).await).await;
+        let headings = page.split(r#"<h2 id=""#).skip(1).filter(|id| {
+            id.split('"')
+                .next()
+                .is_some_and(|id| id.ends_with("-heading"))
+        });
+        let disclosures = page
+            .split("<details ")
+            .skip(1)
+            .filter_map(|tag| tag.split_once('>')?.0.split(r#"id=""#).nth(1));
+        for id in headings.chain(disclosures) {
+            let id = id.split('"').next().unwrap_or_default();
+            assert!(
+                page.contains(&format!(r#"href="{path}#{id}""#)),
+                "search does not find #{id} on {path}: {page}"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 5, "only {checked} sections were found");
+}

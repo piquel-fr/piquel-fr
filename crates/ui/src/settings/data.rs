@@ -1,5 +1,6 @@
 //! The account's data: downloading it, and deleting the account.
 
+use super::Part;
 use crate::{
     form::{Precision, Query, change_form, open, time},
     layout::page_head,
@@ -51,9 +52,9 @@ pub async fn account_data<'a>(
 ) -> Result<impl View> {
     Ok(view! {
         page_head(title: "Your data", lead: "Everything SourceOrigin keeps about you, and leaving.".to_owned())
-        <section class="card" aria-labelledby="export-heading">
+        <section class="card" aria-labelledby=(Part::Export.id())>
             <header>
-                <h2 id="export-heading">"Download your data"</h2>
+                <h2 id=(Part::Export.id())>"Download your data"</h2>
                 change_form(
                     action: page,
                     change: DataChange::Export,
@@ -66,9 +67,9 @@ pub async fn account_data<'a>(
                 "Everything SourceOrigin keeps about your account, in one JSON file: your profile and its picture, handles, email addresses, passkeys and linked accounts, devices, connected apps, the apps you registered, account recoveries, your inbox and every event recorded about your account. What you removed is in it until it is deleted. It holds no passkey keys or secrets."
             </p>
         </section>
-        <section class="card" aria-labelledby="delete-heading">
+        <section class="card" aria-labelledby=(Part::Delete.id())>
             <header>
-                <h2 id="delete-heading">"Delete your account"</h2>
+                <h2 id=(Part::Delete.id())>"Delete your account"</h2>
                 if !state.deleting {
                     open(
                         page: page,

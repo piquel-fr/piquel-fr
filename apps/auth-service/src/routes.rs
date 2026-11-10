@@ -205,9 +205,12 @@ pub(crate) mod dashboard {
     /// The current alerts, which an alert's notification links: the path of
     /// `web::admin::alerts::list`'s route.
     pub(crate) const ALERTS: &str = "/alerts";
+    /// What the top bar's search finds as the administrator types: the path of
+    /// `web::admin::search::suggest`'s route.
+    pub(crate) const SEARCH: &str = "/search";
     /// Every path the dashboard serves is one of these, or under one: the admin
     /// listener mounts the pages on them, and nowhere else.
-    pub(crate) const PREFIXES: [&str; 17] = [
+    pub(crate) const PREFIXES: [&str; 18] = [
         "/",
         SIGN_IN,
         CONFIRM,
@@ -225,6 +228,7 @@ pub(crate) mod dashboard {
         "/audit",
         "/announcements",
         ALERTS,
+        SEARCH,
     ];
 }
 

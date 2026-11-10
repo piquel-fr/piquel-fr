@@ -11,6 +11,22 @@ the apps you signed in to, your notifications and your data.
 
 ![The settings overview: active sessions, connected apps, recent security activity and devices](../images/account/settings.png)
 
+## Find a setting
+
+The search box at the top of every settings and developer console page finds
+any setting as you type. Press **/** or **Ctrl+K** (**⌘K** on a Mac) to jump
+to it from anywhere on the page.
+
+1. Type a few letters of what you are looking for, such as `passk` or
+   `delete`. Words other sites use work too, such as `password`, `username` or
+   `export`, and so does a small typo.
+2. The results list pages, settings on them, such as **Change display name**,
+   and your own apps in the developer console, with their **Settings** and
+   **Secrets**. The best match is highlighted.
+3. Press **Enter** to open the highlighted result, or use the arrow keys to
+   choose another. A setting opens on its page, with its dialog open if it has
+   one. **Escape** closes the list.
+
 ## Words this guide uses
 
 - **Handle:** your account's public name, such as `alice`. You sign in with it,

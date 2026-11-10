@@ -323,38 +323,43 @@ async fn chosen_accounts<'a>(
                         aria-label="Find accounts"
                         autocomplete="off"
                         autofocus=(!find.is_empty())
+                        data-live="found-accounts"
                     >
                 </label>
-                <button class="secondary" name="intent" value="find" formnovalidate="">"Find"</button>
+                <button class="secondary" name="intent" value="find" formnovalidate="" data-live-submit="">"Find"</button>
             </div>
-            if !find.is_empty() {
-                if found.is_empty() {
-                    <p class="empty">(format!("No account matches “{find}”."))</p>
-                } else {
-                    <ul class="list">
-                        for account in found {
-                            let handle = format!("@{}", account.user.handle);
-                            <li>
-                                <div class="text">
-                                    <strong>(handle.as_str())</strong>
-                                    <small>(account.user.display_name.as_str())</small>
-                                </div>
-                                if account.added {
-                                    <span class="badge ok">"Added"</span>
-                                } else {
-                                    <button
-                                        class="secondary small"
-                                        name="add"
-                                        value=(account.user.handle.as_str())
-                                        formnovalidate=""
-                                        aria-label=(format!("Add {handle}"))
-                                    >"Add"</button>
-                                }
-                            </li>
-                        }
-                    </ul>
+            // What the search script swaps in as the administrator types, finding
+            // as the Find button does.
+            <div class="live-results" id="found-accounts">
+                if !find.is_empty() {
+                    if found.is_empty() {
+                        <p class="empty">(format!("No account matches “{find}”."))</p>
+                    } else {
+                        <ul class="list">
+                            for account in found {
+                                let handle = format!("@{}", account.user.handle);
+                                <li>
+                                    <div class="text">
+                                        <strong>(handle.as_str())</strong>
+                                        <small>(account.user.display_name.as_str())</small>
+                                    </div>
+                                    if account.added {
+                                        <span class="badge ok">"Added"</span>
+                                    } else {
+                                        <button
+                                            class="secondary small"
+                                            name="add"
+                                            value=(account.user.handle.as_str())
+                                            formnovalidate=""
+                                            aria-label=(format!("Add {handle}"))
+                                        >"Add"</button>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
                 }
-            }
+            </div>
             <label>
                 "Accounts"
                 <textarea name="accounts" rows="5">(form.accounts.as_str())</textarea>

@@ -12,7 +12,8 @@ use crate::{
         client_facts, client_form, client_status, copy, secret_panel, secrets_list,
     },
     form::{Checkbox, Precision, Query, change_form, open, time},
-    layout::{Label, navigation, page_head},
+    icons::Icon,
+    layout::{Destination, Group, Label, Spot, navigation, page_head},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -139,13 +140,17 @@ pub struct SecretsState {
 
 impl Query for SecretsState {}
 
-/// One of the account's apps, and its page.
+/// One of the account's apps, and its pages.
 #[derive(Clone, Debug)]
 pub struct AppLink<'a> {
     /// The app.
     pub client: ClientRow<'a>,
     /// Its overview page.
     pub page: String,
+    /// Its settings page.
+    pub settings: String,
+    /// Its secrets page, for a confidential app.
+    pub secrets: Option<String>,
 }
 
 /// The pages of one app, in the order its tabs list them. A public app has no
@@ -176,6 +181,37 @@ impl Label for AppTab {
     /// [`AppTab::label`].
     fn label(self) -> &'static str {
         self.label()
+    }
+}
+
+impl AppLink<'_> {
+    /// What search finds of it: its overview, by its name or ID, then its
+    /// settings and, for a confidential app, its secrets.
+    pub(crate) fn destinations(&self) -> impl Iterator<Item = Destination<'_>> {
+        let name = self.client.name;
+        let app = Destination {
+            group: Group::Apps,
+            icon: Icon::Code,
+            title: name.into(),
+            trail: self.client.id.as_str().into(),
+            terms: "app client overview".into(),
+            href: self.page.as_str().into(),
+            confirms: false,
+        };
+        let settings = Spot::setting(
+            AppTab::Settings.label(),
+            "redirect uris callback scopes logout refresh disable enable delete rename",
+        );
+        let secrets = Spot::setting(AppTab::Secrets.label(), "client secret rotate credentials");
+        let tabs = [
+            Some((&self.settings, settings)),
+            self.secrets.as_ref().map(|page| (page, secrets)),
+        ];
+        std::iter::once(app).chain(
+            tabs.into_iter()
+                .flatten()
+                .map(move |(page, spot)| Destination::spot(name, Icon::Code, page.clone(), spot)),
+        )
     }
 }
 

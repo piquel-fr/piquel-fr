@@ -1,6 +1,6 @@
 //! Passkeys and social sign-in.
 
-use super::Audience;
+use super::{Audience, Part};
 use crate::{
     Recovery, RecoveryPasskey, RecoveryStage,
     form::{Ceremony, Precision, Query, change_form, new_passkey, open, passkey_form, time},
@@ -127,9 +127,9 @@ async fn passkey_list<'a>(
     let count = passkeys.len();
     let added = recovery.and_then(Recovery::passkey);
     Ok(view! {
-        <section class="card" aria-labelledby="passkeys-heading">
+        <section class="card" aria-labelledby=(Part::Passkeys.id())>
             <header>
-                <h2 id="passkeys-heading">"Passkeys " <span class="count">(count.to_string())</span></h2>
+                <h2 id=(Part::Passkeys.id())>"Passkeys " <span class="count">(count.to_string())</span></h2>
             </header>
             <ul class="list">
                 for passkey in passkeys {
@@ -168,7 +168,7 @@ async fn passkey_list<'a>(
                 }
             </p>
             if audience.owns() {
-                <details class="disclosure">
+                <details class="disclosure" id=(Part::AddPasskey.id())>
                     <summary><span class="button secondary small">"Add a passkey"</span></summary>
                     <div class="open-row">
                         enroll(page: page, android: android)
@@ -303,9 +303,9 @@ async fn social<'a>(
         .filter(|row| row.identity.is_some())
         .count();
     Ok(view! {
-        <section class="card" aria-labelledby="social-heading">
+        <section class="card" aria-labelledby=(Part::Social.id())>
             <header>
-                <h2 id="social-heading">
+                <h2 id=(Part::Social.id())>
                     "Social sign-in"
                     <span class="count">(format!("{linked} / {}", providers.len()))</span>
                 </h2>

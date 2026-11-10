@@ -1,6 +1,6 @@
 //! Email addresses, and confirming one.
 
-use super::Audience;
+use super::{Audience, Part};
 use crate::{
     form::{Query, change_form, fragment_form, open},
     layout::{page_head, private_address},
@@ -88,9 +88,9 @@ pub async fn addresses<'a>(
                 lead: "Origin Auth sends security notices to your primary address, and apps you sign in to receive it. Every address is verified before it is used.".to_owned(),
             )
         }
-        <section class="card" aria-labelledby="emails-heading">
+        <section class="card" aria-labelledby=(Part::Addresses.id())>
             <header>
-                <h2 id="emails-heading">"Your addresses " <span class="count">(emails.len().to_string())</span></h2>
+                <h2 id=(Part::Addresses.id())>"Your addresses " <span class="count">(emails.len().to_string())</span></h2>
             </header>
             <ul class="list">
                 for email in emails {
@@ -109,7 +109,7 @@ pub async fn addresses<'a>(
             }
             // Open again after an addition that failed, with what was typed.
             if audience.owns() && sends {
-                <details class="disclosure" open=(state.adding.is_some())>
+                <details class="disclosure" id=(Part::AddAddress.id()) open=(state.adding.is_some())>
                     <summary><span class="button secondary small">"Add an address"</span></summary>
                     <div class="open-row">
                         change_form(

@@ -137,7 +137,8 @@ async fn secrets_show_once_in_the_answer_that_makes_them() {
         page.contains(r#"data-replace-url="/developers/new""#),
         "{page}"
     );
-    let id: ClientId = value_after(&page, r#"href="/developers/clients/"#)
+    // The answer's own link, not the top bar's results, which list the app too.
+    let id: ClientId = value_after(&page, r#"<a class="button" href="/developers/clients/"#)
         .parse()
         .expect("app ID");
     let overview = developers::of(APP, &id);

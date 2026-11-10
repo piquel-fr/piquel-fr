@@ -83,8 +83,8 @@ impl AdminService {
         Ok(user.handle)
     }
 
-    /// Lists `page` of the accounts matching `query`, by handle: the first page
-    /// when `None`.
+    /// Lists `page` of the accounts matching `query`, the closest first: the
+    /// first page when `None`. A handle may be written with its `@`.
     pub(crate) async fn search_users(
         &self,
         operator: &Operator,
@@ -93,6 +93,7 @@ impl AdminService {
     ) -> Result<UserPage, AdminError> {
         operator.authorize_read(&self.database).await?;
         let query = query.trim();
+        let query = query.strip_prefix('@').unwrap_or(query);
         let mut users = self.database.users();
         let total = users.count_matching(query).await?;
         let paging = Paging::new(page, total, u32::from(USER_PAGE_SIZE));
