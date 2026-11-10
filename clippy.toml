@@ -1,5 +1,8 @@
-# `expect_used` holds for production code only; tests may panic on failure.
+# `expect_used`, `panic` and `dbg_macro` hold for production code only; tests
+# may panic on failure and print what they inspect.
 allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true
 
 # The project's name is a word in prose, not code. `..` keeps Clippy's defaults.
 doc-valid-idents = ["SourceOrigin", ".."]

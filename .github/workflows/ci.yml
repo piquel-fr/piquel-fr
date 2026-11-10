@@ -14,6 +14,8 @@
 #             web server on its own host, Mailpit receiving auth's email, and
 #             the binary's CLI granting administrators and recovering accounts
 #   docker -> the deployment images: auth, sourceorigin.dev's web server and the docs
+#   infra  -> the piqueld manifests, by piquelctl, and the telemetry configs,
+#             each by the image that runs it
 #   docs   -> the documentation book, built with warnings denied, with every
 #             link and heading anchor in it and in the repository's Markdown
 #             checked offline
@@ -59,7 +61,10 @@ jobs:
   # matches a filter only when it matches every pattern. `web` covers every
   # file Prettier, ESLint or tsc can see, so it excludes file types rather than
   # directories. `app` covers everything the running service and its images
-  # are built from, and the TypeScript SDK the browser suite also runs.
+  # are built from, and the TypeScript SDK the browser suite also runs. Rust
+  # also reads files outside the crates: the committed audit verifier keys,
+  # which auth compiles in, and the generated reference pages its tests compare
+  # with the code, which `reference` matches since `rust` skips Markdown.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -67,10 +72,11 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
+      rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' || steps.filter.outputs.reference == 'true' }}
       web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
       app: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
+      infra: ${{ github.event_name != 'pull_request' || steps.filter.outputs.infra == 'true' }}
     steps:
       - if: github.event_name == 'pull_request'
         id: filter
@@ -79,8 +85,10 @@ jobs:
           predicate-quantifier: every
           filters: |
             rust:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/**,crates/**,tests/sdk-vectors/**,packages/auth/src/protocol.ts,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,clippy.toml,.cargo/**,justfile,just/**,apps/**,crates/**,tests/sdk-vectors/**,packages/auth/src/protocol.ts,docs/dev/security/audit-key.pub,.github/workflows/ci.yml}'
               - '!**/*.md'
+            reference:
+              - 'docs/dev/operations/{cli-commands,variables/*}.md'
             web:
               - '**'
               - '!**/*.{rs,sql,toml,md}'
@@ -90,9 +98,11 @@ jobs:
             deps:
               - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
             app:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,package.json,pnpm-lock.yaml,playwright.config.ts,apps/**,crates/**,packages/auth/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,.cargo/**,justfile,just/**,package.json,pnpm-lock.yaml,playwright.config.ts,apps/**,crates/**,packages/auth/**,tests/browser/**,infra/**,docs/dev/security/audit-key.pub,.dockerignore,.github/workflows/ci.yml}'
               - '!**/*.md'
               - '!infra/piqueld.toml'
+            infra:
+              - '{infra/piqueld.toml,infra/telemetry.toml,infra/telemetry/*.yaml,justfile,just/infra.just,.github/workflows/ci.yml}'
 
   checks:
     name: checks
@@ -319,6 +329,22 @@ jobs:
       - run: docker build --file infra/web.Dockerfile .
       - run: docker build --file infra/docs.Dockerfile .
 
+  # piquelctl publishes no prebuilt binaries either. rust-cache keeps it as it
+  # keeps sqlx-cli in `rust`, and `cargo install` upgrades it when a newer
+  # release is out. Docker pulls each telemetry image.
+  infra:
+    name: infra
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - *install-just
+      - *rust-cache
+      - run: cargo install --locked piquelctl
+      - run: just infra check
+
   # mdBook and lychee at the versions `just install-tools` installs.
   docs:
     name: docs
@@ -341,11 +367,12 @@ jobs:
       - rust
       - e2e
       - docker
+      - infra
       - docs
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
-          allowed-skips: checks, web, rust, e2e, docker
+          allowed-skips: checks, web, rust, e2e, docker, infra
           jobs: ${{ toJSON(needs) }}

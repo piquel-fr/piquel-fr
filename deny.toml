@@ -19,3 +19,16 @@ exceptions = [
     { crate = "sourceorigin-telemetry", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-ui", allow = ["PolyForm-Noncommercial-1.0.0"] },
 ]
+
+[bans]
+# A `*` requirement accepts any future release, breaking or malicious.
+# Workspace crates name their version (Cargo.toml) so they don't count as one.
+wildcards = "deny"
+# Duplicates come from dependencies' own requirements, which this workspace
+# can't change; warning about them would only bury real failures.
+multiple-versions = "allow"
+
+# Crates come from crates.io only: never another registry or a Git repository.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

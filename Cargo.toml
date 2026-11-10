@@ -29,19 +29,26 @@ missing_docs = "warn"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 unwrap_used = "warn"
-# Tests may expect (see clippy.toml); production code propagates errors.
+# Tests may expect, panic and dbg (see clippy.toml); production code
+# propagates errors and logs through tracing.
 expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
 # Modules with children live in `foo/mod.rs`, never a `foo.rs` beside `foo/`.
 self_named_module_files = "warn"
 
 [workspace.dependencies]
-# Local crates
-sourceorigin-common        = { path = "crates/common" }
-sourceorigin-crypto        = { path = "crates/crypto" }
-sourceorigin-repository    = { path = "crates/database" }
-sourceorigin-telemetry     = { path = "crates/telemetry" }
-sourceorigin-auth          = { path = "crates/auth-sdk" }
-sourceorigin-ui            = { path = "crates/ui" }
+# Local crates. Each names the workspace's version: cargo-deny (deny.toml)
+# denies a dependency with no version as a wildcard, and crates.io would refuse
+# to publish the SDK without one.
+sourceorigin-common        = { version = "0.1.0", path = "crates/common" }
+sourceorigin-crypto        = { version = "0.1.0", path = "crates/crypto" }
+sourceorigin-repository    = { version = "0.1.0", path = "crates/database" }
+sourceorigin-telemetry     = { version = "0.1.0", path = "crates/telemetry" }
+sourceorigin-auth          = { version = "0.1.0", path = "crates/auth-sdk" }
+sourceorigin-ui            = { version = "0.1.0", path = "crates/ui" }
 
 # External crates
 async-trait = "0.1"

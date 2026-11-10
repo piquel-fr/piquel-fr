@@ -55,7 +55,9 @@ The manifest declares both environments and where each deploys from: staging
 follows pushes to `main` (`sync = true`), and production receives releases
 promoted from staging (`promote_from = "staging"`). Saving the manifest creates
 them, and every later push to `main` keeps them in line with it. Change them in
-the manifest, never with `piquelctl env create`, `env source` or `env sync`.
+the manifest, never with `piquelctl env create`, `env source` or `env sync`. CI
+validates every change to it with `piquelctl app validate`, and
+`just infra check` runs the same check locally.
 
 To set them up on a new daemon, once the manifest is on `main`:
 
