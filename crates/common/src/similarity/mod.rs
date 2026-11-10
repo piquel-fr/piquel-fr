@@ -1,7 +1,9 @@
 //! Look-alike detection, for every name people could mistake for another: handles,
 //! client display names and the names reserved from both. Two texts look alike
-//! when they share a [`Skeleton`]; a name is compared with a list either whole
-//! ([`Skeleton::find_alike`]) or as part of longer text ([`Skeleton::find_contained`]).
+//! when they share a [`Skeleton`](crate::similarity::Skeleton); a name is compared
+//! with a list either whole
+//! ([`find_alike`](crate::similarity::Skeleton::find_alike)) or as part of longer
+//! text ([`find_contained`](crate::similarity::Skeleton::find_contained)).
 //!
 //! ```
 //! use sourceorigin_common::similarity::Skeleton;
