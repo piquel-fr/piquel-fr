@@ -199,6 +199,10 @@
   background: var(--surface);
   color: var(--fg);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  /* Its own text, whatever the table cell it opens from aligns or keeps from
+     wrapping. */
+  text-align: start;
+  white-space: normal;
 }
 .dialog:popover-open {
   display: grid;
