@@ -21,6 +21,8 @@
 //! # }
 //! ```
 
+pub use content::EmailContent;
+
 use crate::layout::announcement_text;
 use sourceorigin_common::admin::Announcement;
 use std::{borrow::Cow, iter};
@@ -55,8 +57,9 @@ pub enum Block {
     /// A paragraph. Its links' addresses follow it in the plain-text body, each
     /// on a line of its own.
     Paragraph(Vec<Inline>),
-    /// Text as someone wrote it, such as an administrator's message: its
-    /// paragraphs and line breaks are kept, and nothing in it is markup.
+    /// Text kept as written, such as an administrator's message or a
+    /// notification's body, as the inbox shows it: its paragraphs and line
+    /// breaks are kept, and nothing in it is markup.
     Written(String),
     /// What the email asks the reader to do: a button, with its address to copy
     /// below it, or, in plain text, `label` and then the address.
@@ -234,5 +237,7 @@ async fn runs<'a>(inlines: &'a [Inline]) -> Result<impl View> {
     })
 }
 
+/// What each kind of email says.
+mod content;
 #[cfg(test)]
 mod tests;

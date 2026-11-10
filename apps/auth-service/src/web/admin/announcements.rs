@@ -67,8 +67,7 @@ pub(super) async fn show(cx: &Cx) -> Result<Response> {
     let id = *path_param::<Announcement>(cx)?;
     let viewed = app.service.view_announcement(&admin.operator, id).await?;
     let detail = &viewed;
-    let preview = AnnouncementSender::preview(&detail.announcement, &app.auth)
-        .map_err(|error| Error::msg(format!("could not render an announcement: {error}")))?;
+    let preview = AnnouncementSender::preview(&detail.announcement, &app.auth);
     let accounts: Vec<_> = detail
         .accounts
         .iter()

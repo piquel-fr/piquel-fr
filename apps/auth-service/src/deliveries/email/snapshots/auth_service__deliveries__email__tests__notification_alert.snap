@@ -11,18 +11,17 @@ Alert: The audit chain is broken.
 
 A verification found the chain broken.
 
-See the alerts on the admin dashboard:
+See the alerts:
 
 https://admin.sourceorigin.dev/alerts
 
-Read it in your Origin Account notifications:
+Read it in your Origin Account notifications.
 
 https://auth.sourceorigin.dev/settings/notifications/NOTIFICATION
 
 SourceOrigin
 
 --- text/html ---
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,10 +32,15 @@ SourceOrigin
 <body style="margin:0;padding:24px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.5;color:#1a1a1a;background:#ffffff">
 <div style="max-width:560px;margin:0 auto">
 <p>Hello,</p>
-<p><strong>Alert: The audit chain is broken.</strong></p>
+<p>
+<strong>Alert: The audit chain is broken.</strong>
+</p>
 <p>A verification found the chain broken.</p>
-<p><a href="https://admin.sourceorigin.dev/alerts" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">See the alerts</a></p>
-<p><a href="https://auth.sourceorigin.dev/settings/notifications/NOTIFICATION">Read it in your Origin Account notifications</a></p>
+<p>
+<a href="https://admin.sourceorigin.dev/alerts" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">See the alerts</a>
+</p>
+<p style="font-size:14px;color:#555555">Or copy this link: https://admin.sourceorigin.dev/alerts</p>
+<p>Read it in <a href="https://auth.sourceorigin.dev/settings/notifications/NOTIFICATION">your Origin Account notifications</a>.</p>
 <p>SourceOrigin</p>
 </div>
 </body>

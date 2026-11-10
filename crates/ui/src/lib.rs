@@ -89,7 +89,7 @@ pub use developers::{
     SecretsChange, SecretsState, app_header, app_secrets, app_settings, apps, back_to_apps,
     new_app, overview,
 };
-pub use email::{Block, Inline, Mail};
+pub use email::{Block, EmailContent, Inline, Mail};
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{
     AccountNav, Crumb, Health, Pager, PasskeySignal, Policies, PreferenceChange, Preferences,

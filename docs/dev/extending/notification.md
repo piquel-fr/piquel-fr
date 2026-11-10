@@ -118,9 +118,9 @@ Self::PictureRemoved => "SourceOrigin support removed your profile picture",
 
 Write them for the owner: what happened to their account, what changes for them,
 and what to do if they didn't expect it. The body may use the notification's own
-fields, as `DeletionScheduled` formats its date. The email templates in
-`apps/auth-service/templates/email/` render the subject and body as they are, so
-they need no change.
+fields, as `DeletionScheduled` formats its date. Its email
+(`EmailContent::Notification` in `crates/ui/src/email/content.rs`) says the
+subject and body as they are, so it needs no change.
 
 ## Test it
 

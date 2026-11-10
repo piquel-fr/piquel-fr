@@ -95,6 +95,7 @@ impl<M: Mailer> EmailSender<M> {
         let content = self.content(user_id, message).await.expect("content");
         let formatted = self
             .compose(DeliveryId::new(), &content.expect("a recipient"))
+            .await
             .expect("message")
             .formatted();
         let formatted = String::from_utf8_lossy(&formatted);
@@ -187,8 +188,10 @@ async fn retries_resend_the_same_message_to_the_current_address() {
         notification: Notification::EmailRemoved,
         recovery_id: None,
     };
-    let Some(Content::VerifyAddress { link, handle, .. }) =
-        sender.content(user_id, &verify).await.expect("content")
+    let Some(Content {
+        said: EmailContent::VerifyAddress { link, handle, .. },
+        ..
+    }) = sender.content(user_id, &verify).await.expect("content")
     else {
         panic!("a verification message has a link");
     };
@@ -330,11 +333,11 @@ async fn a_recovery_link_is_sent_while_it_works() {
     };
 
     let content = sender.content(user_id, &link).await.expect("content");
-    let Some(Content::RecoveryLink {
+    let Some(Content {
         address: to,
-        handle,
-        link: url,
-        ..
+        said: EmailContent::RecoveryLink {
+            handle, link: url, ..
+        },
     }) = content
     else {
         panic!("a recovery's link has a recipient");
@@ -391,7 +394,11 @@ async fn a_recovery_link_is_sent_while_it_works() {
         email_id,
     };
     let content = unkeyed.content(user_id, &link).await.expect("content");
-    let Some(Content::RecoveryLink { link: url, .. }) = content else {
+    let Some(Content {
+        said: EmailContent::RecoveryLink { link: url, .. },
+        ..
+    }) = content
+    else {
         panic!("a recovery's link has a recipient");
     };
     assert_eq!(url, config.recovery_links.url(&token).as_str());
@@ -440,7 +447,9 @@ async fn recovery_notices_link_to_the_undo_page() {
     let undo_page = format!("https://auth.sourceorigin.dev/recover/undo#recovery={recovery_id}");
 
     let content = sender.content(user_id, &link).await.expect("content");
-    assert!(matches!(content, Some(Content::RecoveryLink { undo, .. }) if undo == undo_page));
+    assert!(
+        matches!(content, Some(Content { said: EmailContent::RecoveryLink { undo, .. }, .. }) if undo == undo_page)
+    );
     for (message, expected) in [
         (&recovered, Some(undo_page.clone())),
         (&revoked(true), Some(undo_page.clone())),
@@ -448,7 +457,7 @@ async fn recovery_notices_link_to_the_undo_page() {
     ] {
         let content = sender.content(user_id, message).await.expect("content");
         assert!(
-            matches!(&content, Some(Content::Notification { undo, page, .. })
+            matches!(&content, Some(Content { said: EmailContent::Notification { undo, page, .. }, .. })
                 if *undo == expected && page.starts_with("https://auth.sourceorigin.dev/settings/notifications/")),
             "{message:?}"
         );
@@ -658,7 +667,7 @@ async fn an_alerts_email_links_the_dashboard() {
             .linking(linked);
         let content = sender.content(user_id, &message).await.expect("content");
         assert!(
-            matches!(&content, Some(Content::Notification { alerts, .. }) if alerts.as_deref() == expected),
+            matches!(&content, Some(Content { said: EmailContent::Notification { alerts, .. }, .. }) if alerts.as_deref() == expected),
             "{linked:?}"
         );
         sender.assert_renders(user_id, &message).await;
@@ -683,8 +692,12 @@ async fn security_emails_carry_the_sign_out_link() {
         recovery_id: None,
     };
     let alert = message(Notification::NewDeviceSignIn);
-    let Some(Content::Notification {
-        sign_out: Some(link),
+    let Some(Content {
+        said:
+            EmailContent::Notification {
+                sign_out: Some(link),
+                ..
+            },
         ..
     }) = sender.content(user_id, &alert).await.expect("content")
     else {
@@ -706,7 +719,10 @@ async fn security_emails_carry_the_sign_out_link() {
     });
     assert!(matches!(
         sender.content(user_id, &service).await.expect("content"),
-        Some(Content::Notification { sign_out: None, .. })
+        Some(Content {
+            said: EmailContent::Notification { sign_out: None, .. },
+            ..
+        })
     ));
 }
 
@@ -809,12 +825,9 @@ async fn a_messages_email_is_its_preview() {
     let outbox = Arc::new(Outbox::default());
     let sender = EmailSender::with_mailer(database.clone(), Some(outbox.clone()), &config);
     let content = sender.content(user_id, &message).await.expect("content");
-    let content = content.expect("an email");
-    assert_eq!(
-        Text { content: &content }.render().expect("text"),
-        EmailSender::preview(&letter, &origin).expect("preview")
-    );
-    let html = Html { content: &content }.render().expect("HTML");
+    let mail = content.expect("an email").said.mail();
+    assert_eq!(mail.text(), EmailSender::preview(&letter, &origin));
+    let html = mail.html().await.expect("HTML");
     assert!(
         html.contains("<p>First line.<br>Second line.</p>"),
         "{html}"
@@ -831,18 +844,33 @@ async fn a_messages_email_is_its_preview() {
 }
 
 /// Every kind of email, as its recipient reads it: its subject, then its
-/// plain-text and HTML bodies. A change to what any of them says shows in its
-/// snapshot under `snapshots/`.
-#[test]
-fn every_email_reads_as_its_snapshot() {
+/// plain-text and HTML bodies, a tag a line. A change to what any of them says
+/// shows in its snapshot under `snapshots/`.
+#[tokio::test]
+async fn every_email_reads_as_its_snapshot() {
     let link = |path: &str| format!("https://auth.sourceorigin.dev{path}");
+    let origin: Origin = AUTH_ORIGIN.parse().expect("origin");
     let handle = Handle::parse("ada").expect("handle");
+    let address = || "ada@example.com".to_owned();
     let written = "First line.\nSecond line.\n\nWrite to <support@example.com>.";
+    let announced = |subject: &str, everyone, unsubscribe| {
+        Content::announcement(
+            address(),
+            Announced {
+                subject: subject.into(),
+                body: written.into(),
+                everyone,
+                unsubscribe,
+            },
+            &origin,
+        )
+        .said
+    };
     let contents = [
         (
             "verify_address",
-            Content::VerifyAddress {
-                address: "ada@example.com".into(),
+            EmailContent::VerifyAddress {
+                address: address(),
                 handle: handle.clone(),
                 link: link("/settings/emails/verify#token=TOKEN"),
                 hours: 24,
@@ -850,8 +878,7 @@ fn every_email_reads_as_its_snapshot() {
         ),
         (
             "recovery_link",
-            Content::RecoveryLink {
-                address: "ada@example.com".into(),
+            EmailContent::RecoveryLink {
                 handle,
                 link: link("/recover#token=TOKEN"),
                 hours: 72,
@@ -860,8 +887,7 @@ fn every_email_reads_as_its_snapshot() {
         ),
         (
             "notification_recovered",
-            Content::Notification {
-                address: "ada@example.com".into(),
+            EmailContent::Notification {
                 subject: Notification::Recovered.subject().to_owned(),
                 body: Notification::Recovered.body(),
                 page: link("/settings/notifications/NOTIFICATION"),
@@ -872,8 +898,7 @@ fn every_email_reads_as_its_snapshot() {
         ),
         (
             "notification_alert",
-            Content::Notification {
-                address: "ada@example.com".into(),
+            EmailContent::Notification {
                 subject: "Alert: The audit chain is broken".into(),
                 body: "A verification found the chain broken.".into(),
                 page: link("/settings/notifications/NOTIFICATION"),
@@ -885,45 +910,33 @@ fn every_email_reads_as_its_snapshot() {
         (
             "message",
             Content::message(
-                "ada@example.com".into(),
+                address(),
                 "About your account".into(),
                 written.into(),
-                &AUTH_ORIGIN.parse().expect("origin"),
-            ),
+                &origin,
+            )
+            .said,
         ),
         (
             "announcement",
-            Content::announcement(
-                "ada@example.com".into(),
-                Announced {
-                    subject: "News".into(),
-                    body: written.into(),
-                    everyone: true,
-                    unsubscribe: Some(link("/unsubscribe?account=ACCOUNT&token=TOKEN")),
-                },
-                &AUTH_ORIGIN.parse().expect("origin"),
+            announced(
+                "News",
+                true,
+                Some(link("/unsubscribe?account=ACCOUNT&token=TOKEN")),
             ),
         ),
         (
             "announcement_essential",
-            Content::announcement(
-                "ada@example.com".into(),
-                Announced {
-                    subject: "Our terms changed".into(),
-                    body: written.into(),
-                    everyone: false,
-                    unsubscribe: None,
-                },
-                &AUTH_ORIGIN.parse().expect("origin"),
-            ),
+            announced("Our terms changed", false, None),
         ),
     ];
     for (name, content) in contents {
-        let text = Text { content: &content }.render().expect("text");
-        let html = Html { content: &content }.render().expect("HTML");
+        let mail = content.mail();
+        let html = mail.html().await.expect("HTML").replace("><", ">\n<");
         let read = format!(
-            "Subject: {}\n\n--- text/plain ---\n{text}\n\n--- text/html ---\n{html}\n",
-            content.subject()
+            "Subject: {}\n\n--- text/plain ---\n{}\n\n--- text/html ---\n{html}\n",
+            mail.subject,
+            mail.text()
         );
         insta::assert_snapshot!(name, read);
     }

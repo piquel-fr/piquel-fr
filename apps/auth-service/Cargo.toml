@@ -13,7 +13,6 @@ sourceorigin-telemetry.workspace = true
 sourceorigin-auth.workspace = true
 sourceorigin-ui.workspace = true
 
-askama.workspace = true
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
