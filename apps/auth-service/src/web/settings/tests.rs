@@ -559,7 +559,7 @@ async fn the_bell_counts_unread_notifications_and_a_report_reads_one() {
     };
     let bell = |unread: &str| {
         format!(
-            r#"<a class="inbox-link" href="{}" title="Notifications" aria-label="{unread}">"#,
+            r#"<a class="shortcut inbox" href="{}" title="Notifications" aria-label="{unread}">"#,
             settings::NOTIFICATIONS
         )
     };

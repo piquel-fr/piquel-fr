@@ -342,18 +342,18 @@ body.admin .main::before {
   border-radius: 50%;
 }
 /* The inbox's bell, with the unread count over its corner. */
-.topbar .inbox-link {
+.topbar .shortcut {
   position: relative;
   display: inline-flex;
   padding: 0.3rem;
   border-radius: 6px;
   color: var(--muted);
 }
-.topbar .inbox-link:hover {
+.topbar .shortcut:hover {
   color: var(--fg);
   background: var(--surface-2);
 }
-.topbar .inbox-link .count.new {
+.topbar .shortcut .count {
   position: absolute;
   top: -0.2rem;
   right: -0.35rem;

@@ -23,7 +23,7 @@ pub use html::{PreferenceChange, Preferences, Sidebar, Theme, Title, document};
 pub use parts::{Pager, page_head};
 pub use sections::{AccountNav, Section, account, signed_out};
 pub use signed_in::{
-    Crumb, InboxLink, NavGroup, NavItem, PasskeySignal, Search, Shell, Who, shell,
+    Crumb, NavGroup, NavItem, PasskeySignal, Search, Shell, Shortcut, ShortcutKind, Who, shell,
 };
 
 pub(crate) use parts::{

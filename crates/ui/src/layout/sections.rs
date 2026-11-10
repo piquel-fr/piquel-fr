@@ -3,8 +3,8 @@
 //! signed in.
 
 use super::{
-    Crumb, InboxLink, NavGroup, NavItem, PasskeySignal, Policies, Preferences, Shell, Who,
-    page_messages, shell,
+    Crumb, NavGroup, NavItem, PasskeySignal, Policies, Preferences, Shell, Shortcut, ShortcutKind,
+    Who, page_messages, shell,
 };
 use crate::{Messages, icons::Icon, settings::Tab};
 use sourceorigin_common::TraceId;
@@ -111,6 +111,17 @@ pub async fn account<'a>(
             count: (*tab == Tab::Notifications && nav.unread > 0).then_some(nav.unread),
         })
         .collect();
+    let shortcuts: Vec<_> = nav
+        .tabs
+        .iter()
+        .find(|(tab, _)| *tab == Tab::Notifications)
+        .map(|(_, href)| Shortcut {
+            kind: ShortcutKind::Inbox,
+            href,
+            count: nav.unread,
+        })
+        .into_iter()
+        .collect();
     let console = [NavItem {
         icon: Icon::Code,
         label: "Your apps",
@@ -160,14 +171,7 @@ pub async fn account<'a>(
             who: Some(who),
             signal: Some(signal),
             me: Some(home),
-            inbox: nav
-                .tabs
-                .iter()
-                .find(|(tab, _)| *tab == Tab::Notifications)
-                .map(|(_, href)| InboxLink {
-                    href,
-                    unread: nav.unread,
-                }),
+            shortcuts: &shortcuts,
             trail,
             page: title,
             search: None,

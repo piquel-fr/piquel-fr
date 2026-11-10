@@ -3,6 +3,7 @@
 use super::AccountError;
 use crate::{
     Operator, Reason,
+    admin::SignedInAdmin,
     security::{ApiError, Confirmed, RequestContext, Session, SessionError},
 };
 use axum::{
@@ -292,6 +293,18 @@ impl From<&Owner> for Viewer {
         Self {
             user: owner.user(),
             by: Reading::Owner(owner.session.id),
+        }
+    }
+}
+
+impl From<&SignedInAdmin> for Viewer {
+    /// The administrator signed in to the dashboard, reading their own account
+    /// through the auth session the dashboard's rests on, as its bell does: an
+    /// owner's read, not recorded as a view.
+    fn from(admin: &SignedInAdmin) -> Self {
+        Self {
+            user: admin.user_id,
+            by: Reading::Owner(admin.session_id),
         }
     }
 }

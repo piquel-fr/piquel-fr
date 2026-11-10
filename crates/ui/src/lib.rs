@@ -89,8 +89,8 @@ pub use developers::{
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{
     AccountNav, Crumb, Health, Pager, PasskeySignal, Policies, PreferenceChange, Preferences,
-    SOURCE, Search, Section, Sidebar, Theme, Title, Who, account, auth_shell, document, signed_out,
-    site_shell,
+    SOURCE, Search, Section, Shortcut, ShortcutKind, Sidebar, Theme, Title, Who, account,
+    auth_shell, document, signed_out, site_shell,
 };
 pub use login::{
     CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,

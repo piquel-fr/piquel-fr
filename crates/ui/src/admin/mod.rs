@@ -65,8 +65,8 @@ use crate::{
     form::{Precision, time},
     icons::{Icon, icon},
     layout::{
-        Crumb, Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who,
-        page_head, shell,
+        Crumb, Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Shortcut,
+        Who, page_head, shell,
     },
     settings::{Tab as SettingsTab, settings_tabs},
 };
@@ -217,6 +217,9 @@ pub struct Dashboard<'a> {
     pub policies: Policies<'a>,
     /// The account search in the top bar, with what was searched, if anything.
     pub search: Search<'a>,
+    /// The top bar's shortcuts: the open alerts, and the administrator's own
+    /// inbox, on auth.
+    pub shortcuts: &'a [Shortcut<'a>],
     /// The `reference` of a server error's trace, for the user to quote.
     pub reference: Option<TraceId>,
     /// The signed-in administrator's passkey confirmation, if the browser is
@@ -298,7 +301,7 @@ pub async fn dashboard_frame<'a>(
             // Only the account's own pages on auth tell the password manager.
             signal: None,
             me: dashboard.administrator.map(|_| dashboard.me),
-            inbox: None,
+            shortcuts: dashboard.shortcuts,
             trail: &trail,
             page: dashboard.title,
             search: dashboard.administrator.map(|_| dashboard.search),

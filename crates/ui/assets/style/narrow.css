@@ -142,10 +142,10 @@
     margin-left: auto;
   }
   /* The bell, when there is one, goes right first, and the avatar beside it. */
-  .topbar .inbox-link {
+  .topbar .shortcut {
     margin-left: auto;
   }
-  .topbar .inbox-link + .me {
+  .topbar .shortcut + .me {
     margin-left: 0;
   }
   .topbar .search {
