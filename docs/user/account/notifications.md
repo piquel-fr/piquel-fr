@@ -32,8 +32,8 @@ emails, you need a [confirmed email address](email-addresses.md).
 - If you administer Origin Auth, an alert about the service was raised, such as a
   broken audit chain. Its subject starts with **Alert:**.
 
-Unread security notifications also show at the top of every settings page,
-where you answer them with **This was me** or **This wasn’t me**. See
+The bell at the top of every settings page counts your unread notifications,
+and opens your inbox. See
 [security alerts](security-alerts.md#answer-an-alert-in-your-settings).
 
 ## Read your inbox

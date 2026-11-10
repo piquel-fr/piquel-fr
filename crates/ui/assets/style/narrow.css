@@ -141,6 +141,13 @@
   .topbar .me {
     margin-left: auto;
   }
+  /* The bell, when there is one, goes right first, and the avatar beside it. */
+  .topbar .inbox-link {
+    margin-left: auto;
+  }
+  .topbar .inbox-link + .me {
+    margin-left: 0;
+  }
   .topbar .search {
     order: 10;
     flex: 1 1 100%;

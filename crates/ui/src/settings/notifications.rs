@@ -1,7 +1,7 @@
 //! The inbox: the account's notifications, newest first, and one notification's
 //! own page.
 
-use super::{Audience, HistoryRow, Holdings, Tab, timeline::report_form};
+use super::{Audience, HistoryRow, Holdings, timeline::report_form};
 use crate::{
     form::{Checkbox, Precision, Query, change_form, open, time},
     icons::{Icon, icon},
@@ -30,16 +30,6 @@ pub enum InboxChange {
     MarkUnread {
         /// The notification.
         id: NotificationId,
-    },
-    /// Says the owner recognizes what a security notification tells, from the
-    /// settings' banner, which marks it read.
-    Recognized {
-        /// The notification.
-        id: NotificationId,
-        /// The settings page the banner was on, which the answer goes back to;
-        /// the inbox otherwise.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        back: Option<Tab>,
     },
     /// Turns a category's email on, or off.
     Email {
@@ -341,67 +331,6 @@ pub(crate) async fn unread_hint(unread: u64, page: &str) -> Result<impl View> {
                     <small>"SourceOrigin has something to tell you."</small>
                 </div>
                 <a class="button small" href=(page)>"Read"</a>
-            </section>
-        }
-    })
-}
-
-/// An unread security notification the settings' banner asks about.
-#[derive(Clone, Copy, Debug)]
-pub struct AlertRow<'a> {
-    /// The notification.
-    pub row: InboxRow<'a>,
-    /// Whether the owner may report its event as not theirs, as its history
-    /// entry allows.
-    pub reportable: bool,
-}
-
-/// Where the settings' banner of unread security notifications leads.
-#[derive(Clone, Copy, Debug)]
-pub struct AlertBanner<'a> {
-    /// The inbox, which "This was me" posts to.
-    pub inbox: &'a str,
-    /// A notification's page, with `{id}` for its ID.
-    pub item: &'a str,
-    /// The settings page the banner is on, which "This was me" comes back to.
-    pub back: Option<Tab>,
-}
-
-/// The banner every settings page shows above itself while security
-/// notifications are unread: each one's subject and time, "This was me", which
-/// marks it read, and "This wasn't me", which opens its page to report its event,
-/// where the history allows a report, or "Review" otherwise.
-#[component]
-pub async fn security_banner<'a>(
-    alerts: &'a [AlertRow<'a>],
-    banner: AlertBanner<'a>,
-) -> Result<impl View> {
-    Ok(view! {
-        if !alerts.is_empty() {
-            <section class="notice warning stack" aria-label="Unread security notifications">
-                for alert in alerts {
-                    let page = banner.item.replace("{id}", &alert.row.id.to_string());
-                    let report = NotificationState { reporting: true }.on(&page)?;
-                    <div class="row">
-                        <div class="text">
-                            <strong>(alert.row.subject)</strong>
-                            " "
-                            time(at: alert.row.created_at, precision: Precision::Minute)
-                        </div>
-                        change_form(
-                            action: banner.inbox,
-                            change: InboxChange::Recognized { id: alert.row.id, back: banner.back },
-                            label: "This was me",
-                            class: "secondary small",
-                            aria_label: format!("This was me: {}", alert.row.subject),
-                        )
-                        if alert.reportable {
-                            <a class="button danger small" href=(report.as_str())>"This wasn’t me"</a>
-                        } else {
-                            <a class="button secondary small" href=(page.as_str())>"Review"</a>
-                        }
-                    </div>
-                }
             </section>
         }
     })

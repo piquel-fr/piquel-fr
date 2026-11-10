@@ -15,7 +15,7 @@ use crate::{
     clients::OwnedClientError,
     deletion::{AccountDeleted, AccountExport},
     federation::FlowCookie,
-    notifications::{NotificationError, NotificationView},
+    notifications::NotificationError,
     routes::{self, page},
     security::{ApiError, BrowserCookie, SessionError},
     web::settings::TABS,
@@ -24,8 +24,8 @@ use serde::{Deserialize, de::DeserializeOwned};
 use sourceorigin_common::ErrorChain;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{
-    AccountNav, Alert, AlertBanner, AlertRow, Crumb, FieldError, LoginQuery, Messages, Notice,
-    PasskeySignal, Query, Recovery, Section, Tab, Who,
+    AccountNav, Alert, Crumb, FieldError, LoginQuery, Messages, Notice, PasskeySignal, Query,
+    Recovery, Section, Tab, Who,
 };
 use topcoat::{
     Error,
@@ -413,9 +413,9 @@ impl WebApplication {
 
     /// Answers with the account page `framed`, at the status and with the messages
     /// of `outcome`, in the account's shell: the sidebar of its sections, then
-    /// what the account's recovery that can still be undone asks, if any, and on a
-    /// settings page, the banner of unread security notifications. Its forms may
-    /// redirect to `targets`.
+    /// what the account's recovery that can still be undone asks, if any. The top
+    /// bar's bell counts the unread notifications. Its forms may redirect to
+    /// `targets`.
     pub(super) async fn account_page(
         &self,
         cx: &Cx,
@@ -445,8 +445,6 @@ impl WebApplication {
         let administrator = self.account.is_administrator(&viewer).await?;
         let accepted = self.account.accepted_passkeys(reader.owner()).await?;
         let unread = self.account.unread_notifications(&viewer).await?;
-        let alerts = self.alerts(&viewer, section, unread).await?;
-        let alerts: Vec<_> = alerts.iter().map(AlertRow::from).collect();
         let session = reader.owner().session_id();
         let confirmed = reader.owner().was_passkey_confirmed();
         // The preference forms come back here by GET, which a page answering a
@@ -511,11 +509,6 @@ impl WebApplication {
                             undo: page::RECOVER_UNDO,
                         )
                     }
-                    sourceorigin_ui::security_banner(alerts: &alerts, banner: AlertBanner {
-                        inbox: page::settings::NOTIFICATIONS,
-                        item: page::settings::NOTIFICATION,
-                        back: tab,
-                    })
                 },
                 head: head,
                 messages: messages,
@@ -525,20 +518,6 @@ impl WebApplication {
         Ok(self
             .render_document(cx, status, title.as_str(), targets, false, page)
             .await?)
-    }
-
-    /// The unread security notifications a settings page's banner asks about,
-    /// when `unread` notifications are: none in another section.
-    async fn alerts(
-        &self,
-        viewer: &Viewer,
-        section: Section,
-        unread: u64,
-    ) -> Result<Vec<NotificationView>, AccountError> {
-        match section {
-            Section::Account if unread > 0 => self.account.unread_alerts(viewer).await,
-            Section::Account | Section::Developers => Ok(Vec::new()),
-        }
     }
 
     /// Answers with the page titled `title` of `section` for a browser that is not

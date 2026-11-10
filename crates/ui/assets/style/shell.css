@@ -341,6 +341,32 @@ body.admin .main::before {
   display: inline-flex;
   border-radius: 50%;
 }
+/* The inbox's bell, with the unread count over its corner. */
+.topbar .inbox-link {
+  position: relative;
+  display: inline-flex;
+  padding: 0.3rem;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.topbar .inbox-link:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+.topbar .inbox-link .count.new {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.35rem;
+  min-width: 1.1rem;
+  padding: 0 0.25rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.68rem;
+  line-height: 1.1rem;
+  text-align: center;
+}
 .topbar .me:hover .avatar {
   filter: brightness(1.12);
 }

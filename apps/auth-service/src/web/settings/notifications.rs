@@ -1,6 +1,5 @@
 //! `/settings/notifications`: the inbox, marking every notification read or one
-//! unread, recognizing one from the banner of unread security notifications, and
-//! turning a category's email on or off; `/settings/notifications/{id}`, one
+//! unread, and turning a category's email on or off; `/settings/notifications/{id}`, one
 //! notification, which opening marks read; `/unsubscribe`, which an
 //! announcement's email links to turn announcements' email off; and
 //! `/sign-out-everywhere`, which a security notification's email links to sign
@@ -17,7 +16,6 @@ use crate::{
     web::{
         Failure, WebApplication,
         account::{AccountPage, Applied, Framed, NoChange, Reader},
-        settings::TABS,
     },
 };
 use sourceorigin_common::{
@@ -26,7 +24,7 @@ use sourceorigin_common::{
 };
 use sourceorigin_ui::{
     Audience, Crumb, EmailRow, HistoryRow, Holdings, InboxChange, InboxPage, InboxRow, InboxState,
-    Messages, Notice, NotificationState, Section, SignOutStep, Tab, Title, UnsubscribeStep,
+    Messages, NotificationState, Section, SignOutStep, Tab, Title, UnsubscribeStep,
 };
 use topcoat::{
     Error,
@@ -65,9 +63,8 @@ impl AccountPage for Inbox {
     }
 
     /// Marking read or unread goes back to the inbox's newest page, which shows
-    /// the change; recognizing a notification from the banner goes back to the
-    /// settings page it was on; turning a category's email on or off reopens the
-    /// email preferences dialog, which shows it.
+    /// the change; turning a category's email on or off reopens the email
+    /// preferences dialog, which shows it.
     async fn apply(
         web: &WebApplication,
         _: &Cx,
@@ -78,17 +75,6 @@ impl AccountPage for Inbox {
             InboxChange::ReadAll => web.account.read_all_notifications(&owner).await?,
             InboxChange::MarkUnread { id } => {
                 web.account.mark_notification(&owner, id, false).await?;
-            }
-            InboxChange::Recognized { id, back } => {
-                web.account.mark_notification(&owner, id, true).await?;
-                let to = TABS
-                    .iter()
-                    .find(|(tab, _)| Some(*tab) == back)
-                    .map_or(settings::NOTIFICATIONS, |(_, page)| *page);
-                return Ok(Applied::Moved {
-                    to: to.to_owned(),
-                    notice: Notice::Recognized,
-                });
             }
             InboxChange::Email { category, email } => {
                 let preference = NotificationPreference {

@@ -101,13 +101,13 @@ pub use recovery::{
     recover, recovery_banner, recovery_prompt, undo_recovery,
 };
 pub use settings::{
-    AccountOverview, AlertBanner, AlertRow, Audience, CROP_SIZE, CROP_X, CROP_Y,
-    ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DataChange, DataState, DeviceChange,
-    DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage, HistoryRow,
-    HistoryState, Holdings, InboxChange, InboxPage, InboxRow, InboxState, NotificationPage,
-    NotificationState, OverviewLinks, PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog,
-    ProfilePages, ProfileState, ProviderRow, SignInChange, SignInState, SignOutStep, Tab,
-    UnsubscribeStep, account_data, account_deleted, account_overview, addresses, connected_apps,
-    devices, history, inbox, known_devices, notification, profile_settings, security_banner,
-    sign_in_methods, sign_out_everywhere, unsubscribe, verified, verify,
+    AccountOverview, Audience, CROP_SIZE, CROP_X, CROP_Y, ConnectedAppChange, ConnectedAppRow,
+    ConnectedAppsState, DataChange, DataState, DeviceChange, DeviceRow, EmailChange, EmailRow,
+    EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, InboxChange,
+    InboxPage, InboxRow, InboxState, NotificationPage, NotificationState, OverviewLinks,
+    PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
+    ProviderRow, SignInChange, SignInState, SignOutStep, Tab, UnsubscribeStep, account_data,
+    account_deleted, account_overview, addresses, connected_apps, devices, history, inbox,
+    known_devices, notification, profile_settings, sign_in_methods, sign_out_everywhere,
+    unsubscribe, verified, verify,
 };

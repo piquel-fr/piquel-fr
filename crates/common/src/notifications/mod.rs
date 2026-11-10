@@ -433,15 +433,10 @@ impl Notification {
         }
     }
 
-    /// The kinds outside the security category: what administrators announce or
-    /// alert, rather than what happened to the account. Every other notification
-    /// is about the account's security, is always emailed, and its email carries
-    /// a link that signs the account out everywhere.
-    pub const OUTSIDE_SECURITY: [&'static str; 2] = ["announcement", "alert_raised"];
-
-    /// Whether it is about the account's security: see [`Self::OUTSIDE_SECURITY`].
-    /// Every kind is named, so a new one decides; keep [`Self::OUTSIDE_SECURITY`]
-    /// in step with its `false` arm.
+    /// Whether it is about the account's security, rather than what
+    /// administrators announce or alert: then it is always emailed, and its email
+    /// carries a link that signs the account out everywhere. Every kind is named,
+    /// so a new one decides.
     #[must_use]
     #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn security(&self) -> bool {

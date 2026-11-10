@@ -44,14 +44,13 @@ use crate::{
     federation::FederationApplication,
     grants::ConnectedApp,
     history::{HistoryItem, HistoryPage},
-    notifications::{NotificationItem, NotificationView},
+    notifications::NotificationItem,
     routes::page::settings,
     sessions::SessionItem,
 };
 use sourceorigin_common::protocol::api::Identity;
 use sourceorigin_ui::{
-    AlertRow, ConnectedAppRow, DeviceRow, EmailRow, HistoryRow, InboxRow, Messages, ProviderRow,
-    Section, Tab,
+    ConnectedAppRow, DeviceRow, EmailRow, HistoryRow, InboxRow, Messages, ProviderRow, Section, Tab,
 };
 use topcoat::{
     context::Cx,
@@ -131,16 +130,6 @@ impl<'a> From<&'a HistoryItem> for HistoryRow<'a> {
             ip: item.ip,
             device: item.device,
             erased: item.erased,
-        }
-    }
-}
-
-impl<'a> From<&'a NotificationView> for AlertRow<'a> {
-    /// The unread security notification as the settings' banner asks about it.
-    fn from(alert: &'a NotificationView) -> Self {
-        Self {
-            row: InboxRow::from(&alert.item),
-            reportable: alert.history.as_ref().is_some_and(HistoryItem::reportable),
         }
     }
 }

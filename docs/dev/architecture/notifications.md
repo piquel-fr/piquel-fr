@@ -49,9 +49,8 @@ message's: the inbox already shows it. The
 ## Security alerts
 
 Every notification but an announcement and a raised alert is about the account's
-security (`Notification::security`, `Notification::OUTSIDE_SECURITY`): it is
-always emailed, its email carries a [sign-out link](#the-sign-out-link), and
-the settings show it in a banner while it is unread. Besides the account
+security (`Notification::security`): it is always emailed, and its email
+carries a [sign-out link](#the-sign-out-link). Besides the account
 notices above, these events alert the owner:
 
 | Event | Notification |
@@ -100,17 +99,15 @@ history shows every use, then ends every session and refresh grant with
 can do is sign the owner out. The link works once, within seven days of the
 notification (`SIGN_OUT_LINK_LIFETIME`).
 
-### The settings banner
+### The top bar's bell
 
-`WebApplication::account_page` shows the newest three unread security
-notifications above every settings page (`AccountService::unread_alerts`).
-**This was me** posts `InboxChange::Recognized`, which marks it read and goes
-back to the page it was on. **This wasn’t me**, where the security history lets
-the owner report the notification's event, opens the notification's page to
-report it; opening it to report does not mark it read, and the report
-(`HistoryChange::Report { notification }`) marks it read once made. Elsewhere,
-**Review** opens the notification. Read state lives on the notification, so
-every device sees it.
+Every account page's top bar has a bell (`InboxLink` in `crates/ui/src/layout`)
+linking the inbox, with the unread count the sidebar's Notifications tab shows.
+The owner answers an alert from its page: opening it from auth's own pages marks
+it read, and **This wasn’t me**, where the security history lets the owner
+report the notification's event, reports it
+(`HistoryChange::Report { notification }`). Read state lives on the
+notification, so every device sees it.
 
 ## Storage
 

@@ -137,6 +137,15 @@ impl<'a> From<&'a str> for Crumb<'a> {
     }
 }
 
+/// The top bar's bell: the inbox, and how many of its notifications are unread.
+#[derive(Clone, Copy, Debug)]
+pub struct InboxLink<'a> {
+    /// The inbox.
+    pub href: &'a str,
+    /// How many notifications are unread, which the bell counts.
+    pub unread: u64,
+}
+
 /// The frame of a signed-in page: what every part of the shell shows.
 #[derive(Clone, Copy, Debug)]
 pub struct Shell<'a> {
@@ -155,6 +164,9 @@ pub struct Shell<'a> {
     pub signal: Option<PasskeySignal<'a>>,
     /// Their own page, which the top bar's avatar links.
     pub me: Option<&'a str>,
+    /// The inbox, which the top bar's bell links, with its unread count, on the
+    /// account's own pages.
+    pub inbox: Option<InboxLink<'a>>,
     /// The pages between the area and the page in the crumb, each named and
     /// linked: the tab the page belongs to, then the page it is under, if any.
     pub trail: &'a [(Crumb<'a>, &'a str)],
@@ -285,7 +297,8 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
 }
 
 /// The top bar of [`shell`]: the menu button of the drawer, the crumb, the search
-/// form, if the area has one, and the avatar.
+/// form, if the area has one, the inbox's bell, on the account's own pages, and
+/// the avatar.
 #[component]
 async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
@@ -316,6 +329,22 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
                             >
                         </label>
                     </form>
+                }
+                if let Some(inbox) = frame.inbox {
+                    <a
+                        class="inbox-link"
+                        href=(inbox.href)
+                        title="Notifications"
+                        aria-label=(match inbox.unread {
+                            0 => "Notifications".to_owned(),
+                            unread => format!("Notifications, {unread} unread"),
+                        })
+                    >
+                        icon(kind: Icon::Bell)
+                        if inbox.unread > 0 {
+                            <span class="count new" aria-hidden="true">(inbox.unread.to_string())</span>
+                        }
+                    </a>
                 }
                 if let Some(who) = frame.who {
                     <a class="me" href=(frame.me.unwrap_or(frame.home)) title="Your account" aria-label="Your account">

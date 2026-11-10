@@ -37,11 +37,11 @@ test('account settings', async ({ page, context, browser }) => {
   await laptop.goto('/login');
   await laptop.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
   await expect(laptop).toHaveURL('/settings');
-  // The new device's sign-in alerts, at the top of every settings page.
+  // The new device's sign-in alerts: the top bar's bell counts it.
   await page.goto('/settings/sessions');
-  const alerts = page.getByRole('region', { name: 'Unread security notifications' });
-  await expect(alerts.getByText('A new device signed in to your account')).toBeVisible();
-  await shoot(page, 'account/security-alerts', alerts);
+  const bell = page.getByRole('link', { name: /^Notifications, \d+ unread$/ });
+  await expect(bell).toBeVisible();
+  await shoot(page, 'account/notification-bell', page.locator('header.topbar'));
   await page.goto('/settings/notifications');
   await page.getByRole('button', { name: 'Mark all as read', exact: true }).click();
   await page.goto('/settings/sessions');

@@ -514,13 +514,12 @@ async fn notifications_are_read_by_opening_them() {
     assert_eq!(shown.status(), StatusCode::NOT_FOUND);
 }
 
-/// Every settings page shows unread security notifications in a banner. "This
-/// was me" marks one read, on every device, and goes back to the page it was on;
-/// "This wasn't me" opens its page to report its event, which marks it read once
-/// made, not before.
+/// The top bar's bell on every settings page links the inbox and counts unread
+/// notifications, on every device. A notification's "This wasn't me" opens its
+/// page to report its event, which marks it read once made, not before.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_banner_asks_about_unread_security_notifications() {
+async fn the_bell_counts_unread_notifications_and_a_report_reads_one() {
     let replicas = Replicas::new().await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
@@ -558,26 +557,23 @@ async fn the_banner_asks_about_unread_security_notifications() {
             .await
             .expect("unread")
     };
-    let subject = "A passkey was added to your account";
-
-    let (_, id) = add().await;
-    let page = html(other.visit(&replicas.a, settings::SIGN_IN).await).await;
-    assert!(page.contains(subject), "{page}");
-    assert!(page.contains("This was me"), "{page}");
-    assert!(page.contains("This wasn’t me"), "{page}");
-    let recognized = InboxChange::Recognized {
-        id,
-        back: Some(sourceorigin_ui::Tab::SignIn),
+    let bell = |unread: &str| {
+        format!(
+            r#"<a class="inbox-link" href="{}" title="Notifications" aria-label="{unread}">"#,
+            settings::NOTIFICATIONS
+        )
     };
-    let answered = browser
-        .post(&replicas, settings::NOTIFICATIONS, &recognized)
+
+    add().await;
+    let page = html(other.visit(&replicas.a, settings::SIGN_IN).await).await;
+    assert!(page.contains(&bell("Notifications, 1 unread")), "{page}");
+    browser
+        .post(&replicas, settings::NOTIFICATIONS, &InboxChange::ReadAll)
         .await;
-    assert_eq!(redirect(&answered), settings::SIGN_IN);
-    assert_eq!(cookie(&answered, BrowserCookie::Notice).0, "recognized");
     assert_eq!(unread().await, 0);
     let page = html(other.visit(&replicas.b, settings::SIGN_IN).await).await;
     assert!(
-        !page.contains("This was me"),
+        page.contains(&bell("Notifications")),
         "read on every device: {page}"
     );
 

@@ -35,9 +35,6 @@ pub(crate) use links::{Link, LinkTarget, Links, SignOutLinks, UnsubscribeLinks};
 
 /// Notifications per page.
 const PAGE_SIZE: u16 = 50;
-/// Unread security notifications the settings' banner shows at most, newest
-/// first; the inbox shows the rest.
-const BANNER_SIZE: u32 = 3;
 pub(crate) use sourceorigin_common::notifications::SIGN_OUT_LINK_LIFETIME;
 
 /// The owner's routes that change their inbox's read state and email
@@ -211,32 +208,6 @@ impl AccountService {
     pub(crate) async fn unread_notifications(&self, viewer: &Viewer) -> Result<u64, AccountError> {
         viewer.authorize(&self.database).await?;
         Ok(self.database.notifications().unread(viewer.user()).await?)
-    }
-
-    /// The account's newest unread security notifications, at most
-    /// [`BANNER_SIZE`], each with its event's history entry: what the banner of
-    /// every settings page asks the owner about.
-    pub(crate) async fn unread_alerts(
-        &self,
-        viewer: &Viewer,
-    ) -> Result<Vec<NotificationView>, AccountError> {
-        viewer.authorize(&self.database).await?;
-        let unread = self
-            .database
-            .notifications()
-            .unread_except(viewer.user(), &Notification::OUTSIDE_SECURITY, BANNER_SIZE)
-            .await?;
-        let mut alerts = Vec::new();
-        for item in unread.into_iter().filter_map(NotificationItem::new) {
-            let history = match item.event_id {
-                Some(event_id) => {
-                    HistoryItem::find(&self.database, viewer.user(), event_id).await?
-                }
-                None => None,
-            };
-            alerts.push(NotificationView { item, history });
-        }
-        Ok(alerts)
     }
 }
 

@@ -41,23 +41,22 @@ already used, doesn't alert either.
 
 ## Answer an alert in your settings
 
-While an alert is unread, every settings page shows it at the top.
+The bell at the top of every settings page counts your unread notifications.
 
-![Unread security alerts at the top of a settings page: a new device signed in, and a passkey was added, each with This was me and This wasn’t me](../../images/account/security-alerts.png)
+![The settings' top bar, with the bell counting one unread notification beside the avatar](../../images/account/notification-bell.png)
 
-1. Read the alert and its time.
-2. If it was you, select **This was me**. The alert is marked read on every
-   device, and you stay on the page you were on.
-3. If it wasn't you, select **This wasn’t me**. The alert's page opens and asks
+1. Select the bell. Your [notifications](notifications.md) open, unread ones
+   in bold.
+2. Select the alert. Opening it marks it read on every device. If it was you,
+   you're done.
+3. If it wasn't you, select **This wasn’t me** on the alert's page. It asks
    **Secure your account?**
 4. Select **Sign out everywhere else**. Every other device and every app is
-   signed out, and the alert is marked read. Your
-   [security history](security-history.md) then offers to undo what was added,
-   such as removing a passkey.
+   signed out. Your [security history](security-history.md) then offers to undo
+   what was added, such as removing a passkey.
 
-Some alerts, such as support disabling your account, can't be reported. Their
-banner offers **Review**, which opens the alert in your
-[notifications](notifications.md).
+Some alerts, such as support disabling your account, can't be reported: their
+page has no **This wasn’t me**.
 
 ## Answer an alert by email
 
@@ -89,7 +88,7 @@ alert you. See [devices](devices.md#known-browsers).
 
 - **An alert for a device you use.** The browser forgot its cookies, as a
   private window or clearing your browsing data does, or you didn't sign in
-  with it for 400 days. Select **This was me**.
+  with it for 400 days. Open the alert to mark it read.
 - **No alert email arrives.** Alerts go to your primary confirmed address, or
   for a recovery to every confirmed one. Without a confirmed address, they
   only reach your notifications.

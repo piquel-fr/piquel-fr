@@ -249,10 +249,10 @@ fn sessionless_steps_and_known_browsers_alert_no_one() {
     assert_eq!(known.notification(&owner()), None);
 }
 
-/// The kinds outside the security category are those of announcements and
-/// raised alerts, which the banner's query leaves out by name.
+/// Only announcements and raised alerts are outside the security category:
+/// every other notification is about the account itself.
 #[test]
-fn outside_security_names_the_kinds_it_leaves_out() {
+fn only_announcements_and_alerts_are_outside_security() {
     let outside = [
         Notification::Announcement {
             announcement_id: crate::AnnouncementId::new(),
@@ -266,10 +266,7 @@ fn outside_security_names_the_kinds_it_leaves_out() {
         },
     ];
     for notification in outside {
-        let stored = serde_json::to_value(&notification).expect("serializes");
-        let kind = stored["kind"].as_str().expect("kind");
-        assert!(Notification::OUTSIDE_SECURITY.contains(&kind), "{kind}");
-        assert!(!notification.security());
+        assert!(!notification.security(), "{notification:?}");
     }
     assert!(Notification::NewDeviceSignIn.security());
 }

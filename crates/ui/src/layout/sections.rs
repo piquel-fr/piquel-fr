@@ -3,8 +3,8 @@
 //! signed in.
 
 use super::{
-    Crumb, NavGroup, NavItem, PasskeySignal, Policies, Preferences, Shell, Who, page_messages,
-    shell,
+    Crumb, InboxLink, NavGroup, NavItem, PasskeySignal, Policies, Preferences, Shell, Who,
+    page_messages, shell,
 };
 use crate::{Messages, icons::Icon, settings::Tab};
 use sourceorigin_common::TraceId;
@@ -160,6 +160,14 @@ pub async fn account<'a>(
             who: Some(who),
             signal: Some(signal),
             me: Some(home),
+            inbox: nav
+                .tabs
+                .iter()
+                .find(|(tab, _)| *tab == Tab::Notifications)
+                .map(|(_, href)| InboxLink {
+                    href,
+                    unread: nav.unread,
+                }),
             trail,
             page: title,
             search: None,
