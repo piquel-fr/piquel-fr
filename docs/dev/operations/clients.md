@@ -48,7 +48,7 @@ On the dashboard:
 ## Change a client
 
 ```sh
-auth-service client show notes     # its registration and its secrets' lifetimes, as JSON
+auth-service client show notes     # its registration and its secrets' lifetimes
 auth-service client update blog --add-redirect-uri https://blog.sourceorigin.dev/auth/callback --reason "New callback"
 auth-service client update notes --backchannel-logout-uri https://notes.example/auth/backchannel-logout --reason "Logout"
 ```

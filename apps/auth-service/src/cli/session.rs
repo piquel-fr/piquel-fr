@@ -38,7 +38,10 @@ impl SessionCommand {
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         match self {
             Self::Revoke {
@@ -50,6 +53,7 @@ impl SessionCommand {
                 service
                     .revoke_session(operator, id, session, reason)
                     .await?;
+                out.info(format_args!("Ended session {session} of {user}."))?;
             }
             Self::RevokeAll {
                 user,
@@ -57,8 +61,9 @@ impl SessionCommand {
                 confirm,
             } => {
                 let id = console.user(&user).await?;
-                confirm.ask(&format!("Sign {user} ({id}) out everywhere"))?;
+                confirm.ask(out, &format!("Sign {user} ({id}) out everywhere"))?;
                 service.revoke_user_sessions(operator, id, reason).await?;
+                out.info(format_args!("Signed {user} out everywhere."))?;
             }
         }
         Ok(())

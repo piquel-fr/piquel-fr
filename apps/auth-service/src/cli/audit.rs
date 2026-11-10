@@ -1,7 +1,10 @@
 //! The audit history: every recorded domain event, and the tamper-evident chain
 //! over them (see `docs/dev/security/audit-history.md`).
 
-use super::{CliError, Confirm, Console, Output};
+use super::{
+    CliError, Confirm, Console,
+    output::{Cell, Style, report},
+};
 use crate::{
     AuditError, AuditKeys, PUBLIC_BASE_URL, Reason, UserRef,
     audit::{AuditVerification, ChainPoint},
@@ -25,9 +28,6 @@ pub(super) enum AuditCommand {
         /// The keys to check checkpoints against.
         #[command(flatten)]
         keys: AuditKeyArgs,
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
     },
     /// Delete the events through a checkpoint, once the chain verifies through it.
     /// The checkpoint becomes the anchor the remaining chain extends. Connects as
@@ -74,14 +74,17 @@ impl AuditKeyArgs {
 impl AuditCommand {
     /// Runs this command through `console`.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
+        let Console {
+            service,
+            operator,
+            out,
+            ..
+        } = console;
         match self {
             Self::List(command) => command.run(console).await,
-            Self::Verify { keys, output } => {
-                let verification = console
-                    .service
-                    .verify_audit_chain(&console.operator, &keys.keys()?)
-                    .await?;
-                output.print(&verification, Self::print_verification)?;
+            Self::Verify { keys } => {
+                let verification = service.verify_audit_chain(operator, &keys.keys()?).await?;
+                out.emit(&verification)?;
                 match verification.broken {
                     Some(broken) => Err(AuditError::Broken(broken).into()),
                     None => Ok(()),
@@ -93,47 +96,49 @@ impl AuditCommand {
                 reason,
                 confirm,
             } => {
-                confirm.ask(&format!(
-                    "This deletes every audit event through position {through}"
-                ))?;
-                let deleted = console
-                    .service
-                    .prune_audit_chain(&console.operator, &keys.keys()?, through, reason)
+                confirm.ask(
+                    out,
+                    &format!("This deletes every audit event through position {through}"),
+                )?;
+                let deleted = service
+                    .prune_audit_chain(operator, &keys.keys()?, through, reason)
                     .await?;
-                eprintln!("Pruned {deleted} events through position {through}.");
-                Ok(())
+                out.info(format_args!(
+                    "Pruned {deleted} events through position {through}."
+                ))
             }
         }
     }
-
-    /// Prints a verification for people, one fact per line.
-    fn print_verification(verification: &AuditVerification) {
-        let point = |point: &Option<ChainPoint>| {
-            point
-                .as_ref()
-                .map_or_else(|| "none".to_owned(), ChainPoint::to_string)
-        };
-        match &verification.broken {
-            None => println!("Chain: intact"),
-            Some(broken) => println!(
-                "Chain: broken at position {}: {}",
-                broken.position, broken.problem
-            ),
-        }
-        println!("Events checked: {}", verification.events_checked);
-        println!("Checkpoints checked: {}", verification.checkpoints_checked);
-        println!("Unsealed: {}", verification.unsealed);
-        if verification.anchor.is_some() {
-            println!("Pruned through: {}", point(&verification.anchor));
-        }
-        println!("Newest: {}", point(&verification.newest));
-        println!(
-            "Latest checkpoint: {}",
-            point(&verification.latest_checkpoint)
-        );
-        println!("Keys: {}", verification.keys);
-    }
 }
+
+// A verification, one fact per line: whether the chain holds, then what was
+// checked.
+report!(AuditVerification, self, out, {
+    let point = |point: &Option<ChainPoint>| point.as_ref().map(Cell::new).into();
+    let chain = match &self.broken {
+        None => Cell::new("intact").style(Style::Good),
+        Some(broken) => Cell::new(format_args!(
+            "broken at position {}: {}",
+            broken.position, broken.problem
+        ))
+        .style(Style::Bad),
+    };
+    let mut fields = vec![
+        ("Chain", chain),
+        ("Events checked", self.events_checked.into()),
+        ("Checkpoints checked", self.checkpoints_checked.into()),
+        ("Unsealed", self.unsealed.into()),
+    ];
+    if self.anchor.is_some() {
+        fields.push(("Pruned through", point(&self.anchor)));
+    }
+    fields.extend([
+        ("Newest", point(&self.newest)),
+        ("Latest checkpoint", point(&self.latest_checkpoint)),
+        ("Keys", Cell::new(self.keys)),
+    ]);
+    out.fields(&fields)
+});
 
 /// Page through recorded events, newest first.
 #[derive(Args)]
@@ -151,14 +156,11 @@ pub(super) struct ListEvents {
     /// The page to list, counting from 1 at the newest events.
     #[arg(long)]
     page: Option<u32>,
-    /// Output format.
-    #[command(flatten)]
-    output: Output,
 }
 
 impl ListEvents {
     /// Prints the page the filters select.
-    pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
+    async fn run(self, console: &Console) -> Result<(), CliError> {
         let user = match &self.user {
             Some(user) => Some(console.user(user).await?),
             None => None,
@@ -169,39 +171,27 @@ impl ListEvents {
             views: self.views,
             page: self.page,
         };
-        self.output.print(
-            &console.service.events(&console.operator, search).await?,
-            Self::print_page,
-        )
+        console
+            .out
+            .emit(&console.service.events(&console.operator, search).await?)
     }
 
-    /// Prints one event per line, with who caused it and why, and how to continue
-    /// if there may be more. `--output json` adds where its request came from.
-    fn print_page(page: &EventPage) {
-        println!("ID\tOCCURRED\tACTOR\tSUBJECT\tKIND\tREASON");
-        for event in &page.events {
-            println!("{}", Self::line(event));
-        }
-        Output::paging(page.paging, "events");
-    }
-
-    /// `event` as one tab-separated line. A reason has no tab or line break.
-    pub(super) fn line(event: &Event) -> String {
+    /// `event` as a table row: when, who caused it, whose account it concerns,
+    /// its kind and why.
+    pub(super) fn row(event: &Event) -> [Cell; 6] {
         let reason = match (&event.reason, event.erased) {
-            (Some(reason), _) => reason.as_str(),
-            (None, true) => "erased",
-            (None, false) => "-",
+            (Some(reason), _) => Cell::new(reason),
+            (None, true) => Cell::new("erased").style(Style::Muted),
+            (None, false) => Cell::none(),
         };
-        format!(
-            "{}\t{}\t{}\t{}\t{}\t{reason}",
-            event.id,
-            event.occurred_at.to_rfc3339(),
-            Self::actor(event),
-            event
-                .subject
-                .map_or_else(|| "-".to_owned(), |id| id.to_string()),
-            event.event["kind"].as_str().unwrap_or("-"),
-        )
+        [
+            Cell::new(event.id),
+            event.occurred_at.into(),
+            Cell::new(Self::actor(event)),
+            event.subject.map(Cell::new).into(),
+            event.event["kind"].as_str().into(),
+            reason,
+        ]
     }
 
     /// Names who caused `event` in a few words, an administrator by their handle
@@ -223,3 +213,14 @@ impl ListEvents {
         }
     }
 }
+
+// One event per line, with who caused it and why, and how to list the next page.
+// `--json` adds where its request came from.
+report!(EventPage, self, out, {
+    out.table(
+        ["ID", "OCCURRED", "ACTOR", "SUBJECT", "KIND", "REASON"],
+        "No events.",
+        self.events.iter().map(ListEvents::row),
+    )?;
+    out.paging(self.paging, "events")
+});

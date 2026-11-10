@@ -18,7 +18,7 @@ sourceorigin_common::str_enum! {
 }
 
 /// How many stored digests of one kind a digest key made.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct DigestUsage {
     /// The kind of record.
     pub secret: DigestedSecret,

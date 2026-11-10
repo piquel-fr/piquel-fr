@@ -1,14 +1,13 @@
-//! What administrative commands share: the service and its operator, output
-//! formats, and confirmation before changes that cut off a whole account,
+//! What administrative commands share: the service and its operator, where they
+//! print, and confirmation before changes that cut off a whole account,
 //! administrator or client.
 
-use super::CliError;
+use super::{CliError, output::Output};
 use crate::{
     AdminService, AuthConfig, Operator, UserRef, account::AccountService, admin::OperatorName,
 };
-use clap::{Args, ValueEnum};
-use serde::Serialize;
-use sourceorigin_common::{UserId, admin::Paging, config::ConfigurationError};
+use clap::Args;
+use sourceorigin_common::{UserId, config::ConfigurationError};
 use sourceorigin_repository::Database;
 use std::io::{BufRead, IsTerminal};
 
@@ -21,16 +20,23 @@ pub(super) struct Console {
     pub(super) account: AccountService,
     /// Who runs them, recorded on their events.
     pub(super) operator: Operator,
+    /// Where they print.
+    pub(super) out: Output,
 }
 
 impl Console {
     /// Runs operations on `database` as the operator at this terminal: `name`,
-    /// given by `--operator`, or the one the environment names.
-    pub(super) fn new(database: Database, name: Option<OperatorName>) -> Result<Self, CliError> {
+    /// given by `--operator`, or the one the environment names. Prints to `out`.
+    pub(super) fn new(
+        database: Database,
+        name: Option<OperatorName>,
+        out: Output,
+    ) -> Result<Self, CliError> {
         Ok(Self {
             service: AdminService::new(database.clone(), AuthConfig::mails_from_environment()?),
             account: AccountService::new(database),
             operator: Self::operator(name, OperatorName::from_environment)?,
+            out,
         })
     }
 
@@ -60,53 +66,6 @@ impl Console {
     }
 }
 
-/// How a read command prints its results.
-#[derive(Clone, Copy, ValueEnum)]
-pub(super) enum OutputFormat {
-    /// Tab-separated lines for people.
-    Table,
-    /// The view the admin dashboard shows, as JSON, for scripts: its shape is
-    /// `sourceorigin_common`'s, as its `admin` and `alerts` modules define it.
-    Json,
-}
-
-/// The `--output` option of read commands.
-#[derive(Args)]
-pub(super) struct Output {
-    /// A table for people, or JSON for scripts.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
-    output: OutputFormat,
-}
-
-impl Output {
-    /// Prints `value` as pretty JSON, or as `table` writes it for people.
-    pub(super) fn print<T: Serialize + ?Sized>(
-        &self,
-        value: &T,
-        table: impl FnOnce(&T),
-    ) -> Result<(), CliError> {
-        match self.output {
-            OutputFormat::Json => println!("{}", serde_json::to_string_pretty(value)?),
-            OutputFormat::Table => table(value),
-        }
-        Ok(())
-    }
-
-    /// Says where a page of `what` stands, and how to go on, after a table.
-    pub(super) fn paging(paging: Paging, what: &str) {
-        eprintln!(
-            "Page {} of {}: {} {what} in all.{}",
-            paging.page,
-            paging.pages,
-            paging.total,
-            paging
-                .next()
-                .map(|next| format!(" Next: --page {next}"))
-                .unwrap_or_default()
-        );
-    }
-}
-
 /// The `--yes` option of commands that cut off a whole account, administrator or
 /// client. Ending one session does not ask: the command names it exactly, and its
 /// owner can sign in again.
@@ -118,20 +77,21 @@ pub(super) struct Confirm {
 }
 
 impl Confirm {
-    /// Describes `change` and asks to go ahead when standard input is a terminal.
-    /// Without one, refuses unless `--yes` was given, so a script never runs a
-    /// change it did not mean to.
-    pub(super) fn ask(&self, change: &str) -> Result<(), CliError> {
+    /// Describes `change` on `out` and asks to go ahead when standard input is a
+    /// terminal. Without one, refuses unless `--yes` was given, so a script never
+    /// runs a change it did not mean to.
+    pub(super) fn ask(&self, out: &Output, change: &str) -> Result<(), CliError> {
         let input = std::io::stdin();
-        self.ask_on(change, input.is_terminal(), input.lock())
+        self.ask_on(out, change, input.is_terminal(), input.lock())
     }
 
     /// [`Self::ask`], reading the answer from `input`, which is a terminal or not.
     pub(super) fn ask_on(
         &self,
+        out: &Output,
         change: &str,
         terminal: bool,
-        mut input: impl BufRead,
+        input: impl BufRead,
     ) -> Result<(), CliError> {
         if self.yes {
             return Ok(());
@@ -139,12 +99,10 @@ impl Confirm {
         if !terminal {
             return Err(CliError::Unconfirmed);
         }
-        eprint!("{change}. Continue? [y/N] ");
-        let mut answer = String::new();
-        input.read_line(&mut answer).map_err(CliError::Prompt)?;
-        match answer.trim() {
-            "y" | "Y" | "yes" => Ok(()),
-            _ => Err(CliError::Declined),
+        if out.ask(change, input)? {
+            Ok(())
+        } else {
+            Err(CliError::Declined)
         }
     }
 }

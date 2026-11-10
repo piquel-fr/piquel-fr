@@ -3,16 +3,19 @@
 //! Signing key commands run their admin operation, as the dashboard's signing
 //! keys page does.
 
-use super::{CliError, Confirm, Console};
+use super::{
+    CliError, Confirm, Console,
+    output::{Cell, Output, Single, report},
+};
 use crate::{
     AuditConfig, AuthConfig, KeyStore, PUBLIC_BASE_URL, Reason, TokenDigestKeys,
     admin::{AdminOperation, OperatorName},
 };
-use chrono::{DateTime, Utc};
 use clap::Subcommand;
+use serde::Serialize;
 use sourceorigin_common::{admin::SigningKey, config::SecretReference, protocol::jwt::KeyId};
 use sourceorigin_crypto::Rs256Key;
-use sourceorigin_repository::Database;
+use sourceorigin_repository::{Database, DigestUsage};
 use std::sync::Arc;
 
 /// The key ID `keys import` gives the PEM key, the default of the removed
@@ -75,25 +78,6 @@ pub(super) enum KeysCommand {
 }
 
 impl KeysCommand {
-    /// Prints one signing key per line, oldest first.
-    fn print_list(keys: &[SigningKey]) {
-        let format =
-            |at: Option<DateTime<Utc>>| at.map_or_else(|| "-".to_owned(), |at| at.to_rfc3339());
-        println!("ID\tTYPE\tSTATE\tCREATED\tACTIVATED\tDEACTIVATED\tRETIRED");
-        for key in keys {
-            println!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                key.id,
-                key.key_type,
-                key.state,
-                key.created_at.to_rfc3339(),
-                format(key.activated_at),
-                format(key.deactivated_at),
-                format(key.retired_at),
-            );
-        }
-    }
-
     /// What revoking the key `id`, among `keys`, does, for its confirmation. It
     /// names the key's state as read now, and says what revoking an active key
     /// does whatever that state, since a waiting key may start signing before the
@@ -124,11 +108,12 @@ impl KeysCommand {
     }
 
     /// Runs this command on `database`, a signing key's as the operator at this
-    /// terminal, `operator` when given.
+    /// terminal, `operator` when given, printing to `out`.
     pub(super) async fn run(
         self,
         database: Database,
         operator: Option<OperatorName>,
+        out: Output,
     ) -> Result<(), CliError> {
         let store = || -> Result<KeyStore, CliError> {
             Ok(KeyStore::new(
@@ -136,13 +121,13 @@ impl KeysCommand {
                 Arc::new(AuthConfig::key_encryption_key_from_environment()?),
             ))
         };
-        let console = || Console::new(database.clone(), operator);
+        let console = || Console::new(database.clone(), operator, out.clone());
         match self {
             Self::List => {
                 let Console {
                     service, operator, ..
                 } = &console()?;
-                Self::print_list(&service.list_signing_keys(operator).await?);
+                out.emit(&service.list_signing_keys(operator).await?[..])?;
             }
             Self::Rotate {
                 now,
@@ -154,13 +139,17 @@ impl KeysCommand {
                 } = &console()?;
                 if now {
                     confirm.ask(
+                        &out,
                         "Make a new signing key sign at once: verifiers that cached the key set reject its tokens until they fetch it again, for up to an hour",
                     )?;
                 }
                 let id = service
                     .rotate_signing_key(operator, &store()?, now, reason)
                     .await?;
-                println!("{id}");
+                out.emit(&Single {
+                    name: "id",
+                    value: id,
+                })?;
             }
             Self::Revoke {
                 id,
@@ -171,33 +160,37 @@ impl KeysCommand {
                     service, operator, ..
                 } = &console()?;
                 let keys = service.list_signing_keys(operator).await?;
-                confirm.ask(&Self::revoking(&id, &keys))?;
+                confirm.ask(&out, &Self::revoking(&id, &keys))?;
                 match service
                     .revoke_signing_key(operator, &store()?, &id, reason)
                     .await?
                 {
-                    Some(replacement) => {
-                        eprintln!("Key {id} revoked; key {replacement} signs from now on.");
-                    }
-                    None => eprintln!("Key {id} revoked."),
+                    Some(replacement) => out.info(format_args!(
+                        "Revoked key {id}; key {replacement} signs from now on."
+                    ))?,
+                    None => out.info(format_args!("Revoked key {id}."))?,
                 }
             }
             Self::DigestUsage => {
                 let keys = TokenDigestKeys::from_environment()?;
-                println!("RECORD\tKEY\tFINGERPRINT\tSTORED");
-                for usage in database.maintenance().digest_usage().await? {
-                    println!(
-                        "{}\t{}\t{}\t{}",
-                        usage.secret,
-                        keys.name(usage.digest_key.as_deref()),
-                        usage.digest_key.as_deref().unwrap_or("-"),
-                        usage.stored,
-                    );
-                }
+                let usage: Vec<_> = database
+                    .maintenance()
+                    .digest_usage()
+                    .await?
+                    .into_iter()
+                    .map(|usage| KeyUsage {
+                        key: keys.name(usage.digest_key.as_deref()),
+                        usage,
+                    })
+                    .collect();
+                out.emit(&usage[..])?;
             }
             Self::Audit => {
                 let config = AuditConfig::from_environment(&PUBLIC_BASE_URL.parse()?)?;
-                println!("{}", config.verifier());
+                out.emit(&Single {
+                    name: "verifier",
+                    value: config.verifier().to_string(),
+                })?;
             }
             Self::Import { pem, id, reason } => {
                 let Console {
@@ -210,12 +203,66 @@ impl KeysCommand {
                     .import_signing_key(operator, &store()?, key, reason)
                     .await?
                 {
-                    eprintln!("Key {id} imported; it signs from now on.");
+                    out.info(format_args!("Imported key {id}; it signs from now on."))?;
                 } else {
-                    eprintln!("Signing keys already exist; nothing was imported.");
+                    out.warning("Signing keys already exist; nothing was imported.")?;
                 }
             }
         }
         Ok(())
     }
 }
+
+// One signing key per line, oldest first.
+report!([SigningKey], self, out, {
+    out.table(
+        [
+            "ID",
+            "TYPE",
+            "STATE",
+            "CREATED",
+            "ACTIVATED",
+            "DEACTIVATED",
+            "RETIRED",
+        ],
+        "No signing keys.",
+        self.iter().map(|key| {
+            [
+                Cell::new(&key.id),
+                Cell::new(key.key_type),
+                key.state.into(),
+                key.created_at.into(),
+                key.activated_at.into(),
+                key.deactivated_at.into(),
+                key.retired_at.into(),
+            ]
+        }),
+    )
+});
+
+/// How many stored digests of one kind a token digest key made, and which of
+/// the configured keys it is.
+#[derive(Serialize)]
+struct KeyUsage {
+    /// The count.
+    #[serde(flatten)]
+    usage: DigestUsage,
+    /// `current`, `accepted`, `unrecorded` or `unknown`.
+    key: &'static str,
+}
+
+// One kind of record per line, per digest key.
+report!([KeyUsage], self, out, {
+    out.table(
+        ["RECORD", "KEY", "FINGERPRINT", "STORED"],
+        "No stored digests.",
+        self.iter().map(|KeyUsage { usage, key }| {
+            [
+                Cell::new(usage.secret),
+                Cell::new(key),
+                usage.digest_key.as_deref().into(),
+                usage.stored.into(),
+            ]
+        }),
+    )
+});

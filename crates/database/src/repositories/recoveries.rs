@@ -4,6 +4,7 @@
 use super::{RecoveryRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Duration, Utc};
+use serde::Serialize;
 use sourceorigin_common::{PasskeyId, RecoveryId, UserId};
 
 /// A new recovery, whose link works until `expires_at`.
@@ -47,7 +48,8 @@ pub struct StoredRecovery {
 /// Where a recovery stands. [`StoredRecovery::state`] is the only place auth
 /// computes it; the migration's `undoable_recovery` is the one SQL copy, which
 /// the database's backstops use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RecoveryState {
     /// Its link works: not used, cancelled or undone, and not expired.
     Open,
@@ -92,7 +94,7 @@ impl StoredRecovery {
 
 /// A recent recovery of an account, as support reviews it before starting
 /// another: where it stands, and the passkey its link enrolled.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RecentRecovery {
     /// The recovery.
     pub id: RecoveryId,
@@ -113,7 +115,7 @@ pub struct RecentRecovery {
 }
 
 /// The passkey a recovery's link enrolled.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RecoveryPasskey {
     /// The passkey.
     pub id: PasskeyId,

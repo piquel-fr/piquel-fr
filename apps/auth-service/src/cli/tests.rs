@@ -8,6 +8,7 @@ use crate::{
     admin::{AdminOperation, OperatorName},
     tests::{Browser, Replicas, operator},
 };
+use output::Cell;
 use sourceorigin_common::{
     AccountStatus, EventId, Handle, SessionId, UserId,
     admin::Event,
@@ -282,7 +283,12 @@ fn every_operation_has_its_command() {
 #[test]
 fn confirmation_needs_a_terminal_or_yes() {
     let ask = |yes, terminal, answer: &str| {
-        Confirm { yes }.ask_on("Disable alice", terminal, answer.as_bytes())
+        Confirm { yes }.ask_on(
+            &Output::sink(),
+            "Disable alice",
+            terminal,
+            answer.as_bytes(),
+        )
     };
     assert!(matches!(
         ask(false, false, "y\n"),
@@ -397,13 +403,13 @@ async fn destructive_commands_confirm() {
         else {
             panic!("a keys command");
         };
-        let refused = command.run(database.clone(), name()).await;
+        let refused = command.run(database.clone(), name(), Output::sink()).await;
         assert!(
             matches!(refused, Err(CliError::Unconfirmed)),
             "{arguments:?}"
         );
     }
-    let console = Console::new(database.clone(), name()).expect("console");
+    let console = Console::new(database.clone(), name(), Output::sink()).expect("console");
     let held = held.to_string();
     for arguments in [
         vec!["handle", "release", held.as_str(), "--reason", "Trademark"],
@@ -454,6 +460,7 @@ impl Administration {
             service: AdminService::new(database.clone(), true),
             account: AccountService::new(database.clone()),
             operator: operator(),
+            out: Output::sink(),
         };
         self.run(&console).await.expect("command");
     }
@@ -480,12 +487,10 @@ fn audit_list_names_the_administrator_and_their_reason() {
         device: None,
         erased: false,
     };
-    let line = audit::ListEvents::line(&event);
-    assert!(line.contains("\tadmin @alice\t"), "{line}");
-    assert!(
-        line.ends_with("\trecovery_started\tLost every passkey"),
-        "{line}"
-    );
+    let [.., actor, _, kind, reason] = audit::ListEvents::row(&event);
+    assert_eq!(actor, Cell::new("admin @alice"));
+    assert_eq!(kind, Cell::new("recovery_started"));
+    assert_eq!(reason, Cell::new("Lost every passkey"));
 }
 
 /// The first event of `kind` in `user`'s history, newest first, which must exist.

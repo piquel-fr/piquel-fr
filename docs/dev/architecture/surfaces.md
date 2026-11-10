@@ -258,7 +258,7 @@ When an administrator or operator acts:
   caused it: an administrator by their handle, linked on the dashboard, and an
   operator by name and host. The dashboard describes each known kind in words,
   with the request's device and IP address, or says retention or a purge erased
-  them. `audit list --output json` carries the same view, `EventPage`.
+  them. `audit list --json` carries the same view, `EventPage`.
 - An administrator may not change another administrator's account: it is refused
   before waiting for the account lock and again under it. A change checks the
   administrator's rights, session and passkey confirmation once more before it

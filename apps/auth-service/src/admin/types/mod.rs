@@ -2,7 +2,7 @@
 
 use super::AdminError;
 use chrono::Duration;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     Handle, HandleError, UserId,
     admin::{AnnouncementAudience, DraftAnnouncement, MessageUser},
@@ -13,14 +13,25 @@ use thiserror::Error;
 
 /// An account whose current handle the handle rules refuse, as `handle check`
 /// lists it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct HandleProblem {
     /// The account.
     pub user_id: UserId,
     /// Its current handle.
     pub handle: Handle,
-    /// Why the rules refuse it.
+    /// Why the rules refuse it, as a sentence in JSON.
+    #[serde(serialize_with = "HandleProblem::sentence")]
     pub error: HandleError,
+}
+
+impl HandleProblem {
+    /// Serializes `error` as its message.
+    fn sentence<S: serde::Serializer>(
+        error: &HandleError,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(error)
+    }
 }
 
 /// Maximum Unicode characters in an administrator's reason.

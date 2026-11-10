@@ -204,7 +204,7 @@ auth-service keys audit > preview-key.pub
 auth-service audit verify --key preview-key.pub
 ```
 
-`--output json` prints the same result as JSON. Run from a trusted build, the
+`--json` prints the same result as JSON. Run from a trusted build, the
 CLI is the authoritative check: a compromised server could answer anything.
 
 Every verification is recorded as an `audit_chain_verified` event, with who

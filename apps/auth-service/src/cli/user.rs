@@ -1,9 +1,11 @@
 //! Finding, showing, disabling, reactivating, recovering, deleting and restoring
 //! accounts.
 
-use super::{CliError, Confirm, Console, Output};
+use super::{
+    CliError, Confirm, Console,
+    output::{Cell, Joined, Single, Style, Time, report},
+};
 use crate::{AdminError, AuthConfig, Reason, UserRef, recovery::Revoke};
-use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use sourceorigin_common::{
     PasskeyId,
@@ -23,9 +25,6 @@ pub(super) enum UserCommand {
         /// The page to list, counting from 1.
         #[arg(long)]
         page: Option<u32>,
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
     },
     /// Show an account's profile, status, emails, passkeys, linked identities,
     /// sessions, known browsers and consents. Recorded, since it shows personal
@@ -33,9 +32,6 @@ pub(super) enum UserCommand {
     Show {
         /// The account: its handle, ID or verified email.
         user: UserRef,
-        /// Output format.
-        #[command(flatten)]
-        output: Output,
     },
     /// Disable an account and end its sessions and refresh tokens. Never the last
     /// active administrator's.
@@ -144,20 +140,18 @@ impl UserCommand {
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         match self {
-            Self::Search {
-                query,
-                page,
-                output,
-            } => output.print(
-                &service.search_users(operator, &query, page).await?,
-                Self::print_page,
-            )?,
-            Self::Show { user, output } => {
+            Self::Search { query, page } => {
+                out.emit(&service.search_users(operator, &query, page).await?)?;
+            }
+            Self::Show { user } => {
                 let id = console.user(&user).await?;
-                output.print(&service.view_user(operator, id).await?, Self::print_detail)?;
+                out.emit(&service.view_user(operator, id).await?)?;
             }
             Self::Disable {
                 user,
@@ -165,12 +159,14 @@ impl UserCommand {
                 confirm,
             } => {
                 let id = console.user(&user).await?;
-                confirm.ask(&format!("Disable {user} ({id}) and end its sessions"))?;
+                confirm.ask(out, &format!("Disable {user} ({id}) and end its sessions"))?;
                 service.disable_user(operator, id, reason).await?;
+                out.info(format_args!("Disabled {user} and ended its sessions."))?;
             }
             Self::Enable { user, reason } => {
                 let id = console.user(&user).await?;
                 service.enable_user(operator, id, reason).await?;
+                out.info(format_args!("Enabled {user}: it can sign in again."))?;
             }
             Self::Recover {
                 user,
@@ -186,7 +182,7 @@ impl UserCommand {
             } => {
                 let id = console.user(&user).await?;
                 let recent = service.recent_recoveries(operator, id).await?;
-                Self::print_recent(&recent);
+                out.context(&recent[..])?;
                 let undoable = recent
                     .iter()
                     .find(|recovery| recovery.state.undoable())
@@ -196,11 +192,12 @@ impl UserCommand {
                 } else {
                     "remove its passkey, withdraw every consent and end every session"
                 };
-                confirm.ask(&format!(
-                    "Undo recovery {} of {user} ({id}): {action}",
-                    undoable.id
-                ))?;
+                confirm.ask(
+                    out,
+                    &format!("Undo recovery {} of {user} ({id}): {action}", undoable.id),
+                )?;
                 service.undo_recovery(operator, id, reason).await?;
+                out.info(format_args!("Undid recovery {} of {user}.", undoable.id))?;
             }
             Self::Delete {
                 user,
@@ -211,6 +208,7 @@ impl UserCommand {
             Self::Restore { user, reason } => {
                 let id = console.user(&user).await?;
                 service.restore_user(operator, id, reason).await?;
+                out.info(format_args!("Restored {user}: it can sign in again."))?;
             }
         }
         Ok(())
@@ -228,12 +226,15 @@ impl UserCommand {
         confirm: &Confirm,
     ) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         let id = console.user(user).await?;
         let links = AuthConfig::recovery_links_from_environment()?;
         let recent = service.recent_recoveries(operator, id).await?;
-        Self::print_recent(&recent);
+        out.context(&recent[..])?;
         // Refused before asking, rather than after the confirmation;
         // the service refuses too.
         let probation = recent
@@ -250,14 +251,19 @@ impl UserCommand {
             ),
             None => "end its sessions and send it a recovery link".to_owned(),
         };
-        confirm.ask(&format!("Recover {user} ({id}): {action}"))?;
-        if let Some(link) = service
+        confirm.ask(out, &format!("Recover {user} ({id}): {action}"))?;
+        match service
             .recover_account(operator, id, reason, &links, revoke)
             .await?
         {
-            println!("{link}");
+            Some(link) => out.emit(&Single {
+                name: "link",
+                value: link,
+            }),
+            None => out.info(format_args!(
+                "Recovering {user}: its primary verified address was sent the link."
+            )),
         }
-        Ok(())
     }
 
     /// Schedules the deletion of `user`'s account, or purges it at once when
@@ -270,130 +276,172 @@ impl UserCommand {
         confirm: &Confirm,
     ) -> Result<(), CliError> {
         let Console {
-            service, operator, ..
+            service,
+            operator,
+            out,
+            ..
         } = console;
         let id = console.user(user).await?;
         if immediately {
-            confirm.ask(&format!(
-                "Purge {user} ({id}) and everything that identifies its person now; this cannot be undone"
-            ))?;
-            service.purge_user(operator, id, reason).await?;
-        } else {
-            confirm.ask(&format!("Schedule the deletion of {user} ({id})"))?;
-            service.schedule_deletion(operator, id, reason).await?;
-        }
-        Ok(())
-    }
-
-    /// Prints the account's recent recoveries, newest first, with where each
-    /// stands and the passkey it enrolled, before another is started or one is
-    /// undone. On standard error, which leaves standard output to the new link.
-    fn print_recent(recent: &[RecentRecovery]) {
-        if recent.is_empty() {
-            return;
-        }
-        eprintln!("RECOVERY\tSTARTED\tSTATE\tPASSKEY\tNAME\tACTIVE");
-        for recovery in recent {
-            let at = |at: Option<DateTime<Utc>>| at.map(|at| at.to_rfc3339());
-            let state = match recovery.state {
-                RecoveryState::Open => "link not used".to_owned(),
-                RecoveryState::Probation { settles_at } => {
-                    format!("in probation until {}", settles_at.to_rfc3339())
-                }
-                RecoveryState::Settled => "settled".to_owned(),
-                RecoveryState::Ended => at(recovery.undone_at)
-                    .map(|at| format!("undone {at}"))
-                    .or_else(|| at(recovery.cancelled_at).map(|at| format!("cancelled {at}")))
-                    .unwrap_or_else(|| "link expired".to_owned()),
-            };
-            let (passkey, name, active) = match &recovery.passkey {
-                Some(passkey) => (
-                    passkey.id.to_string(),
-                    passkey.friendly_name.as_deref().unwrap_or("-"),
-                    if passkey.active { "yes" } else { "no" },
+            confirm.ask(
+                out,
+                &format!(
+                    "Purge {user} ({id}) and everything that identifies its person now; this cannot be undone"
                 ),
-                None => ("-".to_owned(), "-", "-"),
-            };
-            eprintln!(
-                "{}\t{}\t{state}\t{passkey}\t{name}\t{active}",
-                recovery.id,
-                recovery.started_at.to_rfc3339(),
-            );
-        }
-    }
-
-    /// Prints one account per line, and how to continue if there may be more.
-    fn print_page(page: &UserPage) {
-        println!("ID\tHANDLE\tSTATUS\tCREATED\tNAME");
-        for user in &page.users {
-            println!(
-                "{}\t{}\t{}\t{}\t{}",
-                user.id,
-                user.handle,
-                user.status,
-                user.created_at.to_rfc3339(),
-                user.display_name
-            );
-        }
-        Output::paging(page.paging, "accounts");
-    }
-
-    /// Prints an account's facts, then one section per kind of record.
-    fn print_detail(detail: &UserDetail) {
-        let user = &detail.user;
-        println!("{} ({})", user.handle, user.id);
-        println!("Name:\t{}", user.display_name);
-        println!("Status:\t{}", user.status);
-        println!("Created:\t{}", user.created_at.to_rfc3339());
-        println!("Administrator:\t{}", detail.administrator);
-        if let Some(deletion) = &detail.deletion {
-            println!("Purged after:\t{}", deletion.purge_after.to_rfc3339());
-            if let Some(failure) = &deletion.failure {
-                println!("Purge failures:\t{}", failure.attempts);
-                println!("Next attempt:\t{}", failure.next_attempt_at.to_rfc3339());
-                println!("Last error:\t{}", failure.last_error);
-            }
-        }
-        println!("\nEMAIL\tVERIFIED\tPRIMARY");
-        for email in &detail.emails {
-            println!(
-                "{}\t{}\t{}",
-                email.address,
-                email
-                    .verified_at
-                    .map_or_else(|| "-".to_owned(), |at| at.to_rfc3339()),
-                email.primary
-            );
-        }
-        println!("\nPASSKEY\tNAME");
-        for passkey in &detail.passkeys {
-            println!("{}\t{}", passkey.id, passkey.friendly_name);
-        }
-        println!("\nPROVIDER\tEMAIL");
-        for identity in &detail.identities {
-            println!(
-                "{}\t{}",
-                identity.provider,
-                identity.linked_email.as_deref().unwrap_or("-")
-            );
-        }
-        println!("\nSESSION\tMETHODS\tSIGNED IN\tLAST SEEN\tEXPIRES");
-        for session in &detail.sessions {
-            let methods: Vec<_> = session.methods.iter().map(ToString::to_string).collect();
-            println!(
-                "{}\t{}\t{}\t{}\t{}",
-                session.id,
-                methods.join(","),
-                session.authenticated_at.to_rfc3339(),
-                session.last_seen_at.to_rfc3339(),
-                session.expires_at.to_rfc3339()
-            );
-        }
-        println!();
-        super::account::AccountCommand::print_known_devices(&detail.known_devices);
-        println!("\nCLIENT\tSCOPES");
-        for consent in &detail.consents {
-            println!("{}\t{}", consent.client_id, consent.scopes.join(" "));
+            )?;
+            service.purge_user(operator, id, reason).await?;
+            out.info(format_args!("Purged {user}."))
+        } else {
+            confirm.ask(out, &format!("Schedule the deletion of {user} ({id})"))?;
+            service.schedule_deletion(operator, id, reason).await?;
+            out.info(format_args!(
+                "Scheduled the deletion of {user}: it is purged in 30 days unless restored."
+            ))
         }
     }
 }
+
+// An account's recent recoveries, newest first, with where each stands and the
+// passkey it enrolled, shown before another is started or one is undone.
+report!([RecentRecovery], self, out, {
+    if self.is_empty() {
+        return Ok(());
+    }
+    out.table(
+        ["RECOVERY", "STARTED", "STATE", "PASSKEY", "NAME", "ACTIVE"],
+        "",
+        self.iter().map(|recovery| {
+            let state = match recovery.state {
+                RecoveryState::Open => Cell::new("link not used").style(Style::Notice),
+                RecoveryState::Probation { settles_at } => {
+                    Cell::new(format_args!("in probation until {}", Time(settles_at)))
+                        .style(Style::Notice)
+                }
+                RecoveryState::Settled => Cell::new("settled"),
+                RecoveryState::Ended => {
+                    let ended = |what: &str, at| Cell::new(format_args!("{what} {}", Time(at)));
+                    match (recovery.undone_at, recovery.cancelled_at) {
+                        (Some(at), _) => ended("undone", at),
+                        (None, Some(at)) => ended("cancelled", at),
+                        (None, None) => Cell::new("link expired"),
+                    }
+                    .style(Style::Muted)
+                }
+            };
+            let passkey = recovery.passkey.as_ref();
+            [
+                Cell::new(recovery.id),
+                recovery.started_at.into(),
+                state,
+                passkey.map(|passkey| Cell::new(passkey.id)).into(),
+                passkey
+                    .and_then(|passkey| passkey.friendly_name.as_deref())
+                    .into(),
+                passkey.map(|passkey| passkey.active).into(),
+            ]
+        }),
+    )?;
+    out.blank()
+});
+
+// One account per line, and how to list the next page.
+report!(UserPage, self, out, {
+    out.table(
+        ["ID", "HANDLE", "STATUS", "CREATED", "NAME"],
+        "No accounts.",
+        self.users.iter().map(|user| {
+            [
+                Cell::new(user.id),
+                Cell::new(&user.handle),
+                user.status.into(),
+                user.created_at.into(),
+                Cell::new(&user.display_name),
+            ]
+        }),
+    )?;
+    out.paging(self.paging, "accounts")
+});
+
+// An account's facts, then one section per kind of record.
+report!(UserDetail, self, out, {
+    let user = &self.user;
+    out.title(format_args!("{} ({})", user.handle, user.id))?;
+    let mut fields = vec![
+        ("Name", Cell::new(&user.display_name)),
+        ("Status", user.status.into()),
+        ("Created", user.created_at.into()),
+        ("Administrator", self.administrator.into()),
+    ];
+    if let Some(deletion) = &self.deletion {
+        fields.push(("Purged after", deletion.purge_after.into()));
+        if let Some(failure) = &deletion.failure {
+            fields.extend([
+                ("Purge failures", failure.attempts.into()),
+                ("Next attempt", failure.next_attempt_at.into()),
+                (
+                    "Last error",
+                    Cell::new(&failure.last_error).style(Style::Bad),
+                ),
+            ]);
+        }
+    }
+    out.fields(&fields)?;
+    out.section("Emails")?;
+    out.table(
+        ["ADDRESS", "VERIFIED", "PRIMARY"],
+        "No addresses.",
+        self.emails.iter().map(|email| {
+            [
+                Cell::new(&email.address),
+                email.verified_at.into(),
+                email.primary.into(),
+            ]
+        }),
+    )?;
+    out.section("Passkeys")?;
+    out.table(
+        ["ID", "NAME"],
+        "No passkeys.",
+        self.passkeys
+            .iter()
+            .map(|passkey| [Cell::new(passkey.id), Cell::new(&passkey.friendly_name)]),
+    )?;
+    out.section("Linked identities")?;
+    out.table(
+        ["PROVIDER", "EMAIL"],
+        "No linked identities.",
+        self.identities.iter().map(|identity| {
+            [
+                Cell::new(identity.provider),
+                identity.linked_email.as_deref().into(),
+            ]
+        }),
+    )?;
+    out.section("Sessions")?;
+    out.table(
+        ["ID", "METHODS", "SIGNED IN", "LAST SEEN", "EXPIRES"],
+        "No sessions.",
+        self.sessions.iter().map(|session| {
+            [
+                Cell::new(session.id),
+                Cell::new(Joined(&session.methods, ", ")),
+                session.authenticated_at.into(),
+                session.last_seen_at.into(),
+                session.expires_at.into(),
+            ]
+        }),
+    )?;
+    out.section("Known browsers")?;
+    self.known_devices[..].human(out)?;
+    out.section("Consents")?;
+    out.table(
+        ["CLIENT", "SCOPES"],
+        "No consents.",
+        self.consents.iter().map(|consent| {
+            [
+                Cell::new(&consent.client_id),
+                Cell::new(consent.scopes.join(" ")),
+            ]
+        }),
+    )
+});
