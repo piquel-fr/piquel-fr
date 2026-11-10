@@ -119,8 +119,9 @@ event's transaction, so removing the address right after cannot cancel it, and
 says what the inbox says. It links the notification's page, except a message's,
 which reads like an announcement's and links the inbox. A recovery's also
 links its undo page while a passkey can still undo it, and an alert's links the
-dashboard's Alerts tab while auth serves one. The copied addresses are the
-channel's only personal data, deleted with the delivery. The `destination`
+dashboard's Alerts tab while auth serves one. The copied addresses, and a
+message's text, which may be personal, are the channel's only personal data,
+deleted with the delivery. The `destination`
 column names the account and the address's ID, for operators.
 
 A link's token is never stored, not even in the payload: it is an HMAC of the
