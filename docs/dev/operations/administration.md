@@ -273,7 +273,9 @@ can learn why. An administrator's account takes one too, from the dashboard as
 from the command line: unlike the dashboard's other changes, a message changes
 nothing about it. Sending records a `message_sent` event with who sent it, but
 not the text, which may be personal: the inbox and the queued email hold the
-message's only copies, so purging the account deletes both. The owner's
+message's only copies, so purging the account deletes both, as their own
+[retention](../architecture/account-deletion.md#what-auth-stores-and-for-how-long)
+does in time. The owner's
 security history doesn't list the message, since their inbox shows it.
 
 ## Send an announcement

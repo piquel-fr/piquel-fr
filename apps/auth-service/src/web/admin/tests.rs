@@ -25,6 +25,7 @@ use chrono::{DateTime, Utc};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, PictureId, UserId,
     events::{Actor, DomainEvent},
+    notifications::Notification,
 };
 use sourceorigin_repository::{
     Channel, Database, DatabaseError, DatabaseTransaction, EventFilter, NewDelivery,
@@ -2282,4 +2283,22 @@ async fn messages_are_previewed_then_sent_from_the_dashboard() {
         .visit(&confirmed, &format!("{administrator}/message"))
         .await;
     assert_eq!(form.status(), StatusCode::OK);
+    let to_administrator = format!("{DASHBOARD}{administrator}/message");
+    let sent = confirmed
+        .submit(
+            &harness.dashboard,
+            &to_administrator,
+            &typed("send"),
+            OWN_PAGE,
+        )
+        .await;
+    assert_eq!(redirect(&sent), administrator);
+    let mut notifications = harness.database.notifications();
+    let received = notifications.list(admin.user_id, None, 10).await;
+    let messages = received
+        .expect("inbox")
+        .into_iter()
+        .filter(|stored| matches!(stored.notification, Some(Notification::Message { .. })))
+        .count();
+    assert_eq!(messages, 1, "the administrator reads it in their inbox");
 }
