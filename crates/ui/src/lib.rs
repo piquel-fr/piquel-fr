@@ -44,6 +44,9 @@ mod asset;
 mod clients;
 /// The developer console.
 mod developers;
+/// The emails Origin Auth sends: what each says, as blocks, and their HTML and
+/// plain-text bodies.
+mod email;
 /// What forms and links send, what a page says of a change, and the parts of
 /// every form.
 mod form;
@@ -86,6 +89,7 @@ pub use developers::{
     SecretsChange, SecretsState, app_header, app_secrets, app_settings, apps, back_to_apps,
     new_app, overview,
 };
+pub use email::{Block, Inline, Mail};
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{
     AccountNav, Crumb, Health, Pager, PasskeySignal, Policies, PreferenceChange, Preferences,

@@ -33,7 +33,8 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 - `sourceorigin-telemetry` (`crates/telemetry`): logs, traces and metrics, following
   [telemetry.md](architecture/telemetry.md).
 - `sourceorigin-ui` (`crates/ui`): the Topcoat components and layouts of auth's
-  server-rendered pages, the strings they show, titles and notices included, and
+  server-rendered pages and of its emails' HTML and plain-text bodies, the
+  strings they show, titles and notices included, and
   the changes and queries their forms and links send. They render plain data,
   `sourceorigin-common` IDs, vocabularies and events, or plain rows such as `EmailRow`
   or `ClientRow` that the pages map the service's views into, and take URLs as

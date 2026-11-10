@@ -84,7 +84,7 @@ explains how applications, routes and services fit together.
 | `sourceorigin-crypto` (`crates/crypto`) | Every cryptographic primitive: secrets, digests, HMAC, PKCE, RS256 signing and key sets, AES-256-GCM sealing, Ed25519 signed notes and SCRAM verifiers |
 | `sourceorigin-repository` (`crates/database`) | The only crate that runs SQL: connections, migrations, repositories, transactions, events and the delivery queue's storage |
 | `sourceorigin-telemetry` (`crates/telemetry`) | Logs, traces and metrics, and the HTTP layer every router uses |
-| `sourceorigin-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, which know nothing of the database or HTTP |
+| `sourceorigin-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, and the bodies of its emails, which know nothing of the database or HTTP |
 | `sourceorigin-auth` (`crates/auth-sdk`) | The Rust SDK, which depends only on `sourceorigin-common` |
 
 [Rust conventions](../rust-conventions.md#crates) describes each crate in full.
