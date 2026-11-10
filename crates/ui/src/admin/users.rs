@@ -3,7 +3,10 @@
 use super::{
     Action, Change, EventRow, Target, account_status, confirm, event_rows, moment, refused_action,
 };
-use crate::layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address};
+use crate::{
+    email::{Mail, email_preview},
+    layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address},
+};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod,
     admin::{MessageUser, Session, User, UserDetail},
@@ -347,8 +350,8 @@ async fn account_actions<'a>(
 /// A message's email, as it will be sent.
 #[derive(Clone, Copy, Debug)]
 pub struct MessagePreview<'a> {
-    /// Its plain-text body.
-    pub email: &'a str,
+    /// The email.
+    pub email: &'a Mail,
     /// The account's primary verified address, which it is emailed to, if the
     /// account has one.
     pub address: Option<&'a str>,
@@ -415,8 +418,7 @@ pub async fn message_page<'a>(
                                 }
                             </dd>
                         </dl>
-                        <p class="help">"Its plain-text version. The HTML version says the same, with the same line breaks."</p>
-                        <pre class="email">(preview.email)</pre>
+                        email_preview(mail: preview.email)
                         if let Some(target) = target {
                             <p class="target">
                                 <strong>(target.name)</strong>

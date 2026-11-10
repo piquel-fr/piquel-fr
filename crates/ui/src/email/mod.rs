@@ -1,7 +1,8 @@
 //! The emails Origin Auth sends, as blocks of what they say, rendered twice: as
 //! the HTML body, styled inline since mail clients drop stylesheets, and as the
 //! plain-text body. Each sentence is written once, so the two bodies cannot say
-//! different things.
+//! different things. The dashboard previews an email from the same blocks
+//! ([`email_preview`]).
 //!
 //! ```
 //! use sourceorigin_ui::{Block, Inline, Mail, inlines};
@@ -32,6 +33,9 @@ use topcoat::{
     view::{View, ViewExt, component, view},
 };
 
+// The email's styles. The dashboard's preview, whose policy forbids inline
+// styles, draws the same with `.email-preview` in `assets/style/base.css`.
+
 /// The `<body>`'s style: the page every email is read on.
 const BODY: &str = "margin:0;padding:24px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.5;color:#1a1a1a;background:#ffffff";
 /// The column the text reads in.
@@ -41,9 +45,31 @@ const BUTTON: &str = "display:inline-block;padding:10px 18px;border-radius:8px;b
 /// Small print.
 const FINE: &str = "font-size:14px;color:#555555";
 
+/// How an email's blocks are styled: inline, in the email itself, or by the
+/// stylesheet's `.email-preview` rules, in the dashboard's preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Look {
+    /// Inline `style` attributes, which mail clients keep.
+    Inline,
+    /// Classes, which the dashboard's stylesheet draws.
+    Classes,
+}
+
+impl Look {
+    /// The `style` of an element styled `style` in the email itself.
+    fn style(self, style: &'static str) -> Option<&'static str> {
+        (self == Self::Inline).then_some(style)
+    }
+
+    /// The `class` of an element in the preview.
+    fn class(self, class: &'static str) -> Option<&'static str> {
+        (self == Self::Classes).then_some(class)
+    }
+}
+
 /// An email: its subject, and what it says between the greeting and the
 /// sign-off every email shares.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mail {
     /// The subject, which the HTML body's title repeats.
     pub subject: String,
@@ -52,7 +78,7 @@ pub struct Mail {
 }
 
 /// A part of an email, which each body renders its own way.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Block {
     /// A paragraph. Its links' addresses follow it in the plain-text body, each
     /// on a line of its own.
@@ -75,7 +101,7 @@ pub enum Block {
 }
 
 /// A run of text within a paragraph.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Inline {
     /// Plain text.
     Text(Cow<'static, str>),
@@ -192,28 +218,57 @@ async fn email<'a>(mail: &'a Mail) -> Result<impl View> {
             </head>
             <body style=(BODY)>
                 <div style=(COLUMN)>
-                    <p>"Hello,"</p>
-                    for block in &mail.blocks {
-                        match block {
-                            Block::Paragraph(inlines) => {
-                                <p>runs(inlines: inlines)</p>
-                            }
-                            Block::Written(written) => {
-                                announcement_text(body: written)
-                            }
-                            Block::Action { label, href } => {
-                                <p><a href=(href.as_str()) style=(BUTTON)>(*label)</a></p>
-                                <p style=(FINE)>"Or copy this link: " (href.as_str())</p>
-                            }
-                            Block::Fine(inlines) => {
-                                <p style=(FINE)>runs(inlines: inlines)</p>
-                            }
-                        }
-                    }
-                    <p>"SourceOrigin"</p>
+                    mail_body(mail: mail, look: Look::Inline)
                 </div>
             </body>
         </html>
+    })
+}
+
+/// An email as the dashboard shows it before it is sent: what its HTML body
+/// says, drawn by the stylesheet, and its plain-text body below, folded.
+#[component]
+pub async fn email_preview<'a>(mail: &'a Mail) -> Result<impl View> {
+    Ok(view! {
+        <div class="email-preview">
+            mail_body(mail: mail, look: Look::Classes)
+        </div>
+        <details class="email-text">
+            <summary>"Plain-text version"</summary>
+            <pre class="email">(mail.text())</pre>
+        </details>
+    })
+}
+
+/// What an email says, between its greeting and its sign-off, styled by `look`.
+#[component]
+async fn mail_body<'a>(mail: &'a Mail, look: Look) -> Result<impl View> {
+    Ok(view! {
+        <p>"Hello,"</p>
+        for block in &mail.blocks {
+            match block {
+                Block::Paragraph(inlines) => {
+                    <p>runs(inlines: inlines)</p>
+                }
+                Block::Written(written) => {
+                    announcement_text(body: written)
+                }
+                Block::Action { label, href } => {
+                    <p>
+                        <a href=(href.as_str()) style=(look.style(BUTTON)) class=(look.class("email-button"))>
+                            (*label)
+                        </a>
+                    </p>
+                    <p style=(look.style(FINE)) class=(look.class("email-fine"))>
+                        "Or copy this link: " (href.as_str())
+                    </p>
+                }
+                Block::Fine(inlines) => {
+                    <p style=(look.style(FINE)) class=(look.class("email-fine"))>runs(inlines: inlines)</p>
+                }
+            }
+        }
+        <p>"SourceOrigin"</p>
     })
 }
 

@@ -18,7 +18,7 @@ use topcoat::{
         StatusCode, content::Form, error::see_other, href, path_param, query_params,
         response::Response, route,
     },
-    view::view,
+    view::{Child, view},
 };
 
 path_param!(pub account: UserId, error = not_found);
@@ -271,7 +271,7 @@ pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<
         }
     };
     let email = letter.map(|letter| EmailSender::preview(&letter, &app.auth));
-    let preview = email.as_deref().map(|email| MessagePreview {
+    let preview = email.as_ref().map(|email| MessagePreview {
         email,
         address: account
             .emails
@@ -281,7 +281,8 @@ pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<
     });
     let (handle, typed) = (account.user.handle.as_str(), &typed);
     let target = App::target(cx).await;
-    let page = view! { cx =>
+    // The page, with its email, makes a large view: boxed.
+    let page = Child::new(view! { cx =>
         sourceorigin_ui::message_page(
             handle: handle,
             back: back.as_str(),
@@ -290,7 +291,7 @@ pub(super) async fn message(cx: &Cx, form: Option<Form<MessageUser>>) -> Result<
             preview: preview,
             refusal: refusal.as_deref(),
         )
-    };
+    });
     App::render(cx, StatusCode::OK, "Send a message", page).await
 }
 

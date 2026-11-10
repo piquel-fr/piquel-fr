@@ -3,7 +3,11 @@
 
 use super::{Action, Change, confirm, moment};
 use crate::icons::{Icon, icon};
-use crate::{clients::choice, layout::page_head};
+use crate::{
+    clients::choice,
+    email::{Mail, email_preview},
+    layout::page_head,
+};
 use sourceorigin_common::admin::{
     Announcement, AnnouncementAudience, AnnouncementDetail, DraftAnnouncement, User,
 };
@@ -98,14 +102,14 @@ pub async fn announcement_list<'a>(
 }
 
 /// One announcement, `detail`, the chosen `accounts` it goes to, linking their
-/// pages, and its email as `preview` renders its plain-text body; the crumb
+/// pages, and its email, `preview`, as it will be sent; the crumb
 /// leads back to the list. A draft has its `drafts` actions; a sent one says how
 /// its emails fared and how many recipients read it.
 #[component]
 pub async fn announcement_page<'a>(
     detail: &'a AnnouncementDetail,
     accounts: &'a [(&'a User, String)],
-    preview: &'a str,
+    preview: &'a Mail,
     #[into]
     #[default]
     drafts: Option<DraftActions<'a>>,
@@ -203,8 +207,7 @@ pub async fn announcement_page<'a>(
         <section class="card">
             <header><h2>"The email"</h2></header>
             <div class="body stack">
-                <p class="help">"Its plain-text version. The HTML version says the same, with the same line breaks."</p>
-                <pre class="email">(preview)</pre>
+                email_preview(mail: preview)
             </div>
         </section>
     })

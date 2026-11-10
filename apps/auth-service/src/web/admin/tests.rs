@@ -2281,7 +2281,9 @@ fn a_read_started_before_forgetting_is_not_kept() {
 }
 
 /// An administrator writes a message from an account's page and sees its email
-/// as it will be sent, without a fresh confirmation. Sending it needs one, then
+/// as it will be sent, both bodies, the HTML one drawn by the dashboard's
+/// stylesheet, which its policy keeps from inline styles, without a fresh
+/// confirmation. Sending it needs one, then
 /// goes back to the account's page, and its owner reads it in their inbox. An
 /// administrator's account takes one too.
 #[tokio::test]
@@ -2316,6 +2318,13 @@ async fn messages_are_previewed_then_sent_from_the_dashboard() {
         preview.contains("Hello,\n\nSupport needs a word.\n\nWrite to support@example.com."),
         "{preview}"
     );
+    assert!(
+        preview.contains(
+            r#"<div class="email-preview"><p>Hello,</p><p>Support needs a word.</p><p>Write to support@example.com.</p><p class="email-fine">"#
+        ),
+        "{preview}"
+    );
+    assert!(!preview.contains("style="), "{preview}");
     assert!(preview.contains(r#"value="send""#), "{preview}");
     // Its Send names the account, beside it and to the passkey dialog.
     let handle = format!("browser-{}", &owner.user_id.to_string()[24..]);
