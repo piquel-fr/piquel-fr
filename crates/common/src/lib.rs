@@ -43,6 +43,8 @@ pub mod handle;
 pub mod notifications;
 /// The auth protocol's wire documents, shared by auth and the SDKs.
 pub mod protocol;
+/// Look-alike detection for handles, client names and the names reserved from them.
+pub mod similarity;
 
 use serde::{Deserialize, Serialize};
 use std::{error::Error as StdError, fmt, str::FromStr};

@@ -20,8 +20,9 @@
 //! ```
 
 use crate::{
-    Handle, UserId,
+    UserId,
     protocol::oauth::{ClientAuthMethod, Scope, Scopes},
+    similarity::Skeleton,
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, str::FromStr};
@@ -262,25 +263,15 @@ impl DisplayName {
     }
 
     /// Refuses a name containing a brand of [`RESERVED_BRANDS`], as clients accounts
-    /// own must. The name is compared without case, spaces or punctuation, and by
-    /// its handle [skeleton](Handle::skeleton), so "S0urce0r1gin-Settings" and "G00gle"
-    /// are refused too. Letters outside ASCII are dropped, not folded.
+    /// own must. The name is compared by its [skeleton](Skeleton), without case,
+    /// spaces or punctuation, so "S0urce0r1gin-Settings" and "G00gle" are refused
+    /// too. Letters outside ASCII are dropped, not folded.
     ///
     /// # Errors
     ///
     /// Returns [`ReservedDisplayName`] with the brand the name contains.
     pub fn ensure_unreserved(&self) -> Result<(), ReservedDisplayName> {
-        let letters: String = self
-            .0
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .map(|character| character.to_ascii_lowercase())
-            .collect();
-        let name = Handle::fold(&letters);
-        match RESERVED_BRANDS
-            .iter()
-            .find(|brand| name.contains(&Handle::fold(brand)))
-        {
+        match Skeleton::of(&self.0).find_contained(RESERVED_BRANDS) {
             Some(brand) => Err(ReservedDisplayName(brand)),
             None => Ok(()),
         }

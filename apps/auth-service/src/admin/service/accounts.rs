@@ -377,12 +377,12 @@ impl AdminService {
             .await?
             .into_iter()
             .filter_map(|current| {
-                let skeleton = current.handle.skeleton();
                 let error = current.handle.ensure_unreserved().err().or_else(|| {
-                    reserved
-                        .iter()
-                        .find(|reservation| reservation.handle.skeleton() == skeleton)
-                        .map(|reservation| HandleError::Reserved(reservation.handle.to_string()))
+                    current
+                        .handle
+                        .skeleton()
+                        .find_alike(reserved.iter().map(|reservation| &reservation.handle))
+                        .map(|handle| HandleError::Reserved(handle.to_string()))
                 })?;
                 Some(HandleProblem {
                     user_id: current.user_id?,

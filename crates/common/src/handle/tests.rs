@@ -1,4 +1,4 @@
-//! Syntax, reservation and skeleton vectors.
+//! Syntax and reservation vectors.
 use super::{Handle, HandleError};
 
 /// Input is trimmed and lowercased, then must be a 3–32 character DNS label.
@@ -53,25 +53,6 @@ fn decoding_is_strict() {
             "{input:?}"
         );
     }
-}
-
-/// Look-alikes share a skeleton; distinct names do not.
-#[test]
-fn skeleton_vectors() {
-    let skeleton = |handle: &str| Handle::parse(handle).expect("valid").skeleton();
-    for (left, right) in [
-        ("s0urce0rigin", "sourceorigin"),
-        ("source-origin", "sourceorigin"),
-        ("rnoon", "moon"),
-        ("vvave", "wave"),
-        ("b0b", "bob"),
-        ("5am", "sam"),
-        ("adm1n", "admin"),
-    ] {
-        assert_eq!(skeleton(left), skeleton(right), "{left} / {right}");
-    }
-    assert_eq!(skeleton("rn-0-1i5-vv"), "mollsw");
-    assert_ne!(skeleton("alice"), skeleton("alicia"));
 }
 
 /// Reserved names and their confusables are refused; other names are not.

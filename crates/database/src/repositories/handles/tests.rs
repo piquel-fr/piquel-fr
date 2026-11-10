@@ -4,8 +4,8 @@ use crate::{
 };
 use sourceorigin_common::{Handle, UserId};
 
-/// The schema's `handle_skeleton` is the Rust type's skeleton, which the generated
-/// `skeleton` column, and so look-alike uniqueness, relies on.
+/// The schema's `handle_skeleton` computes the Rust `Skeleton` of every handle,
+/// which the generated `skeleton` column, and so look-alike uniqueness, relies on.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn the_schema_computes_the_rust_skeleton() {
@@ -25,7 +25,7 @@ async fn the_schema_computes_the_rust_skeleton() {
             .fetch_one(&pool)
             .await
             .expect("skeleton");
-        assert_eq!(stored, handle.skeleton(), "{handle}");
+        assert_eq!(stored, handle.skeleton().as_str(), "{handle}");
     }
 }
 
