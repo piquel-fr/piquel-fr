@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EmailId, Handle, NotificationId, RecoveryId, UserId,
     events::DomainEvent,
-    notifications::{Addressees, Notification},
+    notifications::{Addressees, Notification, NotificationAction},
 };
 
 /// Email to account holders, sent over SMTP by auth-service.
@@ -151,16 +151,13 @@ impl EmailMessage {
             DomainEvent::EmailRemoved { email_id } => Some(*email_id),
             _ => None,
         };
-        let recovery_id = match (event, &notified.notification) {
-            (
-                DomainEvent::RecoveryStarted { recovery_id, .. },
-                Notification::AccountSecured { kept: true } | Notification::RecoveryStarted,
-            )
-            | (DomainEvent::RecoveryCompleted { recovery_id, .. }, Notification::Recovered) => {
-                Some(*recovery_id)
-            }
+        // The recovery whose undo page a notification offering it links.
+        let recovery_id = match event {
+            DomainEvent::RecoveryStarted { recovery_id, .. }
+            | DomainEvent::RecoveryCompleted { recovery_id, .. } => Some(*recovery_id),
             _ => None,
-        };
+        }
+        .filter(|_| notified.notification.action() == Some(NotificationAction::UndoRecovery));
         let addressees = notified.notification.addressees();
         Ok(emails
             .into_iter()

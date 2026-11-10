@@ -12,7 +12,7 @@ use sourceorigin_common::{
     AccountStatus, EmailId, Handle, NotificationId, PasskeyId, RecoveryId,
     config::Origin,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
-    notifications::Notification,
+    notifications::{Notification, NotificationAction},
 };
 use sourceorigin_crypto::Secret;
 use sourceorigin_repository::{
@@ -450,15 +450,16 @@ async fn recovery_notices_link_to_the_undo_page() {
     assert!(
         matches!(content, Some(Content { said: EmailContent::RecoveryLink { undo, .. }, .. }) if undo == undo_page)
     );
+    let undo = Some((NotificationAction::UndoRecovery, undo_page));
     for (message, expected) in [
-        (&recovered, Some(undo_page.clone())),
-        (&revoked(true), Some(undo_page.clone())),
+        (&recovered, undo.clone()),
+        (&revoked(true), undo.clone()),
         (&revoked(false), None),
     ] {
         let content = sender.content(user_id, message).await.expect("content");
         assert!(
-            matches!(&content, Some(Content { said: EmailContent::Notification { undo, page, .. }, .. })
-                if *undo == expected && page.starts_with("https://auth.sourceorigin.dev/settings/notifications/")),
+            matches!(&content, Some(Content { said: EmailContent::Notification { action, page, .. }, .. })
+                if *action == expected && page.starts_with("https://auth.sourceorigin.dev/settings/notifications/")),
             "{message:?}"
         );
     }
@@ -667,7 +668,8 @@ async fn an_alerts_email_links_the_dashboard() {
             .linking(linked);
         let content = sender.content(user_id, &message).await.expect("content");
         assert!(
-            matches!(&content, Some(Content { said: EmailContent::Notification { alerts, .. }, .. }) if alerts.as_deref() == expected),
+            matches!(&content, Some(Content { said: EmailContent::Notification { action, .. }, .. })
+                if action.as_ref().map(|(action, href)| (*action, href.as_str())) == expected.map(|href| (NotificationAction::SeeAlerts, href))),
             "{linked:?}"
         );
         sender.assert_renders(user_id, &message).await;
@@ -900,8 +902,10 @@ async fn every_email_reads_as_its_snapshot() {
                 subject: Notification::Recovered.subject().to_owned(),
                 body: Notification::Recovered.body(),
                 page: link("/settings/notifications/NOTIFICATION"),
-                undo: Some(link("/recover/undo#recovery=RECOVERY")),
-                alerts: None,
+                action: Some((
+                    NotificationAction::UndoRecovery,
+                    link("/recover/undo#recovery=RECOVERY"),
+                )),
                 sign_out: Some(link("/sign-out#token=TOKEN")),
             },
         ),
@@ -911,8 +915,10 @@ async fn every_email_reads_as_its_snapshot() {
                 subject: "Alert: The audit chain is broken".into(),
                 body: "A verification found the chain broken.".into(),
                 page: link("/settings/notifications/NOTIFICATION"),
-                undo: None,
-                alerts: Some("https://admin.sourceorigin.dev/alerts".into()),
+                action: Some((
+                    NotificationAction::SeeAlerts,
+                    "https://admin.sourceorigin.dev/alerts".into(),
+                )),
                 sign_out: None,
             },
         ),

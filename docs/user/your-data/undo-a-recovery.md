@@ -27,12 +27,16 @@ A recovery tells you in several ways:
 - **"Was this you?"**, asked on every settings and developer console page, and
   when you sign in to an app with your account.
 
-The second and third notices also appear in your settings, under
-**Notifications**.
+Your settings also tell you, under **Notifications**, when support starts the
+recovery, when its link is used, and when support secured your account. While
+you can still undo the recovery, each has **Undo the recovery**, except the
+notice that support secured your account without keeping one of your
+passkeys.
 
 ## Undo it
 
-1. Open the undo link from one of the emails, or select **No, undo it** where
+1. Open the undo link from one of the emails, select **Undo the recovery** on
+   one of the notifications, or select **No, undo it** where
    your account asks "Was this you?". Before the recovery link is used, the
    question offers **No, cancel it** instead. Signed in, you can also open
    `auth.sourceorigin.dev/recover/undo`.

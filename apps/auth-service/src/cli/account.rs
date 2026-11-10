@@ -95,7 +95,8 @@ enum Notifications {
         #[arg(long)]
         before: Option<NotificationId>,
     },
-    /// Show one notification, with its security history entry while kept.
+    /// Show one notification, with what it offers its owner to do and its
+    /// security history entry while kept.
     Show {
         /// The notification, as `list` shows it.
         notification: NotificationId,
@@ -635,8 +636,8 @@ report!(NotificationPage, self, out, {
     out.more(self.next)
 });
 
-// A notification: its subject, when, whether it was read, what it says, and its
-// history entry while the history keeps it.
+// A notification: its subject, when, whether it was read, what it offers its
+// owner to do, what it says, and its history entry while the history keeps it.
 report!(NotificationView, self, out, {
     let NotificationItem {
         subject,
@@ -649,6 +650,9 @@ report!(NotificationView, self, out, {
         ("Sent", Cell::from(*created_at)),
         ("Read", self.item.read().into()),
     ];
+    if let Some(action) = self.item.action {
+        fields.push(("Offers", Cell::new(action.label())));
+    }
     if let Some(entry) = &self.history {
         fields.push((
             "History entry",

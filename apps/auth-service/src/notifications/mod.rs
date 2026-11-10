@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
     EventId, NotificationId,
     events::{Actor, DomainEvent, RevocationReason},
-    notifications::{Notification, NotificationPreference},
+    notifications::{Notification, NotificationAction, NotificationPreference},
 };
 use sourceorigin_repository::{Database, StoredNotification};
 
@@ -79,6 +79,10 @@ pub(crate) struct NotificationItem {
     pub(crate) subject: String,
     /// What it says.
     pub(crate) body: String,
+    /// What it offers to do besides reading it, which its page and email link
+    /// while it can still be done.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) action: Option<NotificationAction>,
 }
 
 /// One notification, as its own page shows it.
@@ -121,6 +125,7 @@ impl NotificationItem {
             event_id: stored.event_id,
             subject: notification.subject().to_owned(),
             body: notification.body(),
+            action: notification.action(),
             notification,
         })
     }

@@ -48,8 +48,10 @@ The sidebar's **Notifications** tab shows how many are unread, and the
 
 A notification's page says what happened and shows its entry in your
 [security history](security-history.md), with **This wasn’t me** if you can
-report it. An alert concerns the service rather than your account, so it has
-no entry, and **See the alerts** opens the admin dashboard's **Alerts** tab. A
+report it. A notification about a recovery has **Undo the recovery** while
+you can still [undo it](../your-data/undo-a-recovery.md). An alert concerns the
+service rather than your account, so it has no entry, and **See the alerts**
+opens the admin dashboard's **Alerts** tab. A
 message from support has no entry either: your inbox is where you read it.
 Select **Mark as unread** to keep it in mind for later.
 

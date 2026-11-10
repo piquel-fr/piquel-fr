@@ -150,12 +150,12 @@ surface needs a change.
 
 ## Limits
 
-- **Links.** A notification's email links its page in the inbox. Only two
-  kinds link to something else: a recovery's notifications link the recovery's
-  undo page, through the `recovery_id` the `email` channel finds for them and
-  the notification page's `about_recovery`, and an alert's links the
-  dashboard's Alerts tab, through `Notification::links_alerts`. A new kind of
-  link needs its email and its page both.
+- **Actions.** A notification's email links its page in the inbox. A kind that
+  offers more names it in `Notification::action`, which its page and its email
+  both read: a recovery's undo page or the dashboard's Alerts tab. A new kind of
+  action needs a `NotificationAction` variant, and each surface must say where
+  it links: the notification page (`src/web/settings/notifications.rs`) and the
+  email (`EmailSender::content`).
 - **During a deploy.** The previous release's email workers may claim the email
   of a kind they don't know. They can't decode it, so they mark the delivery
   failed. An operator retries it with `auth-service deliveries retry <id> --reason "…"` once

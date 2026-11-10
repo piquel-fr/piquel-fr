@@ -35,8 +35,9 @@ use lettre::{
     },
 };
 use sourceorigin_common::{
-    AnnouncementId, DeliveryId, ErrorChain, UserId, admin, config::Origin,
-    notifications::Notification,
+    AnnouncementId, DeliveryId, ErrorChain, UserId, admin,
+    config::Origin,
+    notifications::{Notification, NotificationAction},
 };
 use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::{
@@ -306,8 +307,15 @@ impl<M: Mailer> EmailSender<M> {
                     page: self.origin.join(
                         &settings::NOTIFICATION.replace("{id}", &notification_id.to_string()),
                     ),
-                    undo: recovery_id.map(|id| self.recovery_links.undo_url(id).into()),
-                    alerts: self.alerts.clone().filter(|_| notification.links_alerts()),
+                    action: notification.action().and_then(|action| {
+                        let href = match action {
+                            NotificationAction::UndoRecovery => {
+                                recovery_id.map(|id| self.recovery_links.undo_url(id).into())
+                            }
+                            NotificationAction::SeeAlerts => self.alerts.clone(),
+                        };
+                        href.map(|href| (action, href))
+                    }),
                     sign_out: if notification.security() {
                         let link = self.sign_out_links.link(*notification_id).map(Some);
                         Some(Self::rebuilt(link, "sign-out", notification_id)?)

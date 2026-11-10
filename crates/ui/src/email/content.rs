@@ -1,7 +1,10 @@
 //! What each kind of email says.
 
 use super::{Block, Inline, Mail};
-use sourceorigin_common::{Handle, notifications::SIGN_OUT_LINK_LIFETIME};
+use sourceorigin_common::{
+    Handle,
+    notifications::{NotificationAction, SIGN_OUT_LINK_LIFETIME},
+};
 
 /// What an email says, with every link it gives, which [`EmailContent::mail`]
 /// writes out. Auth builds one for each email it sends.
@@ -40,10 +43,9 @@ pub enum EmailContent {
         body: String,
         /// Its page in the inbox.
         page: String,
-        /// The undo page of the recovery it is about, while a passkey can undo it.
-        undo: Option<String>,
-        /// The dashboard's Alerts tab, for an alert's, unless the dashboard is off.
-        alerts: Option<String>,
+        /// What it offers to do, and the page that does it, while it can be
+        /// done: a recovery's undo page, or the dashboard's Alerts tab.
+        action: Option<(NotificationAction, String)>,
         /// The link signing the account out everywhere, for a security
         /// notification's.
         sign_out: Option<String>,
@@ -155,21 +157,16 @@ impl EmailContent {
                 subject,
                 body,
                 page,
-                undo,
-                alerts,
+                action,
                 sign_out,
             } => {
                 let mut blocks = vec![
                     Block::Paragraph(inlines![Inline::Strong(format!("{subject}.").into())]),
                     Block::Written(body.clone()),
                 ];
-                blocks.extend(undo.iter().map(|undo| Block::Action {
-                    label: "Undo the recovery",
-                    href: undo.clone(),
-                }));
-                blocks.extend(alerts.iter().map(|alerts| Block::Action {
-                    label: "See the alerts",
-                    href: alerts.clone(),
+                blocks.extend(action.iter().map(|(action, href)| Block::Action {
+                    label: action.label(),
+                    href: href.clone(),
                 }));
                 blocks.push(Block::Paragraph(inlines!["Read it in ", inbox(page), "."]));
                 blocks.extend(sign_out.iter().map(|sign_out| {
