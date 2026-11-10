@@ -91,7 +91,13 @@ change_form(
 ```
 
 Every string the page shows is in `sourceorigin-ui`. A new settings tab also adds a
-`Tab` variant, with its label, in `crates/ui/src/settings/mod.rs`.
+`Tab` variant, with its label, in `crates/ui/src/settings/mod.rs`. Its
+`Searchable` implementation there gives the words the top bar's search finds it
+by, such as what other sites call it; the compiler asks for them. Each section
+of the page is a `Part` there: its heading takes its ID from
+`Part::<Section>.id()`, which ends in `-heading`, and the top bar's search
+finds it by that ID. The test `the_top_bar_finds_every_section_of_the_settings`
+fails for a section heading that is no `Part`.
 
 ## 4. Write its handler
 

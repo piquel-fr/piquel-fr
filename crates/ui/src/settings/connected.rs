@@ -1,6 +1,6 @@
 //! Connected apps: the apps that keep access to the account.
 
-use super::Audience;
+use super::{Audience, Part};
 use crate::{
     form::{Query, change_form, open},
     layout::page_head,
@@ -66,9 +66,9 @@ pub async fn connected_apps<'a>(
                 lead: "The apps you sign in to with Origin Auth that keep access to your account, and what they can see. Remove any you no longer use.".to_owned(),
             )
         }
-        <section class="card" aria-labelledby="apps-heading">
+        <section class="card" aria-labelledby=(Part::Apps.id())>
             <header>
-                <h2 id="apps-heading">"Connected apps " <span class="count">(rows.len().to_string())</span></h2>
+                <h2 id=(Part::Apps.id())>"Connected apps " <span class="count">(rows.len().to_string())</span></h2>
             </header>
             <ul class="list">
                 for row in rows {

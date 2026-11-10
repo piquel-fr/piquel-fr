@@ -24,8 +24,8 @@ use serde::{Deserialize, de::DeserializeOwned};
 use sourceorigin_common::ErrorChain;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{
-    AccountNav, Alert, Crumb, FieldError, LoginQuery, Messages, Notice, PasskeySignal, Query,
-    Recovery, Section, Tab, Who,
+    AccountNav, Alert, AppLink, Crumb, FieldError, LoginQuery, Messages, Notice, PasskeySignal,
+    Query, Recovery, Section, Tab, Who,
 };
 use topcoat::{
     Error,
@@ -445,6 +445,9 @@ impl WebApplication {
         let administrator = self.account.is_administrator(&viewer).await?;
         let accepted = self.account.accepted_passkeys(reader.owner()).await?;
         let unread = self.account.unread_notifications(&viewer).await?;
+        // The top bar's search finds the account's apps.
+        let clients = self.account.clients(reader.owner()).await?;
+        let apps: Vec<_> = clients.iter().map(AppLink::from).collect();
         let session = reader.owner().session_id();
         let confirmed = reader.owner().was_passkey_confirmed();
         // The preference forms come back here by GET, which a page answering a
@@ -480,6 +483,8 @@ impl WebApplication {
             tabs: &TABS,
             current: tab,
             developers: page::developers::HOME,
+            register: page::developers::NEW,
+            apps: &apps,
             dashboard: dashboard.as_deref(),
             unread,
         };

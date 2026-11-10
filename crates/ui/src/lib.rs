@@ -70,14 +70,14 @@ pub use admin::{
     DeliveryRow, DraftActions, EventRow, FoundAccount, HandlesPage, HandoffProof, HandoffQuery,
     InvitationRow, Measure, MessagePreview, NewClientForm, OperatorDraft, Problem, RecoveryKey,
     RecoveryRow, RecoveryStanding, Registration, ReleasedRow, ReservationRow, ReservedHolder,
-    SessionRow, SigningKeyRow, Tab as DashboardTab, Target, UserRow, account_settings,
-    admin_overview, administrator_list, alert_list, alert_update_fields, announcement_form,
-    announcement_list, announcement_page, audit_page, client_created, client_list, client_page,
-    client_registration, client_secrets, dashboard_change, dashboard_failure, dashboard_frame,
-    dashboard_signed_out, delivery_list, event_list, event_rows, grant_search, handle_list,
-    handoff_proof, invitation_created, invitation_list, message_page, no_access, previous_alerts,
-    recovery_list, reserved_handle_choice, signing_key_list, signing_key_rotation, user_page,
-    user_search,
+    SearchAction, SessionRow, SigningKeyRow, Tab as DashboardTab, Target, UserRow,
+    account_settings, admin_overview, administrator_list, alert_list, alert_update_fields,
+    announcement_form, announcement_list, announcement_page, audit_page, client_created,
+    client_list, client_page, client_registration, client_secrets, dashboard_change,
+    dashboard_failure, dashboard_frame, dashboard_signed_out, delivery_list, event_list,
+    event_rows, grant_search, handle_list, handoff_proof, invitation_created, invitation_list,
+    message_page, no_access, previous_alerts, recovery_list, reserved_handle_choice,
+    signing_key_list, signing_key_rotation, user_page, user_search,
 };
 pub use asset::{Asset, FONTS, STYLESHEET};
 pub use clients::{
@@ -92,9 +92,10 @@ pub use developers::{
 pub use email::{Block, EmailContent, Inline, Mail, email_preview};
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{
-    AccountNav, Crumb, Health, Pager, PasskeySignal, Policies, PreferenceChange, Preferences,
-    SOURCE, Search, Section, Shortcut, ShortcutKind, Sidebar, Theme, Title, Who, account,
-    auth_shell, document, signed_out, site_shell,
+    AccountNav, Crumb, Destination, Group, Health, Pager, PasskeySignal, Policies,
+    PreferenceChange, Preferences, SOURCE, Search, SearchPage, Section, Shortcut, ShortcutKind,
+    Sidebar, Theme, Title, Who, account, auth_shell, document, search_results, signed_out,
+    site_shell,
 };
 pub use login::{
     CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,

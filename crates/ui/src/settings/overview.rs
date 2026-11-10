@@ -2,7 +2,7 @@
 //! lately, and a provider it could still link.
 
 use super::{
-    ConnectedAppRow, DeviceRow, HistoryRow, Holdings, ProviderRow, SignInChange,
+    ConnectedAppRow, DeviceRow, HistoryRow, Holdings, Part, ProviderRow, SignInChange,
     notifications::unread_hint, timeline::activity_feed,
 };
 use crate::{
@@ -122,9 +122,9 @@ pub async fn account_overview<'a>(
             </section>
         }
         <div class="two side">
-            <section class="card" aria-labelledby="activity-heading">
+            <section class="card" aria-labelledby=(Part::Activity.id())>
                 <header>
-                    <h2 id="activity-heading">"Recent security activity"</h2>
+                    <h2 id=(Part::Activity.id())>"Recent security activity"</h2>
                     <a href=(links.history)>"See all history"</a>
                 </header>
                 if overview.activity.is_empty() {
@@ -133,9 +133,11 @@ pub async fn account_overview<'a>(
                     activity_feed(rows: overview.activity, holds: &overview.holds)
                 }
             </section>
-            <section class="card" aria-labelledby="devices-heading">
+            // A summary of the Devices tab, which search finds instead: its
+            // heading needs no ID.
+            <section class="card" aria-label="Devices">
                 <header>
-                    <h2 id="devices-heading">"Devices"</h2>
+                    <h2>"Devices"</h2>
                     <a href=(links.devices)>"Manage"</a>
                 </header>
                 <ul class="list">

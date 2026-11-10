@@ -111,6 +111,12 @@ change to the page's change type and its component in `sourceorigin-ui`, followi
 [adding a page](page.md). The component takes an `Audience`, so it renders the
 owner's form or the administrator's, which asks for a reason.
 
+So that the top bar's search finds the setting, give its section a `Part` in
+`crates/ui/src/settings/mod.rs`, whose ID its heading takes, with its name and
+the other words people search for it by. A setting changed in a dialog of the
+profile is found through `ProfileDialog::spot`, which the compiler asks for, by
+the query opening the dialog.
+
 ## 5. Add the CLI command
 
 In `apps/auth-service/src/cli/account.rs`, add a command to the setting's

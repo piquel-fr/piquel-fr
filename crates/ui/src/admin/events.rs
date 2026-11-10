@@ -531,6 +531,10 @@ impl EventRow<'_> {
     }
 }
 
+/// An account ID, as the events' filter takes it: a UUID, in either case.
+const UUID_PATTERN: &str =
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+
 /// Domain events, newest first: the filter form posting `user` and `kind` back to
 /// `action` by `GET`, keeping whether administrators' `views` of accounts are
 /// shown, a link to the same list with the views shown or hidden the other way,
@@ -555,23 +559,47 @@ pub async fn event_list<'a>(
             title: "Events",
             lead: format!("{} recorded, newest first.", pages.paging.total),
         )
+        // The search script refreshes the events, and the views' toggle, which
+        // the kind decides, as the administrator types.
         <form method="get" action=(action) class="row search">
-            <input name="user" value=(user) placeholder="Account ID" aria-label="Account ID">
-            <input name="kind" value=(kind) placeholder="Kind, e.g. session_revoked" aria-label="Event kind">
+            <input
+                type="search"
+                name="user"
+                value=(user)
+                placeholder="Account ID"
+                aria-label="Account ID"
+                autocomplete="off"
+                pattern=(UUID_PATTERN)
+                title="A full account ID"
+                data-live="event-toggle event-results"
+            >
+            <input
+                type="search"
+                name="kind"
+                value=(kind)
+                placeholder="Kind, e.g. session_revoked"
+                aria-label="Event kind"
+                autocomplete="off"
+                data-live="event-toggle event-results"
+            >
             if views {
                 <input type="hidden" name="views" value="on">
             }
             <button class="secondary">"Filter"</button>
-            if kind.is_none() {
-                <a class="button secondary" href=(toggle_views)>
-                    (if views { "Hide views" } else { "Show views" })
-                </a>
-            }
+            <span id="event-toggle">
+                if kind.is_none() {
+                    <a class="button secondary" href=(toggle_views)>
+                        (if views { "Hide views" } else { "Show views" })
+                    </a>
+                }
+            </span>
         </form>
-        <section class="card">
-            event_rows(rows: rows)
-        </section>
-        pager(pages: pages, what: "events")
+        <div class="stack" id="event-results">
+            <section class="card">
+                event_rows(rows: rows)
+            </section>
+            pager(pages: pages, what: "events")
+        </div>
     })
 }
 

@@ -4,7 +4,7 @@
 use super::Audience;
 use crate::{
     form::{Precision, Query, change_form, handle_input, hidden, time},
-    layout::{AvatarSize, Who, alert_notice, avatar, dialog, page_head},
+    layout::{AvatarSize, Spot, Who, alert_notice, avatar, dialog, page_head},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -85,6 +85,21 @@ impl ProfileDialog {
             Self::Handle => audience.owns() && changeable_at.is_none(),
             Self::Remove => stored,
         }
+    }
+
+    /// Every dialog.
+    pub(crate) const ALL: [Self; 4] = [Self::Picture, Self::Remove, Self::Name, Self::Handle];
+
+    /// What the top bar's search finds it by, which opens it, if it does.
+    pub(crate) const fn spot(self) -> Option<Spot> {
+        Some(match self {
+            Self::Picture => Spot::setting("Profile picture", "avatar photo image upload remove"),
+            Self::Name => Spot::setting("Change display name", "name full name rename"),
+            Self::Handle => Spot::setting("Change handle", "username @ rename user name"),
+            // Only an account with a picture has it; the picture's dialog is
+            // found instead, beside the button removing it.
+            Self::Remove => return None,
+        })
     }
 
     /// Its element's ID, which its button opens.

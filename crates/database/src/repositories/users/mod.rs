@@ -393,7 +393,7 @@ impl UserRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn count_matching(&mut self, query: &str) -> Result<u64, DatabaseError> {
-        let pattern = Self::pattern(query);
+        let pattern = Self::escaped(query);
         let count = run!(
             self,
             fetch_one,
@@ -404,12 +404,12 @@ impl UserRepository<'_> {
                 WHERE (
                     $1 = ''
                     OR u.id::text = $1
-                    OR h.handle ILIKE $2
-                    OR u.display_name ILIKE $2
+                    OR h.handle ILIKE ('%' || $2 || '%')
+                    OR u.display_name ILIKE ('%' || $2 || '%')
                     OR EXISTS (
                         SELECT FROM user_emails e
                         WHERE e.user_id = u.id
-                        AND e.normalized_email ILIKE $2
+                        AND e.normalized_email ILIKE ('%' || $2 || '%')
                     )
                 )"#,
                 query,
@@ -421,8 +421,10 @@ impl UserRepository<'_> {
 
     /// Lists up to `limit` accounts whose ID equals `query`, or whose handle,
     /// display name or any email contains it, ignoring case, skipping the first
-    /// `offset` matches. An empty query matches every account. Results are ordered
-    /// by handle.
+    /// `offset` matches. An empty query matches every account. The closest
+    /// matches come first: the account whose ID or handle is the query, then the
+    /// one whose email is, then handles starting with it, then display names
+    /// with a word starting with it, then the rest; each by handle.
     ///
     /// # Errors
     ///
@@ -433,7 +435,7 @@ impl UserRepository<'_> {
         offset: u64,
         limit: u16,
     ) -> Result<Vec<User>, DatabaseError> {
-        let pattern = Self::pattern(query);
+        let pattern = Self::escaped(query);
         run!(
             self,
             fetch_all,
@@ -448,15 +450,28 @@ impl UserRepository<'_> {
                 WHERE (
                     $1 = ''
                     OR u.id::text = $1
-                    OR h.handle ILIKE $2
-                    OR u.display_name ILIKE $2
+                    OR h.handle ILIKE ('%' || $2 || '%')
+                    OR u.display_name ILIKE ('%' || $2 || '%')
                     OR EXISTS (
                         SELECT FROM user_emails e
                         WHERE e.user_id = u.id
-                        AND e.normalized_email ILIKE $2
+                        AND e.normalized_email ILIKE ('%' || $2 || '%')
                     )
                 )
-                ORDER BY h.handle, u.id
+                ORDER BY
+                    CASE
+                        WHEN $1 = '' THEN 0
+                        WHEN u.id::text = $1 OR h.handle = lower($1) THEN 0
+                        WHEN EXISTS (
+                            SELECT FROM user_emails e
+                            WHERE e.user_id = u.id AND e.normalized_email = lower($1)
+                        ) THEN 1
+                        WHEN h.handle ILIKE ($2 || '%') THEN 2
+                        WHEN u.display_name ILIKE ($2 || '%')
+                            OR u.display_name ILIKE ('% ' || $2 || '%') THEN 3
+                        ELSE 4
+                    END,
+                    h.handle, u.id
                 LIMIT $3 OFFSET $4"#,
                 query,
                 pattern,
@@ -466,16 +481,13 @@ impl UserRepository<'_> {
         )
     }
 
-    /// The `LIKE` pattern matching `query` anywhere, literally: its wildcards are
-    /// escaped.
-    fn pattern(query: &str) -> String {
-        format!(
-            "%{}%",
-            query
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_")
-        )
+    /// `query` for a `LIKE` pattern, matching itself literally: its wildcards
+    /// are escaped.
+    fn escaped(query: &str) -> String {
+        query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
     }
 }
 /// Focused tests for this module and its security contracts.

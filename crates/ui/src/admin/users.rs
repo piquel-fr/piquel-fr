@@ -5,7 +5,10 @@ use super::{
 };
 use crate::{
     email::{Mail, email_preview},
-    layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address},
+    icons::Icon,
+    layout::{
+        AvatarSize, Destination, Group, Pager, Who, avatar, page_head, pager, private_address,
+    },
 };
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod,
@@ -37,6 +40,26 @@ impl UserRow<'_> {
             handle: self.user.handle.as_str(),
             picture: self.picture.as_deref(),
             administrator: self.administrator,
+        }
+    }
+}
+
+impl<'a> From<&'a UserRow<'a>> for Destination<'a> {
+    /// The account as the dashboard's search finds it: by its handle, beside its
+    /// display name, and by its ID.
+    fn from(row: &'a UserRow<'a>) -> Self {
+        Self {
+            group: Group::Accounts,
+            icon: if row.administrator {
+                Icon::Shield
+            } else {
+                Icon::Profile
+            },
+            title: format!("@{}", row.user.handle).into(),
+            trail: row.user.display_name.as_str().into(),
+            terms: row.user.id.to_string().into(),
+            href: row.href.as_str().into(),
+            confirms: false,
         }
     }
 }

@@ -2,7 +2,11 @@
 //! links, its width and theme toggles and who is signed in, and the top bar
 //! with its crumb and search.
 
-use super::{Health, Policies, Preferences, Sidebar, frames::status_bar};
+use super::{
+    Health, Policies, Preferences, Sidebar,
+    frames::status_bar,
+    search::{Search, search_box},
+};
 use crate::{
     clients::copyable,
     icons::{Icon, icon},
@@ -87,19 +91,6 @@ pub struct PasskeySignal<'a> {
     /// unpadded base64url. The password manager forgets the account's passkeys
     /// this does not list, so it must never miss one.
     pub credentials: &'a [String],
-}
-
-/// A search form the top bar shows, posting `name` to `action` by `GET`.
-#[derive(Clone, Copy, Debug)]
-pub struct Search<'a> {
-    /// Where it searches.
-    pub action: &'a str,
-    /// Its input's name.
-    pub name: &'a str,
-    /// What it searches, as the input's placeholder and label.
-    pub placeholder: &'a str,
-    /// What was searched, if anything.
-    pub value: &'a str,
 }
 
 /// A page's name in the crumb.
@@ -228,7 +219,7 @@ pub struct Shell<'a> {
     pub trail: &'a [(Crumb<'a>, &'a str)],
     /// The page's name in the crumb, after the area's link.
     pub page: Crumb<'a>,
-    /// A search form in the top bar, if the area has one.
+    /// The search in the top bar, if the area has one.
     pub search: Option<Search<'a>>,
     /// What the browser chose, which the toggles reverse.
     pub preferences: Preferences,
@@ -352,11 +343,16 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
     })
 }
 
-/// The top bar of [`shell`]: the menu button of the drawer, the crumb, the search
-/// form, if the area has one, the shortcuts, and the avatar.
+/// The top bar of [`shell`]: the menu button of the drawer, the crumb, the search,
+/// if the area has one, the shortcuts, and the avatar.
 #[component]
 async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
+        // Boxed, so the page's type stops at the search: its results nest deeper
+        // than the compiler follows a page's type.
+        let search = frame
+            .search
+            .map(|search| Child::new(view! { search_box(search: search) }));
         <header class="topbar">
             <label class="menu-button" for="menu" aria-hidden="true">
                 icon(kind: Icon::Menu)
@@ -371,19 +367,8 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
                 <b>(frame.page.text())</b>
             </div>
             <div class="right">
-                if let Some(search) = frame.search {
-                    <form class="search" method="get" action=(search.action) role="search">
-                        <label class="search-box">
-                            icon(kind: Icon::Search)
-                            <input
-                                name=(search.name)
-                                value=(search.value)
-                                placeholder=(search.placeholder)
-                                aria-label=(search.placeholder)
-                                autocomplete="off"
-                            >
-                        </label>
-                    </form>
+                if let Some(search) = search {
+                    (search)
                 }
                 // One group, so phones keep the shortcuts and the avatar together.
                 <div class="links">

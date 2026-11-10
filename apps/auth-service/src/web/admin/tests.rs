@@ -312,10 +312,14 @@ async fn signing_in_asks_auth_for_a_passkey_once() {
     let csp = policy(&page).to_owned();
     let handoff = format!("form-action 'self' {AUTH_ORIGIN}{};", routes::page::ADMIN);
     assert!(csp.contains(&handoff), "{csp}");
-    let script = EmbeddedAssets::DASHBOARD_SCRIPT.path();
+    let (script, search) = (
+        EmbeddedAssets::DASHBOARD_SCRIPT.path(),
+        EmbeddedAssets::SEARCH_SCRIPT.path(),
+    );
     assert!(
-        csp.contains(&format!("script-src {DASHBOARD}{script};"))
-            && csp.contains("connect-src 'self';")
+        csp.contains(&format!(
+            "script-src {DASHBOARD}{script} {DASHBOARD}{search};"
+        )) && csp.contains("connect-src 'self';")
             && csp.contains(&format!("img-src {AUTH_ORIGIN};")),
         "{csp}"
     );
@@ -1205,6 +1209,35 @@ async fn administrators_sidebars_link_the_dashboard() {
     assert!(page.contains(DASHBOARD), "{page}");
     let page = html(other.visit(&harness.auth.a, "/settings").await).await;
     assert!(!page.contains("Admin dashboard"), "{page}");
+}
+
+/// The top bar's search holds the dashboard's pages and actions, and asks
+/// `/search` for the accounts a query finds, each linking its page; an empty
+/// query finds none.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_top_bar_finds_pages_and_accounts() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let other = Browser::new_account(&harness.database).await;
+    let dashboard = harness.sign_in(&admin, "/users").await;
+    let page = html(harness.visit(&dashboard, "/users").await).await;
+    assert!(page.contains(r#"data-suggest="/search""#), "{page}");
+    assert!(
+        page.contains(
+            r#"href="/keys/rotate" data-terms="new key jwks rotate" data-confirm-first="""#
+        ),
+        "an action, confirming first: {page}"
+    );
+    let search = format!("/search?q=%40{}", other.user_id);
+    let found = html(harness.visit(&dashboard, &search).await).await;
+    assert!(found.contains(r#"data-group="accounts""#), "{found}");
+    assert!(
+        found.contains(&format!(r#"href="/users/{}""#, other.user_id)),
+        "{found}"
+    );
+    let none = html(harness.visit(&dashboard, "/search?q=+").await).await;
+    assert!(!none.contains("data-group"), "{none}");
 }
 
 /// Granting rights starts from a search: the page lists the accounts matching a

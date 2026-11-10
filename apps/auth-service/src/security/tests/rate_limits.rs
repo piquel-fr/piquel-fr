@@ -285,6 +285,23 @@ fn routes_doing_real_work_have_budgets() {
     }
 }
 
+/// The dashboard's top bar search spends a budget of its own, so typing never
+/// costs the dashboard's pages theirs.
+#[test]
+fn the_dashboard_search_has_its_own_budget() {
+    for (path, budget) in [
+        (crate::routes::dashboard::SEARCH, RateCategory::Search),
+        ("/users", RateCategory::Dashboard),
+    ] {
+        let request = HttpRequest::get(path).body(Body::empty()).expect("request");
+        assert_eq!(
+            Endpoint::dashboard(&request).rate_category(),
+            Some(budget),
+            "{path}"
+        );
+    }
+}
+
 /// A request is classified by the route it matched, so the pages of an app, whose
 /// path names it, and their twins ending in a slash are pages. A request no route
 /// matched is classified by its path.

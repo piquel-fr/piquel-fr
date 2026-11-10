@@ -50,6 +50,8 @@ mod origins;
 mod overview;
 /// What a change makes and its page shows once, across the change's redirect.
 mod reveal;
+/// What the top bar's search finds beyond the page's own results.
+mod search;
 /// An account's settings, which administrators change on its owner's behalf.
 mod settings;
 #[cfg(test)]
@@ -77,8 +79,8 @@ use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
 use sourceorigin_repository::Database;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{
-    Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search,
-    Shortcut, ShortcutKind, Target, Who,
+    Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, SearchAction,
+    SearchPage, Shortcut, ShortcutKind, Target, Who,
 };
 use std::{
     future::Future,
@@ -334,15 +336,15 @@ impl AdminApplication {
         let auth = config.passkey.origin.clone();
         // A form's answer may send the browser on to auth's handoff page, to sign
         // in or confirm again: browsers apply `form-action` to its redirects too.
-        // The script fetches only the passkey ceremonies of the dashboard's own.
+        // The scripts fetch only the dashboard's own passkey ceremonies and search.
         // Profile pictures are served by auth.
+        let scripts =
+            EmbeddedAssets::DASHBOARD_SCRIPTS.map(|script| dashboard.origin.join(&script.path()));
         let policy = format!(
             "default-src 'none'; script-src {}; style-src {}; font-src 'self'; img-src {}; \
              connect-src 'self'; form-action 'self' {}; frame-ancestors 'none'; \
              base-uri 'none'",
-            dashboard
-                .origin
-                .join(&EmbeddedAssets::DASHBOARD_SCRIPT.path()),
+            scripts.join(" "),
             dashboard.origin.join(&EmbeddedAssets::STYLESHEET.path()),
             auth.serialized(),
             auth.join(routes::page::ADMIN),
@@ -382,6 +384,7 @@ impl AdminApplication {
             .route(start_confirmation)
             .route(finish_confirmation)
             .route(sign_out)
+            .route(search::suggest)
             // The settings administrators share with owners, the account
             // service's operations.
             .route(settings::sign_in)
@@ -411,11 +414,11 @@ impl AdminApplication {
                         }
                     }
                 });
-        // The stylesheet, the fonts it links and the script, the dashboard's
+        // The stylesheet, the fonts it links and the scripts, the dashboard's
         // only files.
         let assets = EmbeddedAssets::SHARED
             .iter()
-            .chain([&EmbeddedAssets::DASHBOARD_SCRIPT]);
+            .chain(&EmbeddedAssets::DASHBOARD_SCRIPTS);
         assets.fold(router, |router, asset| {
             router.route(
                 &asset.path(),
@@ -424,6 +427,94 @@ impl AdminApplication {
                 }),
             )
         })
+    }
+
+    /// What the page's query searched, which the top bar's search box holds.
+    fn searched(cx: &Cx) -> String {
+        parse_query_params::<SearchQuery>(cx)
+            .ok()
+            .and_then(|query| query.q)
+            .unwrap_or_default()
+    }
+
+    /// The change the top bar's search finds for `operation`, if it is one: one
+    /// that acts on no account or client, so its page is one. Every other
+    /// operation runs from the page of what it acts on, or is a tab's page,
+    /// which search finds instead.
+    const fn search_action(operation: AdminOperation) -> Option<SearchAction> {
+        type Op = AdminOperation;
+        Some(match operation {
+            Op::GrantAdministrator => SearchAction::GrantAdministrator,
+            Op::CreateInvitation => SearchAction::Invite,
+            Op::ReserveHandle => SearchAction::ReserveHandle,
+            Op::CreateClient => SearchAction::RegisterClient,
+            Op::RotateSigningKey => SearchAction::RotateSigningKey,
+            Op::DraftAnnouncement => SearchAction::DraftAnnouncement,
+            // Each acts on one account, which search finds.
+            Op::ViewUser
+            | Op::DisableUser
+            | Op::EnableUser
+            | Op::RecoverAccount
+            | Op::UndoRecovery
+            | Op::ScheduleDeletion
+            | Op::RestoreUser
+            | Op::RevokeUserSessions
+            | Op::RevokeSession
+            | Op::MessageUser
+            | Op::RenameHandle
+            | Op::RevokeAdministrator
+            // Each acts on one client, which search finds.
+            | Op::ViewClient
+            | Op::UpdateClient
+            | Op::EnableClient
+            | Op::DisableClient
+            | Op::SuspendClient
+            | Op::UnsuspendClient
+            | Op::DeleteClient
+            | Op::RotateClientSecret
+            | Op::ApproveRelatedOrigin
+            | Op::RemoveRelatedOrigin
+            // Each acts on one row of its tab's list.
+            | Op::RevokeInvitation
+            | Op::ReleaseHandle
+            | Op::UnreserveHandle
+            | Op::RetryDelivery
+            | Op::CancelDelivery
+            | Op::RevokeSigningKey
+            | Op::ViewAnnouncement
+            | Op::EditAnnouncement
+            | Op::DiscardAnnouncement
+            | Op::SendAnnouncement
+            | Op::UpdateAlert
+            // Each is a tab's page.
+            | Op::SearchUsers
+            | Op::ListInvitations
+            | Op::ListClients
+            | Op::ListEvents
+            | Op::ListAdministrators
+            | Op::CheckHandles
+            | Op::ListDeliveries
+            | Op::ListSigningKeys
+            | Op::VerifyAuditChain
+            | Op::ListAnnouncements
+            | Op::ListAlerts
+            // Only the terminal runs these (see `page`).
+            | Op::PurgeUser
+            | Op::ImportSigningKey
+            | Op::ApplyClient
+            | Op::PruneAuditChain => return None,
+        })
+    }
+
+    /// Every change the top bar's search finds, with its page's path.
+    fn search_actions() -> Vec<(SearchAction, &'static str)> {
+        AdminOperation::ALL
+            .iter()
+            .filter_map(|&operation| {
+                let page = Self::page(operation)?;
+                Some((Self::search_action(operation)?, page.path().as_str()))
+            })
+            .collect()
     }
 
     /// The page running `operation`, or `None` when only the CLI runs it, for the
@@ -979,12 +1070,12 @@ impl AdminApplication {
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
-        let (stylesheet, script, home, leave, search, prefer) = (
+        let (stylesheet, home, leave, search, suggest, prefer) = (
             &EmbeddedAssets::STYLESHEET.path(),
-            &EmbeddedAssets::DASHBOARD_SCRIPT.path(),
             &tabs[0].1,
             &href!(sign_out).resolve(cx),
             &href!(users::search).resolve(cx),
+            &href!(search::suggest).resolve(cx),
             &href!(preferences).resolve(cx),
         );
         let (start, finish) = (
@@ -998,10 +1089,7 @@ impl AdminApplication {
         } else {
             uri(cx).path_and_query().map_or("/", |path| path.as_str())
         };
-        let searched = parse_query_params::<SearchQuery>(cx)
-            .ok()
-            .and_then(|query| query.q)
-            .unwrap_or_default();
+        let searched = Self::searched(cx);
         let picture = admin.and_then(|admin| Self::picture(cx, admin.picture));
         let administrator = admin.map(|admin| Who {
             name: admin.handle.as_str(),
@@ -1012,7 +1100,6 @@ impl AdminApplication {
         // The avatar leads to the administrator's own settings, on auth.
         let me = app.auth.join(routes::page::settings::HOME);
         let attention = Self::attention(cx).await;
-        let environment = app.auth.host();
         let dashboard = Dashboard {
             title,
             home,
@@ -1027,12 +1114,13 @@ impl AdminApplication {
             here,
             health: Some(attention.health()),
             attention: &attention.tabs(),
-            environment,
+            environment: app.auth.host(),
             policies: app.policies.links(),
-            search: Search {
-                action: search,
-                name: "q",
-                placeholder: "Search by handle, name, email or ID",
+            suggest,
+            actions: &Self::search_actions(),
+            search: SearchPage {
+                href: search,
+                label: "Every account matching",
                 value: &searched,
             },
             shortcuts: &Self::shortcuts(cx, admin, links, attention).await,
@@ -1046,7 +1134,8 @@ impl AdminApplication {
             }),
         };
         let page = Child::new(page);
-        let scripts = [script.as_str()];
+        let scripts = EmbeddedAssets::DASHBOARD_SCRIPTS.map(|script| script.path());
+        let scripts = scripts.each_ref().map(String::as_str);
         let html = view! { cx =>
             sourceorigin_ui::document(
                 title: title.as_str(),

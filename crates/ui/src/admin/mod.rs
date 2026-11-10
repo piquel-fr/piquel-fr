@@ -65,8 +65,8 @@ use crate::{
     form::{Precision, time},
     icons::{Icon, icon},
     layout::{
-        Crumb, Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Shortcut,
-        Who, page_head, shell,
+        Crumb, Destination, Health, Label, NavGroup, NavItem, Policies, Preferences, Search,
+        SearchPage, Searchable, Shell, Shortcut, Spot, Who, page_head, shell,
     },
     settings::{Tab as SettingsTab, settings_tabs},
 };
@@ -180,6 +180,104 @@ impl Label for Tab {
     }
 }
 
+impl Searchable for Tab {
+    fn icon(self) -> Icon {
+        Self::icon(self)
+    }
+
+    fn terms(self) -> &'static str {
+        match self {
+            Self::Overview => "home health status attention summary",
+            Self::Users => "accounts people members search",
+            Self::Administrators => "admins rights roles operators",
+            Self::Invitations => "invites signup links codes",
+            Self::Handles => "usernames reserved released trademark",
+            Self::Clients => "oidc oauth apps applications relying parties",
+            Self::Events => "logs activity feed history domain events",
+            Self::Deliveries => "outbound queue emails webhooks backchannel logout retries",
+            Self::SigningKeys => "jwks jwt tokens keys rotation",
+            Self::Audit => "audit chain tamper integrity checkpoints verify",
+            Self::Announcements => "broadcast news emails everyone messages",
+            Self::Alerts => "warnings incidents problems attention",
+        }
+    }
+}
+
+/// A change the dashboard's top bar finds, which acts on no account or client
+/// and so has one page: auth decides, for every admin operation, whether it is
+/// one, and links it by its route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchAction {
+    /// Granting administrator rights.
+    GrantAdministrator,
+    /// Creating an invitation.
+    Invite,
+    /// Reserving a handle.
+    ReserveHandle,
+    /// Registering a client operators manage.
+    RegisterClient,
+    /// Publishing a new signing key.
+    RotateSigningKey,
+    /// Drafting an announcement.
+    DraftAnnouncement,
+}
+
+impl SearchAction {
+    /// The tab its page belongs to.
+    const fn tab(self) -> Tab {
+        match self {
+            Self::GrantAdministrator => Tab::Administrators,
+            Self::Invite => Tab::Invitations,
+            Self::ReserveHandle => Tab::Handles,
+            Self::RegisterClient => Tab::Clients,
+            Self::RotateSigningKey => Tab::SigningKeys,
+            Self::DraftAnnouncement => Tab::Announcements,
+        }
+    }
+
+    /// What search finds it by, and whether its page confirms first.
+    const fn spot(self) -> Spot {
+        match self {
+            Self::GrantAdministrator => Spot::action(
+                Change::GrantAdministrator.title(),
+                "add admin promote make administrator",
+                true,
+            ),
+            Self::Invite => Spot::action(
+                Change::Invite.title(),
+                "create invitation new signup link",
+                true,
+            ),
+            Self::ReserveHandle => Spot::action(
+                Change::ReserveHandle.title(),
+                "block keep protect username trademark",
+                true,
+            ),
+            Self::RegisterClient => Spot::action(
+                "Register a client",
+                "new client create oidc oauth app application",
+                true,
+            ),
+            Self::RotateSigningKey => Spot::action(
+                Change::RotateSigningKey.title(),
+                "new key jwks rotate",
+                true,
+            ),
+            Self::DraftAnnouncement => Spot::action(
+                Change::DraftAnnouncement.title(),
+                "draft write send broadcast email everyone",
+                false,
+            ),
+        }
+    }
+
+    /// The result linking `href`, its page.
+    fn destination(self, href: &str) -> Destination<'static> {
+        let tab = self.tab();
+        Destination::spot(tab.label(), tab.icon(), href.to_owned(), self.spot())
+    }
+}
+
 /// What every dashboard page's frame shows.
 #[derive(Clone, Copy, Debug)]
 pub struct Dashboard<'a> {
@@ -215,8 +313,14 @@ pub struct Dashboard<'a> {
     pub environment: &'a str,
     /// SourceOrigin's policies, which the status bar links.
     pub policies: Policies<'a>,
-    /// The account search in the top bar, with what was searched, if anything.
-    pub search: Search<'a>,
+    /// Where the top bar's search asks for the accounts and clients the query
+    /// finds, which [`crate::search_results`] answers with.
+    pub suggest: &'a str,
+    /// The changes the top bar's search finds, each with its page.
+    pub actions: &'a [(SearchAction, &'a str)],
+    /// The account search, where the top bar's search goes when no result is
+    /// chosen, and what it searched, if anything.
+    pub search: SearchPage<'a>,
     /// The top bar's shortcuts: the open alerts, and the administrator's own
     /// inbox, on auth.
     pub shortcuts: &'a [Shortcut<'a>],
@@ -288,6 +392,20 @@ pub async fn dashboard_frame<'a>(
         .map(|(name, href)| (Crumb::Name(name), href));
     let trail: Vec<_> = tab.into_iter().chain(parent).collect();
     Ok(view! {
+        let destinations: Vec<_> = Destination::tabs("Dashboard", dashboard.tabs)
+            .chain(
+                dashboard
+                    .actions
+                    .iter()
+                    .map(|(action, href)| action.destination(href)),
+            )
+            .collect();
+        let search = Search {
+            placeholder: "Search pages, accounts and clients",
+            destinations: &destinations,
+            suggest: Some(dashboard.suggest),
+            page: Some(dashboard.search),
+        };
         let groups = [NavGroup {
             label: Some("dashboard"),
             items: &items,
@@ -304,7 +422,7 @@ pub async fn dashboard_frame<'a>(
             shortcuts: dashboard.shortcuts,
             trail: &trail,
             page: dashboard.title,
-            search: dashboard.administrator.map(|_| dashboard.search),
+            search: dashboard.administrator.map(|_| search),
             preferences: dashboard.preferences,
             preferences_action: dashboard.preferences_action,
             here: dashboard.here,

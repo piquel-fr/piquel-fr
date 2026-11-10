@@ -180,6 +180,13 @@ title, description, button, label, whether it takes something away, and the
 reason it asks for. Link the page from the list it belongs to, as the handles
 page links its changes with an `Action`.
 
+`AdminApplication::search_action`, beside it, decides whether the top bar's search
+finds the operation, and the compiler asks for each new one. A change that acts
+on no account or client, such as reserving a handle, has one page: make it a
+`SearchAction` in `crates/ui/src/admin/mod.rs`, with its name and the other words
+people search for it by, and search links it by its route. Any other
+operation returns `None`, under the comment saying why.
+
 Map the operation to its page in `AdminApplication::page`
 (`apps/auth-service/src/web/admin/mod.rs`): `Op::ReserveHandle => &handles::reserve`.
 The router mounts every page it maps, under the paths of

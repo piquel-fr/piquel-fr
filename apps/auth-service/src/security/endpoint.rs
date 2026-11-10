@@ -1,7 +1,7 @@
 //! How the HTTP boundary classifies a route, which its origin, CSRF and rate
 //! policies all read, and the independent request budgets of each class.
 
-use crate::routes::{ACCOUNT_PREFIX, audit, oidc, page, passkey, pictures, service};
+use crate::routes::{ACCOUNT_PREFIX, audit, dashboard, oidc, page, passkey, pictures, service};
 use axum::extract::{MatchedPath, Request};
 
 /// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
@@ -31,9 +31,12 @@ pub(super) enum Endpoint {
     /// Auth's server-rendered pages, sign-in included, which anyone may navigate to,
     /// and the forms they post.
     Page,
-    /// The admin dashboard's pages, the admin listener's only routes, and the forms
+    /// The admin dashboard's pages, the admin listener's routes, and the forms
     /// they post.
     Dashboard,
+    /// What the dashboard's top bar finds as the administrator types, on a budget
+    /// of its own, so typing never costs the pages theirs.
+    DashboardSearch,
     /// Passkey sign-in on the pages of approved related origins, without cookies.
     RelatedLogin,
     /// The unsubscribe page of announcements' emails, which mail clients post to
@@ -55,6 +58,15 @@ impl Endpoint {
                 .get::<MatchedPath>()
                 .map_or(request.uri().path(), MatchedPath::as_str),
         )
+    }
+
+    /// Classifies a request to the admin listener: the top bar's search, or a page.
+    pub(super) fn dashboard(request: &Request) -> Self {
+        if request.uri().path() == dashboard::SEARCH {
+            Self::DashboardSearch
+        } else {
+            Self::Dashboard
+        }
     }
 
     /// Classifies a route's template, or an unmatched path: exact protocol and page
@@ -97,6 +109,7 @@ impl Endpoint {
             | Self::Account
             | Self::Page
             | Self::Dashboard
+            | Self::DashboardSearch
             | Self::RelatedLogin
             | Self::Other => false,
         }
@@ -118,6 +131,7 @@ impl Endpoint {
             }
             Self::Page | Self::Unsubscribe => Some(RateCategory::Page),
             Self::Dashboard => Some(RateCategory::Dashboard),
+            Self::DashboardSearch => Some(RateCategory::Search),
             Self::Checkpoints => Some(RateCategory::Audit),
             Self::Picture => Some(RateCategory::Picture),
             Self::Discovery | Self::Health => None,
@@ -144,6 +158,8 @@ sourceorigin_common::str_enum! {
         Page = "page",
         /// The admin dashboard's pages and forms.
         Dashboard = "dashboard",
+        /// What the dashboard's top bar finds, asked for as the administrator types.
+        Search = "search",
         /// Reads of the public audit checkpoints.
         Audit = "audit",
         /// Profile pictures, which a page listing accounts loads many of at once.

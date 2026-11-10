@@ -134,6 +134,34 @@ test("the dashboard's top bar fits every window size", async ({ browser }) => {
   }
 });
 
+/**
+ * The top bar's search finds the dashboard's pages at once, and the accounts
+ * the server finds as the administrator types; granting rights lists the
+ * accounts its search finds without a press of its button.
+ */
+test('the dashboard finds accounts as the administrator types', async ({ browser }) => {
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `finder-${suffix}`);
+  const handle = `found-${suffix}`;
+  await signedUp(browser, handle);
+  await openDashboard(admin, '/');
+  const search = admin.getByRole('combobox', { name: 'Search pages, accounts and clients' });
+  const results = admin.getByRole('listbox', { name: 'Results' });
+  await search.fill('keys');
+  await expect(results.locator('[aria-selected="true"]')).toContainText('Signing keys');
+  await search.fill(`@${handle}`);
+  const account = results.getByRole('option', { name: new RegExp(`^@${handle}`) });
+  await expect(account).toBeVisible();
+  await account.click();
+  await expect(admin).toHaveURL(/\/users\/[0-9a-f-]{36}$/);
+  await expect(admin.locator('.page-head').getByText(`@${handle}`, { exact: true })).toBeVisible();
+
+  await openDashboard(admin, '/administrators/grant');
+  await admin.getByRole('searchbox', { name: 'Search accounts' }).pressSequentially(handle);
+  await expect(admin.getByRole('link', { name: `@${handle}`, exact: true })).toBeVisible();
+  await expect(admin).toHaveURL(new RegExp(`[?&]q=${handle}`));
+});
+
 test('an administrator disables a user from the dashboard, and the user is signed out', async ({
   browser
 }) => {

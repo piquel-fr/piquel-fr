@@ -3,10 +3,10 @@
 //! signed in.
 
 use super::{
-    Crumb, NavGroup, NavItem, PasskeySignal, Policies, Preferences, Shell, Shortcut, ShortcutKind,
-    Who, page_messages, shell,
+    Crumb, Destination, Group, NavGroup, NavItem, PasskeySignal, Policies, Preferences, Search,
+    Shell, Shortcut, ShortcutKind, Spot, Who, page_messages, shell,
 };
-use crate::{Messages, icons::Icon, settings::Tab};
+use crate::{AppLink, Messages, icons::Icon, settings::Tab};
 use sourceorigin_common::TraceId;
 use topcoat::{
     Result,
@@ -49,7 +49,8 @@ impl Section {
 
 /// The account's sidebar: each settings tab's page in `tabs`, `current` among
 /// them, if a tab is shown, and the developer console's home at `developers`,
-/// which is current when `section` is it.
+/// which is current when `section` is it. The top bar's search finds those, the
+/// settings on them and the account's `apps`.
 #[derive(Clone, Copy, Debug)]
 pub struct AccountNav<'a> {
     /// The section shown.
@@ -60,11 +61,66 @@ pub struct AccountNav<'a> {
     pub current: Option<Tab>,
     /// The developer console's home.
     pub developers: &'a str,
+    /// Registering an app, in the developer console.
+    pub register: &'a str,
+    /// The account's apps, in the developer console.
+    pub apps: &'a [AppLink<'a>],
     /// The admin dashboard, for an account that administers Origin Auth; a section of
     /// its own in the sidebar, which nobody else sees.
     pub dashboard: Option<&'a str>,
     /// How many notifications are unread, which the inbox's tab counts.
     pub unread: u64,
+}
+
+impl AccountNav<'_> {
+    /// The top bar's search, finding `destinations`, which the page holds: it
+    /// asks the server nothing, and has no page of its own.
+    const fn search<'b>(destinations: &'b [Destination<'b>]) -> Search<'b> {
+        Search {
+            placeholder: "Search settings and apps",
+            destinations,
+            suggest: None,
+            page: None,
+        }
+    }
+
+    /// What the top bar's search finds: every settings tab and what is on it,
+    /// the developer console and each of the account's apps, and the dashboard
+    /// for an administrator.
+    fn destinations(&self) -> Vec<Destination<'_>> {
+        let mut found: Vec<_> = Destination::tabs("Account settings", self.tabs).collect();
+        found.extend(Tab::spots(self.tabs));
+        found.push(Destination {
+            group: Group::Pages,
+            icon: Icon::Code,
+            title: "Your apps".into(),
+            trail: Section::Developers.label().into(),
+            terms: "developer console oidc oauth clients applications".into(),
+            href: self.developers.into(),
+            confirms: false,
+        });
+        found.push(Destination::spot(
+            "Your apps",
+            Icon::Code,
+            self.register.to_owned(),
+            Spot::action(
+                "Register an app",
+                "new app create client oauth oidc application",
+                false,
+            ),
+        ));
+        found.extend(self.apps.iter().flat_map(AppLink::destinations));
+        found.extend(self.dashboard.map(|href| Destination {
+            group: Group::Pages,
+            icon: Icon::Shield,
+            title: "Admin dashboard".into(),
+            trail: "Admin".into(),
+            terms: "administrator administration operators".into(),
+            href: href.into(),
+            confirms: false,
+        }));
+        found
+    }
 }
 
 /// A signed-in page of `section`, in the account's shell: the sidebar of `nav`
@@ -143,6 +199,8 @@ pub async fn account<'a>(
         .into_iter()
         .collect();
     Ok(view! {
+        let destinations = nav.destinations();
+        let search = AccountNav::search(&destinations);
         let groups: Vec<_> = [
             Some(NavGroup {
                 label: Some("account"),
@@ -174,7 +232,7 @@ pub async fn account<'a>(
             shortcuts: &shortcuts,
             trail,
             page: title,
-            search: None,
+            search: Some(search),
             preferences,
             preferences_action,
             here,

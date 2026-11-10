@@ -77,13 +77,7 @@ impl AccountPage for Apps {
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
         let clients = web.account.clients(reader.owner()).await?;
-        let links: Vec<_> = clients
-            .iter()
-            .map(|client| AppLink {
-                client: ClientRow::from(client),
-                page: developers::of(APP, &client.id),
-            })
-            .collect();
+        let links: Vec<_> = clients.iter().map(AppLink::from).collect();
         let page = view! { cx =>
             sourceorigin_ui::apps(links: &links, limit: MAX_OWNED_CLIENTS, new: NEW)
         };
@@ -164,6 +158,19 @@ impl AccountPage for NewApp {
         let head = Child::default();
         web.console_page(cx, Self::TITLE, reader, outcome, head, Child::new(page))
             .await
+    }
+}
+
+impl<'a> From<&'a OwnedClientView> for AppLink<'a> {
+    /// The client, linking its pages: a public one has no secrets.
+    fn from(client: &'a OwnedClientView) -> Self {
+        Self {
+            client: ClientRow::from(client),
+            page: developers::of(APP, &client.id),
+            settings: developers::of(APP_SETTINGS, &client.id),
+            secrets: (client.kind == ClientKind::Confidential)
+                .then(|| developers::of(APP_SECRETS, &client.id)),
+        }
     }
 }
 

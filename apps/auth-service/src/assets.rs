@@ -36,12 +36,20 @@ impl EmbeddedAssets {
     /// The picture script, which lets the profile's picture form choose its crop.
     pub(crate) const PICTURE_SCRIPT: Asset =
         Asset::script("picture", include_bytes!("../assets/picture.js"));
+    /// The search script, which ranks the top bar's results as the user types and
+    /// refreshes a live form's results; auth's pages and the dashboard's both
+    /// load it.
+    pub(crate) const SEARCH_SCRIPT: Asset =
+        Asset::script("search", include_bytes!("../assets/search.js"));
     /// The scripts every page of auth's own loads.
-    pub(crate) const SCRIPTS: [Asset; 2] = [Self::SCRIPT, Self::PICTURE_SCRIPT];
+    pub(crate) const SCRIPTS: [Asset; 3] =
+        [Self::SCRIPT, Self::PICTURE_SCRIPT, Self::SEARCH_SCRIPT];
     /// The admin dashboard's script, which confirms it with a passkey in a
     /// dialog on its page. Auth's own pages never load it.
     pub(crate) const DASHBOARD_SCRIPT: Asset =
         Asset::script("dashboard", include_bytes!("../assets/dashboard.js"));
+    /// The scripts every dashboard page loads.
+    pub(crate) const DASHBOARD_SCRIPTS: [Asset; 2] = [Self::DASHBOARD_SCRIPT, Self::SEARCH_SCRIPT];
     /// The files the admin dashboard serves too: the stylesheet and the
     /// typefaces it links.
     pub(crate) const SHARED: [Asset; 4] = [
@@ -57,7 +65,7 @@ impl EmbeddedAssets {
         let asset = Self::SHARED
             .into_iter()
             .chain(Self::SCRIPTS)
-            .chain([Self::DASHBOARD_SCRIPT])
+            .chain(Self::DASHBOARD_SCRIPTS)
             .find(|asset| asset.path() == path)
             .ok_or(AssetError::NotFound)?;
         let headers = [(header::CONTENT_TYPE, asset.content_type())];
@@ -84,6 +92,10 @@ mod tests {
             ),
             (
                 EmbeddedAssets::DASHBOARD_SCRIPT,
+                "text/javascript; charset=utf-8",
+            ),
+            (
+                EmbeddedAssets::SEARCH_SCRIPT,
                 "text/javascript; charset=utf-8",
             ),
             (sourceorigin_ui::FONTS[0], "font/woff2"),

@@ -398,6 +398,7 @@ impl HttpSecurity {
             | Endpoint::Account
             | Endpoint::Page
             | Endpoint::Dashboard
+            | Endpoint::DashboardSearch
             | Endpoint::Unsubscribe
             | Endpoint::Other => false,
         })
@@ -416,7 +417,7 @@ impl HttpSecurity {
         let origin = request.headers().get(header::ORIGIN).cloned();
         let endpoint = match policy.listener {
             Listener::Public => Endpoint::of(&request),
-            Listener::Admin(_) => Endpoint::Dashboard,
+            Listener::Admin(_) => Endpoint::dashboard(&request),
         };
         let slot = policy.admit(endpoint);
         // Set by the origin check, which runs under the deadline; an error response
@@ -501,7 +502,10 @@ impl HttpSecurity {
         if endpoint.is_protocol() {
             return Ok(());
         }
-        if matches!(endpoint, Endpoint::Page | Endpoint::Dashboard) {
+        if matches!(
+            endpoint,
+            Endpoint::Page | Endpoint::Dashboard | Endpoint::DashboardSearch
+        ) {
             let text = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
             let request = BrowserRequest {
                 fetch_site: text(FETCH_SITE_HEADER),

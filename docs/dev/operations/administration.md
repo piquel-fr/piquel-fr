@@ -42,7 +42,8 @@ deployed. In production (for staging, use `--env staging` and its own hosts):
    with the passkey.
 
 Grant further administrators on the dashboard's **Administrators** page, with
-**Grant rights**, or with `admin grant`. `admin list` lists them, oldest grant
+**Grant rights**, whose search lists the accounts as you type, or with
+`admin grant`. `admin list` lists them, oldest grant
 first.
 
 ## Sign in to the admin dashboard
@@ -84,8 +85,19 @@ auth-service user search ali     # by ID, or part of a handle, name or email
 auth-service user show alice     # the account's profile, emails, passkeys, sessions, known browsers and consents
 ```
 
+Both list the closest matches first: the account whose ID, handle or email is
+what you typed, then handles starting with it, then display names with a word
+starting with it. A handle may keep its `@`.
+
+On the dashboard, type into the search box at the top of any page; **/** or
+**Ctrl+K** jumps to it. As you type, it lists the dashboard's pages and
+actions, such as **Rotate the signing key**, then the accounts and clients the
+query finds. Select one, or press **Enter** to open the highlighted result.
+**Every account matching**, at the end, opens the **Users** page with every
+match.
+
 Commands name an account by its handle, its ID, or a verified email of an active
-account. On the dashboard, search on **Users**, then open the account.
+account.
 
 Reading an account is recorded as a view, once an hour per administrator or
 operator, since it shows personal data. Only the audit shows views, not the
@@ -309,8 +321,8 @@ On the dashboard:
 1. Open **Announcements** and select **New announcement**.
 2. Write the **Subject** and **Text**. Choose **Everyone**, or **These
    accounts**: paste a list, one handle, verified email or account ID per line,
-   or type into the search box and select **Find**, then **Add** beside each
-   account. Finding and adding save nothing.
+   or type into the search box, which lists the accounts it finds as you type,
+   then select **Add** beside each account. Finding and adding save nothing.
 3. Turn on **Essential** if every recipient must receive it by email.
 4. Select **Save draft** to check the email first, or **Send** to send it now.
    Saving a draft needs no passkey; sending asks for one.
@@ -402,8 +414,8 @@ auth-service audit list --user alice --views   # with administrators' views of t
 auth-service audit verify                      # recompute the tamper-evident chain
 ```
 
-On the dashboard, the **Events** page lists events, and **Show views** adds the
-views. The **Audit** page shows the last verification, and **Verify now** runs
+On the dashboard, the **Events** page lists events, filtered by a full account
+ID or a kind as you type, and **Show views** adds the views. The **Audit** page shows the last verification, and **Verify now** runs
 another. Auth also verifies the chain on its own once no verification, other
 than one with `--key`, has been recorded for six hours, so the page always shows
 a recent one; `audit verify` and **Verify now** push the next automatic run

@@ -433,6 +433,109 @@ body.admin .main::before {
 .search-box input:focus-visible {
   outline: none;
 }
+/* The top bar's search: its shortcut's hint, then the list of its results below
+   it, which the search script fills and shows as the user types. */
+.topbar .search {
+  position: relative;
+}
+.search-box .search-key {
+  padding: 0 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.search-box:focus-within .search-key {
+  display: none;
+}
+.search[aria-busy='true'] .search-box .icon {
+  animation: searching 0.9s ease-in-out infinite alternate;
+}
+@keyframes searching {
+  to {
+    opacity: 0.35;
+  }
+}
+.results {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max(100%, min(420px, calc(100vw - 2rem)));
+  max-height: min(480px, 70vh);
+  overflow: auto;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+.result-group + .result-group {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--line);
+}
+.result-heading {
+  padding: 0.3rem 0.55rem 0.15rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+.result {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 5px;
+  color: var(--fg);
+  text-decoration: none;
+}
+.result > .icon {
+  flex: none;
+  color: var(--muted);
+}
+.result[aria-selected='true'] {
+  background: var(--accent-soft);
+}
+.result[aria-selected='true'] > .icon {
+  color: var(--accent);
+}
+.result-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.result-title {
+  flex: none;
+  font-size: 0.88rem;
+}
+.result-title mark {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+.result small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.result-title q {
+  font-weight: 600;
+}
+.results-empty {
+  padding: 0.6rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+/* A live form's results that are empty take no room. */
+.live-results:empty {
+  display: none;
+}
 .content {
   flex: 1;
   display: flex;

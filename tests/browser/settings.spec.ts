@@ -1,7 +1,8 @@
 /**
  * Auth's own settings pages: passkeys, which each page tells the password
- * manager about, devices, an email link and signing out; and reporting a passkey
- * in the security history as not the owner's, which signs every other device out.
+ * manager about, devices, an email link and signing out; reporting a passkey in
+ * the security history as not the owner's, which signs every other device out;
+ * and the top bar's search, which finds the settings as the owner types.
  */
 import { expect, test } from '@playwright/test';
 import {
@@ -10,6 +11,7 @@ import {
   expectAccepted,
   recordAcceptedCredentials,
   secondAuthenticator,
+  signedUp,
   signUp
 } from './helpers';
 
@@ -145,4 +147,41 @@ test('reporting a change in the history signs every other device out, and undoes
   await page.getByRole('button', { name: 'Remove passkey “Unknown passkey”', exact: true }).click();
   await expect(page.getByText('The passkey was removed.')).toBeVisible();
   await expect(page.getByText('Unknown passkey', { exact: true })).toHaveCount(0);
+});
+
+/**
+ * The top bar's search ranks the settings and the pages as the owner types,
+ * forgives a typo, and goes where the chosen result leads: to a section of a
+ * page, or to a dialog open on it.
+ */
+test('the top bar finds settings as the owner types', async ({ browser }) => {
+  const page = await signedUp(browser, `search-${Date.now().toString(36)}`);
+  const search = page.getByRole('combobox', { name: 'Search settings and apps' });
+  const results = page.getByRole('listbox', { name: 'Results' });
+  const chosen = results.locator('[aria-selected="true"]');
+  // `/` focuses it from anywhere, and an empty query lists the pages.
+  await page.locator('main').click();
+  await page.keyboard.press('/');
+  await expect(search).toBeFocused();
+  await expect(results.getByRole('option', { name: /Security history/ })).toBeVisible();
+
+  await search.pressSequentially('passk');
+  await expect(chosen).toContainText('Passkeys');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL('/settings/sign-in#passkeys-heading');
+
+  // One letter swapped still finds the page.
+  await search.fill('devcies');
+  await expect(chosen).toContainText('Devices');
+
+  await search.fill('display name');
+  await expect(chosen).toContainText('Change display name');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL('/settings/profile?open=name');
+  await expect(page.getByRole('dialog', { name: 'Change your display name' })).toBeVisible();
+
+  await search.fill('nothing like this');
+  await expect(page.getByText('Nothing matches.', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(results).toBeHidden();
 });

@@ -11,7 +11,8 @@ use crate::{
     },
     developers::{SecretsState, app_secrets},
     form::{Checkbox, Lines},
-    layout::page_head,
+    icons::Icon,
+    layout::{Destination, Group, page_head},
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -28,6 +29,27 @@ pub struct AdminClientRow<'a> {
     pub client: &'a Client,
     /// Its page.
     pub href: String,
+}
+
+impl<'a> From<&'a AdminClientRow<'a>> for Destination<'a> {
+    /// The client as the dashboard's search finds it: by its name, beside its
+    /// ID, and by its ID.
+    fn from(row: &'a AdminClientRow<'a>) -> Self {
+        let id = row.client.id.as_str();
+        Self {
+            group: Group::Clients,
+            icon: Icon::Client,
+            title: if row.client.display_name.is_empty() {
+                id.into()
+            } else {
+                row.client.display_name.as_str().into()
+            },
+            trail: id.into(),
+            terms: "".into(),
+            href: row.href.as_str().into(),
+            confirms: false,
+        }
+    }
 }
 
 /// A client's settings as an operator's form sends them: an owner's, then the
