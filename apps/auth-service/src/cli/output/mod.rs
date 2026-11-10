@@ -248,7 +248,7 @@ impl Output {
 
     /// Prints what a command shows before it asks to go ahead, such as the
     /// recoveries an account had, on standard error, leaving standard output to
-    /// its result.
+    /// its result. Commands pass only what has something to show.
     pub(super) fn context<R: Report + ?Sized>(&self, report: &R) -> Result<(), CliError> {
         if self.0.json {
             let event = Event::Context(serde_json::to_value(report.json())?);

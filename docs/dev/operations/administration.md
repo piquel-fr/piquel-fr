@@ -491,7 +491,7 @@ Each alert says what to look at. Auth raises these:
   goes to standard error: what a change did, as `Info:`, something surprising,
   as `Warning:`, the question before a change, and a failure, as `Error:` with
   each of its causes. Times are in UTC, and colour is used only on a terminal,
-  unless `NO_COLOR` is set.
+  unless `NO_COLOR` is set or `TERM` is `dumb`.
 - `--json` prints the result as JSON for scripts, and each message, question
   and failure as one JSON object per line on standard error, such as
   `{"info":{"message":"Disabled alice and ended its sessions."}}`. A result

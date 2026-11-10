@@ -498,7 +498,7 @@ Commands:
 - [`auth-service client create`](#auth-service-client-create): Register a client. A confidential client's secret is printed once.
 - [`auth-service client apply`](#auth-service-client-apply): Register a client, or update it to match, with the secret its deployment generated: for clients a deployment manages, from its deployment job. Records nothing when the client already matches.
 - [`auth-service client list`](#auth-service-client-list): List every client, deleted ones included.
-- [`auth-service client show`](#auth-service-client-show): Print a client's registration and its secrets' lifetimes as JSON.
+- [`auth-service client show`](#auth-service-client-show): Show a client's registration and its secrets' lifetimes.
 - [`auth-service client update`](#auth-service-client-update): Change a client's registration; what is not given keeps its value.
 - [`auth-service client disable`](#auth-service-client-disable): Stop a client from authorizing, exchanging codes and refreshing tokens.
 - [`auth-service client delete`](#auth-service-client-delete): Delete a client: it stops working at once, its refresh tokens, secrets and consents go, and its ID can never be registered again.
@@ -579,7 +579,7 @@ Options:
 
 ## `auth-service client show`
 
-Print a client's registration and its secrets' lifetimes as JSON.
+Show a client's registration and its secrets' lifetimes.
 
 ```text
 auth-service client show [OPTIONS] <ID>

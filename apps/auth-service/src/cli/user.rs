@@ -182,7 +182,7 @@ impl UserCommand {
             } => {
                 let id = console.user(&user).await?;
                 let recent = service.recent_recoveries(operator, id).await?;
-                out.context(&recent[..])?;
+                Self::show_recent(console, &recent)?;
                 let undoable = recent
                     .iter()
                     .find(|recovery| recovery.state.undoable())
@@ -234,7 +234,7 @@ impl UserCommand {
         let id = console.user(user).await?;
         let links = AuthConfig::recovery_links_from_environment()?;
         let recent = service.recent_recoveries(operator, id).await?;
-        out.context(&recent[..])?;
+        Self::show_recent(console, &recent)?;
         // Refused before asking, rather than after the confirmation;
         // the service refuses too.
         let probation = recent
@@ -264,6 +264,16 @@ impl UserCommand {
                 "Recovering {user}: its primary verified address was sent the link."
             )),
         }
+    }
+
+    /// Shows the account's recent recoveries, if it has any, before another is
+    /// started or one is undone. On standard error, which leaves standard output
+    /// to the new link.
+    fn show_recent(console: &Console, recent: &[RecentRecovery]) -> Result<(), CliError> {
+        if recent.is_empty() {
+            return Ok(());
+        }
+        console.out.context(recent)
     }
 
     /// Schedules the deletion of `user`'s account, or purges it at once when
@@ -304,9 +314,6 @@ impl UserCommand {
 // An account's recent recoveries, newest first, with where each stands and the
 // passkey it enrolled, shown before another is started or one is undone.
 report!([RecentRecovery], self, out, {
-    if self.is_empty() {
-        return Ok(());
-    }
     out.table(
         ["RECOVERY", "STARTED", "STATE", "PASSKEY", "NAME", "ACTIVE"],
         "",

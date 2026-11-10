@@ -29,7 +29,7 @@ pub(super) enum ClientCommand {
     Apply(ApplyClient),
     /// List every client, deleted ones included.
     List,
-    /// Print a client's registration and its secrets' lifetimes as JSON.
+    /// Show a client's registration and its secrets' lifetimes.
     Show {
         /// The client's ID.
         id: ClientId,
