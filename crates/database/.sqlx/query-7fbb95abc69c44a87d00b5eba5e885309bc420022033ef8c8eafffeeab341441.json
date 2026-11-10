@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    u.id AS \"id: UserId\", h.handle AS \"handle: Handle\", u.display_name,\n                    u.status AS \"status: AccountStatus\", p.id AS \"picture?: PictureId\", u.created_at\n                FROM users u\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'\n                WHERE (\n                    $1 = ''\n                    OR u.id::text = lower($1)\n                    OR h.handle ILIKE ('%' || $2 || '%')\n                    OR u.display_name ILIKE ('%' || $2 || '%')\n                    OR EXISTS (\n                        SELECT FROM user_emails e\n                        WHERE e.user_id = u.id\n                        AND e.normalized_email ILIKE ('%' || $2 || '%')\n                    )\n                )\n                ORDER BY\n                    CASE\n                        WHEN $1 = '' THEN 0\n                        WHEN u.id::text = lower($1) OR h.handle = lower($1) THEN 0\n                        WHEN EXISTS (\n                            SELECT FROM user_emails e\n                            WHERE e.user_id = u.id AND e.normalized_email = lower($1)\n                        ) THEN 1\n                        WHEN h.handle ILIKE ($2 || '%') THEN 2\n                        WHEN u.display_name ILIKE ($2 || '%')\n                            OR u.display_name ILIKE ('% ' || $2 || '%') THEN 3\n                        ELSE 4\n                    END,\n                    h.handle, u.id\n                LIMIT $3 OFFSET $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status: AccountStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "picture?: PictureId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7fbb95abc69c44a87d00b5eba5e885309bc420022033ef8c8eafffeeab341441"
+}

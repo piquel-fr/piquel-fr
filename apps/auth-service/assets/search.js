@@ -38,7 +38,7 @@ const ASKED = 2;
 /** An account ID, which the server finds only whole. */
 const ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 /** How long typing pauses before a live form refreshes, in milliseconds. */
-const LIVE_PAUSE = 150;
+const LIVE_PAUSE = 250;
 
 /**
  * `text` lowercased, without accents, as queries and results compare.
@@ -246,8 +246,8 @@ function wireSearch(form) {
   /** @type {HTMLAnchorElement | undefined} */
   let active;
 
-  /** The query as the server is asked it, and its answers are kept by. */
-  const asked = () => input.value.trim().toLowerCase();
+  /** The query as the server reads it, without a handle's `@`, and its answers are kept by. */
+  const asked = () => input.value.trim().toLowerCase().replace(/^@/, '');
 
   /** The results shown, in order. */
   const shown = () => optionsOf(list).filter((option) => !option.closest('[hidden]'));
@@ -380,7 +380,8 @@ function wireSearch(form) {
       const controller = new AbortController();
       asking = controller;
       const url = new URL(suggest, window.location.href);
-      url.searchParams.set('q', input.value.trim());
+      // The query its answer is kept by, so what is asked is what is kept.
+      url.searchParams.set('q', query);
       form.setAttribute('aria-busy', 'true');
       fetch(url, { signal: controller.signal, headers: { accept: 'text/html' } })
         .then(async (response) => {
@@ -503,7 +504,8 @@ function wireLive(input) {
       method: form.method,
       body: get ? null : fields,
       signal: controller.signal,
-      headers: { accept: 'text/html' }
+      // Spends the search budget, not the pages' (`LIVE_HEADER`).
+      headers: { accept: 'text/html', 'x-sourceorigin-live': '1' }
     })
       .then(async (response) => {
         if (!response.ok) return;

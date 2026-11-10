@@ -285,15 +285,24 @@ fn routes_doing_real_work_have_budgets() {
     }
 }
 
-/// The dashboard's top bar search spends a budget of its own, so typing never
-/// costs the dashboard's pages theirs.
+/// The dashboard's searches, the top bar's and a live search's refresh, spend a
+/// budget of their own, so typing never costs the dashboard's pages theirs.
 #[test]
 fn the_dashboard_search_has_its_own_budget() {
-    for (path, budget) in [
-        (crate::routes::dashboard::SEARCH, RateCategory::Search),
-        ("/users", RateCategory::Dashboard),
+    for (path, live, budget) in [
+        (
+            crate::routes::dashboard::SEARCH,
+            false,
+            RateCategory::Search,
+        ),
+        ("/administrators/grant?q=ali", true, RateCategory::Search),
+        ("/users", false, RateCategory::Dashboard),
     ] {
-        let request = HttpRequest::get(path).body(Body::empty()).expect("request");
+        let mut request = HttpRequest::get(path);
+        if live {
+            request = request.header(crate::security::endpoint::LIVE_HEADER, "1");
+        }
+        let request = request.body(Body::empty()).expect("request");
         assert_eq!(
             Endpoint::dashboard(&request).rate_category(),
             Some(budget),

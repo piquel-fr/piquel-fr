@@ -238,36 +238,23 @@ impl SearchAction {
     /// What search finds it by, and whether its page confirms first.
     const fn spot(self) -> Spot {
         match self {
-            Self::GrantAdministrator => Spot::action(
-                Change::GrantAdministrator.title(),
-                "add admin promote make administrator",
-                true,
-            ),
-            Self::Invite => Spot::action(
-                Change::Invite.title(),
-                "create invitation new signup link",
-                true,
-            ),
-            Self::ReserveHandle => Spot::action(
-                Change::ReserveHandle.title(),
-                "block keep protect username trademark",
-                true,
-            ),
+            Self::GrantAdministrator => {
+                Change::GrantAdministrator.spot("add admin promote make administrator")
+            }
+            Self::Invite => Change::Invite.spot("create invitation new signup link"),
+            Self::ReserveHandle => {
+                Change::ReserveHandle.spot("block keep protect username trademark")
+            }
+            // Registering confirms first, as every change of a client does.
             Self::RegisterClient => Spot::action(
                 "Register a client",
                 "new client create oidc oauth app application",
                 true,
             ),
-            Self::RotateSigningKey => Spot::action(
-                Change::RotateSigningKey.title(),
-                "new key jwks rotate",
-                true,
-            ),
-            Self::DraftAnnouncement => Spot::action(
-                Change::DraftAnnouncement.title(),
-                "draft write send broadcast email everyone",
-                false,
-            ),
+            Self::RotateSigningKey => Change::RotateSigningKey.spot("new key jwks rotate"),
+            Self::DraftAnnouncement => {
+                Change::DraftAnnouncement.spot("draft write send broadcast email everyone")
+            }
         }
     }
 
@@ -767,6 +754,12 @@ impl Change {
             self,
             Self::DraftAnnouncement | Self::EditAnnouncement | Self::DiscardAnnouncement
         )
+    }
+
+    /// Its page, as the top bar's search finds it, by its title and `terms`,
+    /// confirming first as its page does.
+    const fn spot(self, terms: &'static str) -> Spot {
+        Spot::action(self.title(), terms, self.confirms())
     }
 
     /// Whether it takes something away, which its buttons show.

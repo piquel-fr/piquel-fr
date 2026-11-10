@@ -403,7 +403,7 @@ impl UserRepository<'_> {
                 JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
                 WHERE (
                     $1 = ''
-                    OR u.id::text = $1
+                    OR u.id::text = lower($1)
                     OR h.handle ILIKE ('%' || $2 || '%')
                     OR u.display_name ILIKE ('%' || $2 || '%')
                     OR EXISTS (
@@ -419,8 +419,8 @@ impl UserRepository<'_> {
         Ok(count.try_into().unwrap_or_default())
     }
 
-    /// Lists up to `limit` accounts whose ID equals `query`, or whose handle,
-    /// display name or any email contains it, ignoring case, skipping the first
+    /// Lists up to `limit` accounts whose ID is `query`, or whose handle,
+    /// display name or any email contains it, ignoring case throughout, skipping the first
     /// `offset` matches. An empty query matches every account. The closest
     /// matches come first: the account whose ID or handle is the query, then the
     /// one whose email is, then handles starting with it, then display names
@@ -449,7 +449,7 @@ impl UserRepository<'_> {
                 LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'
                 WHERE (
                     $1 = ''
-                    OR u.id::text = $1
+                    OR u.id::text = lower($1)
                     OR h.handle ILIKE ('%' || $2 || '%')
                     OR u.display_name ILIKE ('%' || $2 || '%')
                     OR EXISTS (
@@ -461,7 +461,7 @@ impl UserRepository<'_> {
                 ORDER BY
                     CASE
                         WHEN $1 = '' THEN 0
-                        WHEN u.id::text = $1 OR h.handle = lower($1) THEN 0
+                        WHEN u.id::text = lower($1) OR h.handle = lower($1) THEN 0
                         WHEN EXISTS (
                             SELECT FROM user_emails e
                             WHERE e.user_id = u.id AND e.normalized_email = lower($1)

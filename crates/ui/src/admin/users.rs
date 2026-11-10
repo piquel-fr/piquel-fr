@@ -50,11 +50,7 @@ impl<'a> From<&'a UserRow<'a>> for Destination<'a> {
     fn from(row: &'a UserRow<'a>) -> Self {
         Self {
             group: Group::Accounts,
-            icon: if row.administrator {
-                Icon::Shield
-            } else {
-                Icon::Profile
-            },
+            icon: Icon::Profile,
             title: format!("@{}", row.user.handle).into(),
             trail: row.user.display_name.as_str().into(),
             terms: row.user.id.to_string().into(),

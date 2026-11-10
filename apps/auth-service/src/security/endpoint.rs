@@ -4,6 +4,11 @@
 use crate::routes::{ACCOUNT_PREFIX, audit, dashboard, oidc, page, passkey, pictures, service};
 use axum::extract::{MatchedPath, Request};
 
+/// The header the search script sends with a live search's refresh, which spends
+/// the search budget rather than the pages'. A client gains nothing by sending it
+/// with other requests: each budget is as small as the other.
+pub(super) const LIVE_HEADER: &str = "x-sourceorigin-live";
+
 /// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
 /// classification, so it must list every route that differs from `Other`.
 #[derive(Clone, Copy)]
@@ -34,8 +39,9 @@ pub(super) enum Endpoint {
     /// The admin dashboard's pages, the admin listener's routes, and the forms
     /// they post.
     Dashboard,
-    /// What the dashboard's top bar finds as the administrator types, on a budget
-    /// of its own, so typing never costs the pages theirs.
+    /// What the dashboard's searches find as the administrator types, the top
+    /// bar's and the live ones', on a budget of its own, so typing never costs
+    /// the pages theirs.
     DashboardSearch,
     /// Passkey sign-in on the pages of approved related origins, without cookies.
     RelatedLogin,
@@ -60,9 +66,12 @@ impl Endpoint {
         )
     }
 
-    /// Classifies a request to the admin listener: the top bar's search, or a page.
+    /// Classifies a request to the admin listener: the top bar's search, a live
+    /// search refreshing its page's results, which the search script marks with
+    /// [`LIVE_HEADER`], or a page.
     pub(super) fn dashboard(request: &Request) -> Self {
-        if request.uri().path() == dashboard::SEARCH {
+        if request.uri().path() == dashboard::SEARCH || request.headers().contains_key(LIVE_HEADER)
+        {
             Self::DashboardSearch
         } else {
             Self::Dashboard
@@ -158,7 +167,7 @@ sourceorigin_common::str_enum! {
         Page = "page",
         /// The admin dashboard's pages and forms.
         Dashboard = "dashboard",
-        /// What the dashboard's top bar finds, asked for as the administrator types.
+        /// What the dashboard's searches find, asked for as the administrator types.
         Search = "search",
         /// Reads of the public audit checkpoints.
         Audit = "audit",

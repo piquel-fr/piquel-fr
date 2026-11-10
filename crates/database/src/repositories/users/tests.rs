@@ -219,4 +219,11 @@ async fn search_lists_the_closest_accounts_first() {
     let found: Vec<_> = found.iter().map(|user| user.id).collect();
     let expected: Vec<_> = expected.iter().map(|input| input.id).collect();
     assert_eq!(found, expected);
+    // An ID matches whole, in either case, as one pasted from elsewhere.
+    let pasted = expected[1].to_string().to_uppercase();
+    let found = UserRepository::from_pool(&pool)
+        .search(&pasted, 0, 10)
+        .await
+        .expect("search by ID");
+    assert_eq!(found.first().map(|user| user.id), Some(expected[1]));
 }

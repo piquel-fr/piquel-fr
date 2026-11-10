@@ -44,7 +44,8 @@ has two letters, unless a shorter query it contains found nothing. It answers
 with the accounts and clients the query finds, in the same markup, and spends a
 budget of its own (see [rate limit](request-lifecycle.md#rate-limit)). A search field marked
 `data-live` refreshes its form's results as the user types, by submitting the
-form in the background and swapping in the regions it names. Without the
+form in the background and swapping in the regions it names; on the dashboard,
+these refreshes spend the search budget too. Without the
 script, the dashboard's search goes to **Users**, and the settings' search is
 hidden: the sidebar still reaches every page.
 
