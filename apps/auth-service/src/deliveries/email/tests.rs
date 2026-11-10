@@ -829,3 +829,102 @@ async fn a_messages_email_is_its_preview() {
     };
     assert_eq!(email.headers().get_raw("List-Unsubscribe"), None);
 }
+
+/// Every kind of email, as its recipient reads it: its subject, then its
+/// plain-text and HTML bodies. A change to what any of them says shows in its
+/// snapshot under `snapshots/`.
+#[test]
+fn every_email_reads_as_its_snapshot() {
+    let link = |path: &str| format!("https://auth.sourceorigin.dev{path}");
+    let handle = Handle::parse("ada").expect("handle");
+    let written = "First line.\nSecond line.\n\nWrite to <support@example.com>.";
+    let contents = [
+        (
+            "verify_address",
+            Content::VerifyAddress {
+                address: "ada@example.com".into(),
+                handle: handle.clone(),
+                link: link("/settings/emails/verify#token=TOKEN"),
+                hours: 24,
+            },
+        ),
+        (
+            "recovery_link",
+            Content::RecoveryLink {
+                address: "ada@example.com".into(),
+                handle,
+                link: link("/recover#token=TOKEN"),
+                hours: 72,
+                undo: link("/recover/undo#recovery=RECOVERY"),
+            },
+        ),
+        (
+            "notification_recovered",
+            Content::Notification {
+                address: "ada@example.com".into(),
+                subject: Notification::Recovered.subject().to_owned(),
+                body: Notification::Recovered.body(),
+                page: link("/settings/notifications/NOTIFICATION"),
+                undo: Some(link("/recover/undo#recovery=RECOVERY")),
+                alerts: None,
+                sign_out: Some(link("/sign-out#token=TOKEN")),
+            },
+        ),
+        (
+            "notification_alert",
+            Content::Notification {
+                address: "ada@example.com".into(),
+                subject: "Alert: The audit chain is broken".into(),
+                body: "A verification found the chain broken.".into(),
+                page: link("/settings/notifications/NOTIFICATION"),
+                undo: None,
+                alerts: Some("https://admin.sourceorigin.dev/alerts".into()),
+                sign_out: None,
+            },
+        ),
+        (
+            "message",
+            Content::message(
+                "ada@example.com".into(),
+                "About your account".into(),
+                written.into(),
+                &AUTH_ORIGIN.parse().expect("origin"),
+            ),
+        ),
+        (
+            "announcement",
+            Content::announcement(
+                "ada@example.com".into(),
+                Announced {
+                    subject: "News".into(),
+                    body: written.into(),
+                    everyone: true,
+                    unsubscribe: Some(link("/unsubscribe?account=ACCOUNT&token=TOKEN")),
+                },
+                &AUTH_ORIGIN.parse().expect("origin"),
+            ),
+        ),
+        (
+            "announcement_essential",
+            Content::announcement(
+                "ada@example.com".into(),
+                Announced {
+                    subject: "Our terms changed".into(),
+                    body: written.into(),
+                    everyone: false,
+                    unsubscribe: None,
+                },
+                &AUTH_ORIGIN.parse().expect("origin"),
+            ),
+        ),
+    ];
+    for (name, content) in contents {
+        let text = Text { content: &content }.render().expect("text");
+        let html = Html { content: &content }.render().expect("HTML");
+        let read = format!(
+            "Subject: {}\n\n--- text/plain ---\n{text}\n\n--- text/html ---\n{html}\n",
+            content.subject()
+        );
+        insta::assert_snapshot!(name, read);
+    }
+}
