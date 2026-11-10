@@ -6,14 +6,15 @@
 #   web    -> Prettier, tsc, ESLint and knip, the passkey script included, the
 #             TypeScript SDK's package checks, tests with coverage and runtime
 #             smoke in Node, Bun and workerd, and the web dependency audit
-#   rust   -> Clippy, unit and database tests against PostgreSQL with
-#             coverage, doc tests, and the SQLx query cache checked to match
-#             the migrated schema exactly
+#   rust   -> unit and database tests against PostgreSQL with coverage, and
+#             the SQLx query cache checked to match the migrated schema exactly
+#   rust-lint -> Clippy, rustdoc with warnings denied, and the doc tests
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
 #             with the admin dashboard on its own listener and host, sourceorigin.dev's
 #             web server on its own host, Mailpit receiving auth's email, and
 #             the binary's CLI granting administrators and recovering accounts
-#   docker -> the deployment images: auth, sourceorigin.dev's web server and the docs
+#   docker -> the deployment images: auth, sourceorigin.dev's web server and the docs,
+#             the Rust ones with their layers cached
 #   infra  -> the piqueld manifests, by piquelctl, and the telemetry configs,
 #             each by the image that runs it
 #   docs   -> the documentation book, built with warnings denied, with every
@@ -29,9 +30,10 @@
 # and passes when the rest succeeded or were skipped. audit.yml audits new
 # advisories weekly.
 #
-# Rust caches are saved from main only. Pull requests restore main's caches,
-# so a branch never evicts them with copies no other branch can read. pnpm's
-# small store cache is saved whenever its lockfile hash is new.
+# Rust caches, and the Rust images' layers, are saved from main only. Pull
+# requests restore main's caches, so a branch never evicts them with copies no
+# other branch can read. pnpm's small store cache is saved whenever its lockfile
+# hash is new.
 
 name: CI
 
@@ -153,9 +155,31 @@ jobs:
       - if: needs.changes.outputs.deps == 'true'
         run: just web audit
 
-  # Clippy runs first so lint failures report early; the doc tests then reuse
-  # the dependencies it compiled for build scripts and proc macros. Coverage
-  # builds its own instrumented copy of everything, in target/llvm-cov-target.
+  # Clippy, rustdoc and the doc tests, beside `rust`: its coverage builds an
+  # instrumented copy of everything, in target/llvm-cov-target, which they cannot
+  # reuse. The doc tests reuse the dependencies Clippy compiled for build scripts
+  # and proc macros.
+  rust-lint:
+    name: rust-lint
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - *install-just
+      - &rust-cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          # rust-cache's key ignores this workflow, but includes the job's ID.
+          # Bump the prefix when a job needs a new cache, as when rust began
+          # installing sqlx-cli.
+          prefix-key: v1-rust
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: just rust lint
+      - run: just doc
+      - run: just doc-test
+
   rust:
     name: rust
     needs: changes
@@ -178,18 +202,11 @@ jobs:
       - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
         with:
           tool: just,cargo-nextest,cargo-llvm-cov
-      - &rust-cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          # rust-cache's key ignores this workflow. Bump the prefix when a job
-          # needs a new cache, as when rust began installing sqlx-cli.
-          prefix-key: v1-rust
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - *rust-cache
       # sqlx-cli publishes no prebuilt binaries. rust-cache keeps binaries
       # installed after it restores, so this compiles when main's cache lacks
       # the latest release, until main next saves a cache.
       - run: just db install-sqlx
-      - run: just rust lint
       # Every unit and database test, instrumented. Coverage is reported, not
       # enforced: per crate in the log, per line in the rust-coverage artifact.
       # cargo-llvm-cov adds the llvm-tools-preview component it needs.
@@ -203,8 +220,6 @@ jobs:
       # breaks a cached query fails here even if no test runs that query, as
       # does a cached query the code no longer uses.
       - run: just db prepare-check
-      - run: just doc
-      - run: just doc-test
 
   e2e:
     name: e2e
@@ -325,9 +340,25 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - run: docker build --file infra/auth.Dockerfile .
-      - run: docker build --file infra/web.Dockerfile .
       - run: docker build --file infra/docs.Dockerfile .
+      # Both Rust targets share the `backend` stage, which builds once. A build
+      # restores main's layers, so only what changed since main recompiles:
+      # usually just the workspace's own crates, after cargo-chef's dependencies.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/rust.Dockerfile
+          target: auth
+          cache-from: type=gha,scope=auth
+          cache-to: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'chore/speed-up-ci') && 'type=gha,mode=max,scope=auth,ignore-error=true' || '' }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/rust.Dockerfile
+          target: web
+          cache-from: type=gha,scope=web
+          cache-to: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'chore/speed-up-ci') && 'type=gha,mode=max,scope=web,ignore-error=true' || '' }}
 
   # piquelctl publishes no prebuilt binaries either. rust-cache keeps it as it
   # keeps sqlx-cli in `rust`, and `cargo install` upgrades it when a newer
@@ -365,6 +396,7 @@ jobs:
       - checks
       - web
       - rust
+      - rust-lint
       - e2e
       - docker
       - infra
@@ -374,5 +406,5 @@ jobs:
     steps:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
-          allowed-skips: checks, web, rust, e2e, docker, infra
+          allowed-skips: checks, web, rust, rust-lint, e2e, docker, infra
           jobs: ${{ toJSON(needs) }}

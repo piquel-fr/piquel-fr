@@ -238,7 +238,8 @@ repository = "self"
 
 [spec.services.source.build]
 type = "docker"
-dockerfile = "infra/auth.Dockerfile"
+dockerfile = "infra/rust.Dockerfile"
+target = "auth"
 
 [spec.services.environment]
 # Plaintext stays on the application's private network, which ingress cannot reach.
@@ -319,7 +320,8 @@ repository = "self"
 
 [spec.services.source.build]
 type = "docker"
-dockerfile = "infra/web.Dockerfile"
+dockerfile = "infra/rust.Dockerfile"
+target = "web"
 
 [spec.services.environment]
 WEB_LISTENER = "0.0.0.0:8080"

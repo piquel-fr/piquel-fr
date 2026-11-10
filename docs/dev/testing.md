@@ -161,9 +161,10 @@ CI runs the same recipes, in these jobs:
 | --- | --- |
 | `checks` | `just rust fmt-check`, `just rust unused`, and `just rust audit` when dependencies change |
 | `web` | `just web fmt-check`, `check`, `lint`, `unused`, `test` and `smoke`, and `just web audit` when dependencies change |
-| `rust` | `just rust lint`, `just coverage` against a PostgreSQL 18 service, `just db prepare-check`, `just doc` and `just doc-test` |
+| `rust` | `just coverage` against a PostgreSQL 18 service, then `just db prepare-check` |
+| `rust-lint` | `just rust lint`, `just doc` and `just doc-test` |
 | `e2e` | The browser suite, against the debug binary behind Caddy, with Mailpit receiving auth's email and sourceorigin.dev's web server on its own host |
-| `docker` | Builds the auth, web and docs images |
+| `docker` | Builds the auth, web and docs images, the first two from the layers `main` cached last |
 | `infra` | `just infra check`, with the latest piquelctl |
 | `docs` | `just docs` |
 

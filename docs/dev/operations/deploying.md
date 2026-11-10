@@ -360,9 +360,9 @@ always exits within 9 seconds:
 
 ## sourceorigin.dev
 
-The `web` service (`apps/web`, built by `infra/web.Dockerfile`) serves
-sourceorigin.dev's homepage at `/`, the privacy policy at `/privacy` and the terms of
-service at `/terms`. Google's OAuth branding links the policies, and so do
+The `web` service (`apps/web`, built by the `web` target of
+`infra/rust.Dockerfile`) serves sourceorigin.dev's homepage at `/`, the privacy
+policy at `/privacy` and the terms of service at `/terms`. Google's OAuth branding links the policies, and so do
 auth's pages (`AUTH_WEB_ORIGIN`). It keeps no state, so it has no database or
 secret, and any number of replicas can serve it.
 
