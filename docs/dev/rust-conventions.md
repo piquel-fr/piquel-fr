@@ -299,6 +299,8 @@ Return explicit `thiserror` errors. Preserve sources with `#[source]` or `#[from
 use `?` when a conversion already exists. Do not use `Result<_, ()>` or production
 `expect`, `unwrap` or `panic!`. Drop a source only when it contains a secret or
 can quote personal data, and explain that exception in the code. Gate test helpers with `#[cfg(test)]`.
+Clippy enforces this: it denies `unwrap`, `todo!` and `unimplemented!`
+everywhere, and `expect`, `panic!` and `dbg!` outside tests (`clippy.toml`).
 
 Helpers return the feature's domain error. Browser handlers return `ApiError`
 through `From<DomainError>`; that exhaustive mapping owns public statuses and

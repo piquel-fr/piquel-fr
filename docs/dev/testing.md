@@ -148,7 +148,8 @@ expressions included.
 | Any command against a scratch cluster | `just db scratch -- psql` |
 | Browser tests, against a running deployment | `just web test-browser` |
 | Register the browser tests' clients with auth on `localhost` | `just web browser-client` |
-| Dependency audits (cargo-deny and pnpm) | `just audit` (`just rust audit` / `just web audit`) |
+| Dependency audits: cargo-deny's advisories, licenses, `*` requirements and sources other than crates.io, and pnpm's | `just audit` (`just rust audit` / `just web audit`) |
+| Validate the piqueld manifests with piquelctl, and the telemetry configs with the images that run them (needs Docker) | `just infra check` |
 | Regenerate the query cache, the SDK vectors, the TypeScript SDK's wire types, or the generated documentation | `just db prepare` / `just sdk-vectors` / `just sdk-types` / `just docs reference` |
 | Build the book and check its links | `just docs` |
 
@@ -163,12 +164,15 @@ CI runs the same recipes, in these jobs:
 | `rust` | `just rust lint`, `just coverage` against a PostgreSQL 18 service, `just db prepare-check`, `just doc` and `just doc-test` |
 | `e2e` | The browser suite, against the debug binary behind Caddy, with Mailpit receiving auth's email and sourceorigin.dev's web server on its own host |
 | `docker` | Builds the auth, web and docs images |
+| `infra` | `just infra check`, with the latest piquelctl |
 | `docs` | `just docs` |
 
 A pull request runs only the jobs its changes can affect, by the paths it changes:
-Rust jobs for Rust code, the web job for files Prettier, ESLint or tsc can see,
-and `e2e` and `docker` for anything the service, its images, the TypeScript SDK
-or the browser suite is built from. Changes to Markdown alone run only `docs`, which runs on every
+Rust jobs for Rust code and the files it reads, such as the committed audit keys
+and the generated reference pages, the web job for files Prettier, ESLint or tsc
+can see, `e2e` and `docker` for anything the service, its images, the TypeScript
+SDK or the browser suite is built from, and `infra` for the manifests and the
+telemetry configs. Other Markdown changes run only `docs`, which runs on every
 pull request, since a change anywhere can break a link to it. The `changes` job
 in [ci.yml](https://github.com/sourceorigin-dev/sourceorigin/blob/main/.github/workflows/ci.yml)
 has the exact filters.

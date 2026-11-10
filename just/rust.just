@@ -24,8 +24,11 @@ lint:
 unused:
     @cargo machete
 
+# Advisories, licenses, wildcard requirements and sources other than crates.io,
+# as deny.toml configures them. Every feature is on, so the audit covers what
+# the SDKs' features pull in even when no workspace crate enables them.
 audit:
-    @cargo deny check advisories licenses
+    @cargo deny --all-features check
 
 # Build auth-service and sourceorigin-web; pass `--release` for release.
 [positional-arguments]

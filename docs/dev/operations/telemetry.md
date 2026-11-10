@@ -112,7 +112,9 @@ This runs Grafana's all-in-one OpenTelemetry backend, with both dashboards, at
 | `loki` | `grafana/loki` | Logs, received over OTLP, kept 30 days |
 | `grafana` | `grafana/grafana` | Dashboards at `grafana.sourceorigin.dev` |
 
-Their configuration is in `infra/telemetry/`, mounted as piqueld files.
+Their configuration is in `infra/telemetry/`, mounted as piqueld files. CI checks
+the collector's, Prometheus's, Loki's and Tempo's with their own validators, in
+the images `infra/telemetry.toml` runs, and so does `just infra check`.
 
 ## Dashboards
 
