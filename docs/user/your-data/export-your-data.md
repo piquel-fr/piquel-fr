@@ -44,7 +44,8 @@ downloaded".
   announcements you received,
 - every event recorded about your account, as stored: what your security
   history shows, and also failed sign-ins, passkey confirmations and sign-ins
-  to apps, with the IP address and browser while they are kept,
+  to apps, with the IP address and browser while they are kept, except for
+  changes SourceOrigin support made,
 - whether you are an administrator, and since when.
 
 What you removed, such as a passkey or a signed-out device, is in the file

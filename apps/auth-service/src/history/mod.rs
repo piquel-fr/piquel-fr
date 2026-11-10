@@ -76,10 +76,12 @@ pub(crate) struct HistoryItem<E = HistoryEntry> {
     pub(crate) reason: Option<String>,
     /// The application involved, if any.
     pub(crate) client: Option<ClientView>,
-    /// The request's IP address, while kept.
+    /// The request's IP address, while kept; never an administrator's or
+    /// operator's.
     pub(crate) ip: Option<IpAddr>,
-    /// The request's browser and platform, while kept. Entries recorded before
-    /// platforms were have `other` for theirs.
+    /// The request's browser and platform, while kept; never an administrator's
+    /// or operator's. Entries recorded before platforms were have `other` for
+    /// theirs.
     pub(crate) device: Option<UserAgentFamily>,
     /// Whether retention or a purge deleted the IP address and device.
     pub(crate) erased: bool,
@@ -103,7 +105,9 @@ struct Report {
 
 impl<E> HistoryItem<E> {
     /// `stored`, saying what happened with `entry`. `clients` maps client IDs to
-    /// their names.
+    /// their names. An administrator's or operator's change shows no IP address
+    /// or device: they are the administrator's own, which only the admin views
+    /// show.
     pub(crate) fn with(
         stored: &StoredEvent,
         clients: &BTreeMap<ClientId, String>,
@@ -116,15 +120,17 @@ impl<E> HistoryItem<E> {
                 name: clients.get(id).cloned(),
                 id: id.clone(),
             });
-        let (origin, erased) = match &stored.origin {
-            Personal::Value(origin) => (*origin, false),
-            Personal::Erased => (RequestOrigin::default(), true),
+        let actor = HistoryActor::from(&stored.actor);
+        let (origin, erased) = match (actor, &stored.origin) {
+            (HistoryActor::Admin | HistoryActor::Operator, _) => (RequestOrigin::default(), false),
+            (_, Personal::Value(origin)) => (*origin, false),
+            (_, Personal::Erased) => (RequestOrigin::default(), true),
         };
         Self {
             id: stored.id,
             occurred_at: stored.occurred_at,
             entry,
-            actor: HistoryActor::from(&stored.actor),
+            actor,
             reason: stored.reason.clone(),
             client,
             ip: origin.client_ip,

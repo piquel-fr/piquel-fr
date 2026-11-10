@@ -129,7 +129,8 @@ fn reason() -> Reason {
 /// An administrator renames and removes another account's passkey and unlinks its
 /// identity, with the owner's own operations. Each change is recorded as the
 /// administrator's, with the reason as personal data, and the owner sees who
-/// acted and why in their history.
+/// acted and why in their history, but never the administrator's address or
+/// browser.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_change_another_account_on_its_behalf() {
@@ -202,6 +203,19 @@ async fn administrators_change_another_account_on_its_behalf() {
         .expect("the rename");
     assert_eq!(entry["actor"], "admin");
     assert_eq!(entry["reason"], REASON);
+    // The administrator's own address and browser stay with the admin views; the
+    // owner's own entries keep theirs.
+    assert!(
+        entry["ip"].is_null() && entry["device"].is_null(),
+        "{entry}"
+    );
+    let signed_in = page["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .find(|entry| entry["kind"] == "session.signed_in")
+        .expect("the owner's sign-in");
+    assert!(!signed_in["ip"].is_null(), "{signed_in}");
 }
 
 /// The owner and an administrator change the display name with the same
