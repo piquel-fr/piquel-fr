@@ -912,7 +912,9 @@ async fn forged_checkpoints_are_passed_over_and_not_served() {
     fixture.seal().await;
     let newest = fixture.database.audit().newest_checkpoints(None, 1).await;
     let newest = newest.expect("checkpoints").remove(0);
-    assert_eq!(newest.position, 8);
+    // Past the event just recorded, and the first signing key's generation and
+    // activation, which the router's start recorded as the rotation job's.
+    assert_eq!(newest.position, 10);
     fixture.keys.verifiers.open(&newest.note).expect("signed");
     assert_eq!(
         fixture.broken().await,
