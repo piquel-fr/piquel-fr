@@ -1,13 +1,12 @@
-//! Recording, personal data, the consumer cursor and the audit log import.
+//! Recording, personal data and the audit log import.
 use super::*;
 use crate::{Database, DatabaseTransaction};
 use sourceorigin_common::{
-    PasskeyId, Provider,
+    Provider,
     clients::RelatedOrigin,
     events::{RecordedOrigin, RevocationReason},
 };
 use sqlx::{PgConnection, PgPool};
-use std::time::Duration;
 
 /// Inserts an active account to be the subject of recorded events.
 async fn insert_user(pool: &PgPool) -> UserId {
@@ -135,70 +134,6 @@ async fn personal_data_is_stored_apart_and_erases() {
     );
     assert_eq!(erased.origin, Personal::Erased);
     assert_eq!(erased.reason, None);
-}
-
-/// Reads `user`'s events from `consumer`'s cursor until `count` arrived,
-/// acknowledging everything read. Other tests write events concurrently, and their
-/// open transactions can briefly hold the stream back.
-async fn consume(
-    pool: &PgPool,
-    consumer: &'static str,
-    user: UserId,
-    count: usize,
-) -> Vec<DomainEvent> {
-    let mut events = Vec::new();
-    for _ in 0..100 {
-        let batch = EventRepository::from_pool(pool)
-            .read_after(consumer, 100)
-            .await
-            .expect("read");
-        let Some(last) = batch.last().map(|event| event.cursor) else {
-            if events.len() >= count {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            continue;
-        };
-        events.extend(
-            batch
-                .into_iter()
-                .filter(|event| event.subject == Some(user))
-                .map(|event| event.event.known().cloned().expect("a known event")),
-        );
-        EventRepository::from_pool(pool)
-            .acknowledge(consumer, last)
-            .await
-            .expect("acknowledge");
-    }
-    events
-}
-
-/// An event that commits after a later one is still read, and before it: the
-/// consumer waits for the earlier transaction instead of skipping its event.
-#[tokio::test]
-#[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn read_after_never_skips_an_event_committed_out_of_order() {
-    let pool = Database::test_pool().await;
-    let user = insert_user(&pool).await;
-    let consumer: &'static str = format!("test-{user}").leak();
-    consume(&pool, consumer, user, 0).await;
-    let added = || DomainEvent::PasskeyAdded {
-        passkey_id: PasskeyId::new(),
-    };
-    let (first, second) = (added(), added());
-
-    let mut earlier = DatabaseTransaction::new(pool.begin().await.expect("earlier"));
-    earlier
-        .record(&context(user), Some(user), first.clone())
-        .await
-        .expect("record first");
-    record(&pool, user, second.clone()).await;
-    assert!(
-        consume(&pool, consumer, user, 0).await.is_empty(),
-        "the committed event waits for the earlier transaction"
-    );
-    earlier.commit().await.expect("commit earlier");
-    assert_eq!(consume(&pool, consumer, user, 2).await, [first, second]);
 }
 
 /// An event whose payload an older release could not decode is written in its

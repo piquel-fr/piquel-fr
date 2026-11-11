@@ -35,8 +35,8 @@ impl Limit {
     pub(crate) const LOCK: Self = Self::new("lock_timeout", Duration::from_secs(5));
     /// Longest a session may sit idle inside a transaction. `PostgreSQL` then ends
     /// the session, so a forgotten transaction cannot keep its locks and its
-    /// connection, or hold back the event consumers and the audit sealer, which
-    /// wait for every older transaction to end.
+    /// connection, or hold back the audit sealer, which waits for every older
+    /// transaction to end.
     pub(crate) const IDLE_IN_TRANSACTION: Self = Self::new(
         "idle_in_transaction_session_timeout",
         Duration::from_secs(30),

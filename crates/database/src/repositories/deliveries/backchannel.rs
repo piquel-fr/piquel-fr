@@ -29,8 +29,8 @@ impl Channel for BackchannelLogout {
     /// The token is signed afresh on every attempt, from the recipient alone.
     type Payload = ();
 
-    /// One unordered delivery per client of a revoked session with a back-channel
-    /// logout URI; deliveries are idempotent, so none waits for another.
+    /// One delivery per client of a revoked session with a back-channel logout
+    /// URI.
     async fn deliveries(
         event: &DomainEvent,
         _: Option<UserId>,
@@ -53,7 +53,6 @@ impl Channel for BackchannelLogout {
                     sid: *session_id,
                 },
                 payload: (),
-                ordering_key: None,
             })
             .collect())
     }

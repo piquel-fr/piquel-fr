@@ -93,11 +93,11 @@ repositories! {
     emails: EmailRepository;
     /// Browser sessions, their cookie digests and passkey confirmations.
     sessions: SessionRepository;
-    /// Typed domain events, their personal data and consumer cursors.
+    /// Typed domain events and their personal data.
     events: EventRepository;
     /// The audit chain over sealed events, its checkpoints and anchor.
     audit: AuditRepository;
-    /// Outbound deliveries, their leases and ordering.
+    /// Outbound deliveries and their leases.
     deliveries: DeliveryRepository;
     /// Passkey credentials and `WebAuthn` ceremony state.
     passkeys: PasskeyRepository;
@@ -203,9 +203,10 @@ macro_rules! run {
     }};
 }
 
-/// A checked `sqlx::query_as!` over `domain_events e` in the safe consumer order,
-/// the one rule every cursor-style reader of the stream follows: `$query` selects and
-/// filters, the macro adds the rule, and `$tail` follows it (`LIMIT`, row locks), e.g.
+/// A checked `sqlx::query_as!` over `domain_events e` in the safe order, the rule
+/// every reader that follows the stream, such as the audit sealer, keeps to:
+/// `$query` selects and filters, the macro adds the rule, and `$tail` follows it
+/// (`LIMIT`, row locks), e.g.
 /// `in_safe_order!(Row, "SELECT e.id FROM domain_events e WHERE true", "LIMIT $1", 10)`.
 ///
 /// Sequence order alone is not safe: a transaction can take sequence 10 and commit
@@ -375,7 +376,7 @@ pub(crate) mod deletions;
 pub(crate) mod deliveries;
 /// Verified email ownership and primary-address persistence.
 pub(crate) mod emails;
-/// Typed domain events, personal data and the consumer cursor.
+/// Typed domain events and their personal data.
 pub(crate) mod events;
 /// An account's records its data export reads in full.
 pub(crate) mod exports;

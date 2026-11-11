@@ -2,8 +2,8 @@
 
 This guide adds a channel to the outbound delivery queue: a kind of message auth
 sends to another system, such as an audit witness's checkpoints. The queue
-already gives every channel its guarantees, retries, leases, ordering, metrics
-and operations; a channel supplies what it stores and how it sends.
+already gives every channel its guarantees, retries, leases, metrics and
+operations; a channel supplies what it stores and how it sends.
 [The delivery queue](../architecture/delivery-queue.md) describes how the queue
 works.
 
@@ -27,8 +27,8 @@ Decide:
 
 - **What a send needs.** A delivery copies it when it is created, so a send
   never reads rows that may have changed or gone since.
-- **Whether receivers need deliveries in order.** An ordered delivery that fails
-  holds back every later one with its key, so order only what must be.
+- **Whether receivers can take deliveries in any order.** The queue sends each
+  delivery on its own, and a retry can arrive after a later delivery.
 - **How a receiver recognizes a repeat.** Delivery is at least once, so every
   attempt of a delivery carries the same delivery ID.
 
@@ -46,7 +46,7 @@ impl Channel for BackchannelLogout {
     type Recipient = LogoutRecipient; // client_id, sub, sid
     type Payload = ();
 
-    /// One unordered delivery per client of a revoked session with a
+    /// One delivery per client of a revoked session with a
     /// back-channel logout URI.
     async fn deliveries(
         event: &DomainEvent,
@@ -69,9 +69,7 @@ impl Channel for BackchannelLogout {
 - `deliveries` receives the event, its subject, and the notification it just gave
   the subject, if any, which the `email` channel sends. It runs inside the
   event's transaction, so it sees the rows as the change left them.
-- Each `NewDelivery` names its `destination`, an endpoint URL or an address,
-  and its `ordering_key`: `None` for unordered deliveries, as both channels
-  today have.
+- Each `NewDelivery` names its `destination`, an endpoint URL or an address.
 
 Declare the module in `deliveries/mod.rs`, and export the channel and its
 recipient from the crate root, `crates/database/src/lib.rs`, beside

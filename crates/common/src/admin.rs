@@ -942,8 +942,6 @@ pub struct DeliverySummary {
     pub status: DeliveryStatus,
     /// Attempts so far.
     pub attempts: u64,
-    /// Its ordering key and its place in that order, if it is ordered.
-    pub ordering: Option<(String, i64)>,
     /// When the next attempt is due, while pending.
     pub next_attempt_at: DateTime<Utc>,
     /// The latest attempt's error.
@@ -955,15 +953,13 @@ pub struct DeliverySummary {
 }
 
 impl DeliverySummary {
-    /// Whether an operator may attempt it again: a failed delivery, or a
-    /// cancelled one no other delivery is ordered after.
+    /// Whether an operator may attempt it again: once it failed or was cancelled.
     #[must_use]
     pub const fn retryable(&self) -> bool {
-        match self.status {
-            DeliveryStatus::Failed => true,
-            DeliveryStatus::Cancelled => self.ordering.is_none(),
-            DeliveryStatus::Pending | DeliveryStatus::Succeeded => false,
-        }
+        matches!(
+            self.status,
+            DeliveryStatus::Failed | DeliveryStatus::Cancelled
+        )
     }
 
     /// Whether an operator may cancel it: while pending or failed.

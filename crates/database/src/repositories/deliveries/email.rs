@@ -211,7 +211,6 @@ impl Channel for Email {
                 destination: format!("account {user_id}, address {email_id}"),
                 recipient: user_id,
                 payload: message,
-                ordering_key: None,
             })
             .collect())
     }

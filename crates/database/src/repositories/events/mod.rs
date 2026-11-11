@@ -25,8 +25,9 @@ const PERSONAL_KEY: &str = "$personal";
 /// rename of [`Personal::Erased`].
 const ERASED: &str = "$erased";
 
-/// A consumer's position in the event stream: everything up to and including the
-/// event it was read from. See [`EventRepository::read_after`].
+/// An event's place in the order events are sealed in, `(txid, sequence)`: the
+/// safe order of `in_safe_order!`, in which no event can later appear before one
+/// already read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventCursor {
     /// The writing transaction's ID.
@@ -60,8 +61,6 @@ pub struct EventFilter {
 pub struct StoredEvent {
     /// Event identifier.
     pub id: EventId,
-    /// Position to pass to [`EventRepository::acknowledge`] once handled.
-    pub cursor: EventCursor,
     /// When it was recorded.
     pub occurred_at: DateTime<Utc>,
     /// Who caused it.
@@ -118,10 +117,6 @@ impl RecordedEvent {
 struct EventRow {
     /// Event identifier.
     id: EventId,
-    /// The writing transaction's ID.
-    txid: i64,
-    /// Insertion order.
-    sequence: i64,
     /// When it was recorded.
     occurred_at: DateTime<Utc>,
     /// The serde tag of the [`DomainEvent`] variant.
@@ -197,10 +192,6 @@ impl TryFrom<EventRow> for StoredEvent {
         };
         Ok(Self {
             id: row.id,
-            cursor: EventCursor {
-                txid: row.txid,
-                sequence: row.sequence,
-            },
             occurred_at: row.occurred_at,
             actor: row.actor.0,
             subject: row.subject_user_id,
@@ -408,8 +399,7 @@ impl EventRepository<'_> {
             sqlx::query_as!(
                 EventRow,
                 r#"SELECT
-                    e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
-                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
+                    e.id AS "id: EventId", e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
                     e.trace_id AS "trace_id: TraceId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
@@ -466,8 +456,7 @@ impl EventRepository<'_> {
             sqlx::query_as!(
                 EventRow,
                 r#"SELECT
-                    e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
-                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
+                    e.id AS "id: EventId", e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
                     e.trace_id AS "trace_id: TraceId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
@@ -564,8 +553,7 @@ impl EventRepository<'_> {
             sqlx::query_as!(
                 EventRow,
                 r#"SELECT
-                    e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
-                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
+                    e.id AS "id: EventId", e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
                     e.trace_id AS "trace_id: TraceId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
@@ -618,79 +606,8 @@ impl EventRepository<'_> {
         )?;
         Ok(id)
     }
-
-    /// Returns up to `limit` events after `consumer`'s acknowledged cursor, in the
-    /// safe consumer order of `in_safe_order!`, for consumers such as alerts (#83).
-    /// No event can later appear before the cursor. The audit sealer reads in the same
-    /// order through [`AuditRepository::unsealed`](crate::AuditRepository::unsealed).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails or a stored event does not decode.
-    pub async fn read_after(
-        &mut self,
-        consumer: &'static str,
-        limit: u32,
-    ) -> Result<Vec<StoredEvent>, DatabaseError> {
-        run!(
-            self,
-            fetch_all,
-            in_safe_order!(
-                EventRow,
-                r#"SELECT
-                    e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
-                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
-                    e.subject_user_id AS "subject_user_id: UserId",
-                    e.trace_id AS "trace_id: TraceId",
-                    p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
-                    p.user_agent_family AS "browser?: Browser",
-                    p.platform AS "platform?: Platform",
-                    p.details AS "details?", p.reason AS "reason?"
-                FROM domain_events e
-                LEFT JOIN event_personal_data p ON p.event_id = e.id
-                LEFT JOIN event_consumers c ON c.name = $1
-                WHERE (e.txid, e.sequence) > (COALESCE(c.txid, '0'::xid8), COALESCE(c.sequence, 0))"#,
-                "LIMIT $2",
-                consumer,
-                i64::from(limit),
-            )
-        )?
-        .into_iter()
-        .map(StoredEvent::try_from)
-        .collect()
-    }
-
-    /// Moves `consumer`'s cursor to `cursor`, so [`Self::read_after`] continues after
-    /// it. Run it in the transaction that applies the consumer's effects. A cursor
-    /// never moves backwards.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn acknowledge(
-        &mut self,
-        consumer: &'static str,
-        cursor: EventCursor,
-    ) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "INSERT INTO event_consumers (name, txid, sequence)
-                VALUES ($1, $2::bigint::text::xid8, $3)
-                ON CONFLICT (name) DO UPDATE
-                SET txid = EXCLUDED.txid, sequence = EXCLUDED.sequence
-                WHERE (event_consumers.txid, event_consumers.sequence)
-                    < (EXCLUDED.txid, EXCLUDED.sequence)",
-                consumer,
-                cursor.txid,
-                cursor.sequence,
-            )
-        )?;
-        Ok(())
-    }
 }
 
-/// Database tests for recording, personal data, the consumer cursor and the migration.
+/// Database tests for recording, personal data and the migration.
 #[cfg(test)]
 mod tests;

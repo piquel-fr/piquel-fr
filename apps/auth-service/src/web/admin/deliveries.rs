@@ -79,15 +79,13 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     App::render(cx, StatusCode::OK, "Deliveries", view).await
 }
 
-/// `/deliveries/{delivery}/retry`: attempts a failed delivery, or a cancelled
-/// unordered one, again now.
+/// `/deliveries/{delivery}/retry`: attempts a failed or cancelled delivery again now.
 #[route([GET, POST] "/deliveries/{delivery}/retry")]
 pub(super) async fn retry(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::RetryDelivery).await
 }
 
-/// `/deliveries/{delivery}/cancel`: cancels a pending or failed delivery, which
-/// unblocks the deliveries ordered after it.
+/// `/deliveries/{delivery}/cancel`: cancels a pending or failed delivery.
 #[route([GET, POST] "/deliveries/{delivery}/cancel")]
 pub(super) async fn cancel(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     App::delivery_change(cx, form, Change::CancelDelivery).await

@@ -400,9 +400,8 @@ in a queue until a worker sends them.
    or give up on one with `auth-service deliveries cancel <id> --reason "…"`.
 
 On the dashboard, the **Deliveries** page filters them, and offers **Retry**
-and **Cancel delivery**. A failed delivery with an ordering key holds back the
-ones after it until it is retried or cancelled. After 30 days, cleanup deletes
-it and cancels the ones behind it. See
+and **Cancel delivery**. After 30 days, cleanup deletes a failed or cancelled
+delivery. See
 [the delivery queue](../architecture/delivery-queue.md), and for email,
 [mail not going out](incidents.md#mail-not-going-out).
 

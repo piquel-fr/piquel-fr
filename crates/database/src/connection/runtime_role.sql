@@ -87,5 +87,4 @@ GRANT INSERT (
     event_id, client_ip, user_agent_family, platform, details, reason
 ) ON event_personal_data TO %1$I;
 GRANT UPDATE (details) ON event_personal_data TO %1$I;
-REVOKE DELETE ON event_consumers FROM %1$I;
 $script$, $1::text, $2::text, current_database(), $3::bigint) AS "script!"
