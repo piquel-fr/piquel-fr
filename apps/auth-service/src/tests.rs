@@ -9,6 +9,7 @@ use crate::{
         AuditConfig, EmailConfig, FederationConfig, LinkKeys, OidcConfig, PasskeyConfig,
         PolicyLinks, ProviderConfig, TokenDigestKey, TokenDigestKeys,
     },
+    invitations::InvitationLinks,
     recovery::RecoveryLinks,
     routes,
     security::{BrowserCookie, RequestContext, Session},
@@ -550,6 +551,12 @@ pub(crate) fn operator() -> Operator {
 /// token's digest, so they need no key.
 pub(crate) fn recovery_links() -> RecoveryLinks {
     RecoveryLinks::new(AUTH_ORIGIN.parse().expect("origin"), LinkKeys::generate())
+}
+
+/// Invitation links with a key of their own: signup finds an invitation by its
+/// token's digest, so it needs no key.
+pub(crate) fn invitation_links() -> InvitationLinks {
+    InvitationLinks::new(AUTH_ORIGIN.parse().expect("origin"), LinkKeys::generate())
 }
 
 /// Why the scenarios make an administrative change.

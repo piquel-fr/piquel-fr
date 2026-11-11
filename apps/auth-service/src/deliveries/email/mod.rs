@@ -1,4 +1,4 @@
-//! Sends the `email` and `announcement` channels over SMTP.
+//! Sends the `email`, `announcement` and `invitation` channels over SMTP.
 //!
 //! A link's delivery names the account and the address's ID, and a recovery link's
 //! the recovery's too: the sender reads the address when it sends, so an address
@@ -20,6 +20,7 @@ use crate::{
     admin::Letter,
     config::{DashboardConfig, EmailConfig},
     emails::{VERIFICATION_LIFETIME, VerificationKeys},
+    invitations::InvitationLinks,
     notifications::{SignOutLinks, UnsubscribeLinks},
     recovery::{self, RecoveryLinks},
     routes::{
@@ -35,13 +36,14 @@ use lettre::{
     },
 };
 use sourceorigin_common::{
-    AnnouncementId, DeliveryId, ErrorChain, UserId, admin,
+    AnnouncementId, DeliveryId, ErrorChain, TokenId, UserId, admin,
     config::Origin,
     notifications::{Notification, NotificationAction},
 };
 use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::{
-    Announcement, Database, DatabaseError, Delivery, Email, EmailMessage,
+    Announcement, Database, DatabaseError, Delivery, Email, EmailMessage, Invitation,
+    InvitationKey, OpenInvitation,
 };
 use sourceorigin_ui::{EmailContent, Mail};
 use std::{fmt::Display, time::Duration};
@@ -98,6 +100,8 @@ pub(crate) struct EmailSender<M> {
     verification_keys: VerificationKeys,
     /// Builds recovery links.
     recovery_links: RecoveryLinks,
+    /// Builds invitation links.
+    invitation_links: InvitationLinks,
     /// Builds announcements' unsubscribe links.
     unsubscribe_links: UnsubscribeLinks,
     /// Builds security notifications' sign-out links.
@@ -130,6 +134,7 @@ impl<M: Mailer> EmailSender<M> {
             origin: config.origin.clone(),
             verification_keys: config.verification_keys.clone(),
             recovery_links: config.recovery_links.clone(),
+            invitation_links: config.invitation_links.clone(),
             unsubscribe_links: config.unsubscribe_links.clone(),
             sign_out_links: config.sign_out_links.clone(),
             alerts: None,
@@ -184,6 +189,55 @@ impl<M: Mailer> EmailSender<M> {
             return Ok(());
         };
         mailer.send(self.compose(id, &content).await?).await
+    }
+
+    /// Sends the invitation `invitation_id`'s link to the address it invites, as
+    /// the delivery `id`. Does nothing while email is disabled, or once the
+    /// invitation was redeemed, revoked or expired, so the delivery succeeds
+    /// rather than retrying.
+    async fn invite(&self, id: DeliveryId, invitation_id: TokenId) -> Result<(), DeliveryError> {
+        let Some(mailer) = &self.mailer else {
+            tracing::info!(%id, "email is disabled; delivery dropped");
+            return Ok(());
+        };
+        let Some(content) = self.invitation(invitation_id).await? else {
+            tracing::info!(%id, "invitation is no longer open; delivery dropped");
+            return Ok(());
+        };
+        mailer.send(self.compose(id, &content).await?).await
+    }
+
+    /// What the invitation `id`'s email says, with its link rebuilt, if it is
+    /// still open and was mailed to an address.
+    async fn invitation(&self, id: TokenId) -> Result<Option<Content>, DeliveryError> {
+        let invitation = self
+            .database
+            .security()
+            .open_invitation(InvitationKey::Id(id))
+            .await
+            .map_err(|error| Self::unread(&error))?;
+        let Some(OpenInvitation {
+            email: Some(address),
+            secret_digest,
+            expires_at,
+            ..
+        }) = invitation
+        else {
+            return Ok(None);
+        };
+        let link = Self::rebuilt(
+            self.invitation_links.link(id, &secret_digest),
+            "invitation",
+            &id,
+        )?;
+        Ok(Some(Content {
+            said: EmailContent::Invitation {
+                address: address.clone(),
+                link: link.into(),
+                expires_at,
+            },
+            address,
+        }))
     }
 
     /// What the announcement `id` says to `user_id`, at its primary verified
@@ -456,6 +510,28 @@ impl<M: Mailer> Sender for AnnouncementSender<M> {
     }
 }
 
+/// Sends invitations' email through `M`, as [`EmailSender`] sends account
+/// holders', on a channel of their own, since an invitation's recipient has no
+/// account yet.
+pub(crate) struct InvitationSender<M>(EmailSender<M>);
+
+impl InvitationSender<AsyncSmtpTransport<Tokio1Executor>> {
+    /// Sends through the configured relay, or drops everything without one.
+    pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
+        Self(EmailSender::new(database, config, None))
+    }
+}
+
+impl<M: Mailer> Sender for InvitationSender<M> {
+    type Channel = Invitation;
+    /// An invitation stays worth sending for days, through a long relay outage.
+    const MAX_AGE: Duration = Duration::from_hours(72);
+
+    async fn send(&self, delivery: &Delivery<Invitation>) -> Result<(), DeliveryError> {
+        self.0.invite(delivery.id, delivery.recipient).await
+    }
+}
+
 /// An email to send: where it goes, and what it says. Each [`EmailMessage`],
 /// and each announcement's email, becomes one of these.
 struct Content {
@@ -522,6 +598,7 @@ impl Content {
             },
             EmailContent::VerifyAddress { .. }
             | EmailContent::RecoveryLink { .. }
+            | EmailContent::Invitation { .. }
             | EmailContent::Notification { .. }
             | EmailContent::Message { .. } => Stream::Transactional,
         }

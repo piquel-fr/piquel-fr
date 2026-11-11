@@ -241,7 +241,7 @@ impl SearchAction {
             Self::GrantAdministrator => {
                 Change::GrantAdministrator.spot("add admin promote make administrator")
             }
-            Self::Invite => Change::Invite.spot("create invitation new signup link"),
+            Self::Invite => Change::Invite.spot("create invitation new signup link email send"),
             Self::ReserveHandle => {
                 Change::ReserveHandle.spot("block keep protect username trademark")
             }
@@ -474,7 +474,9 @@ pub enum Change {
     GrantAdministrator,
     /// Revoking an invitation.
     RevokeInvitation,
-    /// Creating an invitation.
+    /// Mailing an invitation's link again.
+    ResendInvitation,
+    /// Creating an invitation, mailed or to pass on.
     Invite,
     /// Starting an account's recovery, with a reason.
     Recover,
@@ -539,6 +541,7 @@ impl Change {
             Self::RevokeAdministrator => "Revoke administrator rights",
             Self::GrantAdministrator => "Grant administrator rights",
             Self::RevokeInvitation => "Revoke this invitation",
+            Self::ResendInvitation => "Send this invitation again",
             Self::Invite => "Invite someone",
             Self::Recover => "Recover this account",
             Self::UndoRecovery => "Undo this account's recovery",
@@ -595,7 +598,12 @@ impl Change {
                 "The account can use this dashboard and every admin operation. The dashboard cannot change it afterwards, until its rights are revoked."
             }
             Self::RevokeInvitation => "Its link stops working.",
-            Self::Invite => "Creates a single-use signup link.",
+            Self::ResendInvitation => {
+                "Mails the same link to the address it invites again. It still expires when it did: to give more time, revoke it and invite again."
+            }
+            Self::Invite => {
+                "Creates a single-use signup link, whether or not signup needs one. Given an address, Origin Auth mails it the link, and the account created with it starts with that address, verified. Without one, the link is shown once, for you to pass on."
+            }
             Self::Recover => {
                 "For an owner who lost every passkey. Ends every session, removes the account's unverified addresses, and emails its primary verified address a link that enrolls one passkey, once, within a day. For 15 days after, that passkey signs in but confirms no change, and any older passkey can undo the recovery. Follow the evidence policy first. An account that was in someone else's hands needs auth-service user recover --revoke, at the terminal."
             }
@@ -671,7 +679,8 @@ impl Change {
             | Self::RevokeInvitation
             | Self::RevokeSigningKey => "Revoke",
             Self::GrantAdministrator => "Grant",
-            Self::Invite => "Create link",
+            Self::Invite => "Invite",
+            Self::ResendInvitation => "Resend",
             Self::Recover => "Send the recovery link",
             Self::UndoRecovery => "Undo the recovery",
             Self::ApproveOrigin => "Add",
@@ -711,6 +720,7 @@ impl Change {
             | Self::Message
             | Self::RevokeAdministrator
             | Self::RevokeInvitation
+            | Self::ResendInvitation
             | Self::ApproveOrigin
             | Self::RemoveOrigin
             | Self::ChangeHandle
@@ -802,6 +812,7 @@ impl Change {
                 "Reason, shown to the owner in their history: what was asked, never the evidence",
             ),
             Self::RevokeInvitation
+            | Self::ResendInvitation
             | Self::Invite
             | Self::ApproveOrigin
             | Self::RemoveOrigin

@@ -318,6 +318,34 @@ impl EmailApplication {
             imported => imported,
         }
     }
+
+    /// Starts the new account `user_id` with `address`, the one the invitation it
+    /// redeemed was mailed to, verified and primary, as `context`'s, in `tx`:
+    /// opening the mailed link proved what a verification email would. An address
+    /// another account verified since the invitation was mailed is skipped, as a
+    /// provider's is, and the account starts without one.
+    pub(crate) async fn invited(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        user_id: UserId,
+        address: &NormalizedEmail,
+    ) -> Result<(), EmailError> {
+        if tx
+            .emails()
+            .is_owned_elsewhere(address.as_str(), user_id)
+            .await?
+        {
+            tracing::info!("invited address held by another account; not added");
+            return Ok(());
+        }
+        let added = Added {
+            context,
+            user_id,
+            address,
+            provider: None,
+        };
+        added.verified(tx).await
+    }
 }
 
 /// An address joining an account, as `context`'s, and the provider it is
@@ -373,7 +401,8 @@ impl Added<'_> {
     }
 
     /// Adds the address verified, as the primary one of an account that has
-    /// none, which a provider authoritative for it vouches for.
+    /// none, which a provider authoritative for it, or the invitation mailed to
+    /// it, vouches for.
     async fn verified(self, tx: &mut DatabaseTransaction<'_>) -> Result<(), EmailError> {
         let id = EmailId::new();
         tx.emails()

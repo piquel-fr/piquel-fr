@@ -6,7 +6,9 @@ use crate::{
     alerts::Alerts,
     audit::{Sealer, Verifier},
     deletion::{DeletionError, Deletions},
-    deliveries::{AnnouncementSender, BackchannelLogoutSender, EmailSender, OutboundClient},
+    deliveries::{
+        AnnouncementSender, BackchannelLogoutSender, EmailSender, InvitationSender, OutboundClient,
+    },
 };
 use chrono::Utc;
 use sourceorigin_common::{
@@ -119,6 +121,10 @@ impl Jobs {
         jobs.deliveries(email, database);
         jobs.deliveries(
             AnnouncementSender::new(database.clone(), &config.email),
+            database,
+        );
+        jobs.deliveries(
+            InvitationSender::new(database.clone(), &config.email),
             database,
         );
         Ok(jobs)

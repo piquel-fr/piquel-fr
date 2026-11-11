@@ -95,6 +95,7 @@ fn trace_ids_are_lower_case_hex() {
     reason = "one literal per event kind, so it grows with `DomainEvent`"
 )]
 fn event_kinds_match_their_serde_tags() {
+    use email::NormalizedEmail;
     use events::{
         CodeRedemptionFailure, DomainEvent, GrantRevocation, RevocationReason, SignInFailure,
         SigningKeyChange,
@@ -187,7 +188,17 @@ fn event_kinds_match_their_serde_tags() {
             reason: CodeRedemptionFailure::InvalidVerifier,
         },
         DomainEvent::InvitationCreated {
+            invitation_id: TokenId::new(),
             expires_at: chrono::Utc::now(),
+        },
+        DomainEvent::InvitationMailed {
+            invitation_id: TokenId::new(),
+            recipient: Personal::Value(
+                NormalizedEmail::parse("jane@example.com").expect("address"),
+            ),
+        },
+        DomainEvent::InvitationRedeemed {
+            invitation_id: TokenId::new(),
         },
         DomainEvent::InvitationRevoked {
             invitation_id: TokenId::new(),

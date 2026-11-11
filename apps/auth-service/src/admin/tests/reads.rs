@@ -120,6 +120,7 @@ impl AdminOperation {
             | Self::RevokeSession
             | Self::MessageUser
             | Self::CreateInvitation
+            | Self::ResendInvitation
             | Self::RevokeInvitation
             | Self::CreateClient
             | Self::ApplyClient

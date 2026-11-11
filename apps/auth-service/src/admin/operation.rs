@@ -37,8 +37,10 @@ operations! {
         MessageUser,
         /// List invitations.
         ListInvitations,
-        /// Create a signup link.
+        /// Create a signup link, mailed to an address or shown to pass on.
         CreateInvitation,
+        /// Mail an open invitation's link again.
+        ResendInvitation,
         /// Revoke an unredeemed invitation.
         RevokeInvitation,
         /// List OIDC clients, and the origins approved for their pages to sign

@@ -64,19 +64,65 @@ and your **Devices** page lists the dashboard under the browser it runs in. See
 
 ## Invite someone
 
-Signing up needs an invitation in staging and production.
+An invitation is a single-use signup link. Signing up needs one in staging and
+production. Where signup is open (`AUTH_INVITE_REQUIRED=false`), anyone can sign
+up, and an invitation is an easy signup link that Origin Auth sends and tracks.
 
-- **On the dashboard**, open **Invitations**, select **Invite someone**, choose
-  how long it's **Valid for**, give a **Reason**, and select **Create link**.
-- **At the terminal**, run `auth-service invite create --expires-in 7d --reason "For Jane"`.
+Origin Auth can mail the link for you:
 
-Either shows a single-use signup link once: send it to the person. It opens
-`/register` with the invitation filled in, and a signup through GitHub or Google
-asks for it on its own page. A link lasts seven days unless you choose another
-time, in hours (`24h`) or days (`7d`).
+- **On the dashboard**, open **Invitations** and select **Invite someone**.
+  Enter the person's **Email address**, choose how long it's **Valid for**, give
+  a **Reason**, and select **Invite**.
+- **At the terminal**, run:
 
-Revoke an unused link with **Revoke** on the **Invitations** page, or
+  ```sh
+  auth-service invite create --email jane@example.com --expires-in 7d --reason "For Jane"
+  ```
+
+  The command prints the invitation's ID.
+
+The email's **Create your account** button opens `/register` with the
+invitation, and the page says which address the account starts with. The
+account starts with that address, already confirmed, as its primary address:
+opening the mailed link proves the person reads that inbox, as a confirmation
+email would. Nobody else sees a mailed link, not even you.
+
+To pass the link on yourself instead, leave out the address (`--email` at the
+terminal). The dashboard and the command then show the link once: send it to
+the person. It opens `/register` with the invitation filled in, and a signup
+through GitHub or Google asks for it on its own page.
+
+A link lasts seven days unless you choose another time, in hours (`24h`) or
+days (`7d`). The **Invitations** page and `invite list` show each invitation's
+address, if it was mailed, and whether it is open, redeemed, revoked or
+expired. History records creating, mailing, redeeming and revoking each one,
+with the address it was mailed to.
+
+### Send an invitation again
+
+If the email went astray, send the same link again, with the same expiry:
+
+- **On the dashboard**, select **Resend** on its row of the **Invitations** page.
+- **At the terminal**, run `auth-service invite resend <id> --reason "…"`.
+
+To give the person more time, revoke the invitation and invite them again.
+
+### Revoke an invitation
+
+Revoke an unused invitation with **Revoke** on the **Invitations** page, or
 `auth-service invite revoke <id> --reason "…"`, with the ID `invite list` shows.
+Its link stops working at once.
+
+### Limits
+
+- Mailing an invitation needs email enabled (`AUTH_SMTP_URL`). Without it,
+  Origin Auth refuses the invitation before creating anything. A link to pass on
+  still works.
+- An address an account already holds confirmed can't be invited: its owner
+  signs in instead.
+- If another account confirms the address before the person signs up, the new
+  account starts without it.
+- Only a mailed invitation can be sent again.
 
 ## Find an account
 
@@ -481,7 +527,9 @@ Each alert says what to look at. Auth raises these:
 ## The command line
 
 - Commands need only `AUTH_DATABASE_URL`. Some need more configuration:
-  - `invite create` needs `AUTH_PUBLIC_BASE_URL`, to build its link.
+  - `invite create` needs `AUTH_PUBLIC_BASE_URL` and `AUTH_TOKEN_DIGEST_KEY`, to
+    derive its link, and `AUTH_SMTP_URL` to mail it.
+  - `invite resend` needs `AUTH_SMTP_URL`.
   - `user recover` needs `AUTH_PUBLIC_BASE_URL` and `AUTH_TOKEN_DIGEST_KEY`, to
     derive its link.
   - `client origin add` needs `AUTH_PUBLIC_BASE_URL`, to tell auth's own domain

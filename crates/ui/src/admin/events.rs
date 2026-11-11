@@ -293,8 +293,20 @@ impl EventRow<'_> {
                     "{client_id} failed to redeem an authorization code: {why}"
                 ))
             }
-            DomainEvent::InvitationCreated { expires_at } => {
-                Description::new("Invitation created").with("valid until", expires_at.to_rfc3339())
+            DomainEvent::InvitationCreated {
+                invitation_id,
+                expires_at,
+            } => Description::new("Invitation created")
+                .with("invitation", invitation_id)
+                .with("valid until", expires_at.to_rfc3339()),
+            DomainEvent::InvitationMailed {
+                invitation_id,
+                recipient,
+            } => Description::new("Invitation mailed")
+                .with("invitation", invitation_id)
+                .personal("to", &recipient),
+            DomainEvent::InvitationRedeemed { invitation_id } => {
+                Description::new("Invitation redeemed").with("invitation", invitation_id)
             }
             DomainEvent::InvitationRevoked { invitation_id } => {
                 Description::new("Invitation revoked").with("invitation", invitation_id)

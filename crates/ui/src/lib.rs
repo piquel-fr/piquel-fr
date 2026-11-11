@@ -98,7 +98,8 @@ pub use layout::{
     site_shell,
 };
 pub use login::{
-    CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
+    CallbackError, Invited, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step,
+    sign_in,
 };
 pub use oidc::{Onward, consent, failure, logout, onward};
 pub use recovery::{

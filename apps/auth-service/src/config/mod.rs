@@ -17,7 +17,7 @@ pub(crate) use keys::LinkKeys;
 pub(crate) use keys::TokenDigestKey;
 pub use keys::{AuditConfig, TokenDigestKeys};
 
-use crate::recovery::RecoveryLinks;
+use crate::{invitations::InvitationLinks, recovery::RecoveryLinks};
 use email::SMTP_URL;
 use ipnet::IpNet;
 use sourceorigin_common::config::{ConfigurationError, Origin, SecretReference, Variable};
@@ -259,6 +259,17 @@ impl AuthConfig {
     pub(crate) fn recovery_links_from_environment() -> Result<RecoveryLinks, ConfigurationError> {
         let origin: Origin = PUBLIC_BASE_URL.parse()?;
         Ok(TokenDigestKeys::from_environment()?.recovery_links(&origin))
+    }
+
+    /// Loads what the `invite` commands need to derive invitation links, as
+    /// [`Self::recovery_links_from_environment`] does recovery links.
+    ///
+    /// # Errors
+    /// Names an invalid or missing origin or key.
+    pub(crate) fn invitation_links_from_environment() -> Result<InvitationLinks, ConfigurationError>
+    {
+        let origin: Origin = PUBLIC_BASE_URL.parse()?;
+        Ok(TokenDigestKeys::from_environment()?.invitation_links(&origin))
     }
 
     /// Reads whether email is enabled (`AUTH_SMTP_URL` is set), for commands that

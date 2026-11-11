@@ -236,6 +236,7 @@ impl Administration {
             Self::Invite(command) => match command {
                 InviteCommand::Create { .. } => Op::CreateInvitation,
                 InviteCommand::List => Op::ListInvitations,
+                InviteCommand::Resend { .. } => Op::ResendInvitation,
                 InviteCommand::Revoke { .. } => Op::RevokeInvitation,
             },
             Self::Client(command) => match **command {

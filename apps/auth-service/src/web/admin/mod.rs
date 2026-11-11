@@ -66,6 +66,7 @@ use crate::{
     assets::EmbeddedAssets,
     config::{DashboardConfig, PolicyLinks},
     federation::ReturnTo,
+    invitations::InvitationLinks,
     passkey::{AuthenticationFinish, PasskeyApplication},
     recovery::RecoveryLinks,
     routes,
@@ -240,10 +241,12 @@ pub(crate) struct AdminApplication {
     auth: Origin,
     /// The administrator's inbox, on auth, which the top bar's bell links.
     inbox: String,
-    /// Whether signup needs an invitation, so the dashboard manages them.
-    invitations: bool,
+    /// Whether signup needs an invitation, which the invitations page says.
+    invite_required: bool,
     /// Derives the links recoveries mail.
     links: RecoveryLinks,
+    /// Derives the links invitations carry.
+    invitation_links: InvitationLinks,
     /// The server's own audit key, which the audit page verifies with when none
     /// is committed for this environment.
     audit_key: NoteVerifier,
@@ -360,8 +363,9 @@ impl AdminApplication {
             passkeys,
             inbox: auth.join(routes::page::settings::NOTIFICATIONS),
             auth,
-            invitations: config.passkey.invite_required,
+            invite_required: config.passkey.invite_required,
             links: config.email.recovery_links.clone(),
+            invitation_links: config.email.invitation_links.clone(),
             audit_key: config.audit.verifier().clone(),
             kek: config.key_encryption_key.clone(),
             policy: HeaderValue::try_from(policy)?,
@@ -478,6 +482,7 @@ impl AdminApplication {
             | Op::ApproveRelatedOrigin
             | Op::RemoveRelatedOrigin
             // Each acts on one row of its tab's list.
+            | Op::ResendInvitation
             | Op::RevokeInvitation
             | Op::ReleaseHandle
             | Op::UnreserveHandle
@@ -538,6 +543,7 @@ impl AdminApplication {
             Op::UndoRecovery => &users::undo_recovery,
             Op::ListInvitations => &invitations::list,
             Op::CreateInvitation => &invitations::create,
+            Op::ResendInvitation => &invitations::resend,
             Op::RevokeInvitation => &invitations::revoke,
             Op::ListClients => &clients::list,
             Op::ViewClient => &clients::detail,

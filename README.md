@@ -8,7 +8,8 @@ by passkeys, for SourceOrigin's services and any app built on them.
   register an app. It is one Rust executable, with PostgreSQL as its only data
   service. GitHub and Google are optional ways to sign in.
 - **admin.sourceorigin.dev** is the admin dashboard, served by the same executable on
-  a private listener.
+  a private listener. Administrators manage accounts there, and invite people by
+  email or with a link to pass on.
 - **sourceorigin.dev** is the homepage and policies.
 - **The SDKs**, `sourceorigin-auth` for Rust and `@sourceorigin/auth` for TypeScript, sign
   users in and validate auth's tokens.

@@ -66,10 +66,8 @@ pub(super) async fn search(cx: &Cx) -> Result<Response> {
         }
         .on(&action)
     })?;
-    let invite = app
-        .invitations
-        .then(|| href!(invitations::create).resolve(cx));
-    let (q, rows, pager, invite) = (&q, &rows, &pager, invite.as_deref());
+    let invite = href!(invitations::create).resolve(cx);
+    let (q, rows, pager, invite) = (&q, &rows, &pager, invite.as_str());
     let page = view! { cx =>
         sourceorigin_ui::user_search(q: q.as_str(), rows: rows, pages: pager, invite: invite)
     };

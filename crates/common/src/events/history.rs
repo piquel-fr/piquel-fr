@@ -137,6 +137,8 @@ impl DomainEvent {
             | Self::PasskeyConfirmed { .. }
             | Self::GrantIssued { .. }
             | Self::InvitationCreated { .. }
+            | Self::InvitationMailed { .. }
+            | Self::InvitationRedeemed { .. }
             | Self::InvitationRevoked { .. }
             // The app's own mistake, or a stolen code's failed use: either way, the
             // account's owner has nothing to do about it.

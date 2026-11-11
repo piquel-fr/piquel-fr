@@ -190,6 +190,20 @@ script asks for one before sending. Unlike the dashboard's changes, a message
 also goes to an administrator's account, since it changes nothing about it (see
 [message an account](../operations/administration.md#message-an-account)).
 
+Administrators also invite people, whether or not signup needs an invitation:
+with signup open, an invitation is a tracked signup link. An invitation mailed to
+an address binds the account created with it to that address, which starts
+verified and primary, since opening the mailed link proves what a verification
+email would. `AdminService::create_invitation` holds the rule for both surfaces:
+it refuses a mailed invitation before anything changes while email is disabled,
+or when an active account holds the address verified. Its link's token is
+derived from its ID, so the email sender, and **Resend**, rebuild the link and
+nobody sees it; one without an address is shown once instead (see
+[invite someone](../operations/administration.md#invite-someone) and
+[the delivery queue](delivery-queue.md#invitations)). Signup checks and redeems
+any invitation it is given, whatever the setting, and records
+`invitation_redeemed` with the new account.
+
 Administrators also follow alerts: conditions auth's background jobs find that
 need their attention, such as a broken audit chain. The dashboard's **Alerts**
 page lists the current ones, on which administrators post status updates until

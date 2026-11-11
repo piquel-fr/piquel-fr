@@ -5,7 +5,9 @@ use crate::{
     ClientRegistryError, KeyError, deletion::DeletionError, handles::HandlesError,
     security::ApiError,
 };
-use sourceorigin_common::{DeliveryId, PasskeyId, protocol::step_up::StepUpRequirement};
+use sourceorigin_common::{
+    DeliveryId, PasskeyId, email::InvalidEmail, protocol::step_up::StepUpRequirement,
+};
 use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::DatabaseError;
 
@@ -69,6 +71,22 @@ pub enum AdminError {
     /// The invitation lifetime is not 1 hour to 365 days.
     #[error("expires_in {0}")]
     InvalidInviteExpiry(#[from] super::InvalidLifetime),
+    /// The address to invite is not one email can be sent to.
+    #[error("the address to invite is invalid: {0}")]
+    InvalidInvitationEmail(#[from] InvalidEmail),
+    /// An invitation is mailed only while email is enabled, so a mailed one is
+    /// refused before anything is created.
+    #[error(
+        "email is disabled, so the invitation cannot be mailed; create a link to pass on yourself instead, without an address"
+    )]
+    InvitationNeedsEmail,
+    /// An active account already holds the address verified: its owner signs in
+    /// rather than signing up.
+    #[error("an account already holds this address verified; its owner can sign in")]
+    InvitationAddressTaken,
+    /// Only an invitation mailed to an address can be sent again.
+    #[error("this invitation was not mailed, so it has no address to send it to again")]
+    InvitationNotMailed,
     /// Only an active account can be recovered.
     #[error("the account is disabled; enable it before recovering it")]
     RecoveryOfDisabledAccount,
@@ -222,6 +240,10 @@ impl AdminError {
             Self::EmailClaimed(_) => "email_claimed",
             Self::InvalidReason => "invalid_reason",
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
+            Self::InvalidInvitationEmail(_) => "invalid_invitation_email",
+            Self::InvitationNeedsEmail => "invitation_needs_email",
+            Self::InvitationAddressTaken => "invitation_address_taken",
+            Self::InvitationNotMailed => "invitation_not_mailed",
             Self::RecoveryOfDisabledAccount => "recovery_of_disabled_account",
             Self::RecoveryNeedsEmail => "recovery_needs_email",
             Self::RecoveryOfAdministrator => "recovery_of_administrator",
@@ -288,6 +310,7 @@ impl From<AdminError> for ApiError {
         match error {
             AdminError::InvalidReason
             | AdminError::InvalidInviteExpiry(_)
+            | AdminError::InvalidInvitationEmail(_)
             | AdminError::InvalidHandoff
             | AdminError::InvalidSubject
             | AdminError::InvalidBody
@@ -315,6 +338,9 @@ impl From<AdminError> for ApiError {
             | AdminError::EmailClaimed(_)
             | AdminError::RecoveryOfDisabledAccount
             | AdminError::RecoveryNeedsEmail
+            | AdminError::InvitationNeedsEmail
+            | AdminError::InvitationAddressTaken
+            | AdminError::InvitationNotMailed
             | AdminError::RecoveryOfAdministrator
             | AdminError::RecoveryInProbation
             | AdminError::UnknownPasskey(_)

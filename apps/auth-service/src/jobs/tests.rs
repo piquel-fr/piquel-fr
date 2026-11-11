@@ -250,7 +250,12 @@ async fn cleanup_that_keeps_falling_behind_raises_its_alert() {
         let expired = Utc::now() - chrono::Duration::days(1);
         database
             .security()
-            .create_invitation(sourceorigin_common::TokenId::new(), &digest, expired)
+            .create_invitation(&sourceorigin_repository::InsertInvitation {
+                id: sourceorigin_common::TokenId::new(),
+                secret_digest: &digest,
+                expires_at: expired,
+                email: None,
+            })
             .await
             .expect("invitation");
         cleanup.run(&mut lock, &shutdown).await.expect("run");

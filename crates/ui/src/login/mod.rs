@@ -209,6 +209,8 @@ pub enum Step<'a> {
         social: Option<(Provider, TokenId)>,
         /// The invitation the form starts with.
         invitation: Option<&'a str>,
+        /// What the page found of that invitation.
+        invited: Invited<'a>,
         /// Whether creating an account needs an invitation.
         invite_required: bool,
         /// Whether the browser runs Android, which may save the passkey with Google
@@ -372,10 +374,11 @@ pub async fn sign_in<'a>(
                     providers: providers,
                     signed_in: signed_in.is_some(),
                 ),
-                Step::SignUp { social, invitation, invite_required, android } => sign_up_form(
+                Step::SignUp { social, invitation, invited, invite_required, android } => sign_up_form(
                     action: &action,
                     social: social,
                     invitation: invitation,
+                    invited: invited,
                     invite_required: invite_required,
                     android: android,
                 ),
@@ -448,19 +451,48 @@ async fn sign_in_forms<'a>(
     })
 }
 
+/// What the sign-up page found of the invitation its link names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Invited<'a> {
+    /// The link names none.
+    No,
+    /// One that can still be used, mailed to this address, if it was.
+    Open(Option<&'a str>),
+    /// One that expired, was revoked or was used already.
+    Closed,
+}
+
 /// The form of [`Step::SignUp`], posting to `action` once the passkey script
 /// created the account. It names the `social` evidence the account gets, if any,
-/// and asks for an invitation, starting with `invitation`, when one is required. On
+/// and asks for an invitation, starting with `invitation`, when one is required.
+/// While signup is open, it sends an `invited` invitation that can still be used
+/// along. It names the address a mailed invitation starts the account with. On
 /// Android, it offers Google Password Manager.
 #[component]
 async fn sign_up_form<'a>(
     action: &'a str,
     social: Option<(Provider, TokenId)>,
     invitation: Option<&'a str>,
+    invited: Invited<'a>,
     invite_required: bool,
     android: bool,
 ) -> Result<impl View> {
     Ok(view! {
+        match invited {
+            Invited::Open(Some(email)) => {
+                <p class="notice info">
+                    // One flex item, so the address flows with the sentence.
+                    <span>"You’re invited. Your account starts with " <strong>(email)</strong> ", already confirmed."</span>
+                </p>
+            },
+            Invited::Closed if invite_required => {
+                <p class="notice error">"This invitation has expired or was used already. Ask whoever invited you for a new one."</p>
+            },
+            Invited::Closed => {
+                <p class="notice info">"This invitation has expired or was used already, but anyone can sign up: create your account without it."</p>
+            },
+            Invited::Open(None) | Invited::No => {},
+        }
         passkey_form(
             action: action,
             ceremony: Ceremony::Register,
@@ -474,6 +506,8 @@ async fn sign_up_form<'a>(
                     "Invitation"
                     <input name="invitation" value=(invitation) required="" autocomplete="off">
                 </label>
+            } else if let Invited::Open(_) = invited {
+                <input type="hidden" name="invitation" value=(invitation)>
             }
             if let Some((_, id)) = social {
                 <input type="hidden" name="pending_signup" value=(id.to_string())>

@@ -8,7 +8,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use sourceorigin_common::{
     AccountStatus,
-    admin::{Administrator, Invitation},
+    admin::{Administrator, Invitation, InvitationSent},
 };
 use topcoat::{
     Result,
@@ -29,11 +29,13 @@ pub struct AdministratorRow<'a> {
     pub revoke: Result<Action, &'a str>,
 }
 
-/// An invitation, and the change revoking it while it can still be used.
+/// An invitation, and the changes it takes while it can still be used.
 #[derive(Clone, Debug)]
 pub struct InvitationRow<'a> {
     /// The invitation.
     pub invitation: &'a Invitation,
+    /// Mailing it again, while it is open and was mailed.
+    pub resend: Option<Action>,
     /// Revoking it, while it is open.
     pub revoke: Option<Action>,
 }
@@ -178,82 +180,95 @@ pub async fn grant_search<'a>(
     })
 }
 
-/// The signup invitations as of `now`, with the page creating one at `create`, or,
-/// with no `rows`, that signup is open.
+/// The signup invitations as of `now`, with the page creating one at `create`,
+/// and whether signup is `required` to start with one.
 #[component]
 pub async fn invitation_list<'a>(
-    #[into] rows: Option<&'a [InvitationRow<'a>]>,
+    rows: &'a [InvitationRow<'a>],
     create: &'a str,
     now: DateTime<Utc>,
+    required: bool,
 ) -> Result<impl View> {
+    let lead = if required {
+        "Single-use signup links. Signup needs one: each lets one person create an account."
+    } else {
+        "Single-use signup links. Signup is open, so anyone can sign up: an invitation is a signup link you can follow."
+    };
     Ok(view! {
-        match rows {
-            None => {
-                page_head(
-                    title: "Invitations",
-                    lead: "Single-use signup links, while signup needs one.".to_owned(),
-                )
-                <section class="card">
-                    <p class="empty">"Signup is open: anyone can register without an invitation, so there is none to manage."</p>
-                </section>
-            },
-            Some(rows) => {
-                page_head(
-                    title: "Invitations",
-                    lead: "Single-use signup links, while signup needs one.".to_owned(),
-                    actions: view! { <a data-confirm-first="" class="button" href=(create)>"Invite someone"</a> },
-                )
-                <section class="card">
-                    if rows.is_empty() {
-                        <p class="empty">"No invitation yet."</p>
-                    } else {
-                        <div class="table-wrap">
-                            <table>
-                                <thead>
-                                    <tr><th>"created"</th><th>"expires"</th><th>"state"</th><th></th></tr>
-                                </thead>
-                                <tbody>
-                                    for row in rows {
-                                        let (tone, label) = row.state(now);
-                                        <tr>
-                                            <td>moment(at: row.invitation.created_at)</td>
-                                            <td>moment(at: row.invitation.expires_at)</td>
-                                            <td><span class=(class!("badge", tone))>(label)</span></td>
-                                            <td class="right">
-                                                if let Some(revoke) = &row.revoke {
-                                                    let named = format!("Invitation ({})", row.invitation.id);
-                                                    confirm(action: revoke, change: Change::RevokeInvitation, target: named.as_str())
-                                                }
-                                            </td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    }
-                </section>
-            },
-        }
+        page_head(
+            title: "Invitations",
+            lead: lead.to_owned(),
+            actions: view! { <a data-confirm-first="" class="button" href=(create)>"Invite someone"</a> },
+        )
+        <section class="card">
+            if rows.is_empty() {
+                <p class="empty">"No invitation yet."</p>
+            } else {
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>"sent to"</th><th>"created"</th><th>"expires"</th><th>"state"</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            for row in rows {
+                                let (tone, label) = row.state(now);
+                                let named = format!("Invitation ({})", row.invitation.id);
+                                <tr>
+                                    <td>
+                                        match &row.invitation.email {
+                                            Some(email) => (email),
+                                            None => <span class="muted">"Link passed on"</span>,
+                                        }
+                                    </td>
+                                    <td>moment(at: row.invitation.created_at)</td>
+                                    <td>moment(at: row.invitation.expires_at)</td>
+                                    <td><span class=(class!("badge", tone))>(label)</span></td>
+                                    <td class="right">
+                                        if let Some(resend) = &row.resend {
+                                            confirm(action: resend, change: Change::ResendInvitation, target: named.as_str())
+                                        }
+                                        if let Some(revoke) = &row.revoke {
+                                            confirm(action: revoke, change: Change::RevokeInvitation, target: named.as_str())
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
     })
 }
 
-/// The page creating an invitation, with why the last attempt was refused, or,
-/// once created, its `link`, shown only now, expiring at `expires_at`; both go
-/// back to `back`.
+/// A new invitation, expiring at `expires_at`, as it was `sent`: its link,
+/// shown only now, or the address it was mailed to. Both go back to `back`.
 #[component]
 pub async fn invitation_created<'a>(
-    link: &'a str,
+    sent: &'a InvitationSent,
     expires_at: DateTime<Utc>,
     back: &'a str,
 ) -> Result<impl View> {
+    let (title, lead) = match sent {
+        InvitationSent::Link(_) => (
+            "Invitation created",
+            "Send this link to the person you invite. It is shown only now, and works once."
+                .to_owned(),
+        ),
+        InvitationSent::Mailed(email) => (
+            "Invitation sent",
+            format!(
+                "Origin Auth mailed the link to {email}. The account created with it starts with this address, verified."
+            ),
+        ),
+    };
     Ok(view! {
-        page_head(
-            title: "Invitation created",
-            lead: "Send this link to the person you invite. It is shown only now, and works once.".to_owned(),
-        )
+        page_head(title: title, lead: lead)
         <section class="card">
             <div class="body">
-                <input readonly="" value=(link) aria-label="Signup link">
+                if let InvitationSent::Link(link) = sent {
+                    <input readonly="" value=(link.as_str()) aria-label="Signup link">
+                }
                 <p class="help">"Expires " moment(at: expires_at)</p>
                 <div class="row"><a class="button secondary" href=(back)>"Done"</a></div>
             </div>

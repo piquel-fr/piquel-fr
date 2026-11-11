@@ -1,0 +1,43 @@
+---
+source: apps/auth-service/src/deliveries/email/tests.rs
+expression: read
+---
+Subject: You’re invited to SourceOrigin
+
+--- text/plain ---
+Hello,
+
+SourceOrigin invited you to create an Origin Account, the account you sign in to SourceOrigin and its apps with. Open the link below to choose a handle and add a passkey.
+
+Create your account:
+
+https://auth.sourceorigin.dev/register?invitation=TOKEN
+
+Your account starts with this address, ada@example.com, already confirmed. The link works once, until 18 November 2026, 09:30 UTC.
+
+If you weren’t expecting this invitation, ignore this email: no account is created unless someone opens the link.
+
+SourceOrigin
+
+--- text/html ---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>You’re invited to SourceOrigin</title>
+</head>
+<body style="margin:0;padding:24px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.5;color:#1a1a1a;background:#ffffff">
+<div style="max-width:560px;margin:0 auto">
+<p>Hello,</p>
+<p>SourceOrigin invited you to create an Origin Account, the account you sign in to SourceOrigin and its apps with. Open the link below to choose a handle and add a passkey.</p>
+<p>
+<a href="https://auth.sourceorigin.dev/register?invitation=TOKEN" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">Create your account</a>
+</p>
+<p style="font-size:14px;color:#555555">Or copy this link: https://auth.sourceorigin.dev/register?invitation=TOKEN</p>
+<p>Your account starts with this address, <strong>ada@example.com</strong>, already confirmed. The link works once, until 18 November 2026, 09:30 UTC.</p>
+<p style="font-size:14px;color:#555555">If you weren’t expecting this invitation, ignore this email: no account is created unless someone opens the link.</p>
+<p>SourceOrigin</p>
+</div>
+</body>
+</html>

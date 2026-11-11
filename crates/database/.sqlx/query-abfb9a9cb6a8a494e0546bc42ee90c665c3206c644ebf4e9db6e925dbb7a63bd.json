@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id AS \"id: TokenId\", created_at, expires_at, redeemed_at, revoked_at\n                FROM invitations\n                ORDER BY created_at DESC, id DESC",
+  "query": "SELECT id AS \"id: TokenId\", email, created_at, expires_at, redeemed_at, revoked_at\n                FROM invitations\n                ORDER BY created_at DESC, id DESC",
   "describe": {
     "columns": [
       {
@@ -10,21 +10,26 @@
       },
       {
         "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "redeemed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "revoked_at",
         "type_info": "Timestamptz"
       }
@@ -34,11 +39,12 @@
     },
     "nullable": [
       false,
+      true,
       false,
       false,
       true,
       true
     ]
   },
-  "hash": "0d0198b9561f338a6ce43080f22626ebecf2dc785acbb7efff1498280d85581d"
+  "hash": "abfb9a9cb6a8a494e0546bc42ee90c665c3206c644ebf4e9db6e925dbb7a63bd"
 }

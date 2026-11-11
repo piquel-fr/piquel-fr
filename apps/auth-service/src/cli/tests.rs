@@ -61,7 +61,15 @@ impl AdminOperation {
                 "message.txt",
             ],
             Self::ListInvitations => &["invite", "list"],
-            Self::CreateInvitation => &["invite", "create", "--reason", "For Jane"],
+            Self::CreateInvitation => &[
+                "invite",
+                "create",
+                "--email",
+                "jane@example.com",
+                "--reason",
+                "For Jane",
+            ],
+            Self::ResendInvitation => &["invite", "resend", AN_ID, "--reason", "Jane lost it"],
             Self::RevokeInvitation => &[
                 "invite",
                 "revoke",

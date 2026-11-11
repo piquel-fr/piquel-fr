@@ -7,8 +7,8 @@
  * serves the dashboard on auth's host, `localhost`, so its passkey dialog needs no
  * list of related origins; a preview's dashboard has a host of its own, so there
  * the browser reads auth's `/.well-known/webauthn` first. Skipped without
- * `E2E_ADMIN_URL` and `E2E_GRANT_ADMIN`; the invitation test also needs
- * `E2E_INVITE`, and the tests that read email `E2E_MAIL_URL`.
+ * `E2E_ADMIN_URL` and `E2E_GRANT_ADMIN`; the tests that read email also need
+ * `E2E_MAIL_URL`.
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import {
@@ -301,34 +301,41 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
 });
 
+/**
+ * Opens the dashboard's invitation form as `admin`, and invites someone for a day,
+ * mailing `email` the link if given.
+ */
+async function invite(admin: Page, email?: string): Promise<void> {
+  await admin.goto(`${adminUrl}/invitations`);
+  await admin.getByRole('link', { name: 'Invite someone', exact: true }).click();
+  if (email) await admin.getByLabel('Email address').fill(email);
+  await admin.getByLabel('Valid for').fill('1d');
+  await admin.getByLabel('Reason').fill('Browser test');
+  await admin.getByRole('button', { name: 'Invite', exact: true }).click();
+}
+
 test('an invitation from the dashboard signs one person up, and a revoked one nobody', async ({
   browser
 }) => {
-  test.skip(!process.env.E2E_INVITE, 'Signup needs no invitation: set E2E_INVITE where it does.');
   const suffix = Date.now().toString(36);
   const admin = await administrator(browser, `inviter-${suffix}`);
-  /** Creates an invitation, valid for a day, and answers its link. */
-  const invite = async () => {
-    await admin.goto(`${adminUrl}/invitations`);
-    await admin.getByRole('link', { name: 'Invite someone', exact: true }).click();
-    await admin.getByLabel('Valid for').fill('1d');
-    await admin.getByLabel('Reason').fill('Browser test');
-    await admin.getByRole('button', { name: 'Create link', exact: true }).click();
+  /** Creates an invitation to pass on, and answers its link. */
+  const link = async () => {
+    await invite(admin);
     await expect(admin.getByRole('heading', { name: 'Invitation created' })).toBeVisible();
     return admin.getByLabel('Signup link').inputValue();
   };
-  /** Whether signing up as `handle` with `link`'s invitation is refused. */
-  const refused = async (link: string, handle: string) => {
+  /**
+   * Whether `link`'s invitation can no longer be used, as its sign-up page says,
+   * whether or not signup needs one.
+   */
+  const refused = async (link: string) => {
     const page = await withPasskeys(browser);
     await page.goto(link);
-    await page.getByLabel('Handle', { exact: true }).fill(handle);
-    await page.getByLabel('Passkey name', { exact: true }).fill('Passkey');
-    await page.getByRole('button', { name: 'Create account with a passkey' }).click();
-    await expect(page.getByRole('alert')).toBeVisible();
-    await expect(page).toHaveURL(/\/register/);
+    await expect(page.getByText('This invitation has expired or was used already')).toBeVisible();
   };
   await openDashboard(admin, '/invitations/new');
-  const first = await invite();
+  const first = await link();
   expect(new URL(first).origin).toBe(authUrl);
   // The link shows once, on a page reached by `GET`: reloading it shows the form
   // again, and creates nothing.
@@ -336,13 +343,13 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
   await expect(admin.getByRole('heading', { name: 'Invitation created' })).toHaveCount(0);
   await expect(admin.getByLabel('Valid for')).toBeVisible();
 
-  // The link signs one account up, once.
+  // The link signs one account up, once, whether or not signup needs one.
   await signUp(await withPasskeys(browser), `invited-${suffix}`, 'Passkey', first);
-  await refused(first, `again-${suffix}`);
+  await refused(first);
 
   // A revoked link signs nobody up. The open invitation is the only one with a
   // button: the redeemed one has none.
-  const second = await invite();
+  const second = await link();
   await admin.getByRole('link', { name: 'Done', exact: true }).click();
   // Invitations list newest first.
   await admin.getByRole('row').nth(1).getByRole('button', { name: 'Revoke', exact: true }).click();
@@ -351,7 +358,40 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
   await revokeInvitation.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/invitations`);
   await expect(admin.getByRole('row').nth(1)).toContainText('Revoked');
-  await refused(second, `revoked-${suffix}`);
+  await refused(second);
+});
+
+test('a mailed invitation starts its account with the address, verified', async ({ browser }) => {
+  test.skip(!mailUrl, 'Set E2E_MAIL_URL to the API of the Mailpit receiving the email.');
+  const suffix = Date.now().toString(36);
+  const address = `invited-${suffix}@e2e.test`;
+  const admin = await administrator(browser, `mailer-${suffix}`);
+  await openDashboard(admin, '/invitations/new');
+  await invite(admin, address);
+  // Nobody but its recipient sees a mailed link.
+  await expect(admin.getByRole('heading', { name: 'Invitation sent' })).toBeVisible();
+  await expect(admin.getByLabel('Signup link')).toHaveCount(0);
+
+  // The list names its recipient, and sends it again, with the same link.
+  await admin.getByRole('link', { name: 'Done', exact: true }).click();
+  const row = admin.getByRole('row').nth(1);
+  await expect(row).toContainText(address);
+  await row.getByRole('button', { name: 'Resend', exact: true }).click();
+  const resend = admin.getByRole('dialog', { name: 'Send this invitation again' });
+  await resend.getByLabel('Reason').fill('Browser test');
+  await resend.getByRole('button', { name: 'Resend', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/invitations`);
+
+  const link = await mailed(address, /https?:\/\/\S+\/register\?invitation=[\w-]+/);
+  const page = await withPasskeys(browser);
+  await page.goto(link);
+  await expect(page.getByText(address)).toBeVisible();
+  await signUp(page, `mailed-${suffix}`, 'Passkey', link);
+  await page.goto('/settings/emails');
+  const listed = page.getByRole('listitem').filter({ hasText: address });
+  // Only a confirmed address can be primary.
+  await expect(listed).toContainText('Primary');
+  await expect(listed).not.toContainText('Waiting for confirmation');
 });
 
 test("an administrator changes an account's passkeys and addresses, and its owner sees why", async ({
