@@ -62,7 +62,7 @@ mod users;
 use crate::{
     AdminError, AdminService, AuthConfig, KeyStore, MAX_DASHBOARD_BODY_BYTES, Reason,
     account::{AccountError, AccountService, Viewer},
-    admin::{AdminOperation, DashboardSignIn, Overview, Problem, SignedInAdmin},
+    admin::{AdminOperation, DashboardCookie, DashboardSignIn, Overview, Problem, SignedInAdmin},
     assets::EmbeddedAssets,
     config::{DashboardConfig, PolicyLinks},
     federation::ReturnTo,
@@ -102,6 +102,7 @@ use topcoat::{
     },
     view::{Child, View, ViewExt, view},
 };
+use url::Url;
 
 /// How long an administrator has to fill in and submit a change's form, once
 /// shown: showing it asks for a confirmation this much newer than the service
@@ -258,22 +259,24 @@ pub(crate) struct AdminApplication {
     attention: Arc<Mutex<AttentionCache>>,
 }
 
-/// What a page answers in its place, such as the redirect through auth's handoff
-/// page, which sets the state cookie. A page fails with it, and [`answers`] sends
-/// it.
+/// Sends the browser through auth's handoff page in place of the page. A page
+/// fails with it, and [`answers`] redirects the browser `to` the handoff, setting
+/// the state `cookie` that binds the handoff to this browser.
 #[derive(Debug, thiserror::Error)]
-#[error("the dashboard answers for the page")]
-struct Answer(Mutex<Option<Response>>);
+#[error("the dashboard hands the browser off to auth")]
+struct HandOff {
+    /// Auth's handoff page.
+    to: Url,
+    /// The state cookie.
+    cookie: DashboardCookie,
+}
 
-impl Answer {
-    /// Fails the page with `response`.
-    fn error(response: Response) -> Error {
-        Self(Mutex::new(Some(response))).into()
-    }
-
-    /// The response, the first time it is asked for.
-    fn take(&self) -> Option<Response> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).take()
+impl HandOff {
+    /// The redirect to the handoff page, with its state cookie.
+    fn response(&self, cx: &Cx) -> Result<Response> {
+        let mut response = see_other(&self.to).into_response(cx)?;
+        self.cookie.set_on(&mut response)?;
+        Ok(response)
     }
 }
 
@@ -643,18 +646,9 @@ impl AdminApplication {
     /// confirms its session with a passkey, and back to the page.
     fn hand_off(&self, cx: &Cx) -> Error {
         let page = uri(cx).path_and_query().map_or("/", |page| page.as_str());
-        let started = self
-            .sign_in
-            .start(page)
-            .map_err(Error::from)
-            .and_then(|(to, cookie)| {
-                let mut response = see_other(to).into_response(cx)?;
-                cookie.set_on(&mut response)?;
-                Ok(response)
-            });
-        match started {
-            Ok(response) => Answer::error(response),
-            Err(error) => error,
+        match self.sign_in.start(page) {
+            Ok((to, cookie)) => HandOff { to, cookie }.into(),
+            Err(error) => error.into(),
         }
     }
 
@@ -842,7 +836,7 @@ impl<I> std::ops::Deref for Refused<I> {
     }
 }
 
-/// Answers a page that failed with an [`Answer`] with it, and one the service
+/// Answers a page that failed with a [`HandOff`] with its redirect, and one the service
 /// refused with what the refusal means, and gives every answer the dashboard's
 /// Content-Security-Policy. A `GET`'s answer deletes what a change sealed for its
 /// page to show, which shows once.
@@ -1155,14 +1149,17 @@ impl AdminApplication {
             .into_response(cx)
     }
 
-    /// What a page that failed with `error` answers: the [`Answer`] it carries,
+    /// What a page that failed with `error` answers: the redirect a [`HandOff`] makes,
     /// that an account which does not administer Origin Auth has no access, or why the
     /// admin or account service refused. Other failures answer as Topcoat does,
     /// such as a redirect, except that a server error is logged, since Topcoat logs
     /// none, and its page shows its trace ID.
     async fn failed(cx: &Cx, error: Error) -> Result<Response> {
-        if let Some(response) = error.downcast_ref::<Answer>().and_then(Answer::take) {
-            return Ok(response);
+        if let Some(hand_off) = error.downcast_ref::<HandOff>() {
+            return match hand_off.response(cx) {
+                Ok(response) => Ok(response),
+                Err(failed) => Self::unexplained(cx, failed).await,
+            };
         }
         // The administrator's own refusal, from either service.
         let administrator = error.downcast_ref::<AdminError>().or_else(|| {

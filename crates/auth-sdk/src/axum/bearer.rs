@@ -9,7 +9,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::de::DeserializeOwned;
-use sourceorigin_common::protocol::challenge::{BearerChallenge, BearerError};
+use sourceorigin_common::{
+    ErrorChain,
+    protocol::challenge::{BearerChallenge, BearerError},
+};
 use std::{
     future::Future,
     marker::PhantomData,
@@ -293,22 +296,6 @@ impl IntoResponse for AuthRejection {
                 .insert(header::WWW_AUTHENTICATE, value);
         }
         response
-    }
-}
-
-/// Formats an error with its sources, for logs.
-pub(super) struct ErrorChain<'a>(pub(super) &'a (dyn std::error::Error + 'a));
-
-impl std::fmt::Display for ErrorChain<'_> {
-    /// Writes the error, then each source after `: `.
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}", self.0)?;
-        let mut source = self.0.source();
-        while let Some(cause) = source {
-            write!(formatter, ": {cause}")?;
-            source = cause.source();
-        }
-        Ok(())
     }
 }
 

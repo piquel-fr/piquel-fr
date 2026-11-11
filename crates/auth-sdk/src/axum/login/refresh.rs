@@ -10,7 +10,7 @@
 use super::{Login, SessionCookie, SignedIn, layer::RequestSession};
 use crate::{
     OAuthError, TokenError,
-    axum::{StoredLogin, bearer::ErrorChain},
+    axum::StoredLogin,
     protocol::oauth::{ErrorCode, ErrorResponse},
 };
 use axum::{
@@ -18,6 +18,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::TimeDelta;
+use sourceorigin_common::ErrorChain;
 use std::time::Duration;
 
 /// Access tokens this close to expiry are refreshed first.

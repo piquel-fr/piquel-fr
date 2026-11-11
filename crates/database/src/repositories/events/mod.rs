@@ -113,7 +113,32 @@ impl RecordedEvent {
     }
 }
 
-/// An event joined with its personal data, as the read queries return it.
+/// A checked `sqlx::query_as!` returning [`EventRow`]s, whose columns are written
+/// only here: every event column, joined with the event's personal data, from
+/// `domain_events e` and `event_personal_data p`. `$rest` filters and orders,
+/// e.g. `select_events!("WHERE e.kind = $1 LIMIT 1", kind)`.
+macro_rules! select_events {
+    ($rest:literal $(, $arg:expr)* $(,)?) => {
+        sqlx::query_as!(
+            EventRow,
+            r#"SELECT
+                e.id AS "id: EventId", e.occurred_at, e.kind, e.version, e.payload,
+                e.actor AS "actor: Json<Actor>",
+                e.subject_user_id AS "subject_user_id: UserId",
+                e.trace_id AS "trace_id: TraceId",
+                p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
+                p.user_agent_family AS "browser?: Browser",
+                p.platform AS "platform?: Platform",
+                p.details AS "details?", p.reason AS "reason?"
+            FROM domain_events e
+            LEFT JOIN event_personal_data p ON p.event_id = e.id
+            "# + $rest
+            $(, $arg)*
+        )
+    };
+}
+
+/// An event joined with its personal data, as [`select_events!`] reads it.
 struct EventRow {
     /// Event identifier.
     id: EventId,
@@ -396,19 +421,8 @@ impl EventRepository<'_> {
         run!(
             self,
             fetch_all,
-            sqlx::query_as!(
-                EventRow,
-                r#"SELECT
-                    e.id AS "id: EventId", e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
-                    e.subject_user_id AS "subject_user_id: UserId",
-                    e.trace_id AS "trace_id: TraceId",
-                    p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
-                    p.user_agent_family AS "browser?: Browser",
-                    p.platform AS "platform?: Platform",
-                    p.details AS "details?", p.reason AS "reason?"
-                FROM domain_events e
-                LEFT JOIN event_personal_data p ON p.event_id = e.id
-                WHERE ($1::uuid IS NULL OR e.subject_user_id = $1)
+            select_events!(
+                r#"WHERE ($1::uuid IS NULL OR e.subject_user_id = $1)
                 AND ($2::text IS NULL OR e.kind = $2)
                 AND (
                     $3::uuid IS NULL
@@ -453,19 +467,8 @@ impl EventRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query_as!(
-                EventRow,
-                r#"SELECT
-                    e.id AS "id: EventId", e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
-                    e.subject_user_id AS "subject_user_id: UserId",
-                    e.trace_id AS "trace_id: TraceId",
-                    p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
-                    p.user_agent_family AS "browser?: Browser",
-                    p.platform AS "platform?: Platform",
-                    p.details AS "details?", p.reason AS "reason?"
-                FROM domain_events e
-                LEFT JOIN event_personal_data p ON p.event_id = e.id
-                WHERE e.kind = 'audit_chain_verified'
+            select_events!(
+                r#"WHERE e.kind = 'audit_chain_verified'
                 AND ($1 OR e.payload ->> 'keys' IS DISTINCT FROM 'given')
                 ORDER BY e.occurred_at DESC
                 LIMIT 1"#,
@@ -550,19 +553,8 @@ impl EventRepository<'_> {
         run!(
             self,
             fetch_all,
-            sqlx::query_as!(
-                EventRow,
-                r#"SELECT
-                    e.id AS "id: EventId", e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
-                    e.subject_user_id AS "subject_user_id: UserId",
-                    e.trace_id AS "trace_id: TraceId",
-                    p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
-                    p.user_agent_family AS "browser?: Browser",
-                    p.platform AS "platform?: Platform",
-                    p.details AS "details?", p.reason AS "reason?"
-                FROM domain_events e
-                LEFT JOIN event_personal_data p ON p.event_id = e.id
-                WHERE e.client_id = $1
+            select_events!(
+                r#"WHERE e.client_id = $1
                 ORDER BY e.txid DESC, e.sequence DESC
                 LIMIT $2"#,
                 client_id.as_str(),

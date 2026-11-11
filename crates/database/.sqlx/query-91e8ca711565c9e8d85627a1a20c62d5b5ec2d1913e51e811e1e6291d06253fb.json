@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    e.id AS \"id: EventId\", e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\", p.reason AS \"reason?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE e.kind = 'audit_chain_verified'\n                AND ($1 OR e.payload ->> 'keys' IS DISTINCT FROM 'given')\n                ORDER BY e.occurred_at DESC\n                LIMIT 1",
+  "query": "SELECT\n                e.id AS \"id: EventId\", e.occurred_at, e.kind, e.version, e.payload,\n                e.actor AS \"actor: Json<Actor>\",\n                e.subject_user_id AS \"subject_user_id: UserId\",\n                e.trace_id AS \"trace_id: TraceId\",\n                p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                p.user_agent_family AS \"browser?: Browser\",\n                p.platform AS \"platform?: Platform\",\n                p.details AS \"details?\", p.reason AS \"reason?\"\n            FROM domain_events e\n            LEFT JOIN event_personal_data p ON p.event_id = e.id\n            WHERE ($1::uuid IS NULL OR e.subject_user_id = $1)\n                AND ($2::text IS NULL OR e.kind = $2)\n                AND (\n                    $3::uuid IS NULL\n                    OR (e.txid, e.sequence) < (\n                        SELECT txid, sequence FROM domain_events\n                        WHERE id = $3\n                        AND ($1::uuid IS NULL OR subject_user_id = $1)\n                    )\n                )\n                AND ($5::uuid IS NULL OR e.id = $5)\n                AND ($7::text IS NULL OR e.kind <> $7)\n                ORDER BY e.txid DESC, e.sequence DESC\n                LIMIT $4 OFFSET $6",
   "describe": {
     "columns": [
       {
@@ -76,7 +76,13 @@
     ],
     "parameters": {
       "Left": [
-        "Bool"
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -96,5 +102,5 @@
       true
     ]
   },
-  "hash": "167b0aa8f62a80288b347e68f73d729e486e24b550c183ced5127719cd525d7c"
+  "hash": "91e8ca711565c9e8d85627a1a20c62d5b5ec2d1913e51e811e1e6291d06253fb"
 }

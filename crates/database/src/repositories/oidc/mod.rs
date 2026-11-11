@@ -76,6 +76,32 @@ pub struct InsertAuthorizationRequest {
     pub expires_at: DateTime<Utc>,
 }
 
+/// A checked `sqlx::query_as!` returning [`StoredAuthorizationRequest`]s, whose
+/// columns are written only here: `$head` reads requests as `r`, with their client
+/// as `c`, and ends where the columns go, after `SELECT` or `RETURNING`; `$tail`
+/// follows them. A pushed request started when the browser claimed it, any other
+/// when it was created.
+macro_rules! authorization_requests {
+    ($head:literal, $tail:literal $(, $arg:expr)* $(,)?) => {
+        sqlx::query_as!(
+            StoredAuthorizationRequest,
+            $head
+                + r#"
+                    r.id AS "id: TokenId", r.pushed, r.client_id AS "client_id: ClientId",
+                    c.display_name AS client_display_name,
+                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
+                    r.scopes AS "scopes: JsonArray<String>", r.audience,
+                    r.interaction AS "interaction: Interaction", r.max_age,
+                    r.hinted_user_id AS "hinted_user_id: UserId",
+                    r.target_acr AS "target_acr: Acr",
+                    COALESCE(r.claimed_at, r.created_at) AS "started_at!"
+                "#
+                + $tail
+            $(, $arg)*
+        )
+    };
+}
+
 /// A pending authorization request. Whether its client's current policy still
 /// allows it is the caller's to check.
 #[derive(Clone, Debug)]
@@ -256,8 +282,7 @@ impl OidcRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query_as!(
-                StoredAuthorizationRequest,
+            authorization_requests!(
                 r#"UPDATE authorization_requests r
                 SET claimed_at = now(), secret_digest = $4, digest_key = $5, expires_at = $6
                 FROM oidc_clients c
@@ -270,15 +295,8 @@ impl OidcRepository<'_> {
                 AND r.expires_at > now()
                 AND c.id = r.client_id
                 AND c.enabled
-                RETURNING
-                    r.id AS "id: TokenId", r.pushed, r.client_id AS "client_id: ClientId",
-                    c.display_name AS client_display_name,
-                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
-                    r.scopes AS "scopes: JsonArray<String>", r.audience,
-                    r.interaction AS "interaction: Interaction", r.max_age,
-                    r.hinted_user_id AS "hinted_user_id: UserId",
-                    r.target_acr AS "target_acr: Acr",
-                    r.claimed_at AS "started_at!""#,
+                RETURNING"#,
+                "",
                 id.as_uuid(),
                 digests,
                 client,
@@ -305,24 +323,15 @@ impl OidcRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query_as!(
-                StoredAuthorizationRequest,
-                r#"SELECT
-                    r.id AS "id: TokenId", r.pushed, r.client_id AS "client_id: ClientId",
-                    c.display_name AS client_display_name,
-                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
-                    r.scopes AS "scopes: JsonArray<String>", r.audience,
-                    r.interaction AS "interaction: Interaction", r.max_age,
-                    r.hinted_user_id AS "hinted_user_id: UserId",
-                    r.target_acr AS "target_acr: Acr",
-                    COALESCE(r.claimed_at, r.created_at) AS "started_at!"
-                FROM authorization_requests r
+            authorization_requests!(
+                "SELECT",
+                "FROM authorization_requests r
                 JOIN oidc_clients c ON c.id = r.client_id
                 WHERE r.id = $1
                 AND r.secret_digest = ANY($2)
                 AND r.consumed_at IS NULL
                 AND r.expires_at > now()
-                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)"#,
+                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)",
                 id.as_uuid(),
                 digests,
             )
@@ -345,9 +354,8 @@ impl OidcRepository<'_> {
         run!(
             self,
             fetch_one,
-            sqlx::query_as!(
-                StoredAuthorizationRequest,
-                r#"UPDATE authorization_requests r
+            authorization_requests!(
+                "UPDATE authorization_requests r
                 SET consumed_at = now()
                 FROM oidc_clients c
                 WHERE r.id = $1
@@ -356,15 +364,8 @@ impl OidcRepository<'_> {
                 AND r.expires_at > now()
                 AND (NOT r.pushed OR r.claimed_at IS NOT NULL)
                 AND c.id = r.client_id
-                RETURNING
-                    r.id AS "id: TokenId", r.pushed, r.client_id AS "client_id: ClientId",
-                    c.display_name AS client_display_name,
-                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
-                    r.scopes AS "scopes: JsonArray<String>", r.audience,
-                    r.interaction AS "interaction: Interaction", r.max_age,
-                    r.hinted_user_id AS "hinted_user_id: UserId",
-                    r.target_acr AS "target_acr: Acr",
-                    COALESCE(r.claimed_at, r.created_at) AS "started_at!""#,
+                RETURNING",
+                "",
                 id.as_uuid(),
                 digests,
             )

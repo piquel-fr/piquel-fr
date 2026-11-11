@@ -45,12 +45,15 @@ OAuth error JSON; from then on, every error goes back to the client's redirect
 URI, always with `state` and `iss` (`ClientRedirect`).
 
 `AuthorizationParameters::validate` checks the rest the same way for browser and
-pushed requests: `response_type=code`, an S256 PKCE challenge, scopes and
-audience the client allows, `prompt`, `max_age`, `acr_values`, and an
-`id_token_hint` that auth signed for this client, which names the only account
-that may answer. The request is stored in `authorization_requests` for ten
-minutes, with its first known `acr_values` entry as its target `acr`. The
-browser carries its opaque token, the transaction, from then on.
+pushed requests, one named step per check: no request object and no
+`response_mode` but `query`, an `id_token_hint` that auth signed for this
+client, which names the only account that may answer, `response_type=code`, an
+S256 PKCE challenge, `state`, scopes and audience the client allows, `nonce`,
+`max_age` and `prompt`. It returns a `ValidatedAuthorization`, whose `store`
+saves the request and returns its token. The request is stored in
+`authorization_requests` for ten minutes, with its first known `acr_values`
+entry as its target `acr`. The browser carries its opaque token, the
+transaction, from then on.
 
 A client registered to push its requests is refused here.
 

@@ -27,7 +27,7 @@ pub use operator::{Operator, OperatorName};
 pub(crate) use overview::{Kinds, Overview, Problem};
 pub(crate) use service::ALERTS_SHOWN;
 pub use service::AdminService;
-pub(crate) use sign_in::{DashboardSignIn, SignedInAdmin};
+pub(crate) use sign_in::{DashboardCookie, DashboardSignIn, SignedInAdmin};
 pub use types::{
     AnnouncementDraft, AnnouncementRecipients, GracePeriod, HandleProblem, InvalidLifetime,
     InviteExpiry, Letter, Reason, UserRef,

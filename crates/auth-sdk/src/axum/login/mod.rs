@@ -13,7 +13,7 @@ mod routes;
 pub use extract::{CrossOrigin, MaybeSignedIn, SignedIn, StepUp};
 pub use layer::{LoginLayer, LoginService};
 
-use super::{BoxFuture, CookieKey, bearer::ErrorChain, seal::SealError, session::StoredLogin};
+use super::{BoxFuture, CookieKey, seal::SealError, session::StoredLogin};
 use crate::{Client, ClientId, Credentials, LogoutToken, Scopes, StepUpRequirement};
 use axum::{
     Router,
@@ -27,7 +27,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use layer::RequestSession;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sourceorigin_common::protocol::same_origin::BrowserRequest;
+use sourceorigin_common::{ErrorChain, protocol::same_origin::BrowserRequest};
 use std::{fmt, future::Future, str::FromStr, sync::Arc};
 use url::Url;
 
