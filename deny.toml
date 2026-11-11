@@ -13,7 +13,6 @@ exceptions = [
     # SourceOrigin's own non-commercial crates. PolyForm is allowed for them by name,
     # never for third-party dependencies.
     { crate = "auth-service", allow = ["PolyForm-Noncommercial-1.0.0"] },
-    { crate = "sourceorigin-crypto", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-web", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-repository", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-telemetry", allow = ["PolyForm-Noncommercial-1.0.0"] },

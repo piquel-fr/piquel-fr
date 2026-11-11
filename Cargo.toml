@@ -13,8 +13,8 @@ members = [
 
 [workspace.package]
 edition = "2024"
-# Non-commercial by default. The SDK and the crate it depends on (auth-sdk,
-# common) override this with Apache-2.0, so any application can use them.
+# Non-commercial by default. The SDK and the crates it depends on (auth-sdk,
+# common, crypto) override this with Apache-2.0, so any application can use them.
 license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/sourceorigin-dev/sourceorigin"
 version = "0.1.0"

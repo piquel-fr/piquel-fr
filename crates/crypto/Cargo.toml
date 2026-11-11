@@ -1,8 +1,9 @@
 [package]
 name = "sourceorigin-crypto"
+description = "The cryptographic primitives Origin Auth and its SDK share: secrets, digests, PKCE, JWT signing and verification, sealing and signed notes"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 repository.workspace = true
 
 [dependencies]

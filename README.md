@@ -51,6 +51,6 @@ See [getting started](docs/dev/getting-started.md) for the tools these need.
 
 SourceOrigin is free to use, change and share for any purpose except a commercial one,
 under the [PolyForm Noncommercial License 1.0.0](LICENSE). The SDKs, and the
-crate they depend on, are under the [Apache License 2.0](LICENSE-APACHE) instead,
+crates they depend on, are under the [Apache License 2.0](LICENSE-APACHE) instead,
 so any application, commercial or not, can sign its users in with Origin Auth:
-`crates/auth-sdk`, `crates/common` and `packages/auth`.
+`crates/auth-sdk`, `crates/common`, `crates/crypto` and `packages/auth`.

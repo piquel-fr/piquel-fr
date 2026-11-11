@@ -1,7 +1,7 @@
 Required Notice: Copyright 2026 SourceOrigin (https://sourceorigin.dev)
 
-This license covers everything in this repository except the SDKs and the crate
-they depend on: crates/auth-sdk, crates/common and packages/auth.
+This license covers everything in this repository except the SDKs and the crates
+they depend on: crates/auth-sdk, crates/common, crates/crypto and packages/auth.
 Those are licensed under the Apache License 2.0, in LICENSE-APACHE.
 
 # PolyForm Noncommercial License 1.0.0
