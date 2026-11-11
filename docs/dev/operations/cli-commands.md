@@ -425,7 +425,7 @@ auth-service invite create [OPTIONS] --reason <REASON>
 
 Options:
 
-- `--email <EMAIL>`: Mail the link to this address, which the account created with it starts with, verified. Needs email enabled (AUTH_SMTP_URL).
+- `--email <EMAIL>`: Mail the link to this address, which the account created with it starts with, verified. Needs email enabled (`AUTH_SMTP_URL`).
 - `--expires-in <EXPIRES_IN>`: How long the link stays valid, e.g. 24h or 7d. Default: `7d`.
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
