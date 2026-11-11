@@ -1,5 +1,6 @@
 //! Authorization request parameters, from the browser or pushed by the client,
-//! validated the same way against the client's registration.
+//! validated the same way against the client's registration into a
+//! [`ValidatedAuthorization`].
 
 use crate::oidc::{
     AUTHORIZATION_REQUEST_MINUTES, Claim, CodeChallengeMethod, Interaction, MAX_STATE_BYTES,
@@ -69,29 +70,24 @@ impl AuthorizationParameters {
     }
 
     /// Validates every other parameter against `client`'s registration, the same
-    /// way for browser and pushed requests, and returns the pending authorization
-    /// to store under the returned token. Errors are not redirected.
+    /// way for browser and pushed requests, one step per check in this order, so
+    /// the first that fails decides the error. Errors are not redirected.
     pub(super) fn validate(
         &self,
         app: &OidcApplication,
         client: &StoredOidcClient,
         pushed: bool,
-    ) -> Result<(OpaqueToken, InsertAuthorizationRequest), OAuthError> {
+    ) -> Result<ValidatedAuthorization, OAuthError> {
+        self.supported()?;
         let hinted_user_id = self.hinted_user_id(app, client)?;
-        let scopes = self.scopes()?;
-        if !scopes.allowed_by(&client.allowed_scopes) {
-            return Err(
-                OAuthCode::InvalidScope.reject("scope includes values this client may not request")
-            );
-        }
-        let audience = self
-            .audience
-            .clone()
-            .or_else(|| client.allowed_audiences.first().cloned())
-            .filter(|audience| client.allowed_audiences.contains(audience))
-            .ok_or_else(|| {
-                OAuthCode::InvalidTarget.reject("audience is not registered for this client")
-            })?;
+        self.response_type()?;
+        self.code_challenge_method()?;
+        self.state()?;
+        self.code_challenge()?;
+        let scopes = self.scopes(client)?;
+        let audience = self.audience(client)?;
+        self.nonce()?;
+        self.max_age()?;
         let interaction = self.interaction()?;
         let lifetime = if pushed {
             Duration::seconds(PUSHED_REQUEST_SECONDS)
@@ -118,16 +114,11 @@ impl AuthorizationParameters {
             target_acr: self.acr_values.as_deref().and_then(Acr::select),
             expires_at: Utc::now() + lifetime,
         };
-        Ok((token, request))
+        Ok(ValidatedAuthorization { token, request })
     }
 
-    /// Rejects unsupported parameters and returns the account named by a verified
-    /// `id_token_hint`, which must have been issued to `client`.
-    fn hinted_user_id(
-        &self,
-        app: &OidcApplication,
-        client: &StoredOidcClient,
-    ) -> Result<Option<UserId>, OAuthError> {
+    /// Rejects request objects and any `response_mode` but `query`.
+    fn supported(&self) -> Result<(), OAuthError> {
         if self.request.is_some() {
             return Err(OAuthCode::RequestNotSupported
                 .reject("request objects are not supported; send the parameters directly"));
@@ -142,6 +133,16 @@ impl AuthorizationParameters {
                 ResponseMode::Query => {}
             }
         }
+        Ok(())
+    }
+
+    /// The account named by a verified `id_token_hint`, which must have been
+    /// issued to `client`.
+    fn hinted_user_id(
+        &self,
+        app: &OidcApplication,
+        client: &StoredOidcClient,
+    ) -> Result<Option<UserId>, OAuthError> {
         let Some(hint) = &self.id_token_hint else {
             return Ok(None);
         };
@@ -178,8 +179,8 @@ impl AuthorizationParameters {
             })
     }
 
-    /// Checks the response type, PKCE challenge and `state`, then parses the scopes.
-    fn scopes(&self) -> Result<Scopes, OAuthError> {
+    /// Requires `response_type=code`.
+    fn response_type(&self) -> Result<(), OAuthError> {
         match self
             .response_type
             .parse::<ResponseType>()
@@ -189,8 +190,12 @@ impl AuthorizationParameters {
                     error,
                 )
             })? {
-            ResponseType::Code => {}
+            ResponseType::Code => Ok(()),
         }
+    }
+
+    /// Requires `code_challenge_method=S256`.
+    fn code_challenge_method(&self) -> Result<(), OAuthError> {
         match self
             .code_challenge_method
             .parse::<CodeChallengeMethod>()
@@ -203,22 +208,53 @@ impl AuthorizationParameters {
                     error,
                 )
             })? {
-            CodeChallengeMethod::S256 => {}
+            CodeChallengeMethod::S256 => Ok(()),
         }
+    }
+
+    /// Bounds `state`, which comes back with the result.
+    fn state(&self) -> Result<(), OAuthError> {
         if self.state.len() > MAX_STATE_BYTES {
             return Err(OAuthCode::InvalidRequest
                 .reject(format!("state must be at most {MAX_STATE_BYTES} bytes")));
         }
+        Ok(())
+    }
+
+    /// Requires the PKCE challenge to be a SHA-256 digest.
+    fn code_challenge(&self) -> Result<(), OAuthError> {
         if !sourceorigin_crypto::Pkce::valid_challenge(&self.code_challenge) {
             return Err(OAuthCode::InvalidRequest
                 .reject("code_challenge must be a base64url SHA-256 digest, 43 characters long"));
         }
-        Scopes::parse(&self.scope)
+        Ok(())
     }
 
-    /// Checks `nonce` and `max_age`, then parses `prompt`: known values, repeats
-    /// allowed, and `none` alone.
-    pub(super) fn interaction(&self) -> Result<Interaction, OAuthError> {
+    /// Parses the scopes, which `client` must be allowed to request.
+    fn scopes(&self, client: &StoredOidcClient) -> Result<Scopes, OAuthError> {
+        let scopes = Scopes::parse(&self.scope)?;
+        if !scopes.allowed_by(&client.allowed_scopes) {
+            return Err(
+                OAuthCode::InvalidScope.reject("scope includes values this client may not request")
+            );
+        }
+        Ok(scopes)
+    }
+
+    /// The resource the access token is for: the one asked for, or `client`'s
+    /// first audience, which must be registered for it.
+    fn audience(&self, client: &StoredOidcClient) -> Result<String, OAuthError> {
+        self.audience
+            .clone()
+            .or_else(|| client.allowed_audiences.first().cloned())
+            .filter(|audience| client.allowed_audiences.contains(audience))
+            .ok_or_else(|| {
+                OAuthCode::InvalidTarget.reject("audience is not registered for this client")
+            })
+    }
+
+    /// Bounds `nonce`, which comes back in the ID token.
+    fn nonce(&self) -> Result<(), OAuthError> {
         if self
             .nonce
             .as_ref()
@@ -227,9 +263,19 @@ impl AuthorizationParameters {
             return Err(OAuthCode::InvalidRequest
                 .reject(format!("nonce must be 1 to {MAX_STATE_BYTES} bytes")));
         }
+        Ok(())
+    }
+
+    /// Rejects a negative `max_age`.
+    fn max_age(&self) -> Result<(), OAuthError> {
         if self.max_age.is_some_and(|age| age < 0) {
             return Err(OAuthCode::InvalidRequest.reject("max_age cannot be negative"));
         }
+        Ok(())
+    }
+
+    /// Parses `prompt`: known values, repeats allowed, and `none` alone.
+    pub(super) fn interaction(&self) -> Result<Interaction, OAuthError> {
         let prompts = self
             .prompt
             .as_deref()
@@ -246,5 +292,27 @@ impl AuthorizationParameters {
             OAuthCode::InvalidRequest
                 .reject("prompt=none cannot be combined with other prompt values")
         })
+    }
+}
+
+/// An authorization request whose parameters all checked out against its
+/// client's registration, from the browser or pushed by the client: the pending
+/// authorization, and the token that continues it.
+pub(super) struct ValidatedAuthorization {
+    /// The browser's transaction, or the pushed request's `request_uri`.
+    token: OpaqueToken,
+    /// The pending authorization, as it is stored.
+    pub(super) request: InsertAuthorizationRequest,
+}
+
+impl ValidatedAuthorization {
+    /// Stores the pending authorization, and returns the encoded token that
+    /// continues it.
+    pub(super) async fn store(self, app: &OidcApplication) -> Result<String, OAuthError> {
+        app.database
+            .oidc()
+            .insert_authorization_request(&self.request)
+            .await?;
+        Ok(self.token.encoded())
     }
 }

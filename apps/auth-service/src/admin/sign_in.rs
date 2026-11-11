@@ -79,9 +79,11 @@ pub(crate) struct SignedInAdmin {
 
 /// How a step of signing in to the dashboard changes the browser's cookies on the
 /// dashboard's origin. Its page applies it to its answer.
+#[derive(Debug)]
 pub(crate) struct DashboardCookie(Step);
 
 /// The change a [`DashboardCookie`] makes.
+#[derive(Debug)]
 enum Step {
     /// A sign-in started: the state its handoff must come back to.
     Started(Secret),
@@ -95,13 +97,13 @@ impl DashboardCookie {
     /// Adds the `Set-Cookie` headers making the change to `response`, keeping any
     /// other cookies being set.
     pub(crate) fn set_on<B>(
-        self,
+        &self,
         response: &mut axum::http::Response<B>,
     ) -> Result<(), InvalidHeaderValue> {
-        match self.0 {
-            Step::Started(state) => BrowserCookie::DashboardState.set_on(response, &state),
+        match &self.0 {
+            Step::Started(state) => BrowserCookie::DashboardState.set_on(response, state),
             Step::SignedIn(session) => {
-                BrowserCookie::Dashboard.set_on(response, &session)?;
+                BrowserCookie::Dashboard.set_on(response, session)?;
                 BrowserCookie::DashboardState.clear_on(response)
             }
             Step::SignedOut => BrowserCookie::Dashboard.clear_on(response),

@@ -57,15 +57,11 @@ impl OidcApplication {
             return Err(OAuthCode::InvalidRequest.reject("request_uri cannot be pushed"));
         }
         q.redirect_uri(&client)?;
-        let (opaque, request) = q.validate(&app, &client, true)?;
-        app.database
-            .oidc()
-            .insert_authorization_request(&request)
-            .await?;
+        let token = q.validate(&app, &client, true)?.store(&app).await?;
         Ok((
             StatusCode::CREATED,
             Json(PushedAuthorization {
-                request_uri: format!("{REQUEST_URI_PREFIX}{}", opaque.encoded()),
+                request_uri: format!("{REQUEST_URI_PREFIX}{token}"),
                 expires_in: PUSHED_REQUEST_SECONDS,
             }),
         ))

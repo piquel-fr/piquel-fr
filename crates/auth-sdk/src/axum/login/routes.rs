@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     Acr, AuthorizeRequest, CallbackParams, LoginError, RefreshToken, StepUpRequirement, TokenError,
-    axum::{StoredLogin, bearer::ErrorChain, seal::SealError, session::PendingAuthorization},
+    axum::{StoredLogin, seal::SealError, session::PendingAuthorization},
     protocol::{oauth::Scope, sdk::ErrorCategory},
 };
 use axum::{
@@ -15,6 +15,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use serde::Deserialize;
+use sourceorigin_common::ErrorChain;
 use std::{sync::Arc, time::Duration};
 
 /// Longest a session's revocation may hold up the sign-in or logout ending it,

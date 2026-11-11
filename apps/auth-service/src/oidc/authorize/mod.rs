@@ -114,7 +114,8 @@ impl OidcApplication {
                 "this client must push its authorization requests and send their request_uri",
             )));
         }
-        let (opaque, request) = q.validate(&app, &client, false).map_err(back)?;
+        let validated = q.validate(&app, &client, false).map_err(back)?;
+        let request = &validated.request;
         let session = Session::resolve(&app.database, context, &headers).await?;
         let requires_login = session.as_ref().is_none_or(|session| {
             !Self::session_satisfies(
@@ -129,13 +130,10 @@ impl OidcApplication {
         if request.interaction.is_silent() && requires_login {
             return Err(back(OAuthCode::LoginRequired.reject(SILENT_LOGIN_REQUIRED)));
         }
-        app.database
-            .oidc()
-            .insert_authorization_request(&request)
-            .await?;
-        let transaction = opaque.encoded();
+        let target_acr = request.target_acr;
+        let transaction = validated.store(&app).await?;
         let next = if requires_login {
-            app.sign_in_page(transaction, request.target_acr)?
+            app.sign_in_page(transaction, target_acr)?
         } else {
             app.continue_authorization(context, &headers, transaction, RecoveryQuestion::Unanswered)
                 .await?

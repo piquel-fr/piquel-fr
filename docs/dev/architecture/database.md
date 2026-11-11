@@ -46,9 +46,12 @@ with type overrides for typed columns, e.g. `id AS "id: SessionId"`,
 `status AS "status: AccountStatus"`, `scopes AS "scopes: JsonArray<String>"`
 (a JSONB array into a `Vec`) or `profile_version AS "profile_version: Unsigned"`.
 Binds pass the column's own type, e.g. `id.as_uuid()` or `kind.as_str()`, so the
-macro checks them too; JSONB binds use `Json(&value) as _`. A value its Rust type
-rejects, like a non-v7 ID or JSON outside the record's type, becomes
-`DatabaseError::InvalidStoredData` with the column index SQLx reports and the
+macro checks them too; JSONB binds use `Json(&value) as _`. When several queries
+read the same record, its columns are written once, in a macro that joins them
+to each query's own SQL with `+`, which SQLx accepts: `select_events!` for
+events with their personal data, and `authorization_requests!`, whose columns
+follow `SELECT` or `RETURNING`. A value its Rust type rejects, like a non-v7 ID
+or JSON outside the record's type, becomes `DatabaseError::InvalidStoredData` with the column index SQLx reports and the
 decoding error as its source. Uniqueness conflicts, writes a check refused
 (`DatabaseError::Refused`) and deadline failures retain their sources too.
 

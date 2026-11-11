@@ -589,12 +589,10 @@ report!(HistoryPage, self, out, {
         ["ID", "TIME", "KIND", "BY", "REASON"],
         "No history.",
         self.entries.iter().map(|item| {
-            // An entry holds no map, so it always serializes.
-            let entry = serde_json::to_value(&item.entry).unwrap_or_default();
             [
                 Cell::new(item.id),
                 item.occurred_at.into(),
-                entry["kind"].as_str().into(),
+                Cell::new(item.entry.kind()),
                 Cell::new(item.actor),
                 item.reason.as_deref().into(),
             ]
