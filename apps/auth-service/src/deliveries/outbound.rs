@@ -141,7 +141,8 @@ impl OutboundClient {
     ///
     /// # Errors
     ///
-    /// As [`Self::send`].
+    /// As [`Self::send`], and, while the body is read, a timeout or a broken
+    /// connection is retryable as well.
     pub(crate) async fn get(
         &self,
         destination: &str,
