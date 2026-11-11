@@ -99,8 +99,6 @@ operations! {
         RotateSigningKey,
         /// Delete a signing key at once, such as a compromised one.
         RevokeSigningKey,
-        /// Import the deployment's PEM signing key into an empty key set.
-        ImportSigningKey,
         /// Recompute the audit chain and check its checkpoints.
         VerifyAuditChain,
         /// Delete the audit history through a checkpoint.

@@ -27,7 +27,7 @@ Commands:
 
 - [`auth-service serve`](#auth-service-serve): Serve the authentication service.
 - [`auth-service migrate`](#auth-service-migrate): Apply database migrations. Connected as the schema owner, also create or reset the role other commands connect as.
-- [`auth-service keys`](#auth-service-keys): Inspect, rotate, revoke and import signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
+- [`auth-service keys`](#auth-service-keys): Inspect, rotate and revoke signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
 - [`auth-service user`](#auth-service-user): Search, show, disable, reactivate and recover accounts.
 - [`auth-service session`](#auth-service-session): End an account's sessions.
 - [`auth-service invite`](#auth-service-invite): Create, list and revoke signup invitations.
@@ -68,7 +68,7 @@ Options:
 
 ## `auth-service keys`
 
-Inspect, rotate, revoke and import signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
+Inspect, rotate and revoke signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
 
 ```text
 auth-service keys [OPTIONS] <COMMAND>
@@ -85,7 +85,6 @@ Commands:
 - [`auth-service keys rotate`](#auth-service-keys-rotate): Publish a new signing key, which signs after 24 hours. Prints its ID.
 - [`auth-service keys revoke`](#auth-service-keys-revoke): Delete a signing key at once, e.g. a compromised one. When it was the active key, the `next` and `retiring` keys go with it, since their private keys were stored alongside, and a new one signs at once. Verifiers that cached it keep accepting it until their cache expires, up to an hour.
 - [`auth-service keys digest-usage`](#auth-service-keys-digest-usage): Count stored token digests per token digest key, to tell when `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` can be removed.
-- [`auth-service keys import`](#auth-service-keys-import): Import the deployment's PEM signing key as the active key, so tokens it signed keep verifying. Does nothing unless the key set is empty.
 - [`auth-service keys audit`](#auth-service-keys-audit): Print the verifier key of the audit key `AUTH_AUDIT_KEY_PROVIDER` names, for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/dev/security/audit-key.pub.
 
 ## `auth-service keys list`
@@ -146,25 +145,6 @@ auth-service keys digest-usage [OPTIONS]
 
 Options:
 
-- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
-- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
-
-## `auth-service keys import`
-
-Import the deployment's PEM signing key as the active key, so tokens it signed keep verifying. Does nothing unless the key set is empty.
-
-```text
-auth-service keys import [OPTIONS] --reason <REASON> <REFERENCE>
-```
-
-Arguments:
-
-- `<REFERENCE>`: The PEM key, at `file://PATH` or `env://NAME`.
-
-Options:
-
-- `--id <ID>`: The key's ID, as tokens it signed name it. Default: `primary`.
-- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 - `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 

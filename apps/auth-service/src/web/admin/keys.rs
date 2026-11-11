@@ -1,5 +1,4 @@
-//! Signing keys: listing, rotating and revoking them. Importing the
-//! deployment's PEM key stays at the terminal.
+//! Signing keys: listing, rotating and revoking them.
 
 use super::{AdminApplication as App, ReasonForm, Refused};
 use crate::Reason;

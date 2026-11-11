@@ -15,8 +15,7 @@ use sourceorigin_common::config::{
 use sourceorigin_crypto::{CryptoError, Digest, NoteKey, NoteVerifier, Secret};
 use std::sync::Arc;
 
-/// Separates opaque token digests from every other use of a token digest key. The
-/// PEM signing key was used the same way, so it still works as a token digest key.
+/// Separates opaque token digests from every other use of a token digest key.
 const TOKEN_DIGEST_CONTEXT: &[u8] = b"sourceorigin-refresh-token-digest-v1";
 /// Separates the email verification key from every other use of a token digest
 /// key.
@@ -81,7 +80,7 @@ pub(crate) struct TokenDigestKey {
 
 impl TokenDigestKey {
     /// Derives the HMAC, verification, recovery, unsubscribe and sign-out link
-    /// keys from configured bytes, as the PEM key's always were.
+    /// keys from configured bytes.
     pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
         let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
         let fingerprint = URL_SAFE_NO_PAD
@@ -198,8 +197,7 @@ impl TokenDigestKeys {
     }
 
     /// Names the key a stored fingerprint belongs to: `current`, `accepted`,
-    /// `unrecorded` for digests made before fingerprints were stored, under the
-    /// PEM key's derivation, or `unknown`.
+    /// `unrecorded` for digests made before fingerprints were stored, or `unknown`.
     #[must_use]
     pub fn name(&self, fingerprint: Option<&str>) -> &'static str {
         let Some(fingerprint) = fingerprint else {

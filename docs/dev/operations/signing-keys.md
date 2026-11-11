@@ -85,18 +85,6 @@ opens the active key. So run the command with the deployment's own key: a key
 sealed with one no replica can open makes the replicas unready, until you revoke
 it again with the right one.
 
-## Import a key
-
-```sh
-auth-service keys import file:///path/key.pem --reason "First deploy"
-```
-
-The command imports a PEM RSA key as the active key, named `primary` unless
-`--id` names it, so tokens it signed keep verifying. It imports only into an
-empty key set, and otherwise changes nothing. Every deployment runs it as the
-`signing-key-import` job, with the `signing-key` secret. The dashboard never
-imports, so the private key never passes through a browser.
-
 ## Change the token digest key
 
 Auth stores refresh tokens, authorization codes and pending logins as HMAC
@@ -117,9 +105,7 @@ deployment, and after a rollback, every release accepts what the other issues:
    email off in their settings instead.
 
 In the manifest, each key is a generated secret mounted as a file, as
-`token-digest-key` is. `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` holds the `signing-key`
-secret until no digest remains under it, so a change starts once that secret is
-removed (see [secrets](secrets.md#generated-secrets)).
+`token-digest-key` is (see [secrets](secrets.md#generated-secrets)).
 
 For a key that leaked, replace it at once instead: see
 [a leaked token digest key](incidents.md#a-leaked-token-digest-key).
@@ -158,6 +144,5 @@ and per key, until cleanup deletes them. It names each key:
 
 - `current`: `AUTH_TOKEN_DIGEST_KEY`.
 - `accepted`: `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`.
-- `unrecorded`: made before digests recorded their key's fingerprint, under the
-  old PEM signing key.
+- `unrecorded`: made before digests recorded their key's fingerprint.
 - `unknown`: neither configured key.

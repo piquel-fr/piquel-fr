@@ -92,12 +92,10 @@ watch, and fix forward if it fails: a retry reuses the new secret.
 | `database-runtime-password` | `auth` | `sourceorigin_auth`'s password | takes effect on the next deployment: see [the database runtime password](#the-database-runtime-password) |
 | `key-encryption-key` | `auth` | `AUTH_KEY_ENCRYPTION_KEY`, which seals the signing keys in the database | **never**: the stored signing keys would no longer open, and auth can't change it |
 | `token-digest-key` | `auth` | `AUTH_TOKEN_DIGEST_KEY` | ends every refresh token and login in progress under it: change it in two deployments instead, as [changing the token digest key](signing-keys.md#change-the-token-digest-key) describes |
-| `signing-key` | `auth` | the RSA key from before signing keys moved to the database, now `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`, which the `signing-key-import` job imports into an empty key set | ends the refresh tokens still under it: leave it until `keys digest-usage` lists none, then remove it as its comment in the manifest says |
 | `audit-key` | `auth`, in previews | the seed that signs a preview's audit checkpoints | makes the preview's earlier checkpoints fail verification |
 | `no-provider-secret` | `auth` | the placeholder mounted for a sign-in provider that's off | nothing: auth never reads it |
 
-Each is 32 random bytes, as hex or unpadded base64url text, except
-`signing-key`, a 3072-bit RSA key.
+Each is 32 random bytes, as hex or unpadded base64url text.
 
 ## Stored secrets
 

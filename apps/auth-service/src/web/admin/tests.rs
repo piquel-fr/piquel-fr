@@ -1776,15 +1776,13 @@ async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
 }
 
 /// The signing keys page lists every key; an administrator publishes a next key
-/// and revokes it. Importing stays at the terminal.
+/// and revokes it.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     let dashboard = harness.confirmed(&admin, "/keys/rotate", Utc::now()).await;
-    let page = html(harness.visit(&dashboard, "/keys").await).await;
-    assert!(page.contains("auth-service keys import"), "{page}");
     let post = async |path: &str| {
         let url = format!("{DASHBOARD}{path}");
         dashboard

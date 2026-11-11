@@ -114,7 +114,7 @@ crate::open_str_enum! {
 const MAX_KEY_ID_LENGTH: usize = 128;
 
 /// A signing key's `kid`: 1 to 128 characters without whitespace. Auth gives each
-/// key it generates a random one and never reuses it; an imported key keeps its own.
+/// key it generates a random one and never reuses it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct KeyId(String);

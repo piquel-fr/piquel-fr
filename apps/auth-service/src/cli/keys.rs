@@ -13,17 +13,12 @@ use crate::{
 };
 use clap::Subcommand;
 use serde::Serialize;
-use sourceorigin_common::{admin::SigningKey, config::SecretReference, protocol::jwt::KeyId};
-use sourceorigin_crypto::Rs256Key;
+use sourceorigin_common::{admin::SigningKey, protocol::jwt::KeyId};
 use sourceorigin_repository::{Database, DigestUsage};
 use std::sync::Arc;
 
-/// The key ID `keys import` gives the PEM key, the default of the removed
-/// `AUTH_SIGNING_KEY_ID`, so tokens it signed keep naming a known key.
-const DEFAULT_IMPORTED_KEY_ID: &str = "primary";
-
-/// Inspecting, rotating, revoking and importing signing keys, and checking token
-/// digest keys. Changes are recorded as made by the operator at this terminal.
+/// Inspecting, rotating and revoking signing keys, and checking token digest
+/// keys. Changes are recorded as made by the operator at this terminal.
 #[derive(Subcommand)]
 pub(super) enum KeysCommand {
     /// List signing keys with their state and dates, oldest first.
@@ -59,19 +54,6 @@ pub(super) enum KeysCommand {
     /// Count stored token digests per token digest key, to tell when
     /// `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` can be removed.
     DigestUsage,
-    /// Import the deployment's PEM signing key as the active key, so tokens it
-    /// signed keep verifying. Does nothing unless the key set is empty.
-    Import {
-        /// The PEM key, at `file://PATH` or `env://NAME`.
-        #[arg(value_name = "REFERENCE")]
-        pem: SecretReference,
-        /// The key's ID, as tokens it signed name it.
-        #[arg(long, default_value = DEFAULT_IMPORTED_KEY_ID)]
-        id: KeyId,
-        /// Why, recorded with the change: 1 to 500 characters.
-        #[arg(long)]
-        reason: Reason,
-    },
     /// Print the verifier key of the audit key `AUTH_AUDIT_KEY_PROVIDER` names,
     /// for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/dev/security/audit-key.pub.
     Audit,
@@ -102,7 +84,6 @@ impl KeysCommand {
             Self::List => AdminOperation::ListSigningKeys,
             Self::Rotate { .. } => AdminOperation::RotateSigningKey,
             Self::Revoke { .. } => AdminOperation::RevokeSigningKey,
-            Self::Import { .. } => AdminOperation::ImportSigningKey,
             Self::DigestUsage | Self::Audit => return None,
         })
     }
@@ -191,22 +172,6 @@ impl KeysCommand {
                     name: "verifier",
                     value: config.verifier().to_string(),
                 })?;
-            }
-            Self::Import { pem, id, reason } => {
-                let Console {
-                    service, operator, ..
-                } = &console()?;
-                let pem = pem.resolve().map_err(CliError::PemUnreadable)?;
-                let key =
-                    Rs256Key::from_pem(id.as_str(), pem.utf8()?).map_err(CliError::InvalidPem)?;
-                if service
-                    .import_signing_key(operator, &store()?, key, reason)
-                    .await?
-                {
-                    out.info(format_args!("Imported key {id}; it signs from now on."))?;
-                } else {
-                    out.warning("Signing keys already exist; nothing was imported.")?;
-                }
             }
         }
         Ok(())

@@ -157,6 +157,7 @@ crate::str_enum! {
         /// key signed or the key it replaces was revoked.
         Generated = "generated",
         /// A key was imported from the deployment's PEM key, signing at once.
+        /// Only earlier releases imported keys; this one reads their events.
         Imported = "imported",
         /// A `next` key started signing.
         Activated = "activated",
