@@ -79,7 +79,6 @@ pub async fn signing_key_list<'a>(
                 </div>
             }
         </section>
-        <p class="help">"Importing the deployment's PEM key, into an empty key set, stays at the terminal: auth-service keys import."</p>
     })
 }
 

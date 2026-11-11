@@ -7,7 +7,6 @@ use crate::{
     admin::{AdminError, Operator, Reason},
 };
 use sourceorigin_common::{admin::SigningKey, protocol::jwt::KeyId};
-use sourceorigin_crypto::Rs256Key;
 
 impl AdminService {
     /// Lists every signing key, oldest first, without either half of the key.
@@ -42,17 +41,5 @@ impl AdminService {
         reason: Reason,
     ) -> Result<Option<KeyId>, AdminError> {
         Ok(keys.revoke(operator, &reason, id).await?)
-    }
-
-    /// Imports `key`, the deployment's PEM key, into `keys` as the active key,
-    /// if the key set is empty, and returns whether it did.
-    pub(crate) async fn import_signing_key(
-        &self,
-        operator: &Operator,
-        keys: &KeyStore,
-        key: Rs256Key,
-        reason: Reason,
-    ) -> Result<bool, AdminError> {
-        Ok(keys.import(operator, &reason, key).await?)
     }
 }

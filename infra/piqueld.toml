@@ -179,16 +179,6 @@ generate = { type = "random", bytes = 32, encoding = "base64url" }
 name = "token-digest-key"
 generate = { type = "random", bytes = 32, encoding = "base64url" }
 
-# The signing key before keys moved to the database. The `signing-key-import`
-# job imports it. It was the token digest key until `token-digest-key` took
-# over, and stays accepted until digests under it expire. Once
-# `auth-service keys digest-usage` lists only `current` keys, remove this
-# secret together with its mount, `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` and the
-# `signing-key-import` job.
-[[spec.secrets]]
-name = "signing-key"
-generate = { type = "rsa", bits = 3072 }
-
 # The Ed25519 seed that signs a preview's audit checkpoints, apart from the OIDC
 # signing key so the two rotate independently. Staging and production mount
 # stored seeds instead. See docs/dev/security/audit-history.md.
@@ -211,22 +201,6 @@ AUTH_DATABASE_OWNER_PASSWORD = "file:///run/secrets/database-password"
 name = "database-password"
 target = "/run/secrets/database-password"
 
-# Imports the PEM signing key as the active key before the first release that
-# reads keys from the database serves, so no token it signed breaks. It imports
-# only into an empty key set, so later deploys change nothing.
-[[spec.jobs]]
-name = "signing-key-import"
-service = "auth"
-command = [
-  "auth-service", "keys", "import", "file:///run/secrets/signing-key",
-  "--reason", "Deployment's first signing key",
-]
-run = "before-rollout"
-
-# The import is recorded as the deployment's, which sets no $USER.
-[spec.jobs.environment]
-AUTH_OPERATOR = "deploy"
-
 [[spec.services]]
 name = "auth"
 depends_on = ["postgres"]
@@ -247,7 +221,6 @@ AUTH_DATABASE_URL = "postgres://sourceorigin_auth@postgres:5432/sourceorigin?ssl
 AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-runtime-password"
 AUTH_KEY_ENCRYPTION_KEY = "file:///run/secrets/key-encryption-key"
 AUTH_TOKEN_DIGEST_KEY = "file:///run/secrets/token-digest-key"
-AUTH_TOKEN_DIGEST_KEY_ACCEPTED = "file:///run/secrets/signing-key"
 AUTH_AUDIT_KEY_PROVIDER = "file:///run/secrets/audit-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # The admin dashboard, which only the private `admin` route reaches, for its own
@@ -279,10 +252,6 @@ target = "/run/secrets/key-encryption-key"
 [[spec.services.secrets]]
 name = "token-digest-key"
 target = "/run/secrets/token-digest-key"
-
-[[spec.services.secrets]]
-name = "signing-key"
-target = "/run/secrets/signing-key"
 
 [[spec.services.secrets]]
 name = "${{ vars.audit_key }}"

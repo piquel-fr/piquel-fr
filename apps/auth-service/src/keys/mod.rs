@@ -233,24 +233,6 @@ impl KeyStore {
         .await
     }
 
-    /// Imports `key`, the deployment's PEM key, as the active key, so tokens it
-    /// signed keep verifying. Imports only into an empty key set, so a repeated
-    /// import never brings back a key that rotated out; returns whether it did.
-    ///
-    /// # Errors
-    /// Returns database and sealing failures.
-    pub async fn import(
-        &self,
-        operator: &Operator,
-        reason: &Reason,
-        key: Rs256Key,
-    ) -> Result<bool, KeyError> {
-        self.change(Some((operator, reason)), None, async |change| {
-            change.import(key).await
-        })
-        .await
-    }
-
     /// Makes sure a key signs, generating one on first start, and loads the key
     /// set. Waits for any rotation in progress.
     ///
@@ -673,18 +655,8 @@ impl<'t, 'c> Change<'t, 'c> {
     fn find(keys: &[StoredSigningKey], state: SigningKeyState) -> Option<&StoredSigningKey> {
         keys.iter().find(|key| key.state == state)
     }
-
-    /// See [`KeyStore::import`].
-    async fn import(&mut self, key: Rs256Key) -> Result<bool, KeyError> {
-        if !self.tx.signing_keys().list().await?.is_empty() {
-            return Ok(false);
-        }
-        let id = self.insert(&key, SigningKeyState::Active).await?;
-        self.record(&id, SigningKeyChange::Imported).await?;
-        Ok(true)
-    }
 }
 
-/// Rotation steps, concurrent ticks, revocation and import on the test database.
+/// Rotation steps, concurrent ticks and revocation on the test database.
 #[cfg(test)]
 mod tests;

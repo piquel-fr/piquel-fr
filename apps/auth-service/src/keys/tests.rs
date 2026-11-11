@@ -1,4 +1,4 @@
-//! Rotation, revocation and import on the shared test database. Each test works in
+//! Rotation and revocation on the shared test database. Each test works in
 //! a transaction that holds the signing key lock and rolls back, so tests never
 //! see each other's keys, and the replicas of other tests keep theirs.
 
@@ -321,32 +321,14 @@ async fn revoking_a_key_removes_it_and_replaces_the_signer() {
     tx.rollback().await.expect("rollback");
 }
 
-/// The PEM key imports into an empty key set only, keeping its ID, and only the
-/// key-encryption key that sealed it opens it again, or may change the keys.
+/// Only the key-encryption key that sealed the keys opens them, or may change them.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn import_fills_an_empty_key_set_once() {
+async fn another_key_encryption_key_neither_opens_nor_changes_the_keys() {
     let (store, database) = store().await;
     let mut tx = database.begin().await.expect("transaction");
     clear(&mut tx).await;
-    let pem = Rs256Key::generate("primary").expect("PEM key");
-    let token = access_token(&KeySet::single(
-        Rs256Key::from_der("primary", &pem.private_key_der().expect("DER")).expect("copy"),
-    ));
-    let mut change = Change::new(&mut tx, &store, Utc::now(), None);
-    assert!(change.import(pem).await.expect("import"));
-    let again = Rs256Key::generate("primary").expect("another PEM key");
-    assert!(
-        !change.import(again).await.expect("second import"),
-        "keys exist"
-    );
-    let keys = key_set(&store, &mut tx).await;
-    assert_eq!(keys.signer().kid(), "primary");
-    assert!(
-        keys.verify::<Value>(&token, TokenType::Access, ISSUER)
-            .is_ok(),
-        "tokens the PEM key signed keep verifying"
-    );
+    assert!(store.tick_in(&mut tx, Utc::now()).await.expect("first key"));
 
     let other = KeyStore::new(
         database.clone(),

@@ -99,9 +99,8 @@ administrator the same way.
 ## Deploy staging
 
 Merge to `main`. The push reaches piqueld through the webhook, and staging
-builds and deploys that commit. Every deployment runs two jobs before its
-rollout: `migrate`, which applies migrations, and `signing-key-import` (see
-[signing keys](signing-keys.md#import-a-key)).
+builds and deploys that commit. Every deployment runs one job before its
+rollout: `migrate`, which applies migrations.
 
 To follow it:
 

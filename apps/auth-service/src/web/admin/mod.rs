@@ -500,7 +500,6 @@ impl AdminApplication {
             | Op::ListAlerts
             // Only the terminal runs these (see `page`).
             | Op::PurgeUser
-            | Op::ImportSigningKey
             | Op::ApplyClient
             | Op::PruneAuditChain => return None,
         })
@@ -574,10 +573,6 @@ impl AdminApplication {
             Op::UpdateAlert => &alerts::update,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
-            // Importing takes the deployment's PEM private key, which must never
-            // pass through a browser: the terminal reads it from a file or the
-            // environment, into an empty key set only.
-            | Op::ImportSigningKey
             // A deployment applies its own clients, with the secret it generated:
             // only the terminal takes a secret. The dashboard registers clients
             // with `CreateClient`, and Origin Auth makes their secrets.
