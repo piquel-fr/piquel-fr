@@ -24,9 +24,9 @@ use ::axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use base64::Engine as _;
 use chrono::Utc;
 use serde_json::json;
+use sourceorigin_common::protocol::jwt::TokenType;
 use std::{
     sync::{
         Arc, Mutex,
@@ -260,40 +260,17 @@ fn code(sub: &str, nonce: &str) -> String {
 }
 
 /// Signs `claims` as auth signs tokens of `typ`, with the vectors' `key-2025`.
-fn sign(claims: &serde_json::Value, typ: &str) -> String {
-    use aws_lc_rs::{
-        rand::SystemRandom,
-        signature::{RSA_PKCS1_SHA256, RsaKeyPair},
-    };
-    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+fn sign(claims: &serde_json::Value, typ: TokenType) -> String {
     let pem = include_str!("../../../../../tests/sdk-vectors/keys/key-2025.pem");
-    let pkcs8 = STANDARD
-        .decode(
-            pem.lines()
-                .filter(|line| !line.starts_with("-----"))
-                .collect::<String>(),
-        )
-        .expect("PEM");
-    let key = RsaKeyPair::from_pkcs8(&pkcs8).expect("RSA key");
-    let encode = |value: &serde_json::Value| URL_SAFE_NO_PAD.encode(value.to_string());
-    let header = json!({ "alg": "RS256", "kid": "key-2025", "typ": typ });
-    let input = format!("{}.{}", encode(&header), encode(claims));
-    let mut signature = vec![0; key.public_modulus_len()];
-    key.sign(
-        &RSA_PKCS1_SHA256,
-        &SystemRandom::new(),
-        input.as_bytes(),
-        &mut signature,
-    )
-    .expect("signature");
-    format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
+    let key = sourceorigin_crypto::Rs256Key::from_pem("key-2025", pem).expect("RSA key");
+    key.sign(typ, claims).expect("signature")
 }
 
 /// An ID token for `sub`, signed now, echoing `nonce`.
 fn id_token(sub: &str, nonce: &str) -> String {
     let mut claims = id_claims(sub);
     claims["nonce"] = json!(nonce);
-    sign(&claims, "JWT")
+    sign(&claims, TokenType::Id)
 }
 
 /// The claims of the vectors' valid ID token for `sub`, without a `nonce`, issued

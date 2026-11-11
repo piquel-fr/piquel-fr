@@ -7,12 +7,12 @@ use crate::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::Deserialize;
-pub use sourceorigin_common::protocol::jws::KeyDefect;
 use sourceorigin_common::protocol::{
-    jws::{Compact, Rs256VerifyingKey, VerifyError},
     jwt::{Algorithm, Jwk, JwkSet, TokenType},
     sdk::{ErrorCategory, ErrorReason, SdkError},
 };
+pub use sourceorigin_crypto::KeyDefect;
+use sourceorigin_crypto::{Compact, Rs256VerifyingKey, VerifyError};
 use std::{
     fmt,
     sync::{Arc, Mutex, MutexGuard, PoisonError},

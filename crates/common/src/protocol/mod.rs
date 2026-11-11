@@ -45,9 +45,6 @@ pub mod api;
 pub mod challenge;
 /// Access token, ID token and `UserInfo` claims, and the `acr` and `amr` values they report.
 pub mod claims;
-/// The RS256 verifier and compact JWS splitting.
-#[cfg(feature = "jws")]
-pub mod jws;
 /// JWT claim and JOSE field vocabulary shared by token issuers and verifiers.
 pub mod jwt;
 /// Authorization server metadata, as published at both well-known discovery paths.

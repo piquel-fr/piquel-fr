@@ -1,12 +1,10 @@
 //! The one RS256 verifier: what auth checks its own tokens with, and what every
 //! SDK built on this crate checks auth's and other issuers' tokens with. A token
-//! is split by [`Compact`](crate::protocol::jws::Compact), whose header each side
-//! reads under its own policy, and verified by an
-//! [`Rs256VerifyingKey`](crate::protocol::jws::Rs256VerifyingKey), which judges a
-//! key as every SDK does.
+//! is split by [`Compact`], whose header each side reads under its own policy, and
+//! verified by an [`Rs256VerifyingKey`], which judges a key as every SDK does.
 //!
 //! ```
-//! use sourceorigin_common::protocol::jws::{Compact, KeyDefect, Rs256VerifyingKey, VerifyError};
+//! use sourceorigin_crypto::{Compact, KeyDefect, Rs256VerifyingKey, VerifyError};
 //!
 //! let token = Compact::split("eyJhbGciOiJSUzI1NiJ9.e30.c2lnbmF0dXJl")?;
 //! assert_eq!(token.header(), br#"{"alg":"RS256"}"#);
@@ -17,7 +15,7 @@
 //!     weak.verify(token.signing_input(), token.signature()),
 //!     Err(VerifyError::Unusable(KeyDefect::ModulusSize(1024)))
 //! ));
-//! # Ok::<(), sourceorigin_common::protocol::jws::Malformed>(())
+//! # Ok::<(), sourceorigin_crypto::Malformed>(())
 //! ```
 
 use aws_lc_rs::{

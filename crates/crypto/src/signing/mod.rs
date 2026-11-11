@@ -1,6 +1,7 @@
 //! RSA signing for interoperable `OpenID` Connect ID and access tokens, and the key
 //! set that signs with one key and verifies with every key it publishes.
 use super::{CryptoError, Digest};
+use crate::{Compact, Rs256VerifyingKey, VerifyError};
 use aws_lc_rs::{
     encoding::{AsDer, Pkcs8V1Der},
     rand::SystemRandom,
@@ -14,9 +15,8 @@ use base64::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use sourceorigin_common::protocol::{
-    jws::{Compact, Rs256VerifyingKey, VerifyError},
-    jwt::{Algorithm, Claim, Jwk, JwkSet, KeyId, KeyType, KeyUse, TokenType},
+use sourceorigin_common::protocol::jwt::{
+    Algorithm, Claim, Jwk, JwkSet, KeyId, KeyType, KeyUse, TokenType,
 };
 use std::{borrow::Cow, collections::BTreeSet};
 
