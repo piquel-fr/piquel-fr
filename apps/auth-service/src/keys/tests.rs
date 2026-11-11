@@ -477,8 +477,8 @@ async fn keys_sealed_either_way_open() {
         panic!("the first start generates one key: {stored:?}");
     };
     let thumbprint = PublicKey::from_jwk(generated.public_jwk.clone())
-        .and_then(|public| public.thumbprint())
-        .expect("thumbprint");
+        .expect("public key")
+        .thumbprint();
     let sealed = generated.sealed_private_key.as_deref().expect("sealed");
     let opens = |binding: Binding| {
         let associated = binding.associated_data(&generated.id, generated.key_type, &thumbprint);

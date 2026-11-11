@@ -1,29 +1,39 @@
-//! AES-256-GCM sealing of private keys at rest under a key-encryption key (KEK).
+//! AES-256-GCM sealing: of private keys at rest under the key-encryption key (KEK),
+//! and of the SDK's cookies under keys derived from the application's cookie key.
 use super::{CryptoError, Secret};
-use aws_lc_rs::aead::{AES_256_GCM, Aad, NONCE_LEN, Nonce, RandomizedNonceKey};
+use aws_lc_rs::{
+    aead::{AES_256_GCM, Aad, NONCE_LEN, Nonce, RandomizedNonceKey},
+    hkdf::{HKDF_SHA256, Salt},
+};
 use std::fmt;
 
-/// The key that seals signing keys in the database, from configuration. Sealed
-/// values are `nonce || ciphertext || tag`; the associated data binds each one to
-/// the record it belongs to, so a sealed key moved to another record fails to open.
-pub struct KeyEncryptionKey(Secret);
+/// An AES-256-GCM key that seals values as `nonce || ciphertext || tag`, with a
+/// random nonce for every seal. The associated data binds each value to its
+/// context, so a value moved to another context fails to open.
+pub struct SealingKey(RandomizedNonceKey);
 
-impl KeyEncryptionKey {
-    /// Parses the KEK from its configured text: 32 bytes in unpadded base64url. A
-    /// trailing newline, as files often end with, is ignored.
+impl SealingKey {
+    /// The key whose bytes are `key`.
     ///
     /// # Errors
-    /// Rejects other encodings and lengths other than 32 bytes.
-    pub fn parse(text: &str) -> Result<Self, CryptoError> {
-        Secret::parse(text.strip_suffix('\n').unwrap_or(text)).map(Self)
+    /// Preserves failures from the cryptographic provider.
+    pub fn new(key: &Secret) -> Result<Self, CryptoError> {
+        Ok(Self(RandomizedNonceKey::new(&AES_256_GCM, key.as_bytes())?))
     }
 
-    /// Generates a KEK, for tests and development.
+    /// The key HKDF-SHA256 derives from `secret` with `info` and no salt, which a
+    /// secret of 256 random bits needs none of. Keys derived for different `info`
+    /// are unrelated.
     ///
     /// # Errors
-    /// Preserves failures from the random source.
-    pub fn generate() -> Result<Self, CryptoError> {
-        Secret::generate().map(Self)
+    /// Preserves failures from the cryptographic provider.
+    pub fn derive(secret: &[u8], info: &[u8]) -> Result<Self, CryptoError> {
+        let mut key = [0; 32];
+        Salt::new(HKDF_SHA256, &[])
+            .extract(secret)
+            .expand(&[info], &AES_256_GCM)?
+            .fill(&mut key)?;
+        Ok(Self(RandomizedNonceKey::new(&AES_256_GCM, &key)?))
     }
 
     /// Encrypts `plaintext`, authenticating `aad` with it.
@@ -33,16 +43,16 @@ impl KeyEncryptionKey {
     pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let mut sealed = plaintext.to_vec();
         let nonce = self
-            .key()?
+            .0
             .seal_in_place_append_tag(Aad::from(aad), &mut sealed)?;
         Ok([nonce.as_ref().as_slice(), &sealed].concat())
     }
 
-    /// Decrypts a value [`Self::seal`] made with the same KEK and `aad`.
+    /// Decrypts a value [`Self::seal`] made with the same key and `aad`.
     ///
     /// # Errors
-    /// Returns [`CryptoError::Unsealable`] for another KEK, other associated data or
-    /// a modified value.
+    /// Returns [`CryptoError::Unsealable`] for another key, other associated data
+    /// or a modified value.
     pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let (nonce, rest) = sealed
             .split_at_checked(NONCE_LEN)
@@ -51,15 +61,57 @@ impl KeyEncryptionKey {
         let mut opened = rest.to_vec();
         // A failed tag check says nothing more than this variant does.
         let plaintext = self
-            .key()?
+            .0
             .open_in_place(nonce, Aad::from(aad), &mut opened)
             .map_err(|_| CryptoError::Unsealable)?;
         Ok(plaintext.to_vec())
     }
+}
 
-    /// The AES-256-GCM key, which draws a random nonce for every seal.
-    fn key(&self) -> Result<RandomizedNonceKey, CryptoError> {
-        Ok(RandomizedNonceKey::new(&AES_256_GCM, self.0.as_bytes())?)
+impl fmt::Debug for SealingKey {
+    /// Renders a safe diagnostic representation without exposing the key.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SealingKey(REDACTED)")
+    }
+}
+
+/// The key that seals signing keys in the database, from configuration, as a
+/// [`SealingKey`]: the associated data binds each sealed key to its record.
+pub struct KeyEncryptionKey(SealingKey);
+
+impl KeyEncryptionKey {
+    /// Parses the KEK from its configured text: 32 bytes in unpadded base64url. A
+    /// trailing newline, as files often end with, is ignored.
+    ///
+    /// # Errors
+    /// Rejects other encodings and lengths other than 32 bytes.
+    pub fn parse(text: &str) -> Result<Self, CryptoError> {
+        SealingKey::new(&Secret::parse(text.strip_suffix('\n').unwrap_or(text))?).map(Self)
+    }
+
+    /// Generates a KEK, for tests and development.
+    ///
+    /// # Errors
+    /// Preserves failures from the random source.
+    pub fn generate() -> Result<Self, CryptoError> {
+        SealingKey::new(&Secret::generate()?).map(Self)
+    }
+
+    /// See [`SealingKey::seal`].
+    ///
+    /// # Errors
+    /// Preserves failures from the random source and the cryptographic provider.
+    pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.0.seal(plaintext, aad)
+    }
+
+    /// See [`SealingKey::open`].
+    ///
+    /// # Errors
+    /// Returns [`CryptoError::Unsealable`] for another KEK, other associated data or
+    /// a modified value.
+    pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.0.open(sealed, aad)
     }
 }
 

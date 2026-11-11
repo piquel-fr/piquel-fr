@@ -3085,7 +3085,6 @@ dependencies = [
 name = "sourceorigin-auth"
 version = "0.1.0"
 dependencies = [
- "aws-lc-rs",
  "axum",
  "base64 0.22.1",
  "chrono",
@@ -3095,6 +3094,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sourceorigin-common",
+ "sourceorigin-crypto",
  "thiserror 2.0.18",
  "tokio",
  "tower",

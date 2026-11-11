@@ -12,8 +12,8 @@ axum = ["dep:axum", "dep:tower", "dep:tracing"]
 
 [dependencies]
 sourceorigin-common = { workspace = true, features = ["client-spans"] }
+sourceorigin-crypto.workspace = true
 
-aws-lc-rs.workspace = true
 axum = { workspace = true, optional = true }
 base64.workspace = true
 chrono.workspace = true

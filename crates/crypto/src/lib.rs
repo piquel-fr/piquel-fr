@@ -1,15 +1,16 @@
-//! Auditable cryptographic primitives for authentication; no browser or database policy.
+//! Auditable cryptographic primitives for authentication, shared by auth and the
+//! Rust SDK; no browser or database policy.
 /// Ed25519 signed notes, for audit checkpoints.
 mod note;
 /// SCRAM-SHA-256 password verifiers, for database roles.
 mod scram;
-/// AES-256-GCM sealing of private keys at rest.
+/// AES-256-GCM sealing of private keys at rest, and of the SDK's cookies.
 mod sealing;
 /// RSA signing and verification of compact JWTs, by key set.
 mod signing;
 pub use note::{NoteKey, NoteVerifier, NoteVerifiers};
 pub use scram::ScramVerifier;
-pub use sealing::KeyEncryptionKey;
+pub use sealing::{KeyEncryptionKey, SealingKey};
 pub use signing::{KeySet, PublicKey, Rs256Key};
 
 use aws_lc_rs::{

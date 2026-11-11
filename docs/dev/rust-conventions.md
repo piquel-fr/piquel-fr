@@ -61,11 +61,13 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet`,
 `KeyEncryptionKey`, `NoteKey` and `ScramVerifier` instead of calling
 `aws-lc-rs` directly. Environment reads go through `Variable`.
-Keep cryptographic implementations in the crypto crate so they can be audited together.
+Keep cryptographic implementations in the crypto crate so they can be audited
+together. It is Apache-2.0, like the SDK, so the SDK uses it too, for its
+randomness, hashes and cookie sealing.
 
-The workspace has one cryptographic library, `aws-lc-rs`: the crypto crate and
-the SDK build on it, and it is rustls's provider for every TLS client (reqwest,
-SQLx and lettre). Don't add another, such as `ring`, `openssl`, `sha2` or `rand`.
+The workspace has one cryptographic library, `aws-lc-rs`: the crypto crate
+builds on it, and it is rustls's provider for every TLS client (reqwest, SQLx
+and lettre). Don't add another, such as `ring`, `openssl`, `sha2` or `rand`.
 OpenSSL is in the tree only because webauthn-rs needs it, and auth-service names
 it only to build it vendored. `cargo tree -i ring` should print nothing.
 
