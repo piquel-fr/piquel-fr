@@ -26,6 +26,17 @@ started signing, stopped signing and was retired, oldest first. One key is
 `active`. Usually a `next` key waits too, and a `retiring` one follows a
 rotation.
 
+Every change to a key is recorded as a `signing_key_changed` event:
+
+```sh
+auth-service audit list --kind signing_key_changed
+```
+
+Each event says who made the change: an operator, with their reason, or the
+key rotation job, for the steps rotation takes on its own. On the dashboard,
+filter the **Events** page by the same kind; each event there also names the
+key and what happened to it.
+
 ## Rotate a key ahead of schedule
 
 To replace the active key before its 90 days are up:

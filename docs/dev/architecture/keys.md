@@ -69,9 +69,11 @@ the same lock (`signing_keys().lock()`). Before any change, `KeyStore::check`
 makes sure this key-encryption key opens the stored active key, so a replica or
 command with the wrong key never stores keys nobody can open.
 
-Changes an operator makes, from `auth-service keys` or the dashboard's Signing
-keys page, record `SigningKeyChanged`. Rotation by the service itself only logs
-`signing key changed`.
+Every change records `SigningKeyChanged`, naming the key and what happened to
+it. Changes an operator makes, from `auth-service keys` or the dashboard's
+Signing keys page, are recorded as theirs, with their reason. The steps rotation
+takes on its own, including the first key's generation on startup, are recorded
+as the `key_rotation` job's.
 
 ### Reload and readiness
 

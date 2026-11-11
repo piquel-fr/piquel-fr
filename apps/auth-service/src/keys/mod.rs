@@ -19,7 +19,7 @@ use crate::{
 use chrono::{DateTime, TimeDelta, Utc};
 use sourceorigin_common::{
     ErrorChain,
-    events::{DomainEvent, EventContext, SigningKeyChange},
+    events::{DomainEvent, EventContext, JobName, SigningKeyChange},
     protocol::jwt::KeyId,
 };
 use sourceorigin_crypto::{
@@ -342,7 +342,7 @@ impl KeyStore {
     /// Runs `apply` in a transaction holding the signing key lock, then commits
     /// once `operator`, if any, is authorized again after the last write, as
     /// `AdminService` authorizes every change. An operator's change is recorded
-    /// with their reason; auth's own rotation has none. `revoking` names the key the
+    /// with their reason; auth's own rotation as [`JobName::KeyRotation`]. `revoking` names the key the
     /// change revokes, if any (see [`Self::check`]).
     async fn change<T>(
         &self,
@@ -470,7 +470,7 @@ impl Binding {
 }
 
 /// One change to the signing keys: a transaction holding their lock, the time
-/// it happens at, and the operator's context for its events.
+/// it happens at, and who its events are recorded as made by.
 struct Change<'t, 'c> {
     /// Holds the signing key lock until it ends.
     tx: &'t mut DatabaseTransaction<'c>,
@@ -478,15 +478,14 @@ struct Change<'t, 'c> {
     store: &'t KeyStore,
     /// When the change happens.
     now: DateTime<Utc>,
-    /// Who makes it, for its events. `None` for rotation by the service itself,
-    /// which records none yet: a release may write `JobName::KeyRotation` only
-    /// once the release before it reads it (see `docs/dev/architecture/database.md`).
-    context: Option<EventContext>,
+    /// Who makes it, for its events: an operator, or the rotation job.
+    context: EventContext,
 }
 
 impl<'t, 'c> Change<'t, 'c> {
-    /// A change in `tx`, which must hold the signing key lock.
-    const fn new(
+    /// A change in `tx`, which must hold the signing key lock, by the operator
+    /// whose `context` is given, or by the rotation job without one.
+    fn new(
         tx: &'t mut DatabaseTransaction<'c>,
         store: &'t KeyStore,
         now: DateTime<Utc>,
@@ -496,25 +495,23 @@ impl<'t, 'c> Change<'t, 'c> {
             tx,
             store,
             now,
-            context,
+            context: context.unwrap_or_else(|| EventContext::system(JobName::KeyRotation)),
         }
     }
 
-    /// Logs a change and records it as made by the operator, if any.
+    /// Logs a change and records it as made by whoever makes this one.
     async fn record(&mut self, id: &KeyId, change: SigningKeyChange) -> Result<(), KeyError> {
         tracing::info!(key_id = %id, %change, "signing key changed");
-        if let Some(context) = &self.context {
-            self.tx
-                .record(
-                    context,
-                    None,
-                    DomainEvent::SigningKeyChanged {
-                        key_id: id.clone(),
-                        change,
-                    },
-                )
-                .await?;
-        }
+        self.tx
+            .record(
+                &self.context,
+                None,
+                DomainEvent::SigningKeyChanged {
+                    key_id: id.clone(),
+                    change,
+                },
+            )
+            .await?;
         Ok(())
     }
 
