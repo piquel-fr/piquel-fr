@@ -88,8 +88,7 @@ pub enum JobName {
     Cleanup,
     /// The purge of accounts whose deletion grace period ended.
     AccountPurge,
-    /// Signing key rotation. Nothing records it yet: a release may write a new
-    /// value only once the previous release reads it (see `docs/dev/architecture/database.md`).
+    /// Signing key rotation, which records the steps it takes on its own.
     KeyRotation,
     /// The periodic verification of the audit chain, which records what it found
     /// and the alert of a broken chain.

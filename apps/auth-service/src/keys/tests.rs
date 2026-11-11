@@ -13,8 +13,11 @@ use axum::{
     http::{Request, StatusCode},
 };
 use serde_json::{Value, json};
-use sourceorigin_common::protocol::jwt::{Jwk, TokenType};
-use sourceorigin_repository::InsertSigningKey;
+use sourceorigin_common::{
+    events::Actor,
+    protocol::jwt::{Jwk, TokenType},
+};
+use sourceorigin_repository::{EventFilter, InsertSigningKey};
 use tower::ServiceExt;
 
 /// The issuer the test tokens name.
@@ -41,6 +44,39 @@ async fn clear(tx: &mut DatabaseTransaction<'_>) {
 async fn states(tx: &mut DatabaseTransaction<'_>) -> Vec<(KeyId, SigningKeyState)> {
     let keys = tx.signing_keys().list().await.expect("list");
     keys.into_iter().map(|key| (key.id, key.state)).collect()
+}
+
+/// The changes to `key` recorded in `tx`, oldest first, each checked to be the
+/// rotation job's.
+async fn changes(tx: &mut DatabaseTransaction<'_>, key: &KeyId) -> Vec<SigningKeyChange> {
+    let filter = EventFilter {
+        kind: Some("signing_key_changed".to_owned()),
+        ..EventFilter::default()
+    };
+    let mut changes: Vec<_> = tx
+        .events()
+        .list(&filter, 1000)
+        .await
+        .expect("events")
+        .into_iter()
+        .filter_map(|stored| {
+            let Some(DomainEvent::SigningKeyChanged { key_id, change }) = stored.event.known()
+            else {
+                panic!("a signing key change: {stored:?}");
+            };
+            (key_id == key).then(|| {
+                assert_eq!(
+                    stored.actor,
+                    Actor::System {
+                        job: JobName::KeyRotation
+                    }
+                );
+                *change
+            })
+        })
+        .collect();
+    changes.reverse();
+    changes
 }
 
 /// The key set built from the keys in `tx`.
@@ -132,10 +168,12 @@ async fn advance(
 /// Each step happens once, when its time comes and not before: the first key
 /// signs at once, a successor is published after 90 days and signs a day later,
 /// the old key stays published while its tokens may be valid, then verifies only
-/// hints for 30 days, and is then deleted. One key signs throughout.
+/// hints for 30 days, and is then deleted. One key signs throughout, and each
+/// step records one event, as the rotation job's.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn rotation_takes_each_step_once_on_schedule() {
+    use SigningKeyChange::{Activated, Deleted, Generated, Retired, Retiring};
     let (store, database) = store().await;
     let mut tx = database.begin().await.expect("transaction");
     clear(&mut tx).await;
@@ -144,7 +182,6 @@ async fn rotation_takes_each_step_once_on_schedule() {
     let [(first, SigningKeyState::Active)] = &states[..] else {
         panic!("the first start generates an active key");
     };
-    let first = first.clone();
     let first_set = key_set(&store, &mut tx).await;
     let (first_hint, first_token) = (hint(&first_set), access_token(&first_set));
 
@@ -159,7 +196,6 @@ async fn rotation_takes_each_step_once_on_schedule() {
     let [_, (second, SigningKeyState::Next)] = &states[..] else {
         panic!("a successor is published");
     };
-    let second = second.clone();
     let keys = key_set(&store, &mut tx).await;
     assert_eq!(
         keys.signer().kid(),
@@ -226,7 +262,7 @@ async fn rotation_takes_each_step_once_on_schedule() {
     );
     assert_eq!(
         advance(&store, &mut tx, deleted).await,
-        [(second, SigningKeyState::Active)]
+        [(second.clone(), SigningKeyState::Active)]
     );
     assert!(matches!(
         key_set(&store, &mut tx)
@@ -234,6 +270,9 @@ async fn rotation_takes_each_step_once_on_schedule() {
             .verify_id_token_hint(&first_hint, ISSUER),
         Err(CryptoError::UnknownKey)
     ));
+    let first_changes = [Generated, Activated, Retiring, Retired, Deleted];
+    assert_eq!(changes(&mut tx, first).await, first_changes);
+    assert_eq!(changes(&mut tx, second).await, [Generated, Activated]);
     tx.rollback().await.expect("rollback");
 }
 
