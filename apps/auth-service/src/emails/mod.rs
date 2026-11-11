@@ -23,7 +23,7 @@ use sourceorigin_common::{
     email::NormalizedEmail,
     events::{Actor, DomainEvent, EventContext},
 };
-use sourceorigin_crypto::{CryptoError, Digest, Secret};
+use sourceorigin_crypto::{Digest, Secret};
 use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, InsertVerifiedEmail,
     PendingFederation, StoredEmail,
@@ -63,26 +63,14 @@ impl VerificationKeys {
     }
 
     /// The token of new address `id`'s verification link, under the current key.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn token(&self, id: EmailId) -> Result<Secret, CryptoError> {
+    pub(crate) fn token(&self, id: EmailId) -> Secret {
         self.0.token(id.as_uuid().as_bytes())
     }
 
     /// The token of address `id`'s verification link whose SHA-256 is the stored
     /// `digest`, under the key that derives it. `None` once no configured key
     /// does.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn rebuild(
-        &self,
-        id: EmailId,
-        digest: &[u8],
-    ) -> Result<Option<Secret>, CryptoError> {
+    pub(crate) fn rebuild(&self, id: EmailId, digest: &[u8]) -> Option<Secret> {
         self.0.rebuild(id.as_uuid().as_bytes(), digest)
     }
 }
@@ -385,11 +373,7 @@ impl Added<'_> {
         EmailApplication::sendable(self.address).map_err(EmailError::Unsendable)?;
         EmailApplication::limit(tx, self.user_id, client_ip, self.address).await?;
         let id = EmailId::new();
-        let digest = config
-            .verification_keys
-            .token(id)
-            .map_err(EmailError::Crypto)?
-            .digest();
+        let digest = config.verification_keys.token(id).digest();
         tx.emails()
             .insert_unverified(&InsertUnverifiedEmail {
                 id,

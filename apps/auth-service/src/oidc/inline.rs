@@ -54,7 +54,7 @@ impl OidcApplication {
         }
         Ok(InlineClaim {
             id: opaque.id,
-            digests: self.accepted_digests(&opaque)?,
+            digests: self.accepted_digests(&opaque),
             hinted_user_id: request.hinted_user_id,
         })
     }

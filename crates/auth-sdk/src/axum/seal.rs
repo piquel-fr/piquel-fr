@@ -13,7 +13,6 @@ use base64::{
         general_purpose::{GeneralPurpose, GeneralPurposeConfig, URL_SAFE_NO_PAD},
     },
 };
-use rand::{RngCore, rngs::OsRng};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt;
 
@@ -188,7 +187,7 @@ pub enum CookieKeyError {
     WrongLength(usize),
     /// The operating system could not supply random bytes.
     #[error("operating system randomness is unavailable")]
-    Randomness(#[source] rand::Error),
+    Randomness(#[source] Unspecified),
     /// The keys could not be derived.
     #[error("the cookie key could not be derived")]
     Crypto(#[source] Unspecified),
@@ -227,9 +226,7 @@ impl CookieKey {
     /// bytes.
     pub fn generate() -> Result<Self, CookieKeyError> {
         let mut bytes = [0; SECRET_BYTES];
-        OsRng
-            .try_fill_bytes(&mut bytes)
-            .map_err(CookieKeyError::Randomness)?;
+        aws_lc_rs::rand::fill(&mut bytes).map_err(CookieKeyError::Randomness)?;
         Self::from_secret(&bytes)
     }
 

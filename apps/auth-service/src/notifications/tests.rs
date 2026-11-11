@@ -260,7 +260,7 @@ async fn owners_choose_which_notifications_are_emailed() {
         "https://auth.sourceorigin.dev".parse().expect("origin"),
         crate::config::LinkKeys::generate(),
     );
-    let link = url::Url::parse(&links.link(alice.user_id).expect("link")).expect("URL");
+    let link = url::Url::parse(&links.link(alice.user_id)).expect("URL");
     assert_eq!(link.path(), routes::page::UNSUBSCRIBE);
     let query = |name: &str| {
         link.query_pairs()
@@ -270,12 +270,10 @@ async fn owners_choose_which_notifications_are_emailed() {
     let token = query("token");
     assert_eq!(query("id"), alice.user_id.to_string());
     let checked = |id, token: &str| {
-        links
-            .check(&Link {
-                id,
-                token: token.to_owned(),
-            })
-            .expect("check")
+        links.check(&Link {
+            id,
+            token: token.to_owned(),
+        })
     };
     assert_eq!(checked(alice.user_id, &token), Some(alice.user_id));
     assert_eq!(checked(bob.user_id, &token), None, "another account's");

@@ -7,16 +7,14 @@
     reason = "a test, whose builder helpers fail it with a message rather than return errors"
 )]
 
+use aws_lc_rs::{
+    aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey},
+    hkdf::{HKDF_SHA256, Salt},
+    rand::SystemRandom,
+    signature::{RSA_PKCS1_SHA256, RsaKeyPair},
+};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
-use openssl::{
-    hash::MessageDigest,
-    md::Md,
-    pkey::{Id, PKey},
-    pkey_ctx::PkeyCtx,
-    sign::Signer,
-    symm::{Cipher, encrypt_aead},
-};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sourceorigin_common::{
@@ -65,6 +63,9 @@ const OLD_KID: &str = "key-2025";
 const NEW_KID: &str = "key-2026";
 /// A 1024-bit key, too weak for any SDK to accept.
 const WEAK_KID: &str = "key-weak";
+/// The modulus of `keys/key-weak.pem`, in base64url: aws-lc-rs refuses to load a
+/// 1024-bit key at all, so its public half is written here.
+const WEAK_MODULUS: &str = "vif7rlXGNRP659r3qzSkhKuklfEcv2Wblz9UyHGx6HCjCuS0RmCLBvaJbW2ok47RCp1DddBovwMfCVmxSzfctbm7I9-juCc5LbOeyS3BZSkTZ10FQerfQFF179XlMOM3Bi7rC7REoWNU_jOvkMzTkZXXMxP-T8phpuEaYxTtJE0";
 /// The app's cookie key, as `openssl rand -base64 32` prints one.
 const COOKIE_KEY: &str = "q5xP0Pl8m0l3pkk1Hk0aQe9H6P7l4H6Jt6bq0c5u3jE=";
 /// The fixture client's session cookie.
@@ -124,10 +125,6 @@ struct Vectors {
     old: Rs256Key,
     /// Key that signs after the rotation.
     new: Rs256Key,
-    /// The old key's PEM, to sign tokens whose header auth's signer would never write.
-    old_pem: String,
-    /// The weak key's PEM, which auth's signer refuses.
-    weak_pem: String,
 }
 
 impl Vectors {
@@ -147,8 +144,6 @@ impl Vectors {
             files: BTreeMap::new(),
             old: key(OLD_KID),
             new: key(NEW_KID),
-            old_pem: pem(OLD_KID),
-            weak_pem: pem(WEAK_KID),
         }
     }
 
@@ -530,10 +525,8 @@ impl Vectors {
             ),
         );
         let input = format!("{}.{payload}", header("HS256"));
-        let public_key = self.old.public_key_pem().expect("public key PEM");
-        let mac = Digest::hmac(&public_key, input.as_bytes())
-            .expect("HMAC")
-            .encoded();
+        let public_key = self.old.public_key().pem();
+        let mac = Digest::hmac(public_key.as_bytes(), input.as_bytes()).encoded();
         self.token(
             "access-alg-hs256",
             "HMAC keyed with the public key (algorithm confusion) is rejected",
@@ -556,22 +549,25 @@ impl Vectors {
             Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
         );
         // A key too weak to verify is the issuer's fault, not the token's: every SDK
-        // refuses it before checking the signature.
-        let weak = PKey::private_key_from_pem(self.weak_pem.as_bytes()).expect("weak test key");
-        let weak = weak.rsa().expect("RSA test key");
+        // refuses it before checking the signature, so the signature is 128 zero
+        // bytes, which an SDK checking it first would report as bad instead.
         let weak_jwks = json!({ "keys": [{
-            "alg": Algorithm::Rs256.as_str(), "e": URL_SAFE_NO_PAD.encode(weak.e().to_vec()),
-            "kid": WEAK_KID, "kty": "RSA", "n": URL_SAFE_NO_PAD.encode(weak.n().to_vec()),
-            "use": "sig",
+            "alg": Algorithm::Rs256.as_str(), "e": "AQAB", "kid": WEAK_KID, "kty": "RSA",
+            "n": WEAK_MODULUS, "use": "sig",
         }]});
         let weak_header = json!({
             "alg": Algorithm::Rs256.as_str(), "kid": WEAK_KID, "typ": TokenType::Access.as_str(),
         });
+        let weak_input = format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&weak_header).expect("header")),
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&access).expect("claims"))
+        );
         self.token(
             "access-weak-key",
             "a 1024-bit RSA key verifies nothing: the key set is at fault",
             access_case(
-                Self::sign_with(&self.weak_pem, &weak_header, &access),
+                format!("{weak_input}.{}", URL_SAFE_NO_PAD.encode([0; 128])),
                 &weak_jwks,
             ),
             Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
@@ -915,23 +911,26 @@ impl Vectors {
     /// Signs `claims` under a hand-written `header` with the old key, for headers
     /// auth's signer never writes.
     fn sign_header(&self, header: &Value, claims: &impl Serialize) -> String {
-        Self::sign_with(&self.old_pem, header, claims)
+        Self::sign_with(&self.old, header, claims)
     }
 
-    /// Signs `claims` under `header` with the key in `pem`.
-    fn sign_with(pem: &str, header: &Value, claims: &impl Serialize) -> String {
+    /// Signs `claims` under `header` with `key`, whatever the header says.
+    fn sign_with(key: &Rs256Key, header: &Value, claims: &impl Serialize) -> String {
         let input = format!(
             "{}.{}",
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(header).expect("header")),
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims).expect("claims"))
         );
-        let key = PKey::private_key_from_pem(pem.as_bytes()).expect("test key");
-        let mut signer = Signer::new(MessageDigest::sha256(), &key).expect("signer");
-        signer.update(input.as_bytes()).expect("signing input");
-        format!(
-            "{input}.{}",
-            URL_SAFE_NO_PAD.encode(signer.sign_to_vec().expect("signature"))
+        let pair = RsaKeyPair::from_pkcs8(&key.private_key_der().expect("DER")).expect("test key");
+        let mut signature = vec![0; pair.public_modulus_len()];
+        pair.sign(
+            &RSA_PKCS1_SHA256,
+            &SystemRandom::new(),
+            input.as_bytes(),
+            &mut signature,
         )
+        .expect("signature");
+        format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
     }
 
     /// Signs `claims` as auth does.
@@ -1504,25 +1503,22 @@ impl Vectors {
         use base64::engine::general_purpose::STANDARD;
         let secret = STANDARD.decode(secret).expect("cookie key");
         let mut key = [0; 32];
-        let mut hkdf = PkeyCtx::new_id(Id::HKDF).expect("HKDF");
-        hkdf.derive_init().expect("HKDF init");
-        hkdf.set_hkdf_md(Md::sha256()).expect("HKDF digest");
-        hkdf.set_hkdf_key(&secret).expect("HKDF key");
-        hkdf.add_hkdf_info(info.as_bytes()).expect("HKDF info");
-        hkdf.derive(Some(&mut key)).expect("HKDF derive");
+        Salt::new(HKDF_SHA256, &[])
+            .extract(&secret)
+            .expand(&[info.as_bytes()], &AES_256_GCM)
+            .expect("HKDF")
+            .fill(&mut key)
+            .expect("HKDF derive");
+        let key = LessSafeKey::new(UnboundKey::new(&AES_256_GCM, &key).expect("AES key"));
         let nonce = [7; 12];
-        let mut tag = [0; 16];
-        let plain = serde_json::to_vec(value).expect("serialize session");
-        let sealed = encrypt_aead(
-            Cipher::aes_256_gcm(),
-            &key,
-            Some(&nonce),
-            context.as_bytes(),
-            &plain,
-            &mut tag,
+        let mut sealed = serde_json::to_vec(value).expect("serialize session");
+        key.seal_in_place_append_tag(
+            Nonce::assume_unique_for_key(nonce),
+            Aad::from(context.as_bytes()),
+            &mut sealed,
         )
         .expect("AES-GCM");
-        URL_SAFE_NO_PAD.encode([&nonce[..], &sealed, &tag].concat())
+        URL_SAFE_NO_PAD.encode([&nonce[..], &sealed].concat())
     }
 }
 

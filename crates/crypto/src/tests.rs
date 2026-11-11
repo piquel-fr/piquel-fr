@@ -30,9 +30,7 @@ fn digests_match_vectors() {
     );
     // RFC 4231, test case 1.
     assert_eq!(
-        Digest::hmac(&[0x0b; 20], b"Hi There")
-            .expect("HMAC")
-            .as_bytes(),
+        Digest::hmac(&[0x0b; 20], b"Hi There").as_bytes(),
         &[
             0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53, 0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b,
             0xf1, 0x2b, 0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7, 0x26, 0xe9, 0x37, 0x6c,
@@ -104,12 +102,7 @@ fn thumbprints_match_rfc() {
         n: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw".to_owned(),
         key_use: None,
     };
-    let thumbprint = |jwk: Jwk| {
-        PublicKey::from_jwk(jwk)
-            .expect("key")
-            .thumbprint()
-            .expect("thumbprint")
-    };
+    let thumbprint = |jwk: Jwk| PublicKey::from_jwk(jwk).expect("key").thumbprint();
     let example = thumbprint(jwk.clone());
     assert_eq!(
         example.encoded(),
@@ -127,11 +120,11 @@ fn thumbprints_match_rfc() {
 fn rsa_configuration_boundaries() {
     assert!(Rs256Key::from_pem("key", "not PEM").is_err());
     assert!(Rs256Key::generate("has whitespace").is_err());
-    let small = openssl::rsa::Rsa::generate(1024).expect("small key");
-    let pem = small.private_key_to_pem().expect("PEM");
+    // The SDK vectors' 1024-bit key, which the provider refuses to load.
+    let small = include_str!("../../../tests/sdk-vectors/keys/key-weak.pem");
     assert!(matches!(
-        Rs256Key::from_pem("small", std::str::from_utf8(&pem).expect("ASCII")),
-        Err(CryptoError::RsaKeySize)
+        Rs256Key::from_pem("small", small),
+        Err(CryptoError::Key(rejected)) if rejected.to_string() == "TooSmall"
     ));
 }
 
@@ -140,8 +133,7 @@ fn rsa_configuration_boundaries() {
 fn jwt_persistence_and_trust_boundaries() {
     let key = Rs256Key::generate("persistent").expect("RSA key");
     let pem = key.private_key_pem().expect("export PEM");
-    let restored = Rs256Key::from_pem("persistent", std::str::from_utf8(&pem).expect("ASCII PEM"))
-        .expect("restore key");
+    let restored = Rs256Key::from_pem("persistent", &pem).expect("restore key");
     assert_eq!(key.jwks(), restored.jwks());
     let now = chrono::Utc::now().timestamp();
     let claims = serde_json::json!({"iss":"https://auth.example", "iat":now, "exp":now+300});
@@ -335,7 +327,7 @@ fn scram_verifiers_match_postgresql() {
         .expect("salt")
         .try_into()
         .expect("16 bytes");
-    let verifier = ScramVerifier::with_salt("pencil", salt).expect("verifier");
+    let verifier = ScramVerifier::with_salt("pencil", salt);
     assert_eq!(verifier.to_string(), DERIVED);
     let fresh = ScramVerifier::new("pencil").expect("verifier").to_string();
     assert!(fresh.starts_with("SCRAM-SHA-256$4096:"));

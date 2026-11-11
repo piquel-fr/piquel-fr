@@ -1,13 +1,7 @@
 //! AES-256-GCM sealing of private keys at rest under a key-encryption key (KEK).
 use super::{CryptoError, Secret};
-use openssl::symm::{Cipher, decrypt_aead, encrypt_aead};
-use rand::{RngCore, rngs::OsRng};
+use aws_lc_rs::aead::{AES_256_GCM, Aad, NONCE_LEN, Nonce, RandomizedNonceKey};
 use std::fmt;
-
-/// Bytes of the random nonce that starts every sealed value.
-const NONCE_BYTES: usize = 12;
-/// Bytes of the authentication tag that ends every sealed value.
-const TAG_BYTES: usize = 16;
 
 /// The key that seals signing keys in the database, from configuration. Sealed
 /// values are `nonce || ciphertext || tag`; the associated data binds each one to
@@ -37,20 +31,11 @@ impl KeyEncryptionKey {
     /// # Errors
     /// Preserves failures from the random source and the cryptographic provider.
     pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let mut nonce = [0; NONCE_BYTES];
-        OsRng
-            .try_fill_bytes(&mut nonce)
-            .map_err(CryptoError::Random)?;
-        let mut tag = [0; TAG_BYTES];
-        let ciphertext = encrypt_aead(
-            Cipher::aes_256_gcm(),
-            self.0.as_bytes(),
-            Some(&nonce),
-            aad,
-            plaintext,
-            &mut tag,
-        )?;
-        Ok([&nonce[..], &ciphertext, &tag].concat())
+        let mut sealed = plaintext.to_vec();
+        let nonce = self
+            .key()?
+            .seal_in_place_append_tag(Aad::from(aad), &mut sealed)?;
+        Ok([nonce.as_ref().as_slice(), &sealed].concat())
     }
 
     /// Decrypts a value [`Self::seal`] made with the same KEK and `aad`.
@@ -59,22 +44,22 @@ impl KeyEncryptionKey {
     /// Returns [`CryptoError::Unsealable`] for another KEK, other associated data or
     /// a modified value.
     pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        if sealed.len() < NONCE_BYTES + TAG_BYTES {
-            return Err(CryptoError::Unsealable);
-        }
-        let (nonce, rest) = sealed.split_at(NONCE_BYTES);
-        let (ciphertext, tag) = rest.split_at(rest.len() - TAG_BYTES);
-        // OpenSSL reports a failed tag check as an empty error stack, which says
-        // nothing more than this variant does.
-        decrypt_aead(
-            Cipher::aes_256_gcm(),
-            self.0.as_bytes(),
-            Some(nonce),
-            aad,
-            ciphertext,
-            tag,
-        )
-        .map_err(|_| CryptoError::Unsealable)
+        let (nonce, rest) = sealed
+            .split_at_checked(NONCE_LEN)
+            .ok_or(CryptoError::Unsealable)?;
+        let nonce = Nonce::try_assume_unique_for_key(nonce)?;
+        let mut opened = rest.to_vec();
+        // A failed tag check says nothing more than this variant does.
+        let plaintext = self
+            .key()?
+            .open_in_place(nonce, Aad::from(aad), &mut opened)
+            .map_err(|_| CryptoError::Unsealable)?;
+        Ok(plaintext.to_vec())
+    }
+
+    /// The AES-256-GCM key, which draws a random nonce for every seal.
+    fn key(&self) -> Result<RandomizedNonceKey, CryptoError> {
+        Ok(RandomizedNonceKey::new(&AES_256_GCM, self.0.as_bytes())?)
     }
 }
 

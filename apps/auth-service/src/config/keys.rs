@@ -13,7 +13,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sourceorigin_common::config::{
     ConfigurationError, Origin, SecretBytes, SecretReference, Variable,
 };
-use sourceorigin_crypto::{CryptoError, Digest, NoteKey, NoteVerifier, Secret};
+use sourceorigin_crypto::{Digest, NoteKey, NoteVerifier, Secret};
 use std::sync::Arc;
 
 /// Separates opaque token digests from every other use of a token digest key.
@@ -87,23 +87,23 @@ pub(crate) struct TokenDigestKey {
 impl TokenDigestKey {
     /// Derives the HMAC, verification, recovery, unsubscribe, sign-out and
     /// invitation link keys from configured bytes.
-    pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
-        let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
+    pub(crate) fn derive(bytes: &[u8]) -> Self {
+        let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT);
         let fingerprint = URL_SAFE_NO_PAD
             .encode(&Digest::sha256(key.as_bytes()).as_bytes()[..DIGEST_KEY_FINGERPRINT_BYTES]);
-        Ok(Self {
+        Self {
             key,
             fingerprint,
-            verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT)?,
-            recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT)?,
-            unsubscribe: Secret::derive(bytes, UNSUBSCRIBE_LINK_CONTEXT)?,
-            sign_out: Secret::derive(bytes, SIGN_OUT_LINK_CONTEXT)?,
-            invitation: Secret::derive(bytes, INVITATION_LINK_CONTEXT)?,
-        })
+            verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT),
+            recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT),
+            unsubscribe: Secret::derive(bytes, UNSUBSCRIBE_LINK_CONTEXT),
+            sign_out: Secret::derive(bytes, SIGN_OUT_LINK_CONTEXT),
+            invitation: Secret::derive(bytes, INVITATION_LINK_CONTEXT),
+        }
     }
 
     /// The digest of `secret` under this key.
-    fn digest(&self, secret: &Secret) -> Result<Digest, CryptoError> {
+    fn digest(&self, secret: &Secret) -> Digest {
         Digest::hmac(self.key.as_bytes(), secret.as_bytes())
     }
 }
@@ -166,19 +166,11 @@ impl TokenDigestKeys {
     /// # Errors
     /// Names a missing or unreadable key, or one shorter than 32 bytes.
     pub fn from_environment() -> Result<Self, ConfigurationError> {
-        let derive = |variable: Variable, bytes: SecretBytes| {
-            TokenDigestKey::derive(bytes.expose_secret())
-                .map_err(|source| variable.error("could not derive a key", source))
-        };
-        let current = derive(TOKEN_DIGEST_KEY, Self::read(TOKEN_DIGEST_KEY)?)?;
+        let derive = |bytes: SecretBytes| TokenDigestKey::derive(bytes.expose_secret());
+        let current = derive(Self::read(TOKEN_DIGEST_KEY)?);
         let accepted = TOKEN_DIGEST_KEY_ACCEPTED
             .optional()?
-            .map(|_| {
-                derive(
-                    TOKEN_DIGEST_KEY_ACCEPTED,
-                    Self::read(TOKEN_DIGEST_KEY_ACCEPTED)?,
-                )
-            })
+            .map(|_| Self::read(TOKEN_DIGEST_KEY_ACCEPTED).map(derive))
             .transpose()?;
         Ok(Self::new(current, accepted))
     }
@@ -196,16 +188,16 @@ impl TokenDigestKeys {
     }
 
     /// The digest a new `secret` is stored as, and its key's fingerprint.
-    pub(crate) fn issue(&self, secret: &Secret) -> Result<(Digest, &str), CryptoError> {
-        Ok((self.current.digest(secret)?, &self.current.fingerprint))
+    pub(crate) fn issue(&self, secret: &Secret) -> (Digest, &str) {
+        (self.current.digest(secret), &self.current.fingerprint)
     }
 
     /// Every digest a presented `secret` may be stored as, one per accepted key.
-    pub(crate) fn accepted(&self, secret: &Secret) -> Result<Vec<Vec<u8>>, CryptoError> {
+    pub(crate) fn accepted(&self, secret: &Secret) -> Vec<Vec<u8>> {
         [Some(&self.current), self.accepted.as_ref()]
             .into_iter()
             .flatten()
-            .map(|key| Ok(key.digest(secret)?.as_bytes().to_vec()))
+            .map(|key| key.digest(secret).as_bytes().to_vec())
             .collect()
     }
 
@@ -247,51 +239,32 @@ impl LinkKeys {
 
     /// The token of a new link for the ID whose bytes are `id`, under the current
     /// key.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn token(&self, id: &[u8; 16]) -> Result<Secret, CryptoError> {
+    pub(crate) fn token(&self, id: &[u8; 16]) -> Secret {
         Self::derive(&self.0[0], id)
     }
 
     /// The token for `id` whose SHA-256 is the stored `digest`, under the key that
     /// derives it. `None` once no configured key does.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn rebuild(
-        &self,
-        id: &[u8; 16],
-        digest: &[u8],
-    ) -> Result<Option<Secret>, CryptoError> {
-        for key in self.0.iter() {
-            let token = Self::derive(key, id)?;
-            if token.digest().as_bytes() == digest {
-                return Ok(Some(token));
-            }
-        }
-        Ok(None)
+    pub(crate) fn rebuild(&self, id: &[u8; 16], digest: &[u8]) -> Option<Secret> {
+        self.0
+            .iter()
+            .map(|key| Self::derive(key, id))
+            .find(|token| token.digest().as_bytes() == digest)
     }
 
     /// Whether a configured key derives `presented` for `id`, compared in
     /// constant time: how a link whose token is stored nowhere is checked.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn derives(&self, id: &[u8; 16], presented: &Secret) -> Result<bool, CryptoError> {
+    pub(crate) fn derives(&self, id: &[u8; 16], presented: &Secret) -> bool {
         let mut derived = false;
         for key in self.0.iter() {
-            let token = Self::derive(key, id)?;
+            let token = Self::derive(key, id);
             derived |= Digest::constant_time_eq(token.as_bytes(), presented.as_bytes());
         }
-        Ok(derived)
+        derived
     }
 
     /// The token `key` derives for `id`.
-    fn derive(key: &Secret, id: &[u8; 16]) -> Result<Secret, CryptoError> {
+    fn derive(key: &Secret, id: &[u8; 16]) -> Secret {
         Secret::derive(key.as_bytes(), id)
     }
 }

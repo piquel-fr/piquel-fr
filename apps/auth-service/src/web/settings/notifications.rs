@@ -27,7 +27,6 @@ use sourceorigin_ui::{
     Messages, NotificationState, Section, SignOutStep, Tab, Title, UnsubscribeStep,
 };
 use topcoat::{
-    Error,
     context::{Cx, app_context},
     router::{
         Body, Method, StatusCode, parse_query_params, path_param,
@@ -265,7 +264,7 @@ impl WebApplication {
     pub(in crate::web) async fn unsubscription(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let here = uri(cx).to_string();
-        match Self::linked(cx, &web.email.unsubscribe_links)? {
+        match Self::linked(cx, &web.email.unsubscribe_links) {
             Some(_) => {
                 let step = UnsubscribeStep::Confirm { action: &here };
                 web.unsubscribe_page(cx, StatusCode::OK, step).await
@@ -283,7 +282,7 @@ impl WebApplication {
     /// read: the link is all it needs.
     pub(in crate::web) async fn unsubscribe(cx: &Cx, _: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
-        let Some(user) = Self::linked(cx, &web.email.unsubscribe_links)? else {
+        let Some(user) = Self::linked(cx, &web.email.unsubscribe_links) else {
             return web
                 .unsubscribe_page(cx, StatusCode::NOT_FOUND, UnsubscribeStep::Invalid)
                 .await;
@@ -301,7 +300,7 @@ impl WebApplication {
     pub(in crate::web) async fn sign_out_confirmation(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let here = uri(cx).to_string();
-        let works = match Self::linked(cx, &web.email.sign_out_links)? {
+        let works = match Self::linked(cx, &web.email.sign_out_links) {
             Some(id) => web.account.sign_out_link_works(id).await?,
             None => false,
         };
@@ -318,7 +317,7 @@ impl WebApplication {
     /// link names out everywhere, once, while the link works.
     pub(in crate::web) async fn sign_out_everywhere(cx: &Cx, _: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
-        let signed_out = match Self::linked(cx, &web.email.sign_out_links)? {
+        let signed_out = match Self::linked(cx, &web.email.sign_out_links) {
             Some(id) => {
                 web.account
                     .sign_out_everywhere(id, Self::context(cx)?)
@@ -339,14 +338,11 @@ impl WebApplication {
 
     /// What the page's link names, if its token is the one Origin Auth made for
     /// it with `links`.
-    fn linked<T: LinkTarget>(cx: &Cx, links: &Links<T>) -> Result<Option<T>, Failure>
+    fn linked<T: LinkTarget>(cx: &Cx, links: &Links<T>) -> Option<T>
     where
         Link<T>: serde::de::DeserializeOwned,
     {
-        let Ok(link) = parse_query_params::<Link<T>>(cx) else {
-            return Ok(None);
-        };
-        Ok(links.check(&link).map_err(Error::from)?)
+        links.check(&parse_query_params::<Link<T>>(cx).ok()?)
     }
 
     /// The sign-out page at `step`, at `status`.

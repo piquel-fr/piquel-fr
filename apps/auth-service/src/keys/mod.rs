@@ -397,8 +397,8 @@ impl KeyStore {
             source,
         };
         let thumbprint = PublicKey::from_jwk(key.public_jwk.clone())
-            .and_then(|public| public.thumbprint())
-            .map_err(invalid)?;
+            .map_err(invalid)?
+            .thumbprint();
         // The table keeps a private key for every key that is not retired.
         let sealed = key.sealed_private_key.as_deref().unwrap_or_default();
         // Opening fails only as `Unsealable`, so the attempts lose no detail.
@@ -413,7 +413,7 @@ impl KeyStore {
         let private = match key.key_type {
             SigningKeyType::Rsa => Rs256Key::from_der(key.id.as_str(), &der).map_err(invalid)?,
         };
-        if private.public_key().thumbprint().map_err(invalid)? != thumbprint {
+        if private.public_key().thumbprint() != thumbprint {
             return Err(KeyError::Mismatched(key.id.clone()));
         }
         Ok(private)
@@ -502,7 +502,7 @@ impl<'t, 'c> Change<'t, 'c> {
         let id: KeyId = key.kid().parse().map_err(|_| CryptoError::KeyId)?;
         let sealed_private_key = self.store.kek.seal(
             &key.private_key_der()?,
-            &Binding::SEALS.associated_data(&id, key_type, &key.public_key().thumbprint()?),
+            &Binding::SEALS.associated_data(&id, key_type, &key.public_key().thumbprint()),
         )?;
         self.tx
             .signing_keys()

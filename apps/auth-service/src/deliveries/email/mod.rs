@@ -40,7 +40,6 @@ use sourceorigin_common::{
     config::Origin,
     notifications::{Notification, NotificationAction},
 };
-use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::{
     Announcement, Database, DatabaseError, Delivery, Email, EmailMessage, Invitation,
     InvitationKey, OpenInvitation,
@@ -260,8 +259,7 @@ impl<M: Mailer> EmailSender<M> {
         let unsubscribe = if email.essential {
             None
         } else {
-            let link = self.unsubscribe_links.link(user_id).map(Some);
-            Some(Self::rebuilt(link, "unsubscribe", &user_id)?)
+            Some(self.unsubscribe_links.link(user_id))
         };
         Ok(Some(Content::announcement(
             email.address,
@@ -371,8 +369,7 @@ impl<M: Mailer> EmailSender<M> {
                         href.map(|href| (action, href))
                     }),
                     sign_out: if notification.security() {
-                        let link = self.sign_out_links.link(*notification_id).map(Some);
-                        Some(Self::rebuilt(link, "sign-out", notification_id)?)
+                        Some(self.sign_out_links.link(*notification_id))
                     } else {
                         None
                     },
@@ -395,19 +392,14 @@ impl<M: Mailer> EmailSender<M> {
     /// a key removed before the link was sent, which operators see, rather than
     /// send a link that matches nothing.
     fn rebuilt<T>(
-        rebuilt: Result<Option<T>, CryptoError>,
+        rebuilt: Option<T>,
         link: &'static str,
         id: &dyn Display,
     ) -> Result<T, DeliveryError> {
-        match rebuilt {
-            Ok(Some(rebuilt)) => return Ok(rebuilt),
-            Ok(None) => tracing::error!(link, %id, "no configured key derives the link's token"),
-            Err(error) => {
-                let error = ErrorChain(&error);
-                tracing::error!(%error, link, %id, "could not derive a link's token");
-            }
-        }
-        Err(DeliveryError::Permanent(Failure::Message))
+        rebuilt.ok_or_else(|| {
+            tracing::error!(link, %id, "no configured key derives the link's token");
+            DeliveryError::Permanent(Failure::Message)
+        })
     }
 
     /// Builds the message. Every attempt of a delivery builds the same one, with

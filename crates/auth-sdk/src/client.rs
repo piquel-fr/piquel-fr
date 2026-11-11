@@ -5,13 +5,12 @@ use crate::{
     IdToken, Issuer, LogoutToken, TokenError,
     http::{Authorization, NetworkError, Reply},
 };
+use aws_lc_rs::digest::{SHA256, digest};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
-use rand::{RngCore, rngs::OsRng};
 use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
 use sourceorigin_common::{
     ClientId,
     protocol::{
@@ -126,7 +125,7 @@ pub enum LoginError {
     /// The operating system could not supply random bytes for `state`, `nonce` and
     /// the PKCE verifier.
     #[error("operating system randomness is unavailable")]
-    Randomness(#[source] rand::Error),
+    Randomness(#[source] aws_lc_rs::error::Unspecified),
     /// The pushed authorization request failed (RFC 9126 §2.3).
     #[error(transparent)]
     Push(OAuthError),
@@ -596,9 +595,7 @@ impl Client {
     ) -> Result<(Url, PendingLogin), LoginError> {
         let random = || -> Result<String, LoginError> {
             let mut bytes = [0; RANDOM_BYTES];
-            OsRng
-                .try_fill_bytes(&mut bytes)
-                .map_err(LoginError::Randomness)?;
+            aws_lc_rs::rand::fill(&mut bytes).map_err(LoginError::Randomness)?;
             Ok(URL_SAFE_NO_PAD.encode(bytes))
         };
         let pending = PendingLogin {
@@ -616,7 +613,7 @@ impl Client {
         };
         let mut scopes = request.scopes.clone();
         scopes.insert(Scope::OpenId);
-        let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes()));
+        let challenge = URL_SAFE_NO_PAD.encode(digest(&SHA256, pending.verifier.as_bytes()));
         // `audience` is never sent: auth then picks the client's default resource.
         // `client_id` is added where the request goes, as `post` adds it.
         let mut parameters = vec![

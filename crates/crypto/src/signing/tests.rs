@@ -75,12 +75,7 @@ fn rejects_algorithm_confusion_and_unrecognized_headers() {
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims"))
         );
         // A valid RSA signature isolates header-policy rejection from signature failure.
-        let mut signer = Signer::new(MessageDigest::sha256(), &key.key).expect("signer");
-        signer.update(input.as_bytes()).expect("input");
-        let token = format!(
-            "{input}.{}",
-            URL_SAFE_NO_PAD.encode(signer.sign_to_vec().expect("signature"))
-        );
+        let token = key.signed(&input).expect("signature");
         assert!(
             matches!(
                 keys.verify::<Value>(&token, TokenType::Id, "https://auth.example"),
@@ -94,9 +89,7 @@ fn rejects_algorithm_confusion_and_unrecognized_headers() {
     let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims"));
     let input = format!("{header}.{payload}");
     let signature =
-        crate::Digest::hmac(&key.public_key_pem().expect("public key"), input.as_bytes())
-            .expect("HMAC")
-            .encoded();
+        crate::Digest::hmac(key.public_key().pem().as_bytes(), input.as_bytes()).encoded();
     let token = format!("{input}.{signature}");
     assert!(matches!(
         keys.verify::<Value>(&token, TokenType::Id, "https://auth.example"),

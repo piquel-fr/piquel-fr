@@ -15,6 +15,7 @@ pub use layer::{LoginLayer, LoginService};
 
 use super::{BoxFuture, CookieKey, seal::SealError, session::StoredLogin};
 use crate::{Client, ClientId, Credentials, LogoutToken, Scopes, StepUpRequirement};
+use aws_lc_rs::digest::{SHA256, digest};
 use axum::{
     Router,
     extract::OriginalUri,
@@ -26,7 +27,6 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use layer::RequestSession;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sourceorigin_common::{ErrorChain, protocol::same_origin::BrowserRequest};
 use std::{fmt, future::Future, str::FromStr, sync::Arc};
 use url::Url;
@@ -80,7 +80,7 @@ impl CookieNames {
     /// The name of the cookie holding the login started with `state`: its slot, by
     /// the first byte of the `state`'s SHA-256.
     fn pending(&self, state: &str) -> String {
-        let slot = Sha256::digest(state)[0] % PENDING_SLOTS;
+        let slot = digest(&SHA256, state.as_bytes()).as_ref()[0] % PENDING_SLOTS;
         format!("{}{slot}", self.pending)
     }
 }
@@ -442,7 +442,7 @@ impl Login {
 
     /// The step-up marker naming the page at `path`.
     fn step_up_marker(path: &str) -> String {
-        URL_SAFE_NO_PAD.encode(Sha256::digest(path))
+        URL_SAFE_NO_PAD.encode(digest(&SHA256, path.as_bytes()))
     }
 
     /// The `Set-Cookie` value deleting cookie `name`.

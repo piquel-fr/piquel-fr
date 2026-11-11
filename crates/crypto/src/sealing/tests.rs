@@ -21,12 +21,12 @@ fn sealed_values_open_only_with_their_key_and_associated_data() {
         kek.open(&sealed, b"kid-2rsa"),
         Err(CryptoError::Unsealable)
     ));
-    for index in [0, NONCE_BYTES, sealed.len() - 1] {
+    for index in [0, NONCE_LEN, sealed.len() - 1] {
         let mut modified = sealed.clone();
         modified[index] ^= 1;
         assert!(kek.open(&modified, b"kid-1rsa").is_err(), "byte {index}");
     }
-    assert!(kek.open(&sealed[..TAG_BYTES], b"kid-1rsa").is_err());
+    assert!(kek.open(&sealed[..NONCE_LEN], b"kid-1rsa").is_err());
 
     let encoded = Secret::generate().expect("secret").encoded();
     assert!(KeyEncryptionKey::parse(&encoded).is_ok());

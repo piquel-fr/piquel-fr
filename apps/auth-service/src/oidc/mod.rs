@@ -601,14 +601,14 @@ impl OidcApplication {
 
     /// HMAC of a new opaque token's secret, the only form in which it is
     /// stored, and the fingerprint of the key that made it.
-    fn token_digest(&self, token: &OpaqueToken) -> Result<(Vec<u8>, String), OAuthError> {
-        let (digest, key) = self.digest_keys.issue(&token.secret)?;
-        Ok((digest.as_bytes().to_vec(), key.to_owned()))
+    fn token_digest(&self, token: &OpaqueToken) -> (Vec<u8>, String) {
+        let (digest, key) = self.digest_keys.issue(&token.secret);
+        (digest.as_bytes().to_vec(), key.to_owned())
     }
 
     /// Every form in which a presented opaque token's secret may be stored: one
     /// digest per accepted digest key.
-    fn accepted_digests(&self, token: &OpaqueToken) -> Result<Vec<Vec<u8>>, OAuthError> {
-        Ok(self.digest_keys.accepted(&token.secret)?)
+    fn accepted_digests(&self, token: &OpaqueToken) -> Vec<Vec<u8>> {
+        self.digest_keys.accepted(&token.secret)
     }
 }

@@ -98,7 +98,7 @@ async fn insert(
     at: DateTime<Utc>,
 ) -> KeyId {
     let id: KeyId = key.kid().parse().expect("key ID");
-    let thumbprint = key.public_key().thumbprint().expect("thumbprint");
+    let thumbprint = key.public_key().thumbprint();
     let sealed_private_key = sealed.unwrap_or_else(|| {
         let associated = binding.associated_data(&id, SigningKeyType::Rsa, &thumbprint);
         let der = key.private_key_der().expect("DER");

@@ -3,7 +3,6 @@
 use super::VERIFICATION_WINDOW;
 use crate::security::ApiError;
 use sourceorigin_common::email::InvalidEmail;
-use sourceorigin_crypto::CryptoError;
 use sourceorigin_repository::DatabaseError;
 use thiserror::Error;
 
@@ -56,9 +55,6 @@ pub(crate) enum EmailError {
     /// Another active account verified this address first.
     #[error("address is verified by another account")]
     OwnedElsewhere,
-    /// The verification token could not be derived.
-    #[error("could not derive verification token")]
-    Crypto(#[source] CryptoError),
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -108,7 +104,6 @@ impl From<EmailError> for ApiError {
             EmailError::OwnedElsewhere => {
                 Self::conflict("This address is already used by another Origin Account.")
             }
-            error @ EmailError::Crypto(_) => Self::internal(error),
             EmailError::Database(error) => error.into(),
         }
     }

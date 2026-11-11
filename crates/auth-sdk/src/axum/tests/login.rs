@@ -91,8 +91,9 @@ async fn step_ups_in_nested_routers_keep_their_prefix() {
         .header(header::COOKIE, &session);
     let response = send_from(&app, fetch, (None, None)).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let marker = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(<sha2::Sha256 as sha2::Digest>::digest("/app/settings"));
+    let marker = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, b"/app/settings"),
+    );
     let cookies = format!("{session}; __Host-sourceorigin-{CLIENT}-step-up={marker}");
     let response = get_with(&app, "/app/settings", &[(header::COOKIE, &cookies)]).await;
     assert_eq!(

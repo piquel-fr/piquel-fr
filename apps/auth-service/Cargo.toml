@@ -18,6 +18,8 @@ base64.workspace = true
 chrono.workspace = true
 ipnet.workspace = true
 lettre.workspace = true
+# Never named: webauthn-rs links OpenSSL, and this builds it vendored.
+openssl.workspace = true
 percent-encoding.workspace = true
 clap.workspace = true
 hyper.workspace = true
@@ -50,3 +52,8 @@ webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
 
 [lints]
 workspace = true
+
+# `openssl` is listed only for its `vendored` feature, which webauthn-rs's copy
+# then builds with.
+[package.metadata.cargo-machete]
+ignored = ["openssl"]

@@ -6,17 +6,13 @@
 //! four bytes of `SHA-256(name || "\n" || 0x01 || public key)`, so a verifier
 //! recognizes its own signatures and ignores others. Verifier keys are written
 //! `<name>+<hex key ID>+<base64(0x01 || public key)>`.
-use super::{CryptoError, Digest};
+use super::{CryptoError, Digest, random_bytes};
+use aws_lc_rs::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use openssl::{
-    pkey::{Id, PKey, Private},
-    sign::{Signer, Verifier},
-};
-use rand::{RngCore, rngs::OsRng};
 use std::{fmt, str::FromStr};
 
 /// Identifies Ed25519 in key IDs and verifier keys.
-const ED25519: u8 = 0x01;
+const ED25519_ID: u8 = 0x01;
 /// Starts every signature line: an em dash and a space.
 const SIGNATURE_PREFIX: &str = "\u{2014} ";
 /// Byte length of an Ed25519 seed, which is its private key.
@@ -31,7 +27,7 @@ const ED25519_SIGNATURE_BYTES: usize = 64;
 /// An Ed25519 key that signs notes under its name, e.g. `auth.sourceorigin.dev/audit`.
 pub struct NoteKey {
     /// The private key.
-    key: PKey<Private>,
+    key: Ed25519KeyPair,
     /// The name and public key that check its signatures.
     verifier: NoteVerifier,
 }
@@ -63,18 +59,15 @@ impl NoteKey {
     /// # Errors
     /// Rejects an invalid name and preserves failures from the random source.
     pub fn generate(name: &str) -> Result<Self, CryptoError> {
-        let mut seed = [0; SEED_BYTES];
-        OsRng
-            .try_fill_bytes(&mut seed)
-            .map_err(CryptoError::Random)?;
-        Self::from_seed(name, &seed)
+        Self::from_seed(name, &random_bytes()?)
     }
 
     /// Builds the key and its verifier from a 32-byte seed.
     fn from_seed(name: &str, seed: &[u8; SEED_BYTES]) -> Result<Self, CryptoError> {
-        let key = PKey::private_key_from_raw_bytes(seed, Id::ED25519)?;
+        let key = Ed25519KeyPair::from_seed_unchecked(seed)?;
         let public = key
-            .raw_public_key()?
+            .public_key()
+            .as_ref()
             .try_into()
             .map_err(|_| CryptoError::NoteKeySeed)?;
         Ok(Self {
@@ -93,13 +86,11 @@ impl NoteKey {
     /// characters, and returns the signed note.
     ///
     /// # Errors
-    /// Rejects invalid text and preserves provider failures.
+    /// Rejects invalid text.
     pub fn sign(&self, text: &str) -> Result<String, CryptoError> {
         NoteVerifier::check_text(text)?;
-        let signature =
-            Signer::new_without_digest(&self.key)?.sign_oneshot_to_vec(text.as_bytes())?;
         let mut signed = self.verifier.id.to_be_bytes().to_vec();
-        signed.extend(signature);
+        signed.extend(self.key.sign(text.as_bytes()).as_ref());
         Ok(format!(
             "{text}\n{SIGNATURE_PREFIX}{} {}\n",
             self.verifier.name,
@@ -137,7 +128,7 @@ impl NoteVerifier {
             return Err(CryptoError::NoteKeyName);
         }
         let mut input = format!("{name}\n").into_bytes();
-        input.push(ED25519);
+        input.push(ED25519_ID);
         input.extend(public);
         let digest = Digest::sha256(&input);
         let mut id = [0; KEY_ID_BYTES];
@@ -174,15 +165,13 @@ impl NoteVerifier {
         }
     }
 
-    /// Whether `signature` is this key's Ed25519 signature of `text`. Any other
-    /// failure of the cryptographic provider is an error, not an invalid signature.
-    fn verifies(&self, text: &str, signature: &[u8]) -> Result<bool, CryptoError> {
+    /// Whether `signature` is this key's Ed25519 signature of `text`.
+    fn verifies(&self, text: &str, signature: &[u8]) -> bool {
         // No Ed25519 signature has another length.
-        if signature.len() != ED25519_SIGNATURE_BYTES {
-            return Ok(false);
-        }
-        let key = PKey::public_key_from_raw_bytes(&self.public, Id::ED25519)?;
-        Ok(Verifier::new_without_digest(&key)?.verify_oneshot(signature, text.as_bytes())?)
+        signature.len() == ED25519_SIGNATURE_BYTES
+            && UnparsedPublicKey::new(&ED25519, &self.public)
+                .verify(text.as_bytes(), signature)
+                .is_ok()
     }
 }
 
@@ -199,7 +188,7 @@ impl FromStr for NoteVerifier {
         let key = STANDARD
             .decode(key)
             .map_err(|_| CryptoError::NoteVerifierKey)?;
-        let Some((&ED25519, public)) = key.split_first() else {
+        let Some((&ED25519_ID, public)) = key.split_first() else {
             return Err(CryptoError::NoteVerifierKey);
         };
         let public = public
@@ -216,7 +205,7 @@ impl FromStr for NoteVerifier {
 impl fmt::Display for NoteVerifier {
     /// Writes the verifier key.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut key = vec![ED25519];
+        let mut key = vec![ED25519_ID];
         key.extend(self.public);
         write!(
             formatter,
@@ -304,7 +293,7 @@ impl NoteVerifiers {
             let (id, signature) = signature.split_at(KEY_ID_BYTES);
             let id = u32::from_be_bytes(id.try_into().map_err(|_| CryptoError::NoteFormat)?);
             for verifier in self.0.iter().filter(|key| key.name == name && key.id == id) {
-                if !verifier.verifies(text, signature)? {
+                if !verifier.verifies(text, signature) {
                     return Err(CryptoError::NoteSignature);
                 }
                 verified = true;

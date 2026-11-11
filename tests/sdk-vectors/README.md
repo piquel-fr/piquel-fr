@@ -9,8 +9,10 @@ shared protocol types, and signed with auth's own signer. Run `just sdk-vectors`
 after changing the generator; `just test` fails while the committed files are stale.
 
 `keys/` holds throwaway RSA keys, `key-2025` (before a rotation) and `key-2026`
-(after it), and `key-weak`, a 1024-bit key whose signatures every SDK refuses. They
-exist only to make the signatures reproducible.
+(after it), which exist only to make the signatures reproducible, and `key-weak`,
+a 1024-bit key every SDK refuses. Nothing signs with `key-weak`, since aws-lc-rs
+won't load it: its token carries a zero signature, which an SDK reaches only if
+it checks the signature before the key.
 
 ## Case format
 

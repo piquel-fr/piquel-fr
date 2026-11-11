@@ -117,7 +117,7 @@ impl OidcApplication {
             );
         }
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, &input.transaction)?;
-        let digests = self.accepted_digests(&opaque)?;
+        let digests = self.accepted_digests(&opaque);
         let mut transaction = self.database.begin().await?;
         // An approval locks the account first: before writing consent, whose row's
         // foreign key would otherwise take a key-share lock that deadlocks with a
@@ -190,7 +190,7 @@ impl OidcApplication {
         session: &StoredSession,
     ) -> Result<OpaqueToken, OAuthError> {
         let code = OpaqueToken::new(TokenPrefix::AuthorizationCode)?;
-        let (secret_digest, digest_key) = self.token_digest(&code)?;
+        let (secret_digest, digest_key) = self.token_digest(&code);
         transaction
             .oidc()
             .insert_code(&InsertAuthorizationCode {

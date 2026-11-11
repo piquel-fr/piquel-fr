@@ -12,10 +12,10 @@ pub use scram::ScramVerifier;
 pub use sealing::KeyEncryptionKey;
 pub use signing::{KeySet, PublicKey, Rs256Key};
 
+use aws_lc_rs::{
+    constant_time, digest, error::KeyRejected, error::Unspecified, hmac, rand as random,
+};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
-use rand::{RngCore, rngs::OsRng};
-use sha2::{Digest as _, Sha256};
 use std::fmt;
 use thiserror::Error;
 
@@ -33,16 +33,22 @@ const MAX_PKCE_VERIFIER_LENGTH: usize = 128;
 pub enum CryptoError {
     /// The operating system could not supply random bytes.
     #[error("operating system randomness unavailable")]
-    Random(#[source] rand::Error),
+    Random(#[source] Unspecified),
     /// The cryptographic provider failed.
     #[error("cryptographic provider failed")]
-    Provider(#[from] openssl::error::ErrorStack),
+    Provider(#[from] Unspecified),
+    /// The cryptographic provider rejected a key, e.g. as malformed.
+    #[error("cryptographic provider rejected the key")]
+    Key(#[from] KeyRejected),
     /// A base64url value is malformed.
     #[error("invalid unpadded base64url encoding")]
     Encoding(#[from] base64::DecodeError),
     /// A decoded secret has the wrong size.
     #[error("secret must contain exactly 32 bytes")]
     SecretLength,
+    /// A PEM private key has neither a PKCS#8 nor a PKCS#1 RSA block.
+    #[error("private key PEM must hold a PRIVATE KEY or RSA PRIVATE KEY block")]
+    Pem,
     /// An RSA key is too small.
     #[error("RSA signing key must contain at least 2048 bits")]
     RsaKeySize,
@@ -99,6 +105,16 @@ pub enum CryptoError {
     NoteUnverified,
 }
 
+/// `N` bytes of operating system randomness.
+///
+/// # Errors
+/// Preserves failures from the random source.
+pub(crate) fn random_bytes<const N: usize>() -> Result<[u8; N], CryptoError> {
+    let mut bytes = [0; N];
+    random::fill(&mut bytes).map_err(CryptoError::Random)?;
+    Ok(bytes)
+}
+
 /// A random 256-bit secret with redacted diagnostics.
 #[derive(Clone)]
 pub struct Secret([u8; SECRET_BYTES]);
@@ -108,18 +124,12 @@ impl Secret {
     /// # Errors
     /// Preserves failures from the random source.
     pub fn generate() -> Result<Self, CryptoError> {
-        let mut bytes = [0; SECRET_BYTES];
-        OsRng
-            .try_fill_bytes(&mut bytes)
-            .map_err(CryptoError::Random)?;
-        Ok(Self(bytes))
+        Ok(Self(random_bytes()?))
     }
     /// Derives a domain-separated secret key with HMAC-SHA256.
-    ///
-    /// # Errors
-    /// Preserves failures from the cryptographic provider.
-    pub fn derive(key: &[u8], context: &[u8]) -> Result<Self, CryptoError> {
-        Ok(Self(Digest::hmac(key, context)?.0))
+    #[must_use]
+    pub fn derive(key: &[u8], context: &[u8]) -> Self {
+        Self(Digest::hmac(key, context).0)
     }
     /// Parses a canonical, unpadded base64url secret.
     ///
@@ -164,20 +174,19 @@ impl Digest {
     /// Computes SHA-256 over arbitrary bytes.
     #[must_use]
     pub fn sha256(value: &[u8]) -> Self {
-        Self(Sha256::digest(value).into())
+        Self::from_output(digest::digest(&digest::SHA256, value).as_ref())
     }
     /// Computes HMAC-SHA256 using the supplied key.
-    ///
-    /// # Errors
-    /// Preserves cryptographic provider failures.
-    pub fn hmac(key: &[u8], value: &[u8]) -> Result<Self, CryptoError> {
-        let key = PKey::hmac(key)?;
-        let mut signer = Signer::new(MessageDigest::sha256(), &key)?;
-        signer.update(value)?;
-        // HMAC-SHA256 always writes exactly 32 bytes; OpenSSL rejects a smaller buffer.
+    #[must_use]
+    pub fn hmac(key: &[u8], value: &[u8]) -> Self {
+        let key = hmac::Key::new(hmac::HMAC_SHA256, key);
+        Self::from_output(hmac::sign(&key, value).as_ref())
+    }
+    /// Copies a SHA-256 or HMAC-SHA256 output, always [`Self::LENGTH`] bytes.
+    fn from_output(output: &[u8]) -> Self {
         let mut bytes = [0; SECRET_BYTES];
-        signer.sign(&mut bytes)?;
-        Ok(Self(bytes))
+        bytes.copy_from_slice(output);
+        Self(bytes)
     }
     /// Exposes the digest for persistence or comparison.
     #[must_use]
@@ -192,7 +201,7 @@ impl Digest {
     /// Compares equal-length byte strings in constant time; length is public.
     #[must_use]
     pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-        left.len() == right.len() && openssl::memcmp::eq(left, right)
+        constant_time::verify_slices_are_equal(left, right).is_ok()
     }
 }
 

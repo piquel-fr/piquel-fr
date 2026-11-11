@@ -7,7 +7,7 @@
 use crate::{config::LinkKeys, routes::page};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{NotificationId, UserId, config::Origin};
-use sourceorigin_crypto::{CryptoError, Secret};
+use sourceorigin_crypto::Secret;
 use std::{fmt::Display, marker::PhantomData};
 
 /// What a link of a notification's email names, and the page it opens.
@@ -88,31 +88,17 @@ impl<T: LinkTarget> Links<T> {
     }
 
     /// The link naming `id`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn link(&self, id: T) -> Result<String, CryptoError> {
+    pub(crate) fn link(&self, id: T) -> String {
         // An ID and an unpadded base64url token need no escaping.
-        let token = self.keys.token(&id.bytes())?.encoded();
-        Ok(format!(
-            "{}?id={id}&token={token}",
-            self.origin.join(T::PAGE)
-        ))
+        let token = self.keys.token(&id.bytes()).encoded();
+        format!("{}?id={id}&token={token}", self.origin.join(T::PAGE))
     }
 
     /// What `link` names, if a configured key derives its token.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn check(&self, link: &Link<T>) -> Result<Option<T>, CryptoError> {
-        let Ok(token) = Secret::parse(&link.token) else {
-            return Ok(None);
-        };
-        Ok(self
-            .keys
-            .derives(&link.id.bytes(), &token)?
-            .then_some(link.id))
+    pub(crate) fn check(&self, link: &Link<T>) -> Option<T> {
+        let token = Secret::parse(&link.token).ok()?;
+        self.keys
+            .derives(&link.id.bytes(), &token)
+            .then_some(link.id)
     }
 }

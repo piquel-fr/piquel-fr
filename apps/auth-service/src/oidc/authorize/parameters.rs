@@ -95,7 +95,7 @@ impl AuthorizationParameters {
             Duration::minutes(AUTHORIZATION_REQUEST_MINUTES)
         };
         let token = OpaqueToken::new(TokenPrefix::AuthorizationRequest)?;
-        let (secret_digest, digest_key) = app.token_digest(&token)?;
+        let (secret_digest, digest_key) = app.token_digest(&token);
         let request = InsertAuthorizationRequest {
             id: token.id,
             secret_digest,

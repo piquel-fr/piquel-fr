@@ -1,8 +1,7 @@
-use super::{CryptoError, Digest};
+use super::{CryptoError, Digest, random_bytes};
+use aws_lc_rs::pbkdf2;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use openssl::{hash::MessageDigest, pkcs5::pbkdf2_hmac};
-use rand::{RngCore, rngs::OsRng};
-use std::fmt;
+use std::{fmt, num::NonZeroU32};
 
 /// A SCRAM-SHA-256 verifier of a password (RFC 5802, RFC 7677): what a server
 /// stores to check the password without knowing it. Displays in the RFC 5803 form
@@ -11,7 +10,7 @@ use std::fmt;
 /// password can be set without the server, or its logs, ever seeing it.
 pub struct ScramVerifier {
     /// PBKDF2 iterations.
-    iterations: u32,
+    iterations: NonZeroU32,
     /// Random salt.
     salt: [u8; Self::SALT_BYTES],
     /// `SHA-256(HMAC(SaltedPassword, "Client Key"))`.
@@ -22,7 +21,7 @@ pub struct ScramVerifier {
 
 impl ScramVerifier {
     /// `PostgreSQL`'s default iteration count and salt length.
-    const ITERATIONS: u32 = 4096;
+    const ITERATIONS: NonZeroU32 = NonZeroU32::MIN.saturating_add(4095);
     /// Salt length in bytes.
     const SALT_BYTES: usize = 16;
 
@@ -33,34 +32,26 @@ impl ScramVerifier {
     /// # Errors
     /// Preserves failures from the random source and the cryptographic provider.
     pub fn new(password: &str) -> Result<Self, CryptoError> {
-        let mut salt = [0; Self::SALT_BYTES];
-        OsRng
-            .try_fill_bytes(&mut salt)
-            .map_err(CryptoError::Random)?;
-        Self::salted(password, salt, Self::ITERATIONS)
+        Ok(Self::salted(password, random_bytes()?, Self::ITERATIONS))
     }
 
     /// Derives the verifier of `password` with `salt`.
-    fn salted(
-        password: &str,
-        salt: [u8; Self::SALT_BYTES],
-        iterations: u32,
-    ) -> Result<Self, CryptoError> {
+    fn salted(password: &str, salt: [u8; Self::SALT_BYTES], iterations: NonZeroU32) -> Self {
         let mut salted = [0; Digest::LENGTH];
-        pbkdf2_hmac(
-            password.as_bytes(),
+        pbkdf2::derive(
+            pbkdf2::PBKDF2_HMAC_SHA256,
+            iterations,
             &salt,
-            iterations as usize,
-            MessageDigest::sha256(),
+            password.as_bytes(),
             &mut salted,
-        )?;
-        let client_key = Digest::hmac(&salted, b"Client Key")?;
-        Ok(Self {
+        );
+        let client_key = Digest::hmac(&salted, b"Client Key");
+        Self {
             iterations,
             salt,
             stored_key: Digest::sha256(client_key.as_bytes()),
-            server_key: Digest::hmac(&salted, b"Server Key")?,
-        })
+            server_key: Digest::hmac(&salted, b"Server Key"),
+        }
     }
 }
 
@@ -82,10 +73,7 @@ impl fmt::Display for ScramVerifier {
 impl ScramVerifier {
     /// The verifier of `password` with `salt` and `PostgreSQL`'s iteration count,
     /// to compare with one the server derived.
-    pub(crate) fn with_salt(
-        password: &str,
-        salt: [u8; Self::SALT_BYTES],
-    ) -> Result<Self, CryptoError> {
+    pub(crate) fn with_salt(password: &str, salt: [u8; Self::SALT_BYTES]) -> Self {
         Self::salted(password, salt, Self::ITERATIONS)
     }
 }

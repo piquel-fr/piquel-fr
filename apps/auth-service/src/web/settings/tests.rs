@@ -686,7 +686,7 @@ async fn the_sign_out_link_signs_every_device_out() {
         .await
         .expect("inbox")[0]
         .id;
-    let link = config.email.sign_out_links.link(id).expect("link");
+    let link = config.email.sign_out_links.link(id);
     let link = url::Url::parse(&link).expect("URL");
     let path = &link[url::Position::BeforePath..];
     let stranger = Browser::signed_out();
@@ -750,11 +750,7 @@ async fn announcement_emails_are_turned_off_from_the_inbox_or_their_link() {
         assert_eq!(emailed().await, email);
     }
 
-    let link = config
-        .email
-        .unsubscribe_links
-        .link(browser.user_id)
-        .expect("link");
+    let link = config.email.unsubscribe_links.link(browser.user_id);
     let link = url::Url::parse(&link).expect("URL");
     let path = &link[url::Position::BeforePath..];
     let stranger = Browser::signed_out();
@@ -899,12 +895,7 @@ async fn verification_links_are_confirmed_by_their_form() {
     let id = value_after(&page, r#"name="remove" value=""#)
         .parse()
         .expect("address ID");
-    let token = config
-        .email
-        .verification_keys
-        .token(id)
-        .expect("token")
-        .encoded();
+    let token = config.email.verification_keys.token(id).encoded();
 
     let browser = Browser::signed_out();
     let page = browser.visit(&replicas.a, settings::VERIFY).await;
