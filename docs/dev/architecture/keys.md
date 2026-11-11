@@ -31,9 +31,11 @@ Auth signs tokens with RS256 keys. `apps/auth-service/src/keys` holds two types:
 Each row of `signing_keys` holds a key ID of 22 random base64url characters, its
 type, its state, its public key as a JWK, and its private key in DER, sealed with
 AES-256-GCM under the key-encryption key (`KeyEncryptionKey`). A sealed value is
-the nonce, the ciphertext and the tag, and its associated data is the key's ID
-and type, so a sealed key moved to another row fails to open. Opening a key also
-checks that the private key is the half of the public key stored with it.
+the nonce, the ciphertext and the tag. Its associated data is the key's ID, its
+type and its public key's JWK thumbprint, so a sealed key moved to another row,
+or stored beside another public key, fails to open. Keys sealed before the
+thumbprint was bound have only the ID and type, and still open. Opening a key
+also checks that the private key is the half of the public key stored with it.
 
 The database never sees a private key in the clear. Retiring a key erases its
 private key; only its public key stays, to verify hints.

@@ -443,11 +443,10 @@ impl KeyStore {
 #[derive(Clone, Copy, Debug)]
 enum Binding {
     /// The key's ID, its type and its public key's JWK thumbprint, so the
-    /// public key stored with it cannot be swapped either. Releases open it, but
-    /// none seals with it yet: the release before must open it first, or a
-    /// rollback would leave keys no replica can open (#316).
+    /// public key stored with it cannot be swapped either: how new keys are sealed.
     PublicKey,
-    /// The key's ID and type: how every release so far seals.
+    /// The key's ID and type: how keys were sealed before [`Self::PublicKey`].
+    /// Keys sealed this way keep opening, so none needs sealing again.
     Record,
 }
 
@@ -455,7 +454,7 @@ impl Binding {
     /// Every binding, in the order opening tries them.
     const ALL: [Self; 2] = [Self::PublicKey, Self::Record];
     /// The binding new keys are sealed with.
-    const SEALS: Self = Self::Record;
+    const SEALS: Self = Self::PublicKey;
 
     /// The associated data of the key `id` of `key_type`, whose public key's JWK
     /// thumbprint is `thumbprint`. Fields are separated by newlines, which none

@@ -372,9 +372,7 @@ async fn import_fills_an_empty_key_set_once() {
 /// A `next` key whose private key does not open, or is not the private half of
 /// its public key, is left out of the key set and refused at promotion, while
 /// the active key keeps signing and the rest of rotation goes on; revoking it
-/// lets rotation publish another. A key
-/// sealed with its public key bound, as a later release will seal, opens, is
-/// published and is promoted.
+/// lets rotation publish another.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_next_key_that_cannot_sign_is_never_promoted() {
@@ -440,22 +438,54 @@ async fn a_next_key_that_cannot_sign_is_never_promoted() {
         let mut change = Change::new(&mut tx, &store, due, None);
         assert_eq!(change.revoke(&next).await.expect("revoke"), None);
     }
+    tx.rollback().await.expect("rollback");
+}
 
-    let bound = Rs256Key::generate("bound").expect("key");
-    let public = bound.public_key().jwk().clone();
+/// New keys are sealed with their public key bound, and a key sealed before
+/// that, bound to its ID and type only, still opens, is published and is promoted.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn keys_sealed_either_way_open() {
+    let (store, database) = store().await;
+    let mut tx = database.begin().await.expect("transaction");
+    clear(&mut tx).await;
+    let start = Utc::now();
+    assert!(store.tick_in(&mut tx, start).await.expect("first key"));
+    let stored = tx.signing_keys().list().await.expect("list");
+    let [generated] = &stored[..] else {
+        panic!("the first start generates one key: {stored:?}");
+    };
+    let thumbprint = PublicKey::from_jwk(generated.public_jwk.clone())
+        .and_then(|public| public.thumbprint())
+        .expect("thumbprint");
+    let sealed = generated.sealed_private_key.as_deref().expect("sealed");
+    let opens = |binding: Binding| {
+        let associated = binding.associated_data(&generated.id, generated.key_type, &thumbprint);
+        store.kek.open(sealed, &associated).is_ok()
+    };
+    assert!(opens(Binding::PublicKey), "a new key binds its public key");
+    assert!(!opens(Binding::Record), "and opens no other way");
+
+    let old = Rs256Key::generate("old").expect("key");
+    let public = old.public_key().jwk().clone();
     let next = insert(
         &store,
         &mut tx,
-        &bound,
+        &old,
         SigningKeyState::Next,
-        (Binding::PublicKey, None),
+        (Binding::Record, None),
         public,
         start,
     )
     .await;
     let published = kids(&key_set(&store, &mut tx).await);
     assert!(published.contains(&next.to_string()), "{published:?}");
-    assert!(store.tick_in(&mut tx, due).await.expect("promote"));
+    assert!(
+        store
+            .tick_in(&mut tx, start + PRE_PUBLICATION)
+            .await
+            .expect("promote")
+    );
     assert_eq!(key_set(&store, &mut tx).await.signer().kid(), next.as_str());
     tx.rollback().await.expect("rollback");
 }
