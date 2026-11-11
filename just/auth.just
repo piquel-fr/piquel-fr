@@ -59,7 +59,7 @@ handle *ARGS:
 mailpit:
     @docker run --rm --name sourceorigin-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
 
-# Inspect, rotate, revoke and import signing keys, e.g. `just auth keys list`.
+# Inspect, rotate and revoke signing keys, e.g. `just auth keys list`.
 [positional-arguments]
 keys *ARGS:
     @just auth run keys "$@"

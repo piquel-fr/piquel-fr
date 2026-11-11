@@ -1,4 +1,4 @@
-//! Signing keys: listing, rotating, revoking and importing them, through the
+//! Signing keys: listing, rotating and revoking them, through the
 //! [`KeyStore`] the caller holds, which seals them with its key-encryption key.
 
 use super::AdminService;

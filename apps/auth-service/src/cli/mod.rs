@@ -98,8 +98,8 @@ enum Command {
     /// Apply database migrations. Connected as the schema owner, also create or
     /// reset the role other commands connect as.
     Migrate,
-    /// Inspect, rotate, revoke and import signing keys, check token digest keys,
-    /// and print the audit key's verifier key. Every replica picks up a signing
+    /// Inspect, rotate and revoke signing keys, check token digest keys, and
+    /// print the audit key's verifier key. Every replica picks up a signing
     /// key change within a minute.
     #[command(subcommand)]
     Keys(KeysCommand),

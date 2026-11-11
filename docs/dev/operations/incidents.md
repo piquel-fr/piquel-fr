@@ -27,13 +27,21 @@ key-encryption key (`AUTH_KEY_ENCRYPTION_KEY`). Treat every stored key as
 compromised when both may have leaked: a copy of the database and the
 `key-encryption-key` secret together, or a host that runs auth.
 
+piqueld may also still store an environment's old `signing-key` secret, which
+nothing mounts any more: `piquelctl env secret sourceorigin --env <env> list`
+lists it. It holds the private key of `primary`, the key it was imported as,
+in plaintext PEM. If that value leaks, `primary` is compromised on its own:
+revoke it if `keys list` still lists it, then delete the secret with
+`piquelctl env secret sourceorigin --env <env> delete signing-key`.
+
 ### What to do
 
 1. If whoever holds them may still read the database or the host, close that
    access first. The key-encryption key can't be changed: it seals every key
    auth generates, including the one that replaces the revoked key. So someone
    who holds it and reads the database again can open the new key too.
-2. Find the key to revoke, the one in state `active`:
+2. Find the key to revoke: the one in state `active`, or `primary` when only
+   the stored `signing-key` secret leaked:
 
    ```sh
    auth-service keys list
@@ -48,9 +56,7 @@ compromised when both may have leaked: a copy of the database and the
    On the dashboard, select **Revoke** next to it on the **Signing keys** page.
    When the revoked key was `active`, the `next` and `retiring` keys go with it,
    since their private keys were stored beside it, and a new key signs at once.
-   Revoking any other key removes only that key. A retired key is never in the
-   key set auth publishes, so after revoking only a retired key, skip steps 4
-   and 5.
+   Revoking any other key removes only that key.
 4. Wait 15 minutes after the revocation. Each replica serves its own copy of
    the key set and reloads it each minute, and one that can't reload stops
    serving within 15 minutes, so only then has every replica dropped the
