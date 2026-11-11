@@ -256,7 +256,7 @@ impl Jobs {
 static CLEANUP_CHANGED: Counter = Counter::new(
     "sourceorigin.auth.cleanup.changed",
     "{row}",
-    "Rows cleanup deleted or changed: expired state, personal data past retention and stuck deliveries.",
+    "Rows cleanup deleted or changed: expired state, personal data past retention and finished deliveries.",
 );
 /// How long each cleanup pass took.
 static CLEANUP_DURATION: Histogram = Histogram::new(

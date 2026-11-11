@@ -1,6 +1,5 @@
 -- Event consumers' cursors were never used outside tests: no release reads or
--- writes event_consumers, so it goes now. Alerts (#83) add the cursor they need
--- when they read the stream.
+-- writes event_consumers, so it goes now.
 DROP TABLE event_consumers;
 
 -- No channel ever ordered its deliveries, so auth no longer reads or writes

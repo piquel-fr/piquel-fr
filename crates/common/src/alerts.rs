@@ -157,8 +157,7 @@ impl Alert {
                 .to_owned(),
             Self::CleanupFailing {} => "Cleanup passes keep failing, so expired sign-in state, \
                 personal data past its retention and finished deliveries stay in the \
-                database, and stuck deliveries hold back the ones behind them. The logs of \
-                the cleanup job say why. It clears once a pass works."
+                database. The logs of the cleanup job say why. It clears once a pass works."
                 .to_owned(),
         }
     }
