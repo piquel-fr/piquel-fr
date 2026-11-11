@@ -1,7 +1,9 @@
 //! The one RS256 verifier: what auth checks its own tokens with, and what every
-//! SDK built on this crate checks auth's and other issuers' tokens with. A token is
-//! split by [`Compact`], whose header each side reads under its own policy, and
-//! verified by an [`Rs256VerifyingKey`], which judges a key as every SDK does.
+//! SDK built on this crate checks auth's and other issuers' tokens with. A token
+//! is split by [`Compact`](crate::protocol::jws::Compact), whose header each side
+//! reads under its own policy, and verified by an
+//! [`Rs256VerifyingKey`](crate::protocol::jws::Rs256VerifyingKey), which judges a
+//! key as every SDK does.
 //!
 //! ```
 //! use sourceorigin_common::protocol::jws::{Compact, KeyDefect, Rs256VerifyingKey, VerifyError};
