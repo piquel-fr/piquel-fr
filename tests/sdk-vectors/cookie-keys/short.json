@@ -1,0 +1,9 @@
+{
+  "description": "16 bytes are refused",
+  "input": {
+    "cookie_key": "++++////++++////++++/w=="
+  },
+  "expected": {
+    "ok": null
+  }
+}

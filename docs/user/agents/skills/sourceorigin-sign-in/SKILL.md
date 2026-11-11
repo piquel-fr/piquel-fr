@@ -55,7 +55,7 @@ the conversation. It never goes in the repository. They then give you the
 | `SOURCEORIGIN_CLIENT_ID` | The client ID |
 | `SOURCEORIGIN_CLIENT_SECRET` | The client secret |
 | `SOURCEORIGIN_REDIRECT_URI` | The registered callback, exactly |
-| `SOURCEORIGIN_COOKIE_KEY` | 32 random bytes in standard base64, from `openssl rand -base64 32` |
+| `SOURCEORIGIN_COOKIE_KEY` | 32 random bytes in base64, base64url or hex, from `openssl rand -base64 32` or a piqueld generated secret |
 
 The cookie key must be the same on every replica, and changing it signs every
 user out. Read both secrets from a file when `<NAME>_FILE` is set, such as
@@ -116,7 +116,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         credentials: Credentials::Secret(secret("SOURCEORIGIN_CLIENT_SECRET")?.into()),
         redirect_uri: env::var("SOURCEORIGIN_REDIRECT_URI")?.parse()?,
     };
-    let key = CookieKey::from_base64(&secret("SOURCEORIGIN_COOKIE_KEY")?)?;
+    let key = CookieKey::parse(&secret("SOURCEORIGIN_COOKIE_KEY")?)?;
     // Scopes besides `openid` and `offline_access`, which every sign-in requests.
     let auth = LoginRoutes::new(issuer.client(config), key)?.scopes("profile".parse()?);
     let app = Router::new()
@@ -158,7 +158,7 @@ const login = new Login(
     redirectUri: process.env.SOURCEORIGIN_REDIRECT_URI ?? ''
   }),
   // Scopes besides `openid` and `offline_access`, which every sign-in requests.
-  { cookieKey: CookieKey.fromBase64(process.env.SOURCEORIGIN_COOKIE_KEY ?? ''), scopes: ['profile'] }
+  { cookieKey: CookieKey.parse(process.env.SOURCEORIGIN_COOKIE_KEY ?? ''), scopes: ['profile'] }
 );
 
 export async function handle(request: Request): Promise<Response> {

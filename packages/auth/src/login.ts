@@ -160,7 +160,7 @@ type RequestSession = {
  *
  * ```ts
  * const login = new Login(issuer.client({ clientId, clientSecret, redirectUri }), {
- *   cookieKey: CookieKey.fromBase64(process.env.NOTES_COOKIE_KEY ?? ''),
+ *   cookieKey: CookieKey.parse(process.env.NOTES_COOKIE_KEY ?? ''),
  *   scopes: ['profile']
  * });
  *

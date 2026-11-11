@@ -46,7 +46,7 @@ const login = new Login(
     // The same key on every replica, kept like the client secret. Without one, a
     // random key signs every user out on restart.
     cookieKey: process.env.COOKIE_KEY
-      ? CookieKey.fromBase64(process.env.COOKIE_KEY)
+      ? CookieKey.parse(process.env.COOKIE_KEY)
       : CookieKey.generate(),
     scopes: ['profile'],
     afterLogout: new URL('/', app).href,

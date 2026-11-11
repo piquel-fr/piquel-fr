@@ -8,6 +8,7 @@ import {
   parseChallenge,
   type BearerChallenge
 } from '../src/index.ts';
+import * as json from '../src/json.ts';
 import { CookieKey, Login } from '../src/server.ts';
 import {
   DISCOVERY_URL,
@@ -139,6 +140,27 @@ describe('callback vectors', () => {
   }
 });
 
+describe('cookie key vectors', () => {
+  for (const vector of cases('cookie-keys')) {
+    test(vector.name, async () => {
+      const text = String(vector.input.cookie_key);
+      const { ok: hex } = vector.expected as { ok: string | null };
+      if (hex === null) {
+        assert.throws(() => CookieKey.parse(text), TypeError);
+        return;
+      }
+      // The same bytes derive the same keys: one opens what the other sealed.
+      const bytes = Uint8Array.from(hex.match(/../g) ?? [], (pair) => parseInt(pair, 16));
+      const expected = CookieKey.parse(btoa(String.fromCharCode(...bytes)));
+      const sealed = await (await CookieKey.parse(text).keys()).session.seal('value', 'context');
+      assert.equal(
+        await (await expected.keys()).session.open(sealed, 'context', json.string),
+        'value'
+      );
+    });
+  }
+});
+
 describe('session cookie vectors', () => {
   for (const vector of cases('sessions')) {
     test(vector.name, async () => {
@@ -152,7 +174,7 @@ describe('session cookie vectors', () => {
         redirectUri: REDIRECT_URI
       });
       const login = new Login(client, {
-        cookieKey: CookieKey.fromBase64(String(vector.input.cookie_key))
+        cookieKey: CookieKey.parse(String(vector.input.cookie_key))
       });
       const request = new Request(REDIRECT_URI, {
         headers: { cookie: String(vector.input.cookie) }

@@ -1,0 +1,9 @@
+{
+  "description": "base64url with padding",
+  "input": {
+    "cookie_key": "----____----____----____----____----____--8="
+  },
+  "expected": {
+    "ok": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "description": "base64 mixing the standard and URL-safe alphabets is refused",
+  "input": {
+    "cookie_key": "++++_///++++////++++////++++////++++////++8="
+  },
+  "expected": {
+    "ok": null
+  }
+}

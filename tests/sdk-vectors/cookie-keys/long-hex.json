@@ -1,0 +1,9 @@
+{
+  "description": "33 bytes are refused",
+  "input": {
+    "cookie_key": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef00"
+  },
+  "expected": {
+    "ok": null
+  }
+}

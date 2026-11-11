@@ -1,0 +1,9 @@
+{
+  "description": "an empty key is refused",
+  "input": {
+    "cookie_key": ""
+  },
+  "expected": {
+    "ok": null
+  }
+}

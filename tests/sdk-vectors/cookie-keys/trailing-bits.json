@@ -1,0 +1,9 @@
+{
+  "description": "base64 whose padding bits are not zero is refused",
+  "input": {
+    "cookie_key": "++++////++++////++++////++++////++++////++9="
+  },
+  "expected": {
+    "ok": null
+  }
+}

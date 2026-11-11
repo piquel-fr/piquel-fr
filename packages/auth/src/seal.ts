@@ -12,6 +12,31 @@ const SECRET_BYTES = 32;
 const NONCE_BYTES = 12;
 
 /**
+ * How a cookie key may be written, each decoding to its bytes or `undefined`:
+ * `openssl rand -base64 32` prints padded standard base64, and piqueld generates
+ * secrets as hex or unpadded base64url. They are tried in this order, the Rust SDK's:
+ * hex first, since hex text is also base64.
+ */
+const ENCODINGS: readonly ((text: string) => Uint8Array<ArrayBuffer> | undefined)[] = [
+  (text) =>
+    /^(?:[0-9a-fA-F]{2})*$/.test(text)
+      ? Uint8Array.from(text.match(/../g) ?? [], (pair) => parseInt(pair, 16))
+      : undefined,
+  (text) =>
+    /^[A-Za-z0-9+/]*=*$/.test(text)
+      ? paddingOptional(text.replace(/\+/g, '-').replace(/\//g, '_'))
+      : undefined,
+  (text) => (/^[A-Za-z0-9_-]*=*$/.test(text) ? paddingOptional(text) : undefined)
+];
+
+/** Decodes canonical base64url, with no more padding than it needs, or none. */
+function paddingOptional(text: string): Uint8Array<ArrayBuffer> | undefined {
+  const unpadded = text.replace(/=+$/, '');
+  const padding = text.length - unpadded.length;
+  return padding <= (4 - (unpadded.length % 4)) % 4 ? base64.decode(unpadded) : undefined;
+}
+
+/**
  * What each sealing key is for, as its HKDF `info`, so the keys derived from one
  * secret for two purposes are unrelated. Each names the format version: a new format
  * gets a new `info`, so cookies of the old one no longer open. Every SDK uses the
@@ -105,13 +130,14 @@ export type SealingKeys = { [P in keyof typeof PURPOSES]: SealingKey };
  * The secret sealing the cookies the browser keeps: the session, with the user's
  * tokens, and each login waiting at auth, with its PKCE verifier and `nonce`. Every
  * replica needs the same key: keep it like any other secret, and generate it with
- * `openssl rand -base64 32`. Changing it signs every user out, but ends no grant at
- * auth: if the key leaked, rotate the client secret too, with no grace period, since
- * the refresh tokens in captured cookies stay valid without it. The key is kept in a
- * private field, so it is never printed or serialized.
+ * `openssl rand -base64 32`, or as a 32-byte secret piqueld generates. Changing it
+ * signs every user out, but ends no grant at auth: if the key leaked, rotate the
+ * client secret too, with no grace period, since the refresh tokens in captured
+ * cookies stay valid without it. The key is kept in a private field, so it is never
+ * printed or serialized.
  *
  * ```ts
- * const cookieKey = CookieKey.fromBase64(process.env.NOTES_COOKIE_KEY ?? '');
+ * const cookieKey = CookieKey.parse(process.env.NOTES_COOKIE_KEY ?? '');
  * ```
  */
 export class CookieKey {
@@ -123,27 +149,22 @@ export class CookieKey {
   }
 
   /**
-   * The key `text` holds: 32 bytes in standard base64, surrounding whitespace
-   * ignored, as `openssl rand -base64 32` prints. Anything else throws a `TypeError`.
+   * The key `text` holds: 32 bytes in standard base64, as `openssl rand -base64 32`
+   * prints, in base64url or in hex, as piqueld generates them. Base64 may be padded or
+   * not, and surrounding whitespace is ignored. Anything else throws a `TypeError`.
    */
-  static fromBase64(text: string): CookieKey {
-    const trimmed = text.trim();
-    let binary: string | undefined;
-    try {
-      binary = /^[A-Za-z0-9+/]*={0,2}$/.test(trimmed) ? atob(trimmed) : undefined;
-    } catch {
-      binary = undefined;
-    }
-    // Canonical only, as the Rust SDK reads it: padded, with no stray trailing bits.
-    if (binary === undefined || btoa(binary) !== trimmed) {
-      throw new TypeError(
-        'a cookie key must be standard base64, as `openssl rand -base64 32` prints'
-      );
-    }
-    if (binary.length !== SECRET_BYTES) {
-      throw new TypeError(`a cookie key must hold 32 bytes, not ${String(binary.length)}`);
-    }
-    return new CookieKey(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
+  static parse(text: string): CookieKey {
+    const decoded = ENCODINGS.map((decode) => decode(text.trim())).filter(
+      (bytes) => bytes !== undefined
+    );
+    const secret = decoded.find((bytes) => bytes.length === SECRET_BYTES);
+    if (secret !== undefined) return new CookieKey(secret);
+    const [other] = decoded;
+    throw new TypeError(
+      other === undefined
+        ? 'a cookie key must be 32 bytes in base64, base64url or hex'
+        : `a cookie key must hold 32 bytes, not ${String(other.length)}`
+    );
   }
 
   /**

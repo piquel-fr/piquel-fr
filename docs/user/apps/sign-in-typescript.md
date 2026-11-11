@@ -25,6 +25,8 @@ which runs on Node's `http` server.
    openssl rand -base64 32
    ```
 
+   Any 32 random bytes work, written in base64, base64url or hex, such as a
+   secret [piqueld generates](deploying-with-piqueld.md#store-the-secrets).
    Keep it secret, like the client secret, and give every replica the same one.
    Changing it signs every user out. `CookieKey.generate()` makes a random one,
    for development and tests.

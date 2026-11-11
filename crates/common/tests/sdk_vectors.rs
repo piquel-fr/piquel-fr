@@ -40,6 +40,7 @@ use sourceorigin_common::{
 use sourceorigin_crypto::{Digest, Rs256Key};
 use std::{
     collections::BTreeMap,
+    fmt::Write as _,
     fs,
     path::{Path, PathBuf},
 };
@@ -166,6 +167,7 @@ impl Vectors {
             "challenges",
             "callbacks",
             "sessions",
+            "cookie-keys",
         ]
         .into_iter()
         .flat_map(|category| fs::read_dir(directory.join(category)).into_iter().flatten())
@@ -1350,6 +1352,128 @@ impl Vectors {
         }
     }
 
+    /// A cookie key written in each encoding the SDKs read, and texts they refuse:
+    /// another length, another encoding, or base64 that is not canonical.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "One table of cases reads better than many small builders."
+    )]
+    fn cookie_keys(&mut self) {
+        use base64::engine::general_purpose::{STANDARD, URL_SAFE};
+        // Its base64 holds both `+` and `/`, which base64url writes `-` and `_`.
+        let secret: Vec<u8> = [0xfb, 0xef, 0xbe, 0xff, 0xff, 0xff]
+            .into_iter()
+            .cycle()
+            .take(32)
+            .collect();
+        let hex = |bytes: &[u8]| {
+            bytes.iter().fold(String::new(), |mut hex, byte| {
+                write!(hex, "{byte:02x}").expect("write to a string");
+                hex
+            })
+        };
+        let standard = STANDARD.encode(&secret);
+        let unpadded = standard.trim_end_matches('=').to_owned();
+        let mut trailing_bits = unpadded.clone();
+        // The last character's low bits are padding, which must be zero.
+        trailing_bits.pop();
+        trailing_bits.push('9');
+        trailing_bits.push('=');
+        // The key's bytes, in hex, or `null` for a refused text.
+        let accepted = Some(hex(&secret));
+        for (name, description, text, expected) in [
+            (
+                "base64",
+                "standard base64, as `openssl rand -base64 32` prints",
+                standard.clone(),
+                accepted.clone(),
+            ),
+            (
+                "base64-unpadded",
+                "standard base64 without its padding",
+                unpadded.clone(),
+                accepted.clone(),
+            ),
+            (
+                "base64url",
+                "unpadded base64url, as piqueld generates",
+                URL_SAFE_NO_PAD.encode(&secret),
+                accepted.clone(),
+            ),
+            (
+                "base64url-padded",
+                "base64url with padding",
+                URL_SAFE.encode(&secret),
+                accepted.clone(),
+            ),
+            (
+                "hex",
+                "hex, as piqueld generates",
+                hex(&secret),
+                accepted.clone(),
+            ),
+            (
+                "hex-uppercase",
+                "hex in capitals",
+                hex(&secret).to_uppercase(),
+                accepted.clone(),
+            ),
+            (
+                "whitespace",
+                "surrounding whitespace is ignored",
+                format!("  {standard}\n"),
+                accepted.clone(),
+            ),
+            (
+                "mixed-alphabets",
+                "base64 mixing the standard and URL-safe alphabets is refused",
+                standard.replacen('/', "_", 1),
+                None,
+            ),
+            (
+                "extra-padding",
+                "base64 with more padding than it needs is refused",
+                format!("{standard}="),
+                None,
+            ),
+            (
+                "trailing-bits",
+                "base64 whose padding bits are not zero is refused",
+                trailing_bits,
+                None,
+            ),
+            (
+                "short",
+                "16 bytes are refused",
+                STANDARD.encode(&secret[..16]),
+                None,
+            ),
+            (
+                "long-hex",
+                "33 bytes are refused",
+                hex(&[&secret[..], &[0]].concat()),
+                None,
+            ),
+            (
+                "not-encoded",
+                "text in no encoding is refused",
+                "not a cookie key".to_owned(),
+                None,
+            ),
+            ("empty", "an empty key is refused", String::new(), None),
+        ] {
+            self.case(
+                &format!("cookie-keys/{name}.json"),
+                &Case {
+                    description,
+                    now: None,
+                    input: json!({ "cookie_key": text }),
+                    expected: Expected::Ok(expected.map_or(Value::Null, Value::String)),
+                },
+            );
+        }
+    }
+
     /// `value` as JSON, sealed as the SDKs seal cookies: AES-256-GCM under the key
     /// HKDF-SHA256 derives from the base64 `secret` with `info` and no salt, with
     /// `context` as associated data, framed as base64url of the nonce, the ciphertext
@@ -1398,5 +1522,6 @@ fn sdk_vectors_are_current() {
     vectors.challenges();
     vectors.callbacks();
     vectors.sessions();
+    vectors.cookie_keys();
     vectors.finish();
 }

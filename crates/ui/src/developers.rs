@@ -257,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
     }};
     // Seals the session cookie, which holds the user's tokens: the same key on every
     // server, generated once with `openssl rand -base64 32`.
-    let key = CookieKey::from_base64(&std::env::var("SOURCEORIGIN_COOKIE_KEY")?)?;
+    let key = CookieKey::parse(&std::env::var("SOURCEORIGIN_COOKIE_KEY")?)?;
     let auth = LoginRoutes::new(issuer.client(config), key)?.scopes("{scopes}".parse()?);
     let app = Router::new()
         .route("/", get(home))

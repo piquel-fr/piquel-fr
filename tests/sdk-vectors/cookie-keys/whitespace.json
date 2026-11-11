@@ -1,0 +1,9 @@
+{
+  "description": "surrounding whitespace is ignored",
+  "input": {
+    "cookie_key": "  ++++////++++////++++////++++////++++////++8=\n"
+  },
+  "expected": {
+    "ok": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef"
+  }
+}

@@ -22,7 +22,7 @@ async fn session_cookie_vectors() {
                 .parse()
                 .expect("callback"),
         });
-        let key = CookieKey::from_base64(case.text("cookie_key")).expect("cookie key");
+        let key = CookieKey::parse(case.text("cookie_key")).expect("cookie key");
         let routes = LoginRoutes::new(client, key).expect("a confidential client");
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -35,6 +35,47 @@ async fn session_cookie_vectors() {
         };
         assert_eq!(session, case.json["expected"]["ok"], "{}", case.name);
     }
+}
+
+/// A cookie key holds the bytes the vectors expect, whichever encoding it is written
+/// in, or is refused: with the length it holds, if it is in an encoding.
+#[test]
+fn cookie_key_vectors() {
+    for case in Case::all("cookie-keys") {
+        let parsed = CookieKey::parse(case.text("cookie_key"));
+        let Some(hex) = case.json["expected"]["ok"].as_str() else {
+            assert!(parsed.is_err(), "{}", case.name);
+            continue;
+        };
+        let secret: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).expect("hex"))
+            .collect();
+        // The same bytes derive the same keys: one opens what the other sealed.
+        let sealed = parsed
+            .expect(&case.name)
+            .session
+            .seal(&"value", "context")
+            .expect("seal");
+        let expected = CookieKey::from_secret(&secret).expect("cookie key");
+        assert_eq!(
+            expected
+                .session
+                .open::<String>(&sealed, "context")
+                .as_deref(),
+            Some("value"),
+            "{}",
+            case.name
+        );
+    }
+    assert!(matches!(
+        CookieKey::parse("c2l4dGVlbiBieXRlcyEhIQ=="),
+        Err(CookieKeyError::WrongLength(16))
+    ));
+    assert!(matches!(
+        CookieKey::parse("not a cookie key"),
+        Err(CookieKeyError::Unrecognized)
+    ));
 }
 
 /// The app's home page for the browser holding `session`: its status, the access

@@ -53,13 +53,11 @@ the app's service. Here the service is `web`, on port 3000:
 domain = "staging.notes.example.com"
 sourceorigin_client_id = "<staging client ID>"
 sourceorigin_client_secret = "sourceorigin-client-secret-staging"
-sourceorigin_cookie_key = "sourceorigin-cookie-key-staging"
 
 [spec.environments.production.variables]
 domain = "notes.example.com"
 sourceorigin_client_id = "<production client ID>"
 sourceorigin_client_secret = "sourceorigin-client-secret-production"
-sourceorigin_cookie_key = "sourceorigin-cookie-key-production"
 
 [[spec.services]]
 name = "web"
@@ -76,8 +74,13 @@ name = "${{ vars.sourceorigin_client_secret }}"
 target = "/run/secrets/sourceorigin-client-secret"
 
 [[spec.services.secrets]]
-name = "${{ vars.sourceorigin_cookie_key }}"
+name = "sourceorigin-cookie-key"
 target = "/run/secrets/sourceorigin-cookie-key"
+
+# The cookie key: piqueld generates one for each environment, never shared.
+[[spec.secrets]]
+name = "sourceorigin-cookie-key"
+generate = { type = "random", bytes = 32, encoding = "base64url" }
 
 [spec.services.healthcheck]
 type = "http"
@@ -120,16 +123,11 @@ piquelctl app secret <app> set sourceorigin-client-secret-production --stdin --e
 piquelctl app secret <app> set sourceorigin-client-secret-staging --stdin --environments staging
 ```
 
-Each environment also needs its own cookie key, never shared: the key seals
-whole sessions, tokens included, so an environment that could read another's
-key could forge its users' sessions. It is 32 random bytes in standard base64.
-piqueld's generated secrets are hexadecimal or base64url, which the SDKs refuse,
-so store them instead. You can run these: the values go straight into piqueld.
-
-```console
-openssl rand -base64 32 | piquelctl app secret <app> set sourceorigin-cookie-key-production --stdin --environments production --no-previews --yes
-openssl rand -base64 32 | piquelctl app secret <app> set sourceorigin-cookie-key-staging --stdin --environments staging --yes
-```
+The cookie key needs nothing stored: the manifest's generated
+`sourceorigin-cookie-key` gives each environment its own on its first
+deployment. Never share one between environments: the key seals whole
+sessions, tokens included, so an environment that could read another's key
+could forge its users' sessions.
 
 ## 4. Deploy
 

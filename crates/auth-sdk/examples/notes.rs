@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         redirect_uri: env::var("NOTES_REDIRECT_URI")?.parse()?,
     };
     // Sessions live in the browser, sealed with this key: every replica uses the same.
-    let key = CookieKey::from_base64(&env::var("NOTES_COOKIE_KEY")?)?;
+    let key = CookieKey::parse(&env::var("NOTES_COOKIE_KEY")?)?;
     let auth = LoginRoutes::new(issuer.client(config), key)?.scopes("profile".parse()?);
     // ANCHOR_END: login
 

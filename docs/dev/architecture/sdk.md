@@ -267,6 +267,11 @@ Server-side apps keep each session in the browser, sealed, as the Rust SDK's axu
 login routes and `@sourceorigin/auth/server` do. The app stores nothing and implements
 nothing: it holds a 32-byte cookie key, the same on every replica.
 
+- **Cookie key.** `CookieKey::parse` and `CookieKey.parse` read the 32 bytes in
+  hex, standard base64 or base64url, tried in that order, since hex text is also
+  base64. Base64 may be padded or not, but never with stray trailing bits. The
+  three encodings write 32 bytes at different lengths, so no key reads two ways.
+  Text in another encoding, or holding another length, is refused.
 - **Cookies.** Each name carries the client ID, so apps sharing a host keep their
   own: `__Host-sourceorigin-<client_id>-session`, `-step-up`, and `-login-<state>` for
   each pending login's slot. All are `Secure`, `HttpOnly`, `SameSite=Lax` and host-only.
