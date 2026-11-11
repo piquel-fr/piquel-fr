@@ -14,7 +14,7 @@ use sourceorigin_common::{
     email::NormalizedEmail,
     events::DomainEvent,
 };
-use sourceorigin_repository::{InsertInvitation, InvitationKey};
+use sourceorigin_repository::{DatabaseTransaction, InsertInvitation, InvitationKey};
 
 impl AdminService {
     /// Lists invitations that have not been purged yet, newest first.
@@ -53,14 +53,8 @@ impl AdminService {
         let token = links.token(id)?;
         let expires_at = Utc::now() + expires_in.duration();
         let mut tx = self.database.begin().await?;
-        if let Some(email) = &email
-            && tx
-                .emails()
-                .find_active_verified(email.as_str())
-                .await?
-                .is_some()
-        {
-            return Err(AdminError::InvitationAddressTaken);
+        if let Some(email) = &email {
+            Self::untaken(&mut tx, email).await?;
         }
         tx.security()
             .create_invitation(&InsertInvitation {
@@ -71,7 +65,7 @@ impl AdminService {
             })
             .await?;
         let mut events = vec![DomainEvent::InvitationCreated {
-            invitation_id: id,
+            invitation_id: Some(id),
             expires_at,
         }];
         let sent = match email {
@@ -90,8 +84,9 @@ impl AdminService {
     }
 
     /// Mails an open invitation's link again, to the address it was mailed to,
-    /// for `reason`. The link and its expiry stay the same: to give more time,
-    /// revoke it and invite again.
+    /// for `reason`, unless an active account holds that address verified since.
+    /// The link and its expiry stay the same: to give more time, revoke it and
+    /// invite again.
     pub(crate) async fn resend_invitation(
         &self,
         operator: &Operator,
@@ -108,8 +103,22 @@ impl AdminService {
             .await?
             .ok_or(AdminError::InvitationNotFound)?;
         let email = invitation.email.ok_or(AdminError::InvitationNotMailed)?;
-        let mailed = Self::mailed(invitation_id, NormalizedEmail::parse(&email)?);
+        let email = NormalizedEmail::parse(&email)?;
+        Self::untaken(&mut tx, &email).await?;
+        let mailed = Self::mailed(invitation_id, email);
         Self::finish(tx, operator, &reason, None, vec![mailed]).await
+    }
+
+    /// Refuses to mail an invitation to `email` while an active account holds it
+    /// verified: its owner signs in rather than signing up.
+    async fn untaken(
+        tx: &mut DatabaseTransaction<'_>,
+        email: &NormalizedEmail,
+    ) -> Result<(), AdminError> {
+        match tx.emails().find_active_verified(email.as_str()).await? {
+            Some(_) => Err(AdminError::InvitationAddressTaken),
+            None => Ok(()),
+        }
     }
 
     /// The event mailing invitation `invitation_id` to `email`, which queues its

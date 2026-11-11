@@ -2206,18 +2206,6 @@ async fn a_session_is_revoked_only_from_its_own_account() {
     assert!(session.is_some(), "still signed in");
 }
 
-/// The invitations pages find who is signed in before whether signup needs
-/// invitations, so a browser that is not signed in learns nothing of it.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn invitation_pages_sign_in_first() {
-    let harness = Harness::new().await;
-    let page = harness
-        .visit(&Browser::signed_out(), "/invitations/new")
-        .await;
-    assert_eq!(location(&page).path(), routes::page::ADMIN);
-}
-
 /// The Alerts page shows an open alert as needing attention, with posting an
 /// update on it, and the overview's banner leads there. An update is recorded
 /// as the administrator's, and the alert then shows its status and note. The

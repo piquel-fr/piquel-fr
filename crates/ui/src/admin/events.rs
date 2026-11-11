@@ -296,9 +296,14 @@ impl EventRow<'_> {
             DomainEvent::InvitationCreated {
                 invitation_id,
                 expires_at,
-            } => Description::new("Invitation created")
-                .with("invitation", invitation_id)
-                .with("valid until", expires_at.to_rfc3339()),
+            } => {
+                let created = Description::new("Invitation created");
+                match invitation_id {
+                    Some(id) => created.with("invitation", id),
+                    None => created,
+                }
+                .with("valid until", expires_at.to_rfc3339())
+            }
             DomainEvent::InvitationMailed {
                 invitation_id,
                 recipient,

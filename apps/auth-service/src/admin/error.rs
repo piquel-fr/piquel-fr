@@ -74,10 +74,10 @@ pub enum AdminError {
     /// The address to invite is not one email can be sent to.
     #[error("the address to invite is invalid: {0}")]
     InvalidInvitationEmail(#[from] InvalidEmail),
-    /// An invitation is mailed only while email is enabled, so a mailed one is
-    /// refused before anything is created.
+    /// An invitation is mailed only while email is enabled, so mailing one, or
+    /// mailing it again, is refused before anything changes.
     #[error(
-        "email is disabled, so the invitation cannot be mailed; create a link to pass on yourself instead, without an address"
+        "email is disabled, so no invitation can be mailed; only a link to pass on yourself, without an address, can be created"
     )]
     InvitationNeedsEmail,
     /// An active account already holds the address verified: its owner signs in

@@ -501,7 +501,7 @@ impl WebApplication {
         &self,
         presented: Option<&str>,
     ) -> Result<Option<Option<OpenInvitation>>, Failure> {
-        let Some(presented) = presented else {
+        let Some(presented) = presented.filter(|presented| !presented.is_empty()) else {
             return Ok(None);
         };
         let found = self.passkeys.invitation(presented).await;

@@ -198,8 +198,10 @@ pub enum DomainEvent {
     /// A signup invitation was created. A mailed one is then
     /// [`Self::InvitationMailed`].
     InvitationCreated {
-        /// The new invitation.
-        invitation_id: TokenId,
+        /// The new invitation. Events recorded before invitations could be
+        /// mailed have none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invitation_id: Option<TokenId>,
         /// When the invitation stops being accepted.
         expires_at: DateTime<Utc>,
     },
