@@ -88,6 +88,5 @@ impl Sender for BackchannelLogoutSender {
                 request.form(&[("logout_token", token)])
             })
             .await
-            .map(drop)
     }
 }

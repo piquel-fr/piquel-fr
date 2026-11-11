@@ -28,8 +28,6 @@ use url::{Host, Url};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Sent with every request.
 const USER_AGENT: &str = "sourceorigin-auth";
-/// The most of a response body that is read; the rest is ignored.
-const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 /// The obsolete HTTP-date formats receivers must still accept (RFC 9110 section
 /// 5.6.7): RFC 850 and C's `asctime`. The preferred format is RFC 2822's.
 const OBSOLETE_HTTP_DATES: [&str; 2] = ["%A, %d-%b-%y %H:%M:%S GMT", "%a %b %e %H:%M:%S %Y"];
@@ -65,23 +63,6 @@ const REFUSED_V6: [Ipv6Net; 7] = [
 const NAT64: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 0, 0, 0), 96);
 /// 6to4 (RFC 3056): bits 16 to 48 are the IPv4 address reached.
 const SIX_TO_FOUR: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16);
-
-/// A successful response, with at most its caller's limit of its body:
-/// [`MAX_RESPONSE_BYTES`] for [`OutboundClient::send`].
-// Back-channel logout needs only the status class, and a fetched file only its
-// body; a future channel may read the status. `expect` fails the build once one
-// does.
-#[derive(Debug)]
-pub(crate) struct OutboundResponse {
-    /// The successful status.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "No channel reads a response's status yet.")
-    )]
-    pub status: StatusCode,
-    /// The body's first bytes, up to the limit.
-    pub body: Vec<u8>,
-}
 
 /// Sends requests to destinations third parties supply. Destinations must be
 /// HTTPS URLs whose host is, or resolves only to, public addresses; the
@@ -135,8 +116,9 @@ impl OutboundClient {
     }
 
     /// Sends a `method` request to `destination`, configured by `request`, e.g. to
-    /// add a body. Returns the response if its status is successful, with its body
-    /// cut at [`MAX_RESPONSE_BYTES`].
+    /// add a body, and succeeds as soon as a successful status arrives. The
+    /// response's body is never read, so a receiver that stalls after its headers
+    /// cannot turn an accepted request into a timeout.
     ///
     /// # Errors
     ///
@@ -149,9 +131,8 @@ impl OutboundClient {
         method: Method,
         destination: &str,
         request: impl FnOnce(RequestBuilder) -> RequestBuilder,
-    ) -> Result<OutboundResponse, DeliveryError> {
-        self.request(method, destination, MAX_RESPONSE_BYTES, request)
-            .await
+    ) -> Result<(), DeliveryError> {
+        self.request(method, destination, request).await.map(drop)
     }
 
     /// Fetches `destination` with `GET`, as [`Self::send`] sends, asking for the
@@ -167,40 +148,38 @@ impl OutboundClient {
         accept: &str,
         limit: usize,
     ) -> Result<Vec<u8>, DeliveryError> {
-        let response = self
-            .request(Method::GET, destination, limit, |request| {
+        let mut response = self
+            .request(Method::GET, destination, |request| {
                 request.header(ACCEPT, accept)
             })
             .await?;
-        Ok(response.body)
-    }
-
-    /// [`Self::send`], keeping at most `limit` bytes of the body.
-    async fn request(
-        &self,
-        method: Method,
-        destination: &str,
-        limit: usize,
-        request: impl FnOnce(RequestBuilder) -> RequestBuilder,
-    ) -> Result<OutboundResponse, DeliveryError> {
-        let url = self.check(destination)?;
-        let transport = |error: reqwest::Error| Self::transport_error(&error);
-        let mut response = request(self.client.request(method, url))
-            .send_traced()
-            .await
-            .map_err(transport)?;
-        Self::check_status(response.status(), response.headers(), Utc::now())?;
         let mut body = Vec::new();
         while body.len() < limit
-            && let Some(chunk) = response.chunk().await.map_err(transport)?
+            && let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|error| Self::transport_error(&error))?
         {
             let room = limit - body.len();
             body.extend_from_slice(&chunk[..chunk.len().min(room)]);
         }
-        Ok(OutboundResponse {
-            status: response.status(),
-            body,
-        })
+        Ok(body)
+    }
+
+    /// [`Self::send`], returning the successful response with its body unread.
+    async fn request(
+        &self,
+        method: Method,
+        destination: &str,
+        request: impl FnOnce(RequestBuilder) -> RequestBuilder,
+    ) -> Result<reqwest::Response, DeliveryError> {
+        let url = self.check(destination)?;
+        let response = request(self.client.request(method, url))
+            .send_traced()
+            .await
+            .map_err(|error| Self::transport_error(&error))?;
+        Self::check_status(response.status(), response.headers(), Utc::now())?;
+        Ok(response)
     }
 
     /// Parses `destination`, refusing anything but HTTPS and an IP literal host

@@ -215,7 +215,7 @@ profile picture a social signup imports, and email
   supply. `OutboundClient` (`apps/auth-service/src/deliveries/outbound.rs`)
   sends only over HTTPS, to hosts that resolve only to public addresses,
   connects to the addresses it checked, uses no proxy, follows no redirect, and
-  reads at most 64 KiB of the answer
+  reads no answer's body except a profile picture's, up to its size limit
   ([outbound HTTP](../architecture/delivery-queue.md#outbound-http)).
 - **Email.** Auth sends through the SMTP relay over TLS. Only a loopback relay
   may be reached without it (`config/email.rs`). A delivery stores no link
