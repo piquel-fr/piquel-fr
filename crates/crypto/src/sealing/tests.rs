@@ -9,7 +9,7 @@ fn sealed_values_open_only_with_their_key_and_associated_data() {
     let kek = KeyEncryptionKey::generate().expect("KEK");
     let sealed = kek.seal(b"private key", b"kid-1rsa").expect("seal");
     assert_eq!(
-        kek.open(&sealed, b"kid-1rsa").expect("open"),
+        kek.open(&sealed, b"kid-1rsa").expect("open").as_slice(),
         b"private key"
     );
     let other = KeyEncryptionKey::generate().expect("other KEK");
@@ -30,7 +30,9 @@ fn sealed_values_open_only_with_their_key_and_associated_data() {
 
     let encoded = Secret::generate().expect("secret").encoded();
     assert!(KeyEncryptionKey::parse(&encoded).is_ok());
-    assert!(KeyEncryptionKey::parse(&format!("{encoded}\n")).is_ok());
+    // Configuration strips a file's trailing newline (`SecretBytes::text`), so a
+    // KEK is the encoding alone.
+    assert!(KeyEncryptionKey::parse(&format!("{encoded}\n")).is_err());
     for invalid in [format!("{encoded}="), "not base64!".to_owned()] {
         assert!(matches!(
             KeyEncryptionKey::parse(&invalid),

@@ -44,14 +44,13 @@ sourceorigin_common::variables! {
     pub(crate) const VARIABLES;
 
     /// Where to read the key that seals signing keys in the database: 32 bytes as
-    /// unpadded base64url text, through `env://NAME` or `file:///path`. A trailing
-    /// newline is ignored. Required. It can't be changed yet: the stored signing
-    /// keys would no longer open.
+    /// unpadded base64url text, through `env://NAME` or `file:///path`. Required.
+    /// It can't be changed yet: the stored signing keys would no longer open.
     pub(super) const KEY_ENCRYPTION_KEY = "AUTH_KEY_ENCRYPTION_KEY";
     /// Where to read the key under which refresh tokens, authorization codes and
     /// pending logins are stored as HMAC digests. Its raw bytes are the key, at
-    /// least 32 of them. Email verification, recovery, unsubscribe, sign-out and
-    /// invitation links derive from it too.
+    /// least 32 of them, a trailing newline included. Email verification,
+    /// recovery, unsubscribe, sign-out and invitation links derive from it too.
     /// Required. Replacing it at once ends every refresh token and every login in
     /// progress, so change it in two deploys.
     const TOKEN_DIGEST_KEY = "AUTH_TOKEN_DIGEST_KEY";
@@ -308,7 +307,7 @@ impl AuditConfig {
     pub(crate) fn parse(origin: &Origin, secret: &SecretBytes) -> Result<Self, ConfigurationError> {
         let reason = "must contain a 32-byte Ed25519 seed as 64 hexadecimal characters";
         let hex = secret
-            .utf8()
+            .text()
             .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;
         let key = NoteKey::from_hex_seed(&AuditKeys::name(origin), hex)
             .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;

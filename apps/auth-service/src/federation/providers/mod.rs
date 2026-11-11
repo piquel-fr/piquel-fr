@@ -307,7 +307,7 @@ impl FederationApplication {
             .header(header::ACCEPT, "application/json")
             .form(&[
                 ("client_id", config.client_id.as_str()),
-                ("client_secret", config.client_secret.utf8()?),
+                ("client_secret", config.client_secret.text()?),
                 ("code", code),
                 ("redirect_uri", &self.callback_url(provider)),
                 ("code_verifier", verifier),

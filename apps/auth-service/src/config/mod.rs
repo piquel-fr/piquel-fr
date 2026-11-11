@@ -292,7 +292,7 @@ impl AuthConfig {
             KEY_ENCRYPTION_KEY.error("must resolve through env://NAME or file://PATH", source)
         })?;
         let text = secret
-            .utf8()
+            .text()
             .map_err(|source| KEY_ENCRYPTION_KEY.error("must contain UTF-8 text", source))?;
         KeyEncryptionKey::parse(text).map_err(|source| {
             KEY_ENCRYPTION_KEY.error("must contain 32 bytes in unpadded base64url", source)

@@ -193,7 +193,7 @@ fn jwt_persistence_and_trust_boundaries() {
 fn notes_match_the_reference_vectors() {
     let key = NoteKey::from_hex_seed(
         "PeterNeumann",
-        "810a1402d5146c8d84f2443330f54080ebf98ee17d9c74f6252fc5d5c7283173\n",
+        "810a1402d5146c8d84f2443330f54080ebf98ee17d9c74f6252fc5d5c7283173",
     )
     .expect("seed");
     let vkey = "PeterNeumann+c74f20a3+ARpc2QcUPDhMQegwxbzhKqiBfsVkmqq/LDE4izWy10TW";
@@ -289,7 +289,8 @@ fn notes_open_only_with_a_valid_listed_signature() {
 fn note_keys_reject_malformed_seeds_and_names() {
     let seed = "00".repeat(32);
     assert!(NoteKey::from_hex_seed("audit", &seed).is_ok());
-    assert!(NoteKey::from_hex_seed("audit", &format!("{seed}\n")).is_ok());
+    // Configuration strips a file's trailing newline (`SecretBytes::text`).
+    assert!(NoteKey::from_hex_seed("audit", &format!("{seed}\n")).is_err());
     for bad in [
         String::new(),
         "00".repeat(31),

@@ -5,6 +5,7 @@ use aws_lc_rs::{
     aead::{AES_256_GCM, Aad, NONCE_LEN, Nonce, RandomizedNonceKey},
     hkdf::{HKDF_SHA256, Salt},
 };
+use secrecy::zeroize::Zeroizing;
 use std::fmt;
 
 /// An AES-256-GCM key that seals values as `nonce || ciphertext || tag`, with a
@@ -28,12 +29,12 @@ impl SealingKey {
     /// # Errors
     /// Preserves failures from the cryptographic provider.
     pub fn derive(secret: &[u8], info: &[u8]) -> Result<Self, CryptoError> {
-        let mut key = [0; 32];
+        let mut key = Zeroizing::new([0; 32]);
         Salt::new(HKDF_SHA256, &[])
             .extract(secret)
             .expand(&[info], &AES_256_GCM)?
-            .fill(&mut key)?;
-        Ok(Self(RandomizedNonceKey::new(&AES_256_GCM, &key)?))
+            .fill(key.as_mut_slice())?;
+        Ok(Self(RandomizedNonceKey::new(&AES_256_GCM, key.as_slice())?))
     }
 
     /// Encrypts `plaintext`, authenticating `aad` with it.
@@ -48,23 +49,25 @@ impl SealingKey {
         Ok([nonce.as_ref().as_slice(), &sealed].concat())
     }
 
-    /// Decrypts a value [`Self::seal`] made with the same key and `aad`.
+    /// Decrypts a value [`Self::seal`] made with the same key and `aad`. The
+    /// plaintext, such as a private key or a session's tokens, is zeroized when
+    /// dropped.
     ///
     /// # Errors
     /// Returns [`CryptoError::Unsealable`] for another key, other associated data
     /// or a modified value.
-    pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
         let (nonce, rest) = sealed
             .split_at_checked(NONCE_LEN)
             .ok_or(CryptoError::Unsealable)?;
         let nonce = Nonce::try_assume_unique_for_key(nonce)?;
-        let mut opened = rest.to_vec();
+        let mut opened = Zeroizing::new(rest.to_vec());
         // A failed tag check says nothing more than this variant does.
         let plaintext = self
             .0
             .open_in_place(nonce, Aad::from(aad), &mut opened)
             .map_err(|_| CryptoError::Unsealable)?;
-        Ok(plaintext.to_vec())
+        Ok(Zeroizing::new(plaintext.to_vec()))
     }
 }
 
@@ -80,13 +83,12 @@ impl fmt::Debug for SealingKey {
 pub struct KeyEncryptionKey(SealingKey);
 
 impl KeyEncryptionKey {
-    /// Parses the KEK from its configured text: 32 bytes in unpadded base64url. A
-    /// trailing newline, as files often end with, is ignored.
+    /// Parses the KEK from its configured text: 32 bytes in unpadded base64url.
     ///
     /// # Errors
     /// Rejects other encodings and lengths other than 32 bytes.
     pub fn parse(text: &str) -> Result<Self, CryptoError> {
-        SealingKey::new(&Secret::parse(text.strip_suffix('\n').unwrap_or(text))?).map(Self)
+        SealingKey::new(&Secret::parse(text)?).map(Self)
     }
 
     /// Generates a KEK, for tests and development.
@@ -110,7 +112,7 @@ impl KeyEncryptionKey {
     /// # Errors
     /// Returns [`CryptoError::Unsealable`] for another KEK, other associated data or
     /// a modified value.
-    pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
         self.0.open(sealed, aad)
     }
 }

@@ -1,6 +1,7 @@
 use super::{CryptoError, Digest, random_bytes};
 use aws_lc_rs::pbkdf2;
 use base64::{Engine, engine::general_purpose::STANDARD};
+use secrecy::zeroize::Zeroizing;
 use std::{fmt, num::NonZeroU32};
 
 /// A SCRAM-SHA-256 verifier of a password (RFC 5802, RFC 7677): what a server
@@ -37,20 +38,21 @@ impl ScramVerifier {
 
     /// Derives the verifier of `password` with `salt`.
     fn salted(password: &str, salt: [u8; Self::SALT_BYTES], iterations: NonZeroU32) -> Self {
-        let mut salted = [0; Digest::LENGTH];
+        // The salted password is as good as the password: it is zeroized when dropped.
+        let mut salted = Zeroizing::new([0; Digest::LENGTH]);
         pbkdf2::derive(
             pbkdf2::PBKDF2_HMAC_SHA256,
             iterations,
             &salt,
             password.as_bytes(),
-            &mut salted,
+            salted.as_mut_slice(),
         );
-        let client_key = Digest::hmac(&salted, b"Client Key");
+        let client_key = Digest::hmac(salted.as_slice(), b"Client Key");
         Self {
             iterations,
             salt,
             stored_key: Digest::sha256(client_key.as_bytes()),
-            server_key: Digest::hmac(&salted, b"Server Key"),
+            server_key: Digest::hmac(salted.as_slice(), b"Server Key"),
         }
     }
 }

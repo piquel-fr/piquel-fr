@@ -4,6 +4,7 @@
 mod reference;
 
 pub use reference::{Documented, GeneratedFile, Section, Stale};
+use secrecy::zeroize::Zeroizing;
 use std::{env, error::Error as StdError, fmt, fs, path::PathBuf, str::FromStr};
 use thiserror::Error;
 use url::Url;
@@ -290,7 +291,7 @@ impl SecretReference {
         if bytes.is_empty() {
             return Err(SecretError::Empty);
         }
-        Ok(SecretBytes(bytes))
+        Ok(SecretBytes(Zeroizing::new(bytes)))
     }
 }
 impl FromStr for SecretReference {
@@ -310,20 +311,27 @@ impl FromStr for SecretReference {
     }
 }
 
-/// Resolved bytes with redacted diagnostic formatting.
-pub struct SecretBytes(Vec<u8>);
+/// A resolved secret, zeroized when dropped and redacted in diagnostics.
+pub struct SecretBytes(Zeroizing<Vec<u8>>);
 impl SecretBytes {
-    /// Exposes secret bytes to the component that requested them.
+    /// The secret's bytes as read, for a key that is raw bytes, such as the token
+    /// digest key. Any other secret is text: read it with [`Self::text`].
     #[must_use]
     pub fn expose_secret(&self) -> &[u8] {
         &self.0
     }
-    /// Borrows a text secret without copying it.
+    /// The secret as text: UTF-8, without one trailing line ending (`\n` or
+    /// `\r\n`), which a file ends with when a shell or an editor writes it. Every
+    /// text secret is read by this one rule, so the same value gives the same
+    /// secret through `env://` and `file://`.
     ///
     /// # Errors
     /// Preserves invalid UTF-8 diagnostics without displaying secret bytes.
-    pub fn utf8(&self) -> Result<&str, ConfigurationError> {
-        Ok(std::str::from_utf8(&self.0)?)
+    pub fn text(&self) -> Result<&str, ConfigurationError> {
+        let text = std::str::from_utf8(&self.0)?;
+        Ok(text
+            .strip_suffix('\n')
+            .map_or(text, |line| line.strip_suffix('\r').unwrap_or(line)))
     }
 }
 impl fmt::Debug for SecretBytes {

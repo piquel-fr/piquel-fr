@@ -2,6 +2,7 @@
 //! the schema owner's, which `migrate` and `audit prune` may use.
 
 use super::AuthConfig;
+use secrecy::zeroize::Zeroizing;
 use sourceorigin_common::config::{ConfigurationError, SecretReference, Variable};
 use sourceorigin_repository::{DatabaseConfig, RuntimeRole};
 use std::time::Duration;
@@ -58,7 +59,10 @@ struct DatabaseVariables {
 impl DatabaseVariables {
     /// Reads the connection to `url`, the value of [`Self::url`], and returns it
     /// with its separately mounted password.
-    fn read(self, url: &str) -> Result<(DatabaseConfig, Option<String>), ConfigurationError> {
+    fn read(
+        self,
+        url: &str,
+    ) -> Result<(DatabaseConfig, Option<Zeroizing<String>>), ConfigurationError> {
         let config = DatabaseConfig::new(url, DATABASE_POOL_SIZE, DATABASE_CONNECT_TIMEOUT)
             .map_err(|source| {
                 self.url.error(
@@ -83,11 +87,12 @@ impl DatabaseVariables {
                 self.password
                     .error("must resolve through env://NAME or file://PATH", source)
             })?;
-        let password = secret
-            .utf8()
-            .map_err(|source| self.password.error("must contain UTF-8 text", source))?
-            .trim_end_matches('\n')
-            .to_owned();
+        let password = Zeroizing::new(
+            secret
+                .text()
+                .map_err(|source| self.password.error("must contain UTF-8 text", source))?
+                .to_owned(),
+        );
         Ok((config.with_password(&password), Some(password)))
     }
 }

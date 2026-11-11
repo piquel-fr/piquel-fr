@@ -160,9 +160,8 @@ impl EmailConfig {
                             .error("must resolve through env://NAME or file://PATH", source)
                     })?;
                 let password = password
-                    .utf8()
+                    .text()
                     .map_err(|source| SMTP_PASSWORD.error("must contain UTF-8 text", source))?
-                    .trim_end_matches('\n')
                     .to_owned();
                 builder
                     .credentials(Credentials::new(user, password))

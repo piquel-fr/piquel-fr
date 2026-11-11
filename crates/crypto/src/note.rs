@@ -9,6 +9,7 @@
 use super::{CryptoError, Digest, random_bytes};
 use aws_lc_rs::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use secrecy::zeroize::Zeroizing;
 use std::{fmt, str::FromStr};
 
 /// Identifies Ed25519 in key IDs and verifier keys.
@@ -34,19 +35,18 @@ pub struct NoteKey {
 
 impl NoteKey {
     /// Loads a key from its seed written as 64 hexadecimal characters, as a
-    /// generated secret holds it. One trailing newline is ignored.
+    /// generated secret holds it.
     ///
     /// # Errors
     /// Rejects a name that is empty or contains whitespace or `+`, and a seed
     /// that is not exactly 32 hex-encoded bytes.
     pub fn from_hex_seed(name: &str, hex: &str) -> Result<Self, CryptoError> {
-        let hex = hex.strip_suffix('\n').unwrap_or(hex);
         if hex.len() != SEED_BYTES * 2 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(CryptoError::NoteKeySeed);
         }
         // Every character is an ASCII hex digit, so each pair is a valid slice, and
         // `from_str_radix` never sees the sign it would otherwise accept.
-        let mut seed = [0; SEED_BYTES];
+        let mut seed = Zeroizing::new([0; SEED_BYTES]);
         for (index, byte) in seed.iter_mut().enumerate() {
             *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16)
                 .map_err(|_| CryptoError::NoteKeySeed)?;
@@ -59,7 +59,7 @@ impl NoteKey {
     /// # Errors
     /// Rejects an invalid name and preserves failures from the random source.
     pub fn generate(name: &str) -> Result<Self, CryptoError> {
-        Self::from_seed(name, &random_bytes()?)
+        Self::from_seed(name, &Zeroizing::new(random_bytes()?))
     }
 
     /// Builds the key and its verifier from a 32-byte seed.
