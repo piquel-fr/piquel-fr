@@ -50,9 +50,10 @@ pushed requests, one named step per check: no request object and no
 client, which names the only account that may answer, `response_type=code`, an
 S256 PKCE challenge, `state`, scopes and audience the client allows, `nonce`,
 `max_age` and `prompt`. It returns a `ValidatedAuthorization`, whose `store`
-saves the request and returns its token. The request is stored in `authorization_requests` for ten
-minutes, with its first known `acr_values` entry as its target `acr`. The
-browser carries its opaque token, the transaction, from then on.
+saves the request and returns its token. The request is stored in
+`authorization_requests` for ten minutes, with its first known `acr_values`
+entry as its target `acr`. The browser carries its opaque token, the
+transaction, from then on.
 
 A client registered to push its requests is refused here.
 

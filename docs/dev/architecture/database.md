@@ -51,8 +51,8 @@ read the same record, its columns are written once, in a macro that joins them
 to each query's own SQL with `+`, which SQLx accepts: `select_events!` for
 events with their personal data, and `authorization_requests!`, whose columns
 follow `SELECT` or `RETURNING`. A value its Rust type rejects, like a non-v7 ID
-or JSON outside the record's type, becomes `DatabaseError::InvalidStoredData` with the column index SQLx reports and the
-decoding error as its source. Uniqueness conflicts, writes a check refused
+or JSON outside the record's type, becomes `DatabaseError::InvalidStoredData`
+with the column index SQLx reports and the decoding error as its source. Uniqueness conflicts, writes a check refused
 (`DatabaseError::Refused`) and deadline failures retain their sources too.
 
 Only `Database::provision` runs unchecked SQL: DDL takes no bind parameters, so a
