@@ -45,7 +45,6 @@ async fn delivery_changes_check_and_record_their_administrator() {
             destination: "https://receiver.example".into(),
             recipient: (),
             payload: (),
-            ordering_key: None,
         };
         harness
             .database

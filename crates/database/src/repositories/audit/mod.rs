@@ -219,8 +219,7 @@ impl From<CheckpointRow> for Checkpoint {
 
 impl AuditRepository<'_> {
     /// Returns up to `limit` unsealed events in the order to seal them, to be
-    /// sealed in `format`: the safe consumer order of `in_safe_order!`, which
-    /// [`EventRepository::read_after`](crate::EventRepository::read_after) shares. No
+    /// sealed in `format`: the safe order of `in_safe_order!`. No
     /// event can later appear before one returned here, so positions never need to be
     /// reassigned. The rows stay locked until the transaction ends, so
     /// none changes between being hashed and being sealed.

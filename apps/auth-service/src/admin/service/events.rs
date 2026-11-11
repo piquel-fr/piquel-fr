@@ -155,8 +155,7 @@ impl AdminService {
             .await?)
     }
 
-    /// Attempts a failed delivery, or a cancelled unordered one, again now, for
-    /// `reason`.
+    /// Attempts a failed or cancelled delivery again now, for `reason`.
     pub(crate) async fn retry_delivery(
         &self,
         operator: &Operator,
@@ -167,13 +166,12 @@ impl AdminService {
         tx.deliveries()
             .retry(id)
             .await
-            .map_err(AdminError::delivery(id, "failed or cancelled unordered"))?;
+            .map_err(AdminError::delivery(id, "failed or cancelled"))?;
         let retried = DomainEvent::DeliveryRetried { delivery_id: id };
         Self::finish(tx, operator, &reason, None, vec![retried]).await
     }
 
-    /// Cancels a pending or failed delivery, for `reason`, which unblocks the
-    /// deliveries ordered after it.
+    /// Cancels a pending or failed delivery, for `reason`.
     pub(crate) async fn cancel_delivery(
         &self,
         operator: &Operator,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    id AS \"id: DeliveryId\", channel, destination,\n                    status AS \"status: DeliveryStatus\", attempts::bigint AS \"attempts!: Unsigned\",\n                    ordering_key, ordinal, next_attempt_at, last_error, created_at, finished_at\n                FROM deliveries\n                WHERE ($1::text IS NULL OR status = $1)\n                AND ($2::text IS NULL OR channel = $2)\n                ORDER BY created_at DESC, id DESC\n                LIMIT $3",
+  "query": "SELECT\n                    id AS \"id: DeliveryId\", channel, destination,\n                    status AS \"status: DeliveryStatus\", attempts::bigint AS \"attempts!: Unsigned\",\n                    next_attempt_at, last_error, created_at, finished_at\n                FROM deliveries\n                WHERE ($1::text IS NULL OR status = $1)\n                AND ($2::text IS NULL OR channel = $2)\n                ORDER BY created_at DESC, id DESC\n                LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -30,31 +30,21 @@
       },
       {
         "ordinal": 5,
-        "name": "ordering_key",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 6,
-        "name": "ordinal",
-        "type_info": "Int8"
-      },
-      {
-        "ordinal": 7,
         "name": "next_attempt_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 6,
         "name": "last_error",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 8,
         "name": "finished_at",
         "type_info": "Timestamptz"
       }
@@ -72,13 +62,11 @@
       false,
       false,
       null,
-      true,
-      true,
       false,
       true,
       false,
       true
     ]
   },
-  "hash": "d938df89faaf50a412e842a19dbc98c9187427e1e6535a61954a8d2fb6537449"
+  "hash": "ca19d1c1634ae27af67282c822d5f4ca47afe95d6d4661138305e8eee84bdf76"
 }

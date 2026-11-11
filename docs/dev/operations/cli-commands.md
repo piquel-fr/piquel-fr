@@ -1080,8 +1080,8 @@ Options:
 Commands:
 
 - [`auth-service deliveries list`](#auth-service-deliveries-list): List deliveries, newest first.
-- [`auth-service deliveries retry`](#auth-service-deliveries-retry): Attempt a failed delivery, or a cancelled unordered one, again now.
-- [`auth-service deliveries cancel`](#auth-service-deliveries-cancel): Cancel a pending or failed delivery, which unblocks the deliveries ordered after it.
+- [`auth-service deliveries retry`](#auth-service-deliveries-retry): Attempt a failed or cancelled delivery again now.
+- [`auth-service deliveries cancel`](#auth-service-deliveries-cancel): Cancel a pending or failed delivery.
 
 ## `auth-service deliveries list`
 
@@ -1101,7 +1101,7 @@ Options:
 
 ## `auth-service deliveries retry`
 
-Attempt a failed delivery, or a cancelled unordered one, again now.
+Attempt a failed or cancelled delivery again now.
 
 ```text
 auth-service deliveries retry [OPTIONS] --reason <REASON> <ID>
@@ -1119,7 +1119,7 @@ Options:
 
 ## `auth-service deliveries cancel`
 
-Cancel a pending or failed delivery, which unblocks the deliveries ordered after it.
+Cancel a pending or failed delivery.
 
 ```text
 auth-service deliveries cancel [OPTIONS] --reason <REASON> <ID>

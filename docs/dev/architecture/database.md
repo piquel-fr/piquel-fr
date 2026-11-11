@@ -207,7 +207,7 @@ Every five minutes, one replica drains expired ephemeral state in bounded batche
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
 personal data older than 90 days; the events themselves are kept indefinitely. It
 also deletes finished deliveries: succeeded ones after 7 days, failed or cancelled
-ones after 30. Deleting a failed ordered delivery cancels the ones behind it.
+ones after 30.
 It also deletes the records accounts no longer use, such as passkeys revoked
 over 90 days ago; [what auth stores](account-deletion.md#what-auth-stores-and-for-how-long)
 lists them.
@@ -265,9 +265,9 @@ transaction cannot hold connections and locks forever:
 | `idle_in_transaction_session_timeout` | 30 s | `PostgreSQL` ends the session, rolling its transaction back. |
 | `transaction_timeout` | off | Never: connection options override a limit the role set for itself, which would cut a seal batch or a verification short. |
 
-The idle limit matters beyond the session itself: event consumers and the audit
-sealer wait for every older transaction to end (see [Consumers](#consumers)), so a
-forgotten one would stop them. Never hold a transaction open across network calls
+The idle limit matters beyond the session itself: the audit sealer waits for
+every older transaction to end (see [Reading in order](#reading-in-order)), so a
+forgotten one would stop it. Never hold a transaction open across network calls
 or prompts. A person's own `psql` session gets none of these limits.
 
 Work that legitimately takes longer raises only the limit it needs, explicitly,
@@ -316,7 +316,6 @@ the runtime role or resets its attributes and password, and grants it:
     only. It can be erased but not rewritten: a trigger refuses an insert for an
     event of another transaction, and an update that does anything but remove
     values from `details`, as a purge does with its clients' related origins;
-  - `event_consumers`: `SELECT, INSERT, UPDATE`;
   - `_sqlx_migrations`: nothing.
 
 Grants are reset on every run, so they cover tables that new migrations add. A
@@ -366,8 +365,7 @@ code). The repository method underneath is private to the crate,
 so no revocation can skip the event. Refreshes are too frequent to be
 events. `Imported` holds the rows of `security_audit_log`, the log events replaced,
 verbatim; only migrations write it, and its fields are private, so it can only be
-read back. `repositories/events/` stores events: the personal data split below,
-`read_after` and `acknowledge`.
+read back. `repositories/events/` stores events and the personal data split below.
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
@@ -428,18 +426,17 @@ always reads it.
 - `subject_user_id` has no foreign key: history outlives the account. Subject and
   actor UUIDs are pseudonymous, not anonymous: applications hold the same `sub`.
 
-### Consumers
+### Reading in order
 
-`events().read_after(consumer, limit)` returns the events after a consumer's cursor,
-and `acknowledge(consumer, cursor)` moves it, in the transaction that applies the
-consumer's effects. A sequence number alone is not a safe cursor: a transaction can
-take sequence 10 and commit after another one took 11, and a reader that saw 11
-would skip 10. Consumers therefore read in `(txid, sequence)` order, and only events
-of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), which
-have all finished. The rule is written once, in the `in_safe_order!` query macro of
-`repositories/mod.rs`, which `read_after` and the audit sealer's `audit().unsealed`
-both build on. A long-running transaction holds back every consumer until it ends,
-so keep transactions short; the idle limit (see [Time limits](#time-limits)) ends
+A reader that follows the stream, such as the audit sealer, must never skip an
+event. A sequence number alone is not a safe position: a transaction can take
+sequence 10 and commit after another one took 11, and a reader that saw 11 would
+skip 10. Readers therefore read in `(txid, sequence)` order, and only events of
+transactions older than every running one (`txid < pg_snapshot_xmin(...)`), which
+have all finished. The rule is written once, in the `in_safe_order!` query macro
+of `repositories/mod.rs`, which the audit sealer's `audit().unsealed` builds on. A
+long-running transaction holds back every reader until it ends, so keep
+transactions short; the idle limit (see [Time limits](#time-limits)) ends
 one that is forgotten. `history_for_user` lists an account's events,
 newest first, in the same `(txid, sequence)` order, so sealed history is listed in
 chain order.
@@ -510,8 +507,8 @@ accounts' handles, is the only way a handle returns to the pool.
 `repositories/audit/` stores the tamper-evident chain that
 [audit-history.md](../security/audit-history.md) describes. Events are inserted
 unsealed, so recording never waits on the chain head. Auth's sealer job, under
-`LockKey::AuditChain`, reads them with `audit().unsealed`, in the consumers' safe
-order but tracked by `chain_position IS NULL` rather than a cursor, gives each its
+`LockKey::AuditChain`, reads them with `audit().unsealed`, in the safe order of
+[Reading in order](#reading-in-order) but tracked by `chain_position IS NULL` rather than a cursor, gives each its
 `chain_position`, `chain_hash` and `chain_format` with `seal`, and stores signed checkpoints with
 `insert_checkpoint`. The repository never hashes or signs: auth computes the hashes
 from `EventContent`, whose serialization is the canonical event, so a tampered row

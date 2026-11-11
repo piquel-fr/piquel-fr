@@ -376,7 +376,6 @@ async fn queue<C: Channel<Recipient = Behavior, Payload = ()>>(
         destination: "https://receiver.example".into(),
         recipient: behavior,
         payload: (),
-        ordering_key: None,
     };
     database
         .deliveries()

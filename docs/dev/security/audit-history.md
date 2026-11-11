@@ -44,7 +44,7 @@ release that reads it: an older one reports those events changed and stops
 signing. Verification refuses a format it does not know, rather than report the
 chain broken.
 
-The sealer works in the order event consumers use, `(txid, sequence)`, and only
+The sealer works in the order `(txid, sequence)`, and only
 on events whose transaction, and every older one, has finished. No event can
 therefore appear later before one already sealed. A long-running transaction
 delays sealing for as long as it runs. Histories list events in the same order,

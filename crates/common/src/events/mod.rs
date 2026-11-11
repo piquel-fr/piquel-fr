@@ -360,13 +360,13 @@ pub enum DomainEvent {
         /// The recovery.
         recovery_id: RecoveryId,
     },
-    /// An operator made a failed delivery, or a cancelled unordered one, due again.
+    /// An operator made a failed or cancelled delivery due again.
     DeliveryRetried {
         /// The delivery.
         delivery_id: DeliveryId,
     },
     /// An operator cancelled a pending or failed delivery, such as a notice to a
-    /// user, which unblocks the deliveries ordered after it.
+    /// user.
     DeliveryCancelled {
         /// The delivery.
         delivery_id: DeliveryId,

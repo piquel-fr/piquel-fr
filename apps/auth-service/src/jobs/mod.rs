@@ -273,9 +273,8 @@ static CLEANUP_OVERRUNS: Counter = Counter::new(
 );
 
 /// Drains expired authentication state, event personal data and finished
-/// deliveries past their retention, and abandons delivery ordering keys stuck
-/// behind an old failure, in bounded batches until a pass finds nothing or a
-/// one-minute budget runs out.
+/// deliveries past their retention, in bounded batches until a pass finds nothing
+/// or a one-minute budget runs out.
 /// Short pauses between batches keep cleanup from monopolizing the database under
 /// heavy churn.
 struct Cleanup {
@@ -394,17 +393,12 @@ impl Cleanup {
         Ok(())
     }
 
-    /// Runs one batch and returns how many rows it changed. Abandoning stuck keys
-    /// needs a transaction of its own, so its locks last until it decides.
+    /// Runs one batch and returns how many rows it deleted.
     async fn batch(connection: &mut ExclusiveConnection) -> Result<u64, DatabaseError> {
-        let mut tx = connection.begin().await?;
-        let abandoned = tx.abandon_stuck_deliveries(Self::BATCH_SIZE).await?;
-        tx.commit().await?;
-        let purged = connection
+        connection
             .maintenance()
             .purge_expired_auth_state(Self::BATCH_SIZE)
-            .await?;
-        Ok(abandoned + purged)
+            .await
     }
 }
 

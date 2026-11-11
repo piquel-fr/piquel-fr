@@ -76,8 +76,8 @@ impl MaintenanceRepository<'_> {
     /// announcements sent over a year ago, with the announcements to chosen
     /// accounts they leave without one, and the handles of accounts purged over a
     /// year ago, which anyone may then claim.
-    /// Returns how many rows were deleted. Failed ordered deliveries are left to
-    /// [`DatabaseTransaction::abandon_stuck_deliveries`](crate::DatabaseTransaction::abandon_stuck_deliveries). `batch_size` is clamped to 1..=1000 rows per table.
+    /// Returns how many rows were deleted. `batch_size` is clamped to 1..=1000
+    /// rows per table.
     ///
     /// Each batch skips rows that live requests have locked, except event personal
     /// data, which requests never lock. Outside a transaction,
@@ -347,17 +347,13 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
-            // Ordered failures hold back their key, so only
-            // `DatabaseTransaction::abandon_stuck_deliveries` removes them.
             "DELETE FROM deliveries d
             WHERE d.ctid IN (
                 SELECT delivery.ctid
                 FROM deliveries delivery
                 WHERE (delivery.status = 'succeeded' AND delivery.finished_at < now() - interval '7 days')
-                OR (delivery.status = 'cancelled' AND delivery.finished_at < now() - interval '30 days')
                 OR (
-                    delivery.status = 'failed'
-                    AND delivery.ordering_key IS NULL
+                    delivery.status IN ('failed', 'cancelled')
                     AND delivery.finished_at < now() - interval '30 days'
                 )
                 LIMIT $1

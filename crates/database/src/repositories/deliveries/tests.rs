@@ -1,11 +1,8 @@
-//! Fan-out with the event, exclusive claims, lost leases and per-key ordering.
+//! Fan-out with the event, exclusive claims, lost leases and operators' changes.
 //!
 //! Tests share one database, so each claims from a channel of its own.
 use super::*;
-use crate::{
-    Database, EventRepository, InsertUser, MaintenanceRepository, SessionScope, StoredEvent,
-    UserRepository,
-};
+use crate::{Database, EventRepository, InsertUser, SessionScope, StoredEvent, UserRepository};
 use sourceorigin_common::{
     SessionId,
     events::{Actor, EventContext, RequestOrigin, RevocationReason},
@@ -45,12 +42,8 @@ test_channels! {
     Concurrent = "test_concurrent";
     /// Claimed again once its lease expires.
     Leased = "test_leased";
-    /// Sent in order.
-    Ordered = "test_ordered";
-    /// Cancelled while being sent.
-    Interrupted = "test_interrupted";
-    /// Stuck behind an old failure.
-    Abandoned = "test_abandoned";
+    /// Retried and cancelled by an operator.
+    Operated = "test_operated";
     /// Counted for the backlog gauges.
     Backlogged = "test_backlogged";
 }
@@ -84,7 +77,6 @@ impl Channel for Recorder {
             destination: "https://rp.example/logout".into(),
             recipient: handle,
             payload: 1,
-            ordering_key: None,
         }])
     }
 }
@@ -98,11 +90,8 @@ async fn clear<C: Channel>(pool: &PgPool) {
         .expect("clear channel");
 }
 
-/// Queues a delivery on `C`, ordered by `key` if given.
-async fn insert<C: Channel<Recipient = String, Payload = u32>>(
-    pool: &PgPool,
-    key: Option<&str>,
-) -> DeliveryId {
+/// Queues a delivery on `C`.
+async fn insert<C: Channel<Recipient = String, Payload = u32>>(pool: &PgPool) -> DeliveryId {
     DeliveryRepository::from_pool(pool)
         .insert::<C>(
             None,
@@ -110,7 +99,6 @@ async fn insert<C: Channel<Recipient = String, Payload = u32>>(
                 destination: "https://receiver.example".into(),
                 recipient: "recipient".into(),
                 payload: 7,
-                ordering_key: key.map(Into::into),
             },
         )
         .await
@@ -213,7 +201,7 @@ async fn concurrent_workers_never_claim_the_same_delivery() {
     clear::<Concurrent>(&pool).await;
     let mut queued = HashSet::new();
     for _ in 0..10 {
-        queued.insert(insert::<Concurrent>(&pool, None).await);
+        queued.insert(insert::<Concurrent>(&pool).await);
     }
     let claims: Vec<_> = (0..30)
         .map(|_| {
@@ -236,7 +224,7 @@ async fn concurrent_workers_never_claim_the_same_delivery() {
 async fn an_expired_lease_is_claimed_again_and_the_stale_outcome_discarded() {
     let pool = Database::test_pool().await;
     clear::<Leased>(&pool).await;
-    let id = insert::<Leased>(&pool, None).await;
+    let id = insert::<Leased>(&pool).await;
 
     let stale = claim::<Leased>(&pool, Duration::from_millis(1))
         .await
@@ -293,8 +281,8 @@ async fn the_backlog_counts_pending_deliveries_and_dates_the_oldest() {
         }
     );
 
-    insert::<Backlogged>(&pool, None).await;
-    insert::<Backlogged>(&pool, None).await;
+    insert::<Backlogged>(&pool).await;
+    insert::<Backlogged>(&pool).await;
     let claimed = claim::<Backlogged>(&pool, LEASE).await.expect("claim");
     finish(&pool, &claimed, &DeliveryOutcome::Succeeded)
         .await
@@ -315,180 +303,60 @@ async fn the_backlog_counts_pending_deliveries_and_dates_the_oldest() {
     );
 }
 
-/// Deliveries with one key are claimed in ordinal order, one at a time. A failed
-/// one holds back the rest, through cleanup, until it is retried and succeeds, or
-/// is cancelled for good.
+/// An operator retries a failed or cancelled delivery, which makes it due again
+/// and restarts its maximum age, and cancels a pending or failed one. Cancelling
+/// an attempt in progress discards its outcome, and a retry waits for that
+/// attempt's lease, so the two are never sent at once.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
+async fn operators_retry_and_cancel_deliveries() {
     let pool = Database::test_pool().await;
-    clear::<Ordered>(&pool).await;
-    let key = format!("key-{}", Uuid::now_v7());
-    let mut ids = Vec::new();
-    for _ in 0..3 {
-        ids.push(insert::<Ordered>(&pool, Some(&key)).await);
-    }
-    let unordered = insert::<Ordered>(&pool, None).await;
-    let next = async || claim::<Ordered>(&pool, LEASE).await;
-
-    let mut claimed = Vec::new();
-    while let Some(delivery) = next().await {
-        claimed.push(delivery);
-    }
-    assert_eq!(
-        claimed.iter().map(|d| d.id).collect::<HashSet<_>>(),
-        HashSet::from([ids[0], unordered]),
-        "only the first of the key is due while it is pending"
-    );
-    for delivery in &claimed {
-        finish(&pool, delivery, &DeliveryOutcome::Succeeded)
-            .await
-            .expect("succeed");
-    }
-
-    let second = next().await.expect("second");
-    assert_eq!(second.id, ids[1]);
-    finish(&pool, &second, &failed()).await.expect("fail");
-    MaintenanceRepository::from_pool(&pool)
-        .purge_expired_auth_state(1000)
-        .await
-        .expect("cleanup");
-    assert!(next().await.is_none(), "the failure holds back the third");
-
-    let repository = || DeliveryRepository::from_pool(&pool);
-    repository().retry(ids[1]).await.expect("retry");
-    let retried = next().await.expect("retried");
-    assert_eq!((retried.id, retried.attempts), (ids[1], 2));
-    assert!(
-        retried.retried_at.is_some(),
-        "retrying restarts the maximum age"
-    );
-    finish(&pool, &retried, &failed())
-        .await
-        .expect("fail again");
-    repository().cancel(ids[1]).await.expect("cancel");
-    assert!(
-        matches!(
-            repository().retry(ids[1]).await,
-            Err(DatabaseError::NotFound)
-        ),
-        "cancelling an ordered delivery is final"
-    );
-    assert!(matches!(
-        repository().cancel(ids[1]).await,
-        Err(DatabaseError::NotFound)
-    ));
-
-    let third = next().await.expect("third");
-    assert_eq!(third.id, ids[2]);
-    let ordinals: Vec<_> = repository()
-        .list(None, Some(Ordered::NAME), 10)
-        .await
-        .expect("list")
-        .into_iter()
-        .filter_map(|summary| summary.ordering)
-        .map(|(_, ordinal)| ordinal)
-        .collect();
-    assert_eq!(ordinals, [3, 2, 1], "newest first");
-}
-
-/// Cancelling a delivery while it is being sent discards its outcome, but the
-/// next one with its key waits for the attempt's lease, so it cannot overtake it.
-#[tokio::test]
-#[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn a_cancelled_attempt_holds_back_its_key_until_its_lease_expires() {
-    let pool = Database::test_pool().await;
-    clear::<Interrupted>(&pool).await;
-    let key = format!("key-{}", Uuid::now_v7());
-    let first = insert::<Interrupted>(&pool, Some(&key)).await;
-    let second = insert::<Interrupted>(&pool, Some(&key)).await;
+    clear::<Operated>(&pool).await;
+    let id = insert::<Operated>(&pool).await;
     let lease = Duration::from_millis(300);
+    let next = async || claim::<Operated>(&pool, lease).await;
+    let repository = || DeliveryRepository::from_pool(&pool);
 
-    let attempt = claim::<Interrupted>(&pool, lease).await.expect("first");
-    assert_eq!(attempt.id, first);
-    DeliveryRepository::from_pool(&pool)
-        .cancel(first)
-        .await
-        .expect("cancel");
-    assert!(claim::<Interrupted>(&pool, lease).await.is_none());
+    let attempt = next().await.expect("first attempt");
+    repository().cancel(id).await.expect("cancel");
     assert!(matches!(
         finish(&pool, &attempt, &DeliveryOutcome::Succeeded).await,
         Err(DatabaseError::NotFound)
     ));
-    tokio::time::sleep(lease).await;
-    let next = claim::<Interrupted>(&pool, lease).await.expect("second");
-    assert_eq!(next.id, second);
-}
+    assert!(next().await.is_none(), "a cancelled delivery is not due");
 
-/// Thirty days after a failure, cleanup abandons its key: the deliveries behind
-/// it are cancelled, never sent out of order, and the failure is deleted. A key
-/// whose next delivery is being inserted is skipped until the insert ends, and
-/// the key then takes new deliveries again.
-#[tokio::test]
-#[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
-    let pool = Database::test_pool().await;
-    clear::<Abandoned>(&pool).await;
-    let key = format!("key-{}", Uuid::now_v7());
-    let failed_id = insert::<Abandoned>(&pool, Some(&key)).await;
-    let waiting = insert::<Abandoned>(&pool, Some(&key)).await;
-    let attempt = claim::<Abandoned>(&pool, LEASE).await.expect("first");
-    finish(&pool, &attempt, &failed()).await.expect("fail");
-    sqlx::query("UPDATE deliveries SET finished_at = now() - interval '31 days' WHERE id = $1")
-        .bind(failed_id.as_uuid())
-        .execute(&pool)
+    repository()
+        .retry(id)
         .await
-        .expect("age the failure");
-    let abandon = async || {
-        let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
-        let changed = tx.abandon_stuck_deliveries(10).await.expect("abandon");
-        tx.commit().await.expect("commit");
-        changed
-    };
-
-    let mut inserting = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
-    let inserted = inserting
-        .deliveries()
-        .insert::<Abandoned>(
-            None,
-            NewDelivery {
-                destination: "https://receiver.example".into(),
-                recipient: "recipient".into(),
-                payload: 7,
-                ordering_key: Some(key.clone()),
-            },
-        )
-        .await
-        .expect("insert");
-    assert_eq!(abandon().await, 0, "a key being inserted to is skipped");
-    inserting.commit().await.expect("commit the insert");
-
-    assert_eq!(abandon().await, 3, "two cancelled and the failure deleted");
-    let mut listed: Vec<_> = DeliveryRepository::from_pool(&pool)
-        .list(None, Some(Abandoned::NAME), 10)
-        .await
-        .expect("list")
-        .into_iter()
-        .map(|d| (d.id, d.status))
-        .collect();
-    listed.sort_by_key(|&(id, _)| id.as_uuid());
-    assert_eq!(
-        listed,
-        [
-            (waiting, DeliveryStatus::Cancelled),
-            (inserted, DeliveryStatus::Cancelled)
-        ]
+        .expect("retry the cancelled delivery");
+    assert!(
+        next().await.is_none(),
+        "the cancelled attempt's lease holds"
     );
+    tokio::time::sleep(lease).await;
+    let retried = next().await.expect("retried");
+    assert_eq!((retried.id, retried.attempts), (id, 2));
+    assert!(
+        retried.retried_at.is_some(),
+        "retrying restarts the maximum age"
+    );
+    finish(&pool, &retried, &failed()).await.expect("fail");
+    repository()
+        .retry(id)
+        .await
+        .expect("retry the failed delivery");
+    let last = next().await.expect("retried again");
+    finish(&pool, &last, &DeliveryOutcome::Succeeded)
+        .await
+        .expect("succeed");
     assert!(matches!(
-        DeliveryRepository::from_pool(&pool).retry(failed_id).await,
+        repository().retry(id).await,
         Err(DatabaseError::NotFound)
     ));
-
-    let next = insert::<Abandoned>(&pool, Some(&key)).await;
-    assert_eq!(
-        claim::<Abandoned>(&pool, LEASE).await.map(|d| d.id),
-        Some(next)
-    );
+    assert!(matches!(
+        repository().cancel(id).await,
+        Err(DatabaseError::NotFound)
+    ));
 }
 
 /// Ending a session queues, in the revocation's transaction, one logout token per

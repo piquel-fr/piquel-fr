@@ -3,8 +3,7 @@
 //!
 //! Delivery is at least once. A worker claims a delivery with a lease, sends it
 //! outside any transaction, then records the outcome only if it still holds the
-//! lease. Deliveries sharing an ordering key are sent one at a time, in the order
-//! their transactions committed. See `docs/dev/architecture/delivery-queue.md`.
+//! lease. See `docs/dev/architecture/delivery-queue.md`.
 
 use super::{DeliveryRepository, RepositoryExecutor, Unsigned};
 use crate::{DatabaseError, DatabaseTransaction, repositories::notifications::Notified};
@@ -100,10 +99,6 @@ pub struct NewDelivery<C: Channel> {
     pub recipient: C::Recipient,
     /// The message.
     pub payload: C::Payload,
-    /// Deliveries sharing a key are sent one at a time, in the order their
-    /// transactions committed, and a failed one holds back those after it until an
-    /// operator retries or cancels it. `None` for unordered deliveries.
-    pub ordering_key: Option<String>,
 }
 
 /// A delivery a worker has claimed. Only it can record the attempt's outcome, and
@@ -202,10 +197,6 @@ struct SummaryRow {
     status: DeliveryStatus,
     /// Attempts so far.
     attempts: Unsigned,
-    /// Ordering key, if ordered.
-    ordering_key: Option<String>,
-    /// Place in the key's order, if ordered.
-    ordinal: Option<i64>,
     /// Next attempt.
     next_attempt_at: DateTime<Utc>,
     /// Latest error.
@@ -217,7 +208,7 @@ struct SummaryRow {
 }
 
 impl From<SummaryRow> for DeliverySummary {
-    /// Pairs the ordering key with its ordinal, which the schema sets together.
+    /// Converts the stored attempt count.
     fn from(row: SummaryRow) -> Self {
         Self {
             id: row.id,
@@ -225,7 +216,6 @@ impl From<SummaryRow> for DeliverySummary {
             destination: row.destination,
             status: row.status,
             attempts: row.attempts.into(),
-            ordering: row.ordering_key.zip(row.ordinal),
             next_attempt_at: row.next_attempt_at,
             last_error: row.last_error,
             created_at: row.created_at,
@@ -237,8 +227,7 @@ impl From<SummaryRow> for DeliverySummary {
 impl DeliveryRepository<'_> {
     /// Queues a delivery on channel `C`. Events' deliveries are inserted by
     /// [`DatabaseTransaction::record`]; insert directly only deliveries no event
-    /// causes. An ordered delivery takes the next ordinal of its key, which locks
-    /// the key until the transaction ends, so ordinals follow commit order.
+    /// causes.
     ///
     /// # Errors
     ///
@@ -253,29 +242,18 @@ impl DeliveryRepository<'_> {
         let recipient = serde_json::to_value(&delivery.recipient).map_err(serialization)?;
         let payload = serde_json::to_value(&delivery.payload).map_err(serialization)?;
         let id = DeliveryId::new();
-        // One statement, so the ordinal and the delivery commit together even
-        // outside a transaction. Taking the ordinal locks the key's row until then.
         run!(
             self,
             execute,
             sqlx::query!(
-                "WITH ordinal AS (
-                    INSERT INTO delivery_orderings (ordering_key, next_ordinal)
-                    SELECT $6, 2 WHERE $6::text IS NOT NULL
-                    ON CONFLICT (ordering_key) DO UPDATE
-                    SET next_ordinal = delivery_orderings.next_ordinal + 1
-                    RETURNING next_ordinal - 1 AS value
-                )
-                INSERT INTO deliveries (
-                    id, event_id, channel, destination, recipient, ordering_key, ordinal,
-                    payload, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, (SELECT value FROM ordinal), $7, $8)",
+                "INSERT INTO deliveries (
+                    id, event_id, channel, destination, recipient, payload, status
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 id.as_uuid(),
                 event_id.map(EventId::as_uuid),
                 C::NAME,
                 delivery.destination,
                 recipient,
-                delivery.ordering_key,
                 payload,
                 DeliveryStatus::Pending.as_str(),
             )
@@ -306,10 +284,8 @@ impl DeliveryRepository<'_> {
 
     /// Claims the longest-due delivery of channel `C` for `lease`, or returns
     /// `None` when none is due. Concurrent workers never claim the same delivery
-    /// while its lease lasts. An ordered delivery is due only once every earlier
-    /// one with its key succeeded or was cancelled, and no attempt of a cancelled
-    /// one may still be in progress. Run it outside a transaction,
-    /// so the claim commits before the send starts.
+    /// while its lease lasts. Run it outside a transaction, so the claim commits
+    /// before the send starts.
     ///
     /// # Errors
     ///
@@ -338,13 +314,6 @@ impl DeliveryRepository<'_> {
                     AND d.status = 'pending'
                     AND d.next_attempt_at <= now()
                     AND (d.leased_until IS NULL OR d.leased_until < now())
-                    AND (d.ordering_key IS NULL OR NOT EXISTS (
-                        SELECT 1
-                        FROM deliveries e
-                        WHERE e.ordering_key = d.ordering_key
-                        AND e.ordinal < d.ordinal
-                        AND (e.status IN ('pending', 'failed') OR e.leased_until > now())
-                    ))
                     ORDER BY d.next_attempt_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -458,7 +427,7 @@ impl DeliveryRepository<'_> {
                 r#"SELECT
                     id AS "id: DeliveryId", channel, destination,
                     status AS "status: DeliveryStatus", attempts::bigint AS "attempts!: Unsigned",
-                    ordering_key, ordinal, next_attempt_at, last_error, created_at, finished_at
+                    next_attempt_at, last_error, created_at, finished_at
                 FROM deliveries
                 WHERE ($1::text IS NULL OR status = $1)
                 AND ($2::text IS NULL OR channel = $2)
@@ -497,14 +466,13 @@ impl DeliveryRepository<'_> {
         )
     }
 
-    /// Makes a failed delivery, or a cancelled unordered one, due again now, and
-    /// restarts its channel's maximum age. Cancelling an ordered delivery is
-    /// final: the deliveries after it may already have been sent.
+    /// Makes a failed or cancelled delivery due again now, and restarts its
+    /// channel's maximum age.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::NotFound`] if no failed delivery or cancelled
-    /// unordered delivery has this ID, or another [`DatabaseError`] if the query fails.
+    /// Returns [`DatabaseError::NotFound`] if no failed or cancelled delivery has
+    /// this ID, or another [`DatabaseError`] if the query fails.
     pub async fn retry(&mut self, id: DeliveryId) -> Result<(), DatabaseError> {
         run!(
             self,
@@ -513,8 +481,7 @@ impl DeliveryRepository<'_> {
                 "UPDATE deliveries
                 SET status = 'pending', next_attempt_at = now(), finished_at = NULL,
                     retried_at = now()
-                WHERE id = $1
-                AND (status = 'failed' OR (status = 'cancelled' AND ordering_key IS NULL))
+                WHERE id = $1 AND status IN ('failed', 'cancelled')
                 RETURNING id",
                 id.as_uuid(),
             )
@@ -522,10 +489,8 @@ impl DeliveryRepository<'_> {
         Ok(())
     }
 
-    /// Cancels a pending or failed delivery, which unblocks the deliveries ordered
-    /// after it. An attempt in progress may still reach the receiver, but its
-    /// outcome is discarded, and its lease keeps holding back the deliveries
-    /// ordered after it until it expires, so none overtakes it.
+    /// Cancels a pending or failed delivery. An attempt in progress may still
+    /// reach the receiver, but its outcome is discarded.
     ///
     /// # Errors
     ///
@@ -547,83 +512,6 @@ impl DeliveryRepository<'_> {
     }
 }
 
-/// An ordered failure past retention, with its key, as cleanup locks them.
-struct StuckKey {
-    /// The failed delivery.
-    id: DeliveryId,
-    /// The key it holds back.
-    ordering_key: String,
-}
-
-impl DatabaseTransaction<'_> {
-    /// Abandons up to `keys` ordering keys held back by a failure that finished
-    /// over 30 days ago: cancels every delivery waiting behind the failure, so
-    /// none is sent out of order, then deletes the failure. The cancelled ones are
-    /// deleted 30 days later. Returns how many deliveries were cancelled or deleted.
-    ///
-    /// Each key is handled under locks on the failure and the key's ordering row,
-    /// taken before the deliveries waiting behind it are read. An operator retry
-    /// or cancel of the failure therefore waits for this transaction, then finds
-    /// the failure gone, and a delivery being inserted under the key makes this
-    /// skip the key. Each later statement sees every delivery committed before the
-    /// locks were taken.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if a query fails.
-    pub async fn abandon_stuck_deliveries(&mut self, keys: u32) -> Result<u64, DatabaseError> {
-        let mut changed = 0;
-        for _ in 0..keys {
-            let Some(stuck) = self.deliveries().lock_stuck_key().await? else {
-                break;
-            };
-            changed += self.deliveries().abandon(&stuck).await?;
-        }
-        Ok(changed)
-    }
-}
-
-impl DeliveryRepository<'_> {
-    /// Locks one failure past retention, and its key's ordering row, skipping
-    /// any already locked.
-    async fn lock_stuck_key(&mut self) -> Result<Option<StuckKey>, DatabaseError> {
-        run!(
-            self,
-            fetch_optional,
-            sqlx::query_as!(
-                StuckKey,
-                r#"SELECT failure.id AS "id: DeliveryId", failure.ordering_key AS "ordering_key!"
-                FROM deliveries failure
-                JOIN delivery_orderings ordering ON ordering.ordering_key = failure.ordering_key
-                WHERE failure.status = 'failed'
-                AND failure.finished_at < now() - interval '30 days'
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED"#,
-            )
-        )
-    }
-
-    /// Cancels the deliveries waiting behind a locked failure, then deletes it.
-    async fn abandon(&mut self, stuck: &StuckKey) -> Result<u64, DatabaseError> {
-        let cancelled = run!(
-            self,
-            execute,
-            sqlx::query!(
-                "UPDATE deliveries
-                SET status = 'cancelled', finished_at = now(), claim_token = NULL
-                WHERE ordering_key = $1 AND status = 'pending'",
-                stuck.ordering_key,
-            )
-        )?;
-        let deleted = run!(
-            self,
-            execute,
-            sqlx::query!("DELETE FROM deliveries WHERE id = $1", stuck.id.as_uuid())
-        )?;
-        Ok(cancelled.rows_affected() + deleted.rows_affected())
-    }
-}
-
 /// Announcements' emails.
 mod announcement;
 pub use announcement::{Announcement, AnnouncementEmail};
@@ -633,6 +521,6 @@ pub use backchannel::{BackchannelLogout, LogoutRecipient};
 /// Messages to account holders.
 mod email;
 pub use email::{Email, EmailMessage, PendingAddress, PendingRecovery};
-/// Database tests for fan-out, claims, leases and ordering.
+/// Database tests for fan-out, claims and leases.
 #[cfg(test)]
 mod tests;

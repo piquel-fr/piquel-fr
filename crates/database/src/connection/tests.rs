@@ -352,7 +352,6 @@ async fn runtime_role_has_only_row_privileges() {
         "DELETE FROM audit_checkpoints",
         "UPDATE audit_anchor SET position = position",
         "INSERT INTO audit_anchor (position) VALUES (1)",
-        "DELETE FROM event_consumers",
         "SELECT FROM _sqlx_migrations",
         "CREATE TABLE shadow (id INT)",
         "CREATE TEMPORARY TABLE shadow (id INT)",

@@ -38,7 +38,7 @@ impl Channel for Announcement {
     type Recipient = UserId;
     type Payload = AnnouncementId;
 
-    /// One unordered delivery per recipient of the sent announcement its email
+    /// One delivery per recipient of the sent announcement its email
     /// goes to ([`mail_recipients`]). Its `destination` names the account and the
     /// announcement, never the address.
     ///
@@ -64,7 +64,6 @@ impl Channel for Announcement {
                 destination: format!("account {user_id}, announcement {announcement_id}"),
                 recipient: user_id,
                 payload: *announcement_id,
-                ordering_key: None,
             })
             .collect())
     }

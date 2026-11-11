@@ -24,7 +24,7 @@ pub(super) enum DeliveriesCommand {
         #[arg(long, default_value_t = 100)]
         limit: u32,
     },
-    /// Attempt a failed delivery, or a cancelled unordered one, again now.
+    /// Attempt a failed or cancelled delivery again now.
     Retry {
         /// The delivery's ID.
         id: DeliveryId,
@@ -32,7 +32,7 @@ pub(super) enum DeliveriesCommand {
         #[arg(long)]
         reason: Reason,
     },
-    /// Cancel a pending or failed delivery, which unblocks the deliveries ordered after it.
+    /// Cancel a pending or failed delivery.
     Cancel {
         /// The delivery's ID.
         id: DeliveryId,
@@ -82,7 +82,6 @@ report!([DeliverySummary], self, out, {
             "CHANNEL",
             "STATUS",
             "ATTEMPTS",
-            "ORDER",
             "DUE OR FINISHED",
             "LAST ERROR",
             "DESTINATION",
@@ -94,11 +93,6 @@ report!([DeliverySummary], self, out, {
                 Cell::new(&delivery.channel),
                 delivery.status.into(),
                 delivery.attempts.into(),
-                delivery
-                    .ordering
-                    .as_ref()
-                    .map(|(key, ordinal)| Cell::new(format_args!("{key}#{ordinal}")))
-                    .into(),
                 delivery
                     .finished_at
                     .unwrap_or(delivery.next_attempt_at)

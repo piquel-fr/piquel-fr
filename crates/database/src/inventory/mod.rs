@@ -44,14 +44,12 @@ sourceorigin_common::str_enum! {
         DashboardSessions = "dashboard_sessions",
         /// The outbound delivery queue.
         Deliveries = "deliveries",
-        /// The next position of each ordered delivery key.
+        /// Unused since migration 0044, which says when it is dropped.
         DeliveryOrderings = "delivery_orderings",
         /// Domain events, the audit chain's content.
         DomainEvents = "domain_events",
         /// Digests of address verification links.
         EmailVerificationSecrets = "email_verification_secrets",
-        /// Event consumers' cursors.
-        EventConsumers = "event_consumers",
         /// The personal data of each event.
         EventPersonalData = "event_personal_data",
         /// Linked GitHub and Google identities.
@@ -187,7 +185,6 @@ impl Table {
             | Self::AuditAnchor
             | Self::AuditCheckpoints
             | Self::DeliveryOrderings
-            | Self::EventConsumers
             | Self::Invitations
             | Self::SigningKeys => Holds::Nothing,
         }

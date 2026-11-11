@@ -623,12 +623,8 @@ impl Change {
             Self::UnreserveHandle => {
                 "Anyone can claim the handle again, unless an account holds or held it."
             }
-            Self::RetryDelivery => {
-                "It is attempted again now. A cancelled ordered delivery cannot be retried: the deliveries after it may already have gone on without it."
-            }
-            Self::CancelDelivery => {
-                "It is not attempted again, and the deliveries ordered after it go on without it."
-            }
+            Self::RetryDelivery => "It is attempted again now.",
+            Self::CancelDelivery => "It is not attempted again unless it is retried.",
             Self::RotateSigningKey => {
                 "Publishes a new key, which signs after a day, once verifiers have fetched it; the current key signs until then. A key already waiting is kept. Every replica picks up the change within a minute."
             }

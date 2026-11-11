@@ -48,7 +48,7 @@ pub async fn delivery_list<'a>(
     Ok(view! {
         page_head(
             title: "Deliveries",
-            lead: "Emails and back-channel logouts, newest first. A delivery that failed holds back the ones ordered after it until it is retried or cancelled.".to_owned(),
+            lead: "Emails and back-channel logouts, newest first. A failed delivery is not attempted again until it is retried.".to_owned(),
         )
         <form method="get" action=(action) class="row search">
             <select name="status" aria-label="Status">
@@ -84,9 +84,6 @@ pub async fn delivery_list<'a>(
                                 <tr>
                                     <td>
                                         <code>(delivery.channel.as_str())</code> " " (delivery.destination.as_str())
-                                        if let Some((key, ordinal)) = &delivery.ordering {
-                                            <br><small class="muted">(format!("ordered {key} #{ordinal}"))</small>
-                                        }
                                     </td>
                                     <td><span class=(class!("badge", tone))>(label)</span></td>
                                     <td>(delivery.attempts.to_string())</td>

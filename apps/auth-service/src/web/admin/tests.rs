@@ -1715,7 +1715,6 @@ async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
         destination: "https://receiver.example".into(),
         recipient: (),
         payload: (),
-        ordering_key: None,
     };
     let id = harness
         .database

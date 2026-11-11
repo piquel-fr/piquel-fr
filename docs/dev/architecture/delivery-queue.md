@@ -34,14 +34,8 @@ page.
   use to deduplicate: it is the `jti` of logout tokens, and the source of an
   email's `Message-ID`. Auth-service's `deliveries/tests.rs` kills a replica
   mid-send, and stalls another past its lease, to check this end to end.
-- **Ordered per key.** Deliveries that share an ordering key are sent one at a
-  time, in the order their transactions committed, whatever the replicas' clocks
-  say. A failed one holds back the rest until an operator retries or cancels it,
-  which is recorded as `delivery_retried` or `delivery_cancelled` (cancelling one
-  can hold back a notice to a user), or for 30 days, after which cleanup abandons the key: the failure is deleted
-  and the deliveries behind it are cancelled, never sent out of order. A
-  cancelled one holds back the rest until its last attempt's lease expires. Deliveries
-  without a key are unordered.
+- **Unordered.** Each delivery is sent on its own, so a failed one never holds
+  back another. Receivers must not rely on the order deliveries arrive in.
 - **Never secret.** Payloads are stored as they are, so they never hold a
   plaintext secret. `last_error` holds a status code or an error kind, never a
   response body.
@@ -49,8 +43,7 @@ page.
 ## Life of a delivery
 
 1. `record` calls each registered channel's `Channel::deliveries`, which inserts
-   rows with status `pending`. An ordered delivery takes the next ordinal of its
-   key from `delivery_orderings`, which locks the key until commit.
+   rows with status `pending`.
 2. Every replica runs two workers per channel. A worker claims the longest-due
    delivery with `FOR UPDATE SKIP LOCKED`, sets a fresh claim token and a 60 second
    lease, and commits. Idle workers poll every second.
@@ -68,12 +61,7 @@ page.
    - Permanent error, or a retry later than the channel's `MAX_AGE` after
      creation: `failed`.
 5. The cleanup job deletes `succeeded` deliveries after 7 days and `failed` or
-   `cancelled` ones after 30. A failed ordered delivery is abandoned instead,
-   in a cleanup transaction covering up to 1,000 keys. For each key, cleanup
-   locks the failure and the key's ordering row, cancels every delivery waiting
-   behind it, and deletes it. An operator
-   retry or cancel waits for that transaction and then finds the failure gone,
-   and a key whose next delivery is still being inserted is skipped.
+   `cancelled` ones after 30.
 
 ## Outbound HTTP
 
@@ -163,7 +151,7 @@ the `Message-ID` scheme with it.
 
 Sending an announcement writes a notification of kind `announcement`, with its
 subject and text, to each recipient's inbox, from the recipients it locked, and
-records `AnnouncementSent`, whose fan-out creates one unordered delivery per
+records `AnnouncementSent`, whose fan-out creates one delivery per
 recipient with a primary verified address, leaving out, unless the announcement
 is essential, those who turned announcements' email off
 ([email preferences](notifications.md#email-preferences)). These emails go out
@@ -187,15 +175,15 @@ account's announcement deliveries, which would find no recipient left.
 
 ```sh
 auth-service deliveries list [--status failed] [--channel email] [--limit 100]
-auth-service deliveries retry <id> --reason "…"    # a failed, or cancelled unordered, delivery
+auth-service deliveries retry <id> --reason "…"    # a failed or cancelled delivery
 auth-service deliveries cancel <id> --reason "…"   # a pending or failed delivery
 ```
 
-`just auth deliveries …` runs them with the caller's configuration. Retrying a
+`just auth deliveries …` runs them with the caller's configuration, and each
+change is recorded as `delivery_retried` or `delivery_cancelled`. Retrying a
 delivery makes it due now and restarts its channel's `MAX_AGE`. Cancelling an
-ordered delivery is final, since the deliveries after it may already be sent. Cancelling an attempt in progress
-cannot stop it from reaching the receiver, but its outcome is discarded, and the
-deliveries ordered after it wait for its lease to expire.
+attempt in progress cannot stop it from reaching the receiver, but its outcome
+is discarded.
 
 ### Metrics
 
@@ -220,7 +208,7 @@ gauges until the next one succeeds.
 
 - **`backchannel_logout`**: OIDC Back-Channel Logout 1.0 tokens. Every early end of
   a session goes through `DatabaseTransaction::revoke_sessions`, which records one
-  `SessionRevoked` per session. Its fan-out creates one unordered delivery per
+  `SessionRevoked` per session. Its fan-out creates one delivery per
   client that received tokens from the session (`oidc_session_clients`, which a
   trigger fills whenever any release redeems a code) and registered a back-channel
   logout URI. The recipient copies the
