@@ -28,8 +28,8 @@ auth-service client create blog --name Blog --trusted --reason "SourceOrigin's b
 An app with a server, which keeps a secret and may refresh tokens:
 
 ```sh
-auth-service client create notes --name Notes --confidential --refresh --reason "Notes app" \
-    --redirect-uri https://notes.example/callback --scope openid --scope notes:read
+auth-service client create notes --name Notes --confidential --reason "Notes app" \
+    --redirect-uri https://notes.example/callback --scope openid --scope offline_access --scope notes:read
 ```
 
 For a confidential client, the command prints its secret once: store it in the
@@ -149,9 +149,13 @@ sign-in**. See [passkey sign-in on your own pages](../../user/apps/passkey-sign-
   normalizes them: `https://app.example/`, not `https://APP.example`. The
   origins of an enabled public client's redirect URIs may call the token,
   revocation and userinfo endpoints from a browser.
-- **Scopes** default to `openid`, `profile` and `email`.
-- **Refresh tokens** (`--refresh`) are issued when the client also requests
-  `offline_access`.
+- **Scopes** default to `openid`, `profile` and `email`, and `offline_access`
+  for a confidential client, which the SDKs' login routes always request.
+- **Refresh tokens** are issued when the client also requests
+  `offline_access`. A confidential client may receive them unless registered
+  with `--no-refresh`, and a public one only with `--refresh`. The dashboard's
+  and the developer console's forms start with the same defaults for the kind
+  chosen.
 - **Trusted** (`--trusted`) skips the consent screen. It is for first-party
   clients only.
 - **Pushed requests** (`--require-par`) make the client push its authorization

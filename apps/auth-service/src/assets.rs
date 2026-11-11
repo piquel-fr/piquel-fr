@@ -45,22 +45,29 @@ impl EmbeddedAssets {
     /// to the clipboard; auth's pages and the dashboard's both load it.
     pub(crate) const COPY_SCRIPT: Asset =
         Asset::script("copy", include_bytes!("../assets/copy.js"));
+    /// The client form script, which switches a new client's scopes and refresh
+    /// tokens to the defaults of the kind chosen; auth's pages and the
+    /// dashboard's both load it.
+    pub(crate) const CLIENT_FORM_SCRIPT: Asset =
+        Asset::script("client-form", include_bytes!("../assets/client-form.js"));
     /// The scripts every page of auth's own loads.
-    pub(crate) const SCRIPTS: [Asset; 4] = [
+    pub(crate) const SCRIPTS: [Asset; 5] = [
         Self::SCRIPT,
         Self::PICTURE_SCRIPT,
         Self::SEARCH_SCRIPT,
         Self::COPY_SCRIPT,
+        Self::CLIENT_FORM_SCRIPT,
     ];
     /// The admin dashboard's script, which confirms it with a passkey in a
     /// dialog on its page. Auth's own pages never load it.
     pub(crate) const DASHBOARD_SCRIPT: Asset =
         Asset::script("dashboard", include_bytes!("../assets/dashboard.js"));
     /// The scripts every dashboard page loads.
-    pub(crate) const DASHBOARD_SCRIPTS: [Asset; 3] = [
+    pub(crate) const DASHBOARD_SCRIPTS: [Asset; 4] = [
         Self::DASHBOARD_SCRIPT,
         Self::SEARCH_SCRIPT,
         Self::COPY_SCRIPT,
+        Self::CLIENT_FORM_SCRIPT,
     ];
     /// The files the admin dashboard serves too: the stylesheet and the
     /// typefaces it links.

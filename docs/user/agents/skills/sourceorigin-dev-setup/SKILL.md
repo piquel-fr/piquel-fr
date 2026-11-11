@@ -42,9 +42,9 @@ this machine:
 - **Redirect URIs**: `http://127.0.0.1:3000/auth/callback`.
 - **Post-logout URIs**: `http://127.0.0.1:3000/`, if the app sends users back
   there after signing out.
-- **Scopes**: the app's scopes, and `offline_access`, which the SDKs' login
-  routes always request.
-- **Allow refresh tokens**: on.
+- **Scopes**: the app's scopes. Keep `offline_access`, which an app with a
+  backend starts with: the SDKs' login routes always request it.
+- **Allow refresh tokens**: on, as it starts.
 - **Back-channel logout URI**: empty. Auth posts logout tokens only to HTTPS
   URIs with public addresses, so it can't reach this machine.
 

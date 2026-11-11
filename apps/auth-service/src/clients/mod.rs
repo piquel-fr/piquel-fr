@@ -14,7 +14,6 @@ use sourceorigin_common::{
     ClientId, UserId,
     clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RelatedOrigin},
     events::{DomainEvent, EventContext},
-    protocol::oauth::Scope,
 };
 use sourceorigin_crypto::{ClientSecret, CryptoError};
 use sourceorigin_repository::{
@@ -33,8 +32,6 @@ pub(crate) use owned::{
     OwnedClientError, OwnedClientView,
 };
 
-/// Scopes a new client may request when none are given.
-pub const DEFAULT_CLIENT_SCOPES: [Scope; 3] = [Scope::OpenId, Scope::Profile, Scope::Email];
 /// Live clients an account may manage at once. Deleting one frees its place.
 pub const MAX_OWNED_CLIENTS: u32 = 10;
 /// Clients an account may register a day, deleted ones included. A deleted client

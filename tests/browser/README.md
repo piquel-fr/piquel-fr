@@ -90,7 +90,6 @@ cli client create browser-e2e-inline --name 'Browser E2E inline' --trusted \
     --redirect-uri https://related-e2e.test/callback
 cli client origin add browser-e2e-inline https://related-e2e.test
 cli client create browser-e2e-server --name 'Browser E2E server' --trusted --confidential \
-    --scope openid --scope profile --scope email --scope offline_access --refresh \
     --redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri http://127.0.0.1:4100/
 ```
 

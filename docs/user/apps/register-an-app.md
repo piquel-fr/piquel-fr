@@ -30,11 +30,11 @@ and never appear in the console: see [OIDC clients](../../dev/operations/clients
 
    You can't change this later. Both kinds sign in with PKCE.
 4. Fill in **Redirect URIs**, one per line.
-5. If your server signs users in with the SDKs' login routes, check
-   `offline_access` under **Scopes**, and **Allow refresh tokens**. The routes
-   request `offline_access` at every sign-in, and use refresh tokens to learn
-   when a user's session at Origin Auth ends. Leave the other settings as they are
-   for now: [app settings](app-settings.md) explains each one.
+5. Leave the other settings as they are for now: [app settings](app-settings.md)
+   explains each one. An app with a backend starts with `offline_access` under
+   **Scopes** and **Allow refresh tokens** on, which the SDKs' login routes
+   need: they request `offline_access` at every sign-in, and use refresh tokens
+   to learn when a user's session at Origin Auth ends.
 6. Select **Register app**. If you haven't used your passkey in the last five
    minutes, your browser asks for it first.
 

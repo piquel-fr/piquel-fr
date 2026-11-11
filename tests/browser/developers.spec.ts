@@ -58,6 +58,24 @@ test('the developer console registers an app, shows its secret once, and the app
   await page.getByLabel('App name', { exact: true }).fill('Console E2E');
   await page.getByRole('textbox', { name: 'Redirect URIs', exact: true }).fill(redirectUri);
 
+  // Each kind starts with its defaults, which the SDKs' login routes need for an app
+  // with a backend: `offline_access` and refresh tokens. A choice the user made stays.
+  const offline = page.getByRole('switch', { name: 'offline_access' });
+  const refresh = page.getByLabel('Allow refresh tokens', { exact: true });
+  await expect(offline).toBeChecked();
+  await expect(refresh).toBeChecked();
+  await page.getByLabel('No, it runs in the browser or on a device').check();
+  await expect(offline).not.toBeChecked();
+  await expect(refresh).not.toBeChecked();
+  await page.getByLabel('Yes, a web app with a backend').check();
+  await expect(offline).toBeChecked();
+  await expect(refresh).toBeChecked();
+  await refresh.uncheck();
+  await page.getByLabel('No, it runs in the browser or on a device').check();
+  await page.getByLabel('Yes, a web app with a backend').check();
+  await expect(refresh).not.toBeChecked();
+  await refresh.check();
+
   // A confidential app's secret shows only in the answer to its registration, which
   // no cache keeps, and never reaches a URL, the history or the browser's storage.
   const registered = page.waitForResponse(

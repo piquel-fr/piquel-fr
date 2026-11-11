@@ -4,7 +4,7 @@ use super::{
     CliError, Confirm, Console,
     output::{Cell, Joined, Single, Style, report},
 };
-use crate::{Applied, ClientDetails, DEFAULT_CLIENT_SCOPES, GracePeriod, PUBLIC_BASE_URL, Reason};
+use crate::{Applied, ClientDetails, GracePeriod, PUBLIC_BASE_URL, Reason};
 use clap::{Args, Subcommand};
 use sourceorigin_common::{
     ClientId,
@@ -437,16 +437,20 @@ pub(super) struct CreateClient {
     /// A page the browser may return to after logout; repeat for several.
     #[arg(long = "post-logout-uri")]
     post_logout_uris: Vec<RedirectUri>,
-    /// A scope the client may request; repeat for several. Defaults to openid,
-    /// profile and email.
+    /// A scope the client may request; repeat for several. Defaults to `openid`,
+    /// `profile` and `email`, and `offline_access` for a confidential client.
     #[arg(long = "scope")]
     scopes: Vec<ScopeName>,
     /// The client runs on a server and authenticates with a secret.
     #[arg(long)]
     confidential: bool,
     /// The client may receive refresh tokens when it requests `offline_access`.
-    #[arg(long)]
+    /// The default for a confidential client.
+    #[arg(long, conflicts_with = "no_refresh")]
     refresh: bool,
+    /// The client receives no refresh tokens. The default for a public client.
+    #[arg(long)]
+    no_refresh: bool,
     /// The client skips the consent screen. Only for first-party clients.
     #[arg(long)]
     trusted: bool,
@@ -513,25 +517,30 @@ impl ApplyClient {
 impl CreateClient {
     /// Checks the counts of the repeated options and builds the registration.
     fn registration(self) -> Result<ClientRegistration, CliError> {
+        let kind = if self.confidential {
+            ClientKind::Confidential
+        } else {
+            ClientKind::Public
+        };
         let scopes = if self.scopes.is_empty() {
-            DEFAULT_CLIENT_SCOPES.map(ScopeName::from).into()
+            kind.default_scopes()
+                .iter()
+                .copied()
+                .map(ScopeName::from)
+                .collect()
         } else {
             self.scopes
         };
         Ok(ClientRegistration {
             id: self.id,
             display_name: self.name,
-            kind: if self.confidential {
-                ClientKind::Confidential
-            } else {
-                ClientKind::Public
-            },
+            kind,
             redirect_uris: RedirectUris::new(self.redirect_uris)
                 .map_err(CliError::count("redirect URIs"))?,
             post_logout_uris: PostLogoutUris::new(self.post_logout_uris)
                 .map_err(CliError::count("post-logout URIs"))?,
             allowed_scopes: AllowedScopes::new(scopes).map_err(CliError::count("scopes"))?,
-            allow_refresh: self.refresh,
+            allow_refresh: self.refresh || (kind.default_refresh() && !self.no_refresh),
             trusted: self.trusted,
             require_pushed_authorization_requests: self.require_par,
             backchannel_logout_uri: self.backchannel_logout_uri,

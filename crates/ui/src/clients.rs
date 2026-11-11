@@ -247,6 +247,26 @@ pub struct ClientDraft {
     pub backchannel_logout_uri: String,
 }
 
+impl ClientDraft {
+    /// The settings a new client of `kind` starts with: its default scopes, and
+    /// refresh tokens if its kind allows them by default.
+    #[must_use]
+    pub fn new_client(kind: ClientKind) -> Self {
+        Self {
+            scopes: kind.default_scopes().iter().copied().collect(),
+            allow_refresh: Checkbox(kind.default_refresh()),
+            ..Self::default()
+        }
+    }
+
+    /// The names of the scope and refresh switches it turns on, space-separated.
+    fn switches(&self) -> String {
+        let mut switches = self.scopes.names();
+        switches.extend(self.allow_refresh.0.then(|| "allow_refresh".to_owned()));
+        switches.join(" ")
+    }
+}
+
 impl From<&ClientRow<'_>> for ClientDraft {
     /// `client`'s settings as they are. Only standard scopes have a checkbox.
     fn from(client: &ClientRow<'_>) -> Self {
@@ -468,7 +488,8 @@ async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
 /// A switch sending `name` when on, or with a `value`, a radio button of the
 /// group `name` choosing it, `checked` or not, which takes the focus if
 /// `autofocus`: its `label` beside it, then its `detail` below, which describes
-/// it. The switch is a checkbox with the `switch` role, which the stylesheet
+/// it. A radio button's `defaults` name the switches choosing it turns on, for
+/// the client form script. The switch is a checkbox with the `switch` role, which the stylesheet
 /// draws as a sliding toggle at the right end of a boxed row; switches inside a
 /// `choices` element share one box.
 #[component]
@@ -477,6 +498,7 @@ pub(crate) async fn choice<'a>(
     #[default] value: Option<&'a str>,
     checked: bool,
     #[default] autofocus: bool,
+    #[default] defaults: Option<String>,
     #[into] label: Child<'_>,
     #[into] detail: Child<'_>,
 ) -> Result<impl View> {
@@ -492,6 +514,7 @@ pub(crate) async fn choice<'a>(
                 value=(value)
                 checked=(checked)
                 autofocus=(autofocus)
+                data-defaults=(defaults)
                 aria-describedby=(input.described_by())
             >
             <label for=(input.id.as_str())>(label)</label>
@@ -500,7 +523,9 @@ pub(crate) async fn choice<'a>(
     })
 }
 
-/// The question of a new client's kind, `chosen` checked.
+/// The question of a new client's kind, `chosen` checked. Each answer names the
+/// switches its kind starts with on, so the client form script turns them on
+/// when it is chosen.
 #[component]
 async fn kind_question(chosen: ClientKind) -> Result<impl View> {
     Ok(view! {
@@ -521,6 +546,7 @@ async fn kind_question(chosen: ClientKind) -> Result<impl View> {
                     name: "kind",
                     value: Some(kind.as_str()),
                     checked: kind == chosen,
+                    defaults: Some(ClientDraft::new_client(kind).switches()),
                     label: view! { (answer) },
                     detail: view! { (detail) },
                 )

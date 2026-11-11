@@ -153,6 +153,30 @@ impl ClientKind {
             Self::Confidential => ClientAuthMethod::ClientSecretBasic,
         }
     }
+
+    /// The scopes a new client of this kind may request unless its registration
+    /// names others: `openid`, `profile` and `email`, and `offline_access` for a
+    /// confidential client, which the SDKs' login routes always request.
+    #[must_use]
+    pub const fn default_scopes(self) -> &'static [Scope] {
+        match self {
+            Self::Public => &[Scope::OpenId, Scope::Profile, Scope::Email],
+            Self::Confidential => &[
+                Scope::OpenId,
+                Scope::Profile,
+                Scope::Email,
+                Scope::OfflineAccess,
+            ],
+        }
+    }
+
+    /// Whether a new client of this kind may receive refresh tokens unless its
+    /// registration says otherwise: a confidential one may, so the SDKs' login
+    /// routes keep its sessions.
+    #[must_use]
+    pub const fn default_refresh(self) -> bool {
+        matches!(self, Self::Confidential)
+    }
 }
 
 /// Who manages a client, fixed when it is registered.

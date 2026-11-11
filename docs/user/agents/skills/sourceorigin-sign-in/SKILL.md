@@ -36,11 +36,12 @@ https://auth.sourceorigin.dev/developers/new and fill in:
 - **Post-logout URIs**: `https://<app host>/`, if users should come back to the
   app after signing out.
 - **Scopes**: `openid`, `profile` for the user's handle, name and picture,
-  `email` only if the app needs it, and `offline_access`. The login routes
-  request `offline_access` on every sign-in, and auth refuses a sign-in that
-  asks for a scope the app may not request.
-- **Allow refresh tokens**: on. Without refresh tokens, a session ends
-  with its access token, within five minutes.
+  `email` only if the app needs it, and `offline_access`, which an app with a
+  backend starts with. The login routes request `offline_access` on every
+  sign-in, and auth refuses a sign-in that asks for a scope the app may not
+  request.
+- **Allow refresh tokens**: on, as it starts. Without refresh tokens, a session
+  ends with its access token, within five minutes.
 
 After **Register app**, the console shows the client secret once. Ask the
 person to put it in the app's environment themselves, and not to paste it into

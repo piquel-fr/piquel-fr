@@ -312,14 +312,15 @@ async fn signing_in_asks_auth_for_a_passkey_once() {
     let csp = policy(&page).to_owned();
     let handoff = format!("form-action 'self' {AUTH_ORIGIN}{};", routes::page::ADMIN);
     assert!(csp.contains(&handoff), "{csp}");
-    let (script, search, copy) = (
+    let (script, search, copy, client_form) = (
         EmbeddedAssets::DASHBOARD_SCRIPT.path(),
         EmbeddedAssets::SEARCH_SCRIPT.path(),
         EmbeddedAssets::COPY_SCRIPT.path(),
+        EmbeddedAssets::CLIENT_FORM_SCRIPT.path(),
     );
     assert!(
         csp.contains(&format!(
-            "script-src {DASHBOARD}{script} {DASHBOARD}{search} {DASHBOARD}{copy};"
+            "script-src {DASHBOARD}{script} {DASHBOARD}{search} {DASHBOARD}{copy} {DASHBOARD}{client_form};"
         )) && csp.contains("connect-src 'self';")
             && csp.contains(&format!("img-src {AUTH_ORIGIN};")),
         "{csp}"
