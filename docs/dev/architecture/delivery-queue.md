@@ -76,8 +76,11 @@ Destinations come from client registrations, which third parties can supply.
   6to4 address is also checked as the IPv4 address it reaches. The connection
   goes to the checked addresses. IP literals get the same check, and proxies are
   never used, since a proxy would resolve the name itself.
-- 5 seconds to connect, 10 in total. Only the first 64 KiB of a response body
-  are read.
+- 5 seconds to connect, 10 in total.
+- Only the status decides the outcome. It is taken as soon as the response's
+  headers arrive, and the body is never read, so a receiver that accepts a
+  delivery and then stalls cannot turn it into a retry. A profile picture is
+  the one body fetched, up to its size limit.
 
 HTTP 408, 429 and 5xx, timeouts, connection and DNS failures are retryable. Other
 statuses, refused destinations and redirects fail at once.

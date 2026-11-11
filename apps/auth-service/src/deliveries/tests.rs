@@ -208,10 +208,12 @@ async fn non_public_and_plain_http_destinations_are_refused() {
     }
 }
 
-/// A redirect is refused rather than followed, a busy receiver's `Retry-After`
-/// comes back with its retryable status, and a long body is cut at 64 KiB.
+/// A successful status is accepted before any of the body arrives, so a receiver
+/// that stalls after its headers still counts as reached. A redirect is refused
+/// rather than followed, a busy receiver's `Retry-After` comes back with its
+/// retryable status, and a fetched file is cut at its limit.
 #[tokio::test]
-async fn redirects_are_refused() {
+async fn responses_are_classified_by_status_alone() {
     let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind receiver");
@@ -220,6 +222,14 @@ async fn redirects_are_refused() {
         tcp.local_addr().expect("address").port()
     );
     let receiver = Router::new()
+        .route(
+            "/stalled",
+            get(|| async {
+                axum::body::Body::from_stream(tokio_stream::pending::<
+                    Result<Vec<u8>, std::convert::Infallible>,
+                >())
+            }),
+        )
         .route(
             "/moved",
             get(|| async { axum::response::Redirect::temporary("https://example.com/") }),
@@ -230,15 +240,15 @@ async fn redirects_are_refused() {
                 (StatusCode::SERVICE_UNAVAILABLE, [(RETRY_AFTER, "30")]).into_response()
             }),
         )
-        .route("/ok", get(|| async { vec![b'a'; 100 * 1024] }));
+        .route("/long", get(|| async { vec![b'a'; 100 * 1024] }));
     let client = OutboundClient::local(TlsListener::serve(tcp, receiver));
     let send = async |path: &str| {
         client
             .send(Method::GET, &format!("{origin}{path}"), |request| request)
             .await
-            .map(|response| (response.status, response.body.len()))
     };
-    assert_eq!(send("/ok").await, Ok((StatusCode::OK, 64 * 1024)));
+    let stalled = tokio::time::timeout(SEND_TIMEOUT / 2, send("/stalled"));
+    assert_eq!(stalled.await, Ok(Ok(())));
     assert_eq!(
         send("/moved").await,
         Err(DeliveryError::Permanent(Failure::Redirect))
@@ -250,6 +260,11 @@ async fn redirects_are_refused() {
             retry_after: Some(Duration::from_secs(30)),
         })
     );
+    let long = client
+        .get(&format!("{origin}/long"), "*/*", 64 * 1024)
+        .await
+        .map(|body| body.len());
+    assert_eq!(long, Ok(64 * 1024));
 }
 
 /// Declares channels for worker tests, whose deliveries are inserted directly.
