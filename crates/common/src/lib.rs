@@ -9,6 +9,7 @@
 //! - `client-spans`: `SendTraced`, a client span around each `reqwest` request.
 //! - `config`: environment variables, validated origins and secret references.
 //! - `email`: email address normalization.
+//! - `jws`: the RS256 verifier auth and the SDKs share, and compact JWS splitting.
 //! - `events`: the domain events auth records, the notifications they give
 //!   owners, and the alerts administrators are shown.
 //! - `similarity`: look-alike detection, and the handle and client name checks

@@ -90,7 +90,9 @@ Checks run in this order, and the first failure is reported. Each failure is an
    leading zero bytes, and its exponent is 65537, the only one every runtime the
    SDKs support imports (Cloudflare Workers accepts just 3, 17 and 65537). Any
    other key is the key set's fault, a `keys` error (`unusable_key`), not the
-   token's. Then the signature verifies (`bad_signature`).
+   token's. Then the signature verifies (`bad_signature`). In Rust, this step and
+   the splitting of the token are `sourceorigin_common::protocol::jws`, the one
+   RS256 verifier the Rust SDK and auth itself share.
 7. The claims parse as the shared claim type, so required claims are present and
    well typed (`invalid_claims`). A logout token's `events` must hold the
    back-channel logout event with an object value, and it must have no `nonce`,

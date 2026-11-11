@@ -74,7 +74,7 @@ pub enum TokenError {
     Keys(#[source] KeyError),
     /// The signature does not verify.
     #[error("token signature is invalid")]
-    BadSignature(#[source] jsonwebtoken::signature::Error),
+    BadSignature,
     /// Claims are missing or have the wrong type.
     #[error("token claims are invalid")]
     InvalidClaims(#[source] serde_json::Error),
@@ -177,7 +177,7 @@ impl TokenError {
             Self::WrongType { .. } => ErrorReason::WrongType,
             Self::UnsupportedAlgorithm(_) => ErrorReason::UnsupportedAlgorithm,
             Self::UnknownKey(_) => ErrorReason::UnknownKey,
-            Self::BadSignature(_) => ErrorReason::BadSignature,
+            Self::BadSignature => ErrorReason::BadSignature,
             Self::InvalidClaims(_) | Self::InvalidSubject(_) | Self::NoLogoutTarget => {
                 ErrorReason::InvalidClaims
             }

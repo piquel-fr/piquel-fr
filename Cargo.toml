@@ -108,8 +108,6 @@ lettre = { version = "0.11", default-features = false, features = ["builder", "s
 # Decodes the SMTP user in AUTH_SMTP_URL; already in the tree through url and lettre.
 percent-encoding = "2.3"
 
-# JWS signature checks only; the SDK validates claims itself.
-jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
 # The workspace's one cryptographic library, and rustls's provider for every TLS
 # client: hashes, HMAC, PBKDF2, AES-256-GCM, RSA and Ed25519 signatures, and OS
 # randomness. Its RSA is constant-time, which the RustCrypto `rsa` crate's

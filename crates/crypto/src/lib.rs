@@ -50,9 +50,9 @@ pub enum CryptoError {
     /// A PEM private key has no PKCS#8 block.
     #[error("private key PEM must hold a PRIVATE KEY block")]
     Pem,
-    /// An RSA key is too small.
-    #[error("RSA signing key must contain at least 2048 bits")]
-    RsaKeySize,
+    /// A public key that every SDK would refuse to verify with.
+    #[error("signing key cannot verify signatures")]
+    UnusableKey(#[source] sourceorigin_common::protocol::jws::KeyDefect),
     /// The key identifier cannot safely appear in JWT headers.
     #[error("signing key ID must contain 1 to 128 characters without whitespace")]
     KeyId,

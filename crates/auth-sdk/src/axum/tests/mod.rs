@@ -261,8 +261,11 @@ fn code(sub: &str, nonce: &str) -> String {
 
 /// Signs `claims` as auth signs tokens of `typ`, with the vectors' `key-2025`.
 fn sign(claims: &serde_json::Value, typ: &str) -> String {
+    use aws_lc_rs::{
+        rand::SystemRandom,
+        signature::{RSA_PKCS1_SHA256, RsaKeyPair},
+    };
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-    use jsonwebtoken::{EncodingKey, crypto::aws_lc::DEFAULT_PROVIDER};
     let pem = include_str!("../../../../../tests/sdk-vectors/keys/key-2025.pem");
     let pkcs8 = STANDARD
         .decode(
@@ -271,15 +274,18 @@ fn sign(claims: &serde_json::Value, typ: &str) -> String {
                 .collect::<String>(),
         )
         .expect("PEM");
-    // jsonwebtoken reads RSA keys in PKCS#1 form, which the PKCS#8 form of a
-    // 2048-bit key wraps in a fixed 26-byte header.
-    let key = EncodingKey::from_rsa_der(&pkcs8[26..]);
+    let key = RsaKeyPair::from_pkcs8(&pkcs8).expect("RSA key");
     let encode = |value: &serde_json::Value| URL_SAFE_NO_PAD.encode(value.to_string());
     let header = json!({ "alg": "RS256", "kid": "key-2025", "typ": typ });
     let input = format!("{}.{}", encode(&header), encode(claims));
-    let signer =
-        (DEFAULT_PROVIDER.signer_factory)(&jsonwebtoken::Algorithm::RS256, &key).expect("signer");
-    let signature = signer.try_sign(input.as_bytes()).expect("signature");
+    let mut signature = vec![0; key.public_modulus_len()];
+    key.sign(
+        &RSA_PKCS1_SHA256,
+        &SystemRandom::new(),
+        input.as_bytes(),
+        &mut signature,
+    )
+    .expect("signature");
     format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
 }
 

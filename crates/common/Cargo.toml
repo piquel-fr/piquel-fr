@@ -18,12 +18,16 @@ email = ["dep:unicode-normalization"]
 # Domain events recorded by auth. Audit chain verifications are recorded as the
 # admin view `AuditVerification`.
 events = ["dep:serde_json", "admin", "email"]
+# The RS256 verifier and compact JWS splitting, for auth and the SDKs.
+jws = ["dep:aws-lc-rs", "dep:base64"]
 # Look-alike detection for handles, client names and the names reserved from them.
 similarity = ["dep:unicode-security"]
 # SQLx decoding for identifiers and `str_enum!` vocabularies; only `crates/database` enables it.
 sqlx = ["dep:sqlx"]
 
 [dependencies]
+aws-lc-rs = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 chrono.workspace = true
 reqwest = { workspace = true, optional = true }
 serde.workspace = true
