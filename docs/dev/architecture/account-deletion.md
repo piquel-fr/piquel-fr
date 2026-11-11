@@ -130,7 +130,7 @@ It holds every record auth keeps about the account, and no secret, digest or key
 material: passkeys show their label, dates and backup state only. Only the owner
 may download it, never an administrator, since it carries every IP address and
 every event about the account out of auth. Like every response, it is never
-cached. Version 5 holds:
+cached. Version 6 holds:
 
 - the profile, picture, handles, administrator rights, email addresses,
   consents and refresh grants;

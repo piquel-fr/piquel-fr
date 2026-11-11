@@ -220,11 +220,12 @@ async fn addresses_change_their_primary_and_are_removed() {
     assert!(page.contains("Receives security notices"), "{page}");
 }
 
-/// The handle can change once its cooldown is over. A refusal says why, with the
-/// handle typed still in the form, and a change says so.
+/// A new account can change its handle at once. A refusal says why, with the
+/// handle typed still in the form, and a change says so and when the handle can
+/// change again.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_handle_changes_once_its_cooldown_is_over() {
+async fn a_new_account_changes_its_handle_at_once() {
     let replicas = Replicas::new().await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
@@ -244,13 +245,8 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
         page.contains(&format!(r#"<span class="mono">@{current}</span>"#)),
         "{page}"
     );
-    assert!(page.contains("You can change it again on"), "{page}");
+    assert!(!page.contains("You can change it again on"), "{page}");
 
-    database
-        .users()
-        .age_handle_change(browser.user_id, 31)
-        .await
-        .expect("age");
     let opened = ProfileState {
         open: Some(ProfileDialog::Handle),
         ..ProfileState::default()
@@ -280,6 +276,7 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
         page.contains(&format!(r#"<span class="mono">@{renamed}</span>"#)),
         "{page}"
     );
+    assert!(page.contains("You can change it again on"), "{page}");
 }
 
 /// The display name changes from the profile, without a passkey confirmation. A

@@ -41,9 +41,10 @@ links to the old one stop finding you. Apps see the new handle the next time
 they refresh your profile. The old handle stays reserved for you, so nobody
 else can take it, and you can take it back later.
 
-You can change your handle once every 30 days, counting from when you created
-your account too. Until then, its **Change** button is disabled, and the page
-says when you can change it again.
+If the handle you chose when you signed up isn't right, you can change it
+straight away. After that, each change waits 30 days from the one before.
+Until then, its **Change** button is disabled, and the page says when you can
+change it again.
 
 ## Change your display name
 

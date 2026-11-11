@@ -12,8 +12,9 @@ pub struct StoredUser {
     pub id: UserId,
     /// Public identifier and login name.
     pub handle: Handle,
-    /// When the handle last changed, or the account was created.
-    pub handle_changed_at: DateTime<Utc>,
+    /// When the handle last changed, or `None` while it is the one chosen at
+    /// signup.
+    pub handle_changed_at: Option<DateTime<Utc>>,
     /// Name shown to the user and to relying parties.
     pub display_name: String,
     /// Starts at 1; bumped when profile claims change.

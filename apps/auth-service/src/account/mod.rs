@@ -196,10 +196,9 @@ pub(crate) struct Profile {
 impl From<StoredUser> for Profile {
     /// Keeps what the account's pages show.
     fn from(user: StoredUser) -> Self {
-        let changeable_at = user.handle_changed_at + handles::COOLDOWN;
         Self {
+            handle_changeable_at: handles::changeable_at(&user),
             handle: user.handle,
-            handle_changeable_at: (changeable_at > Utc::now()).then_some(changeable_at),
             display_name: user.display_name,
             picture: user.picture,
         }

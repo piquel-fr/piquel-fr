@@ -36,7 +36,7 @@ use tracing::Instrument;
 /// The `format` of every export.
 const FORMAT: &str = "sourceorigin.account-export";
 /// The export's version; a change to its shape gets a new one.
-const VERSION: u32 = 5;
+const VERSION: u32 = 6;
 /// Where the serialized credential holds whether the passkey may be synced.
 const BACKUP_ELIGIBLE_POINTER: &str = "/cred/backup_eligible";
 /// Where the serialized credential holds whether the passkey is synced.
@@ -59,14 +59,15 @@ static STREAMING: Semaphore = Semaphore::const_new(STREAMS);
 const VIEWS: &str = "account_viewed";
 
 /// Everything auth stores about an account, read from one snapshot and streamed
-/// as one document: `{"format": "sourceorigin.account-export", "version": 5, …,
+/// as one document: `{"format": "sourceorigin.account-export", "version": 6, …,
 /// "events": […]}`. Version 2 added the profile picture; version 3 moved
 /// dashboard sessions under the sessions they rest on. Version 4 added what
 /// ended and is still stored (revoked passkeys, unlinked identities, ended
 /// sessions), each session's apps, the owned apps' related origins, and every
 /// event about the account as stored, which replaced its history, deleted apps,
 /// notifications of kinds a newer release wrote, and received announcements;
-/// version 5 the known devices.
+/// version 5 the known devices; in version 6, the profile's `handle_changed_at`
+/// is `null` until the handle first changes.
 pub(crate) struct AccountExport {
     /// Every section but the events, read when the export starts.
     records: Records,
@@ -135,8 +136,8 @@ struct Profile {
     id: UserId,
     /// Handle, also the login name.
     handle: Handle,
-    /// When the handle last changed.
-    handle_changed_at: DateTime<Utc>,
+    /// When the handle last changed, if it has since signup.
+    handle_changed_at: Option<DateTime<Utc>>,
     /// Name shown to the user and to applications.
     display_name: String,
     /// Whether the account can sign in.

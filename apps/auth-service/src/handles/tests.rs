@@ -5,12 +5,12 @@ use crate::security::SessionError;
 use crate::tests::{Browser, Replicas};
 use sourceorigin_common::AuthenticationMethod;
 
-/// A rename needs a passkey confirmation, and the cooldown to have passed since the
-/// last change, reclaims included. It bumps the profile version and records the
-/// change.
+/// A rename needs a passkey confirmation. A new account may change its handle at
+/// once; every later change, reclaims included, waits out the cooldown since the
+/// last one. A rename bumps the profile version and records the change.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn renames_wait_out_the_cooldown() {
+async fn the_first_rename_is_free_and_later_ones_wait_out_the_cooldown() {
     let database = Replicas::database().await;
     let account = AccountService::new(database.clone());
     let browser = Browser::new_account(&database).await;
@@ -43,15 +43,8 @@ async fn renames_wait_out_the_cooldown() {
         account.rename_handle(&social, &renamed).await,
         Err(AccountError::Owner(SessionError::StepUpRequired { .. }))
     ));
-    // A new account's handle has just been chosen.
-    let Err(AccountError::Handle(HandlesError::Cooldown { retry_after })) =
-        account.rename_handle(&owner, &renamed).await
-    else {
-        panic!("a new handle is in its cooldown");
-    };
-    assert_eq!(retry_after, original.handle_changed_at + COOLDOWN);
-
-    wait_out_cooldown().await;
+    // A new account corrects the handle chosen at signup without waiting.
+    assert_eq!(original.handle_changed_at, None);
     let handle = account
         .rename_handle(&owner, &format!(" {renamed} "))
         .await
@@ -72,12 +65,16 @@ async fn renames_wait_out_the_cooldown() {
             new: Personal::Value(handle),
         })
     );
-    assert!(matches!(
-        account
-            .rename_handle(&owner, original.handle.as_str())
-            .await,
-        Err(AccountError::Handle(HandlesError::Cooldown { .. }))
-    ));
+    let Err(AccountError::Handle(HandlesError::Cooldown { retry_after })) = account
+        .rename_handle(&owner, original.handle.as_str())
+        .await
+    else {
+        panic!("the second change waits out the cooldown");
+    };
+    assert_eq!(
+        Some(retry_after),
+        changed.handle_changed_at.map(|at| at + COOLDOWN)
+    );
 
     // Taking back the old handle restarts the cooldown too.
     wait_out_cooldown().await;
