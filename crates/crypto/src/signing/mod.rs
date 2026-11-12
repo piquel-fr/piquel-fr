@@ -28,8 +28,6 @@ const GENERATED_RSA_SIZE: KeySize = KeySize::Rsa3072;
 const MIN_RSA_BITS: usize = 2_048;
 /// The PEM label of a PKCS#8 private key.
 const PKCS8_LABEL: &str = "PRIVATE KEY";
-/// The PEM label of a PKCS#1 RSA private key.
-const PKCS1_LABEL: &str = "RSA PRIVATE KEY";
 /// The PEM label of a public key.
 const PUBLIC_KEY_LABEL: &str = "PUBLIC KEY";
 /// Bounds allocation before decoding untrusted compact tokens.
@@ -213,18 +211,14 @@ pub struct Rs256Key {
 }
 
 impl Rs256Key {
-    /// Loads a PEM RSA private key under `kid`, PKCS#8 (`PRIVATE KEY`) or PKCS#1
-    /// (`RSA PRIVATE KEY`), as `openssl genpkey` and `openssl genrsa` write them.
+    /// Loads a PKCS#8 PEM RSA private key (`PRIVATE KEY`) under `kid`, for test
+    /// fixtures.
     ///
     /// # Errors
     /// Returns an error for invalid PEM, a non-RSA or undersized key, or an invalid identifier.
     pub fn from_pem(kid: impl Into<String>, pem: &str) -> Result<Self, CryptoError> {
-        let key = if let Some(der) = Pem::decode(pem, PKCS8_LABEL) {
-            RsaKeyPair::from_pkcs8(&der)?
-        } else {
-            RsaKeyPair::from_der(&Pem::decode(pem, PKCS1_LABEL).ok_or(CryptoError::Pem)?)?
-        };
-        Self::from_key(kid.into(), key)
+        let der = Pem::decode(pem, PKCS8_LABEL).ok_or(CryptoError::Pem)?;
+        Self::from_key(kid.into(), RsaKeyPair::from_pkcs8(&der)?)
     }
 
     /// Loads a PKCS#8 DER RSA private key under `kid`, as [`Self::private_key_der`] exports it.

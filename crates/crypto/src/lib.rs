@@ -47,8 +47,8 @@ pub enum CryptoError {
     /// A decoded secret has the wrong size.
     #[error("secret must contain exactly 32 bytes")]
     SecretLength,
-    /// A PEM private key has neither a PKCS#8 nor a PKCS#1 RSA block.
-    #[error("private key PEM must hold a PRIVATE KEY or RSA PRIVATE KEY block")]
+    /// A PEM private key has no PKCS#8 block.
+    #[error("private key PEM must hold a PRIVATE KEY block")]
     Pem,
     /// An RSA key is too small.
     #[error("RSA signing key must contain at least 2048 bits")]
