@@ -1,14 +1,12 @@
 //! RSA signing for interoperable `OpenID` Connect ID and access tokens, and the key
 //! set that signs with one key and verifies with every key it publishes.
 use super::{CryptoError, Digest};
+use crate::{Compact, Rs256VerifyingKey, VerifyError};
 use aws_lc_rs::{
     encoding::{AsDer, Pkcs8V1Der},
     rand::SystemRandom,
     rsa::KeySize,
-    signature::{
-        KeyPair, ParsedPublicKey, RSA_PKCS1_2048_8192_SHA256, RSA_PKCS1_SHA256, RsaKeyPair,
-        RsaPublicKeyComponents,
-    },
+    signature::{KeyPair, RSA_PKCS1_SHA256, RsaKeyPair},
 };
 use base64::{
     Engine,
@@ -24,14 +22,10 @@ use std::{borrow::Cow, collections::BTreeSet};
 
 /// RSA key size used by generated keys.
 const GENERATED_RSA_SIZE: KeySize = KeySize::Rsa3072;
-/// Minimum RSA modulus size in bits.
-const MIN_RSA_BITS: usize = 2_048;
 /// The PEM label of a PKCS#8 private key.
 const PKCS8_LABEL: &str = "PRIVATE KEY";
 /// The PEM label of a public key.
 const PUBLIC_KEY_LABEL: &str = "PUBLIC KEY";
-/// Bounds allocation before decoding untrusted compact tokens.
-const MAX_TOKEN_LENGTH: usize = 16_384;
 /// Maximum tolerated future issuance time.
 const ISSUED_AT_SKEW_SECONDS: i64 = 30;
 
@@ -48,34 +42,21 @@ struct Header<'a> {
     typ: TokenType,
 }
 
-/// A compact JWT split into its parts, with its header parsed but nothing verified.
-struct Compact<'a> {
+/// A compact token with auth's header parsed, but nothing verified.
+struct Token<'a> {
     /// The parsed protected header.
     header: Header<'static>,
-    /// `header.payload`, the bytes the signature covers.
-    signing_input: &'a str,
-    /// The base64url payload.
-    payload: &'a str,
-    /// The decoded signature.
-    signature: Vec<u8>,
+    /// The token's parts.
+    compact: Compact<'a>,
 }
 
-impl<'a> Compact<'a> {
+impl<'a> Token<'a> {
     /// Splits a bounded token into exactly three parts and parses its header.
     fn parse(token: &'a str) -> Result<Self, CryptoError> {
-        if token.len() > MAX_TOKEN_LENGTH {
-            return Err(CryptoError::InvalidToken);
-        }
-        let (signing_input, signature) = token.rsplit_once('.').ok_or(CryptoError::InvalidToken)?;
-        let (header, payload) = signing_input
-            .split_once('.')
-            .filter(|(_, payload)| !payload.contains('.'))
-            .ok_or(CryptoError::InvalidToken)?;
+        let split = Compact::split(token).map_err(|_| CryptoError::InvalidToken)?;
         Ok(Self {
-            header: serde_json::from_slice(&URL_SAFE_NO_PAD.decode(header)?)?,
-            signing_input,
-            payload,
-            signature: URL_SAFE_NO_PAD.decode(signature)?,
+            header: serde_json::from_slice(split.header())?,
+            compact: split.decode().map_err(|_| CryptoError::InvalidToken)?,
         })
     }
 }
@@ -85,48 +66,28 @@ impl<'a> Compact<'a> {
 pub struct PublicKey {
     /// The published form.
     jwk: Jwk,
-    /// The modulus and exponent, big-endian without leading zero bytes.
-    components: RsaPublicKeyComponents<Vec<u8>>,
-    /// The validated key, which verifies RS256 signatures.
-    key: ParsedPublicKey,
+    /// The key that verifies its RS256 signatures, which has no defect.
+    key: Rs256VerifyingKey,
 }
 
 impl PublicKey {
     /// Builds the key a JWK describes.
     ///
     /// # Errors
-    /// Rejects malformed or undersized keys and invalid key identifiers.
+    /// Rejects malformed keys, keys every SDK would refuse to verify with, and
+    /// invalid key identifiers.
     pub fn from_jwk(jwk: Jwk) -> Result<Self, CryptoError> {
         jwk.kid.parse::<KeyId>().map_err(|_| CryptoError::KeyId)?;
-        let components = match jwk.kty {
-            KeyType::Rsa => {
-                let component = |value: &str| -> Result<Vec<u8>, CryptoError> {
-                    let bytes = URL_SAFE_NO_PAD.decode(value)?;
-                    let start = bytes
-                        .iter()
-                        .position(|byte| *byte != 0)
-                        .unwrap_or(bytes.len());
-                    Ok(bytes[start..].to_vec())
-                };
-                let n = component(&jwk.n)?;
-                let bits = n.first().map_or(0, |first| {
-                    n.len() * 8 - usize::try_from(first.leading_zeros()).unwrap_or(0)
-                });
-                if bits < MIN_RSA_BITS {
-                    return Err(CryptoError::RsaKeySize);
-                }
-                RsaPublicKeyComponents {
-                    n,
-                    e: component(&jwk.e)?,
-                }
-            }
+        let key = match jwk.kty {
+            KeyType::Rsa => Rs256VerifyingKey::new(
+                &URL_SAFE_NO_PAD.decode(&jwk.n)?,
+                &URL_SAFE_NO_PAD.decode(&jwk.e)?,
+            ),
         };
-        let key = components.to_parsed_public_key(&RSA_PKCS1_2048_8192_SHA256)?;
-        Ok(Self {
-            jwk,
-            components,
-            key,
-        })
+        if let Some(defect) = key.defect() {
+            return Err(CryptoError::UnusableKey(defect));
+        }
+        Ok(Self { jwk, key })
     }
 
     /// The key identifier tokens name in their `kid` header.
@@ -144,15 +105,14 @@ impl PublicKey {
     /// The key's JWK thumbprint (RFC 7638): the SHA-256 digest of its required
     /// members, in lexicographic order and canonical form, so it names the key
     /// itself, whatever its `kid` or how its JWK spells it.
-    ///
     #[must_use]
     pub fn thumbprint(&self) -> Digest {
         let members = match self.jwk.kty {
             // Base64url never needs escaping in JSON.
             KeyType::Rsa => format!(
                 r#"{{"e":"{}","kty":"RSA","n":"{}"}}"#,
-                URL_SAFE_NO_PAD.encode(&self.components.e),
-                URL_SAFE_NO_PAD.encode(&self.components.n),
+                URL_SAFE_NO_PAD.encode(self.key.exponent()),
+                URL_SAFE_NO_PAD.encode(self.key.modulus()),
             ),
         };
         Digest::sha256(members.as_bytes())
@@ -162,7 +122,8 @@ impl PublicKey {
     /// writes, for independent verifiers.
     #[must_use]
     pub fn pem(&self) -> String {
-        Pem::encode(PUBLIC_KEY_LABEL, self.key.as_ref())
+        // `from_jwk` refused a key with a defect, so this one has its DER.
+        Pem::encode(PUBLIC_KEY_LABEL, self.key.der().unwrap_or_default())
     }
 
     /// Whether this key signs with `alg`. Requiring the header's algorithm to be
@@ -177,7 +138,7 @@ impl PublicKey {
     /// key, but not its expiry, and returns its claims.
     fn verified(
         &self,
-        token: &Compact<'_>,
+        token: &Token<'_>,
         typ: TokenType,
         issuer: &str,
     ) -> Result<Value, CryptoError> {
@@ -185,9 +146,12 @@ impl PublicKey {
             return Err(CryptoError::InvalidToken);
         }
         self.key
-            .verify_sig(token.signing_input.as_bytes(), &token.signature)
-            .map_err(|_| CryptoError::Signature)?;
-        let claims: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(token.payload)?)?;
+            .verify(token.compact.signing_input(), token.compact.signature())
+            .map_err(|error| match error {
+                VerifyError::Unusable(defect) => CryptoError::UnusableKey(defect),
+                VerifyError::BadSignature => CryptoError::Signature,
+            })?;
+        let claims: Value = serde_json::from_slice(token.compact.payload())?;
         if claims[Claim::Issuer.as_str()] != issuer
             || claims
                 .get(Claim::IssuedAt.as_str())
@@ -416,7 +380,7 @@ impl KeySet {
         token_type: TokenType,
         issuer: &str,
     ) -> Result<T, CryptoError> {
-        let token = Compact::parse(token)?;
+        let token = Token::parse(token)?;
         let claims = Self::find(&self.published, &token)?.verified(&token, token_type, issuer)?;
         if claims
             .get(Claim::ExpiresAt.as_str())
@@ -435,14 +399,14 @@ impl KeySet {
     /// Returns [`CryptoError::UnknownKey`] for a key outside the set; otherwise
     /// preserves provider and decoding failures and rejects invalid signatures or claims.
     pub fn verify_id_token_hint(&self, token: &str, issuer: &str) -> Result<Value, CryptoError> {
-        let token = Compact::parse(token)?;
+        let token = Token::parse(token)?;
         Self::find(&self.published, &token)
             .or_else(|_| Self::find(&self.retired, &token))?
             .verified(&token, TokenType::Id, issuer)
     }
 
     /// The key among `keys` that `token` names.
-    fn find<'k>(keys: &'k [PublicKey], token: &Compact<'_>) -> Result<&'k PublicKey, CryptoError> {
+    fn find<'k>(keys: &'k [PublicKey], token: &Token<'_>) -> Result<&'k PublicKey, CryptoError> {
         keys.iter()
             .find(|key| key.kid() == token.header.kid)
             .ok_or(CryptoError::UnknownKey)

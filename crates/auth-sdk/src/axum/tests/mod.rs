@@ -24,9 +24,9 @@ use ::axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use base64::Engine as _;
 use chrono::Utc;
 use serde_json::json;
+use sourceorigin_common::protocol::jwt::TokenType;
 use std::{
     sync::{
         Arc, Mutex,
@@ -260,34 +260,17 @@ fn code(sub: &str, nonce: &str) -> String {
 }
 
 /// Signs `claims` as auth signs tokens of `typ`, with the vectors' `key-2025`.
-fn sign(claims: &serde_json::Value, typ: &str) -> String {
-    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-    use jsonwebtoken::{EncodingKey, crypto::aws_lc::DEFAULT_PROVIDER};
+fn sign(claims: &serde_json::Value, typ: TokenType) -> String {
     let pem = include_str!("../../../../../tests/sdk-vectors/keys/key-2025.pem");
-    let pkcs8 = STANDARD
-        .decode(
-            pem.lines()
-                .filter(|line| !line.starts_with("-----"))
-                .collect::<String>(),
-        )
-        .expect("PEM");
-    // jsonwebtoken reads RSA keys in PKCS#1 form, which the PKCS#8 form of a
-    // 2048-bit key wraps in a fixed 26-byte header.
-    let key = EncodingKey::from_rsa_der(&pkcs8[26..]);
-    let encode = |value: &serde_json::Value| URL_SAFE_NO_PAD.encode(value.to_string());
-    let header = json!({ "alg": "RS256", "kid": "key-2025", "typ": typ });
-    let input = format!("{}.{}", encode(&header), encode(claims));
-    let signer =
-        (DEFAULT_PROVIDER.signer_factory)(&jsonwebtoken::Algorithm::RS256, &key).expect("signer");
-    let signature = signer.try_sign(input.as_bytes()).expect("signature");
-    format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
+    let key = sourceorigin_crypto::Rs256Key::from_pem("key-2025", pem).expect("RSA key");
+    key.sign(typ, claims).expect("signature")
 }
 
 /// An ID token for `sub`, signed now, echoing `nonce`.
 fn id_token(sub: &str, nonce: &str) -> String {
     let mut claims = id_claims(sub);
     claims["nonce"] = json!(nonce);
-    sign(&claims, "JWT")
+    sign(&claims, TokenType::Id)
 }
 
 /// The claims of the vectors' valid ID token for `sub`, without a `nonce`, issued

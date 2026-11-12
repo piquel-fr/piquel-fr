@@ -23,7 +23,10 @@ fn logout(sub: Option<&str>, sid: Option<SessionId>) -> String {
         events: LogoutEvents,
         nonce: Absent,
     };
-    sign(&serde_json::to_value(claims).expect("claims"), "logout+jwt")
+    sign(
+        &serde_json::to_value(claims).expect("claims"),
+        TokenType::Logout,
+    )
 }
 
 /// Posts `body` to the back-channel logout route as a form.

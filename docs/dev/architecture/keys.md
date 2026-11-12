@@ -95,7 +95,10 @@ A failed reload keeps the current set in use, while it is fresh enough:
 
 The key set signs and verifies for `OidcApplication` (tokens, JWKS, userinfo and
 hints) and for `BackchannelLogoutSender`, which signs each logout token when it
-sends it.
+sends it. It verifies with the crypto crate's `Rs256VerifyingKey`, as
+the Rust SDK does, so a key auth would publish is judged as every SDK judges it:
+a modulus of 2048 to 8192 bits and the exponent 65537. Auth's own header policy is stricter than an SDK's: the header
+holds exactly `alg`, `kid` and `typ`.
 
 ## Token digest keys
 

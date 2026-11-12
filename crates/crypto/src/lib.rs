@@ -1,5 +1,7 @@
 //! Auditable cryptographic primitives for authentication, shared by auth and the
 //! Rust SDK; no browser or database policy.
+/// The one RS256 verifier auth and the SDK share, and compact JWS splitting.
+mod jws;
 /// Ed25519 signed notes, for audit checkpoints.
 mod note;
 /// SCRAM-SHA-256 password verifiers, for database roles.
@@ -8,6 +10,7 @@ mod scram;
 mod sealing;
 /// RSA signing and verification of compact JWTs, by key set.
 mod signing;
+pub use jws::{Compact, KeyDefect, Malformed, Rs256VerifyingKey, Split, VerifyError};
 pub use note::{NoteKey, NoteVerifier, NoteVerifiers};
 pub use scram::ScramVerifier;
 pub use sealing::{KeyEncryptionKey, SealingKey};
@@ -50,9 +53,9 @@ pub enum CryptoError {
     /// A PEM private key has no PKCS#8 block.
     #[error("private key PEM must hold a PRIVATE KEY block")]
     Pem,
-    /// An RSA key is too small.
-    #[error("RSA signing key must contain at least 2048 bits")]
-    RsaKeySize,
+    /// A public key that every SDK would refuse to verify with.
+    #[error("signing key cannot verify signatures")]
+    UnusableKey(#[source] KeyDefect),
     /// The key identifier cannot safely appear in JWT headers.
     #[error("signing key ID must contain 1 to 128 characters without whitespace")]
     KeyId,

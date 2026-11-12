@@ -415,7 +415,7 @@ async fn refreshing_id_tokens(
             }
             change(&mut claims);
             let mut tokens = TokenEndpoint::tokens(&format!("access-{call}"));
-            tokens["id_token"] = json!(sign(&claims, "JWT"));
+            tokens["id_token"] = json!(sign(&claims, TokenType::Id));
             ::axum::Json(tokens).into_response()
         }
     })

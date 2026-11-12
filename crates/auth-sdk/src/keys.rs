@@ -6,12 +6,13 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
-use jsonwebtoken::{DecodingKey, crypto::aws_lc::DEFAULT_PROVIDER};
 use serde::Deserialize;
 use sourceorigin_common::protocol::{
     jwt::{Algorithm, Jwk, JwkSet, TokenType},
     sdk::{ErrorCategory, ErrorReason, SdkError},
 };
+pub use sourceorigin_crypto::KeyDefect;
+use sourceorigin_crypto::{Compact, Malformed, Rs256VerifyingKey, VerifyError};
 use std::{
     fmt,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -19,8 +20,6 @@ use std::{
 use thiserror::Error;
 use url::Url;
 
-/// Most bytes accepted for a compact token, checked before decoding it.
-const MAX_TOKEN_BYTES: usize = 16 * 1024;
 /// Shortest time between two key fetches, whatever triggers them. Bounds how often
 /// unknown key IDs or an outage can make the cache call the issuer.
 const MIN_FETCH_INTERVAL: TimeDelta = TimeDelta::seconds(30);
@@ -75,18 +74,19 @@ impl JwsHeader {
 ///     Err(TokenError::WrongType { .. })
 /// ));
 /// assert!(matches!(Jws::parse("two.segments"), Err(TokenError::Malformed(_))));
+/// // The header's checks come first, whatever follows it.
+/// assert!(matches!(
+///     Jws::parse("eyJhbGciOiJSUzI1NiIsImNyaXQiOltdfQ.not*base64.not*base64"),
+///     Err(TokenError::UnsupportedCriticalHeader)
+/// ));
 /// # Ok::<(), TokenError>(())
 /// ```
 #[derive(Clone)]
 pub struct Jws<'a> {
     /// Decoded protected header.
     header: JwsHeader,
-    /// `header.payload`, the bytes the signature covers.
-    signing_input: &'a str,
-    /// Decoded payload.
-    payload: Vec<u8>,
-    /// Decoded signature.
-    signature: Vec<u8>,
+    /// The token's decoded parts.
+    compact: Compact<'a>,
 }
 
 impl fmt::Debug for Jws<'_> {
@@ -107,33 +107,16 @@ impl<'a> Jws<'a> {
     /// 16 KiB, with a JSON header; [`TokenError::UnsupportedCriticalHeader`] if that
     /// header sets `crit`.
     pub fn parse(token: &'a str) -> Result<Self, TokenError> {
-        if token.len() > MAX_TOKEN_BYTES {
-            return Err(TokenError::Malformed("the token exceeds 16 KiB"));
-        }
-        let mut segments = token.split('.');
-        let (Some(header), Some(payload), Some(signature), None) = (
-            segments.next(),
-            segments.next(),
-            segments.next(),
-            segments.next(),
-        ) else {
-            return Err(TokenError::Malformed("the token is not three segments"));
-        };
-        let decode = |segment: &str| {
-            URL_SAFE_NO_PAD
-                .decode(segment)
-                .map_err(|_| TokenError::Malformed("a segment is not base64url"))
-        };
-        let parsed: JwsHeader = serde_json::from_slice(&decode(header)?)
+        let malformed = |malformed: Malformed| TokenError::Malformed(malformed.0);
+        let split = Compact::split(token).map_err(malformed)?;
+        let header: JwsHeader = serde_json::from_slice(split.header())
             .map_err(|_| TokenError::Malformed("the header is not a JWS header"))?;
-        if parsed.crit.is_some() {
+        if header.crit.is_some() {
             return Err(TokenError::UnsupportedCriticalHeader);
         }
         Ok(Self {
-            header: parsed,
-            signing_input: &token[..header.len() + 1 + payload.len()],
-            payload: decode(payload)?,
-            signature: decode(signature)?,
+            header,
+            compact: split.decode().map_err(malformed)?,
         })
     }
 
@@ -146,7 +129,7 @@ impl<'a> Jws<'a> {
     /// The payload. Read it only once the signature has been verified.
     #[must_use]
     pub fn payload(&self) -> &[u8] {
-        &self.payload
+        self.compact.payload()
     }
 
     /// Requires `typ` to be `expected`, compared case-insensitively with or without
@@ -239,29 +222,6 @@ impl KeyError {
     }
 }
 
-/// Why a signing key cannot verify signatures, as every SDK judges it.
-#[derive(Debug, Error)]
-pub enum KeyDefect {
-    /// The RSA modulus, not counting leading zero bytes, is under 2048 or over 8192
-    /// bits.
-    #[error("its RSA modulus is {0} bits, outside 2048 to 8192")]
-    ModulusSize(usize),
-    /// The RSA exponent is not 65537, the one every SDK's runtime verifies with.
-    #[error("its RSA exponent is not 65537")]
-    Exponent,
-    /// No verifier can be built from it for the token's algorithm.
-    #[error("no verifier can be built from it")]
-    Verifier(#[source] jsonwebtoken::errors::Error),
-}
-
-/// Shortest RSA modulus a key may have, in bits (RFC 7518 §3.3).
-const MIN_MODULUS_BITS: usize = 2048;
-/// Longest RSA modulus a key may have, in bits, as aws-lc verifies.
-const MAX_MODULUS_BITS: usize = 8192;
-/// The only RSA exponent a key may have, big-endian: 65537. Cloudflare Workers imports
-/// only 3, 17 and 65537, so a wider rule would let SDKs disagree on a key.
-const EXPONENT: [u8; 3] = [1, 0, 1];
-
 /// One signing key a set lists for verification.
 #[derive(Clone)]
 struct Key {
@@ -269,48 +229,8 @@ struct Key {
     kid: String,
     /// The only algorithm the key may verify, when the set names one.
     alg: Option<Algorithm>,
-    /// Public key material.
-    decoding: DecodingKey,
-    /// The modulus's size in bits, not counting leading zero bytes.
-    modulus_bits: usize,
-    /// Whether the exponent is 65537.
-    exponent_valid: bool,
-}
-
-impl Key {
-    /// The key with modulus `n` and exponent `e`, big-endian bytes. Leading zero bytes
-    /// are dropped, so a padded key verifies as it does in every SDK.
-    fn new(kid: String, alg: Option<Algorithm>, n: &[u8], e: &[u8]) -> Self {
-        let significant = |bytes: &[u8]| {
-            let start = bytes
-                .iter()
-                .position(|byte| *byte != 0)
-                .unwrap_or(bytes.len());
-            bytes[start..].to_vec()
-        };
-        let (n, e) = (significant(n), significant(e));
-        let modulus_bits = n.first().map_or(0, |first| {
-            n.len() * 8 - usize::try_from(first.leading_zeros()).unwrap_or(0)
-        });
-        Self {
-            kid,
-            alg,
-            decoding: DecodingKey::from_rsa_raw_components(&n, &e),
-            modulus_bits,
-            exponent_valid: e == EXPONENT,
-        }
-    }
-
-    /// What keeps this key from verifying, if anything.
-    const fn defect(&self) -> Option<KeyDefect> {
-        if self.modulus_bits < MIN_MODULUS_BITS || self.modulus_bits > MAX_MODULUS_BITS {
-            Some(KeyDefect::ModulusSize(self.modulus_bits))
-        } else if self.exponent_valid {
-            None
-        } else {
-            Some(KeyDefect::Exponent)
-        }
-    }
+    /// Public key material, judged as every SDK judges it.
+    verifier: Rs256VerifyingKey,
 }
 
 /// The usable keys of a JSON Web Key Set.
@@ -374,7 +294,11 @@ impl KeySet {
             if keys.iter().any(|key| key.kid == jwk.kid) {
                 return Err(KeyError::DuplicateKeyId(jwk.kid));
             }
-            keys.push(Key::new(jwk.kid, jwk.alg, &n, &e));
+            keys.push(Key {
+                kid: jwk.kid,
+                alg: jwk.alg,
+                verifier: Rs256VerifyingKey::new(&n, &e),
+            });
         }
         Ok(Self { keys })
     }
@@ -545,26 +469,18 @@ impl KeyCache {
         if key.alg.is_some_and(|alg| alg != algorithm) {
             return Err(TokenError::UnknownKey(Some(kid.to_owned())));
         }
-        let name = match algorithm {
-            Algorithm::Rs256 => jsonwebtoken::Algorithm::RS256,
-        };
-        // The aws-lc-rs provider is named explicitly instead of through
-        // jsonwebtoken's process default, which an application enabling another
-        // backend would make ambiguous.
-        let unusable = |source| {
-            TokenError::Keys(KeyError::UnusableKey {
-                kid: kid.to_owned(),
-                source,
-            })
-        };
-        if let Some(defect) = key.defect() {
-            return Err(unusable(defect));
+        match algorithm {
+            Algorithm::Rs256 => key
+                .verifier
+                .verify(jws.compact.signing_input(), jws.compact.signature())
+                .map_err(|error| match error {
+                    VerifyError::Unusable(source) => TokenError::Keys(KeyError::UnusableKey {
+                        kid: kid.to_owned(),
+                        source,
+                    }),
+                    VerifyError::BadSignature => TokenError::BadSignature,
+                }),
         }
-        let verifier = (DEFAULT_PROVIDER.verifier_factory)(&name, &key.decoding)
-            .map_err(|source| unusable(KeyDefect::Verifier(source)))?;
-        verifier
-            .verify(jws.signing_input.as_bytes(), &jws.signature)
-            .map_err(TokenError::BadSignature)
     }
 
     /// The cached keys. Nothing panics while holding the lock, so poisoning is
