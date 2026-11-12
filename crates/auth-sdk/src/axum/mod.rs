@@ -54,7 +54,7 @@
 //! #     redirect_uri: "https://notes.sourceorigin.dev/auth/callback".parse()?,
 //! # };
 //! // The same key on every replica: `openssl rand -base64 32`.
-//! let key = CookieKey::from_base64(&std::env::var("NOTES_COOKIE_KEY")?)?;
+//! let key = CookieKey::parse(&std::env::var("NOTES_COOKIE_KEY")?)?;
 //! let auth = LoginRoutes::new(issuer.client(config), key)?
 //!     .scopes("profile".parse()?)
 //!     .after_login("/notes".parse()?);

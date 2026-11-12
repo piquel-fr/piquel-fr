@@ -1,0 +1,12 @@
+{
+  "description": "an empty key holds no bytes",
+  "input": {
+    "cookie_key": ""
+  },
+  "expected": {
+    "error": {
+      "bytes": 0,
+      "code": "wrong_length"
+    }
+  }
+}

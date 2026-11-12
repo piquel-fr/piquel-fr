@@ -1,0 +1,11 @@
+{
+  "description": "text in no encoding is refused",
+  "input": {
+    "cookie_key": "not a cookie key"
+  },
+  "expected": {
+    "error": {
+      "code": "unrecognized"
+    }
+  }
+}

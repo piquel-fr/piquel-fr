@@ -22,7 +22,7 @@ async fn session_cookie_vectors() {
                 .parse()
                 .expect("callback"),
         });
-        let key = CookieKey::from_base64(case.text("cookie_key")).expect("cookie key");
+        let key = CookieKey::parse(case.text("cookie_key")).expect("cookie key");
         let routes = LoginRoutes::new(client, key).expect("a confidential client");
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -34,6 +34,48 @@ async fn session_cookie_vectors() {
             SessionCookie::Ended | SessionCookie::Absent => serde_json::Value::Null,
         };
         assert_eq!(session, case.json["expected"]["ok"], "{}", case.name);
+    }
+}
+
+/// A cookie key holds the bytes the vectors expect, whichever encoding it is written
+/// in, or is refused as they expect: with the length it holds, if it is in an
+/// encoding.
+#[test]
+fn cookie_key_vectors() {
+    for case in Case::all("cookie-keys") {
+        let parsed = CookieKey::parse(case.text("cookie_key"));
+        let expected = &case.json["expected"];
+        let Some(hex) = expected["ok"].as_str() else {
+            let refusal = match parsed {
+                Err(CookieKeyError::WrongLength(bytes)) => {
+                    serde_json::json!({ "code": "wrong_length", "bytes": bytes })
+                }
+                Err(CookieKeyError::Unrecognized) => serde_json::json!({ "code": "unrecognized" }),
+                other => panic!("{}: {other:?}", case.name),
+            };
+            assert_eq!(refusal, expected["error"], "{}", case.name);
+            continue;
+        };
+        let secret: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).expect("hex"))
+            .collect();
+        // The same bytes derive the same keys: one opens what the other sealed.
+        let sealed = parsed
+            .expect(&case.name)
+            .session
+            .seal(&"value", "context")
+            .expect("seal");
+        let expected = CookieKey::from_secret(&secret).expect("cookie key");
+        assert_eq!(
+            expected
+                .session
+                .open::<String>(&sealed, "context")
+                .as_deref(),
+            Some("value"),
+            "{}",
+            case.name
+        );
     }
 }
 

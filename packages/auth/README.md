@@ -34,7 +34,7 @@ const login = new Login(
     redirectUri: 'https://notes.example/auth/callback'
   }),
   // `openssl rand -base64 32`, the same on every replica.
-  { cookieKey: CookieKey.fromBase64(process.env.COOKIE_KEY!), scopes: ['profile'] }
+  { cookieKey: CookieKey.parse(process.env.COOKIE_KEY!), scopes: ['profile'] }
 );
 
 export async function fetch(request: Request): Promise<Response> {

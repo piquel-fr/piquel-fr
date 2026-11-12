@@ -35,7 +35,7 @@ stopped:
 | The app fails to start: `metadata names issuer ..., expected ...` | `SOURCEORIGIN_ISSUER` differs from auth's issuer, for example by a trailing slash |
 | The app fails to start: `environment variable not found` | A variable is missing from the app's environment |
 | The app fails to start: `the login routes need a confidential client` (Rust), or a `TypeError` from `new Login` (TypeScript) | No client secret reached the SDK |
-| The app fails to start: `a cookie key must be standard base64` or `a cookie key must hold 32 bytes` | Make a key with `openssl rand -base64 32` |
+| The app fails to start: `a cookie key must be 32 bytes in base64, base64url or hex` or `a cookie key must hold 32 bytes` | Make a key with `openssl rand -base64 32` |
 
 An app that doesn't use the SDKs may show auth's own answer in the browser
 instead, a JSON object such as

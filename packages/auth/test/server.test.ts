@@ -319,18 +319,11 @@ function setCookie(response: Response, name: string): string | undefined {
     .find((pair) => pair.startsWith(`${name}=`));
 }
 
-test('a cookie key is 32 bytes of canonical base64, and is never printed', () => {
+test('a cookie key is never printed', () => {
   const text = vector('sessions', 'valid').input.cookie_key as string;
-  const key = CookieKey.fromBase64(` ${text}\n`);
+  const key = CookieKey.parse(text);
   assert.ok(!inspect(key).includes(text.slice(0, 8)));
   assert.equal(JSON.stringify(key), '{}');
-  for (const [bad, message] of [
-    ['not base64!', /standard base64/],
-    [text.replace(/=$/, ''), /standard base64/],
-    [btoa('sixteen bytes!!!'), /32 bytes, not 16/]
-  ] as const) {
-    assert.throws(() => CookieKey.fromBase64(bad), { name: 'TypeError', message }, bad);
-  }
 });
 
 test('a public client is refused', async () => {

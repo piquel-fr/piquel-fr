@@ -7,8 +7,11 @@ use aws_lc_rs::{
     hkdf::{HKDF_SHA256, Salt},
 };
 use base64::{
-    Engine,
-    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine, alphabet,
+    engine::{
+        DecodePaddingMode,
+        general_purpose::{GeneralPurpose, GeneralPurposeConfig, URL_SAFE_NO_PAD},
+    },
 };
 use rand::{RngCore, rngs::OsRng};
 use serde::{Serialize, de::DeserializeOwned};
@@ -16,6 +19,56 @@ use std::fmt;
 
 /// Bytes in a cookie key, and in the AES-256 keys derived from it.
 const SECRET_BYTES: usize = 32;
+
+/// How a cookie key may be written: `openssl rand -base64 32` prints padded
+/// standard base64, and piqueld generates secrets as hex or unpadded base64url.
+/// No key reads two ways: hex of 32 bytes is longer than their base64, and text
+/// valid in both base64 alphabets decodes to the same bytes in each.
+#[derive(Clone, Copy)]
+enum Encoding {
+    /// Hexadecimal, in either case.
+    Hex,
+    /// Standard base64, padded or not.
+    Base64,
+    /// URL-safe base64, padded or not.
+    Base64Url,
+}
+
+impl Encoding {
+    /// Every encoding, in the order a key is tried in: hex first, since hex text is
+    /// also base64.
+    const ALL: [Self; 3] = [Self::Hex, Self::Base64, Self::Base64Url];
+
+    /// Base64 with optional padding, refusing stray trailing bits.
+    const PADDING_OPTIONAL: GeneralPurposeConfig =
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
+
+    /// The bytes `text` holds in this encoding, if it is written in it.
+    fn decode(self, text: &str) -> Option<Vec<u8>> {
+        let base64 = |alphabet| {
+            GeneralPurpose::new(alphabet, Self::PADDING_OPTIONAL)
+                .decode(text)
+                .ok()
+        };
+        match self {
+            Self::Hex => {
+                let (pairs, odd) = text.as_bytes().as_chunks::<2>();
+                if !odd.is_empty() {
+                    return None;
+                }
+                pairs
+                    .iter()
+                    .map(|pair| {
+                        let [high, low] = pair.map(|digit| char::from(digit).to_digit(16));
+                        u8::try_from(high? << 4 | low?).ok()
+                    })
+                    .collect()
+            }
+            Self::Base64 => base64(&alphabet::STANDARD),
+            Self::Base64Url => base64(&alphabet::URL_SAFE),
+        }
+    }
+}
 
 /// What a sealing key is for, so the keys derived from one secret for two purposes
 /// are unrelated. Each is the HKDF `info`, which names the format version: a new
@@ -97,14 +150,15 @@ impl SealingKey {
 /// The secret sealing the cookies the browser keeps: the session, with the user's
 /// tokens, and each login waiting at auth, with its PKCE verifier and `nonce`. Every
 /// replica needs the same key: keep it like any other secret, and generate it with
-/// `openssl rand -base64 32`. Changing it signs every user out, but ends no grant at
-/// auth: if the key leaked, rotate the client secret too, with no grace period, since
-/// the refresh tokens in captured cookies stay valid without it.
+/// `openssl rand -base64 32`, or as a 32-byte secret piqueld generates. Changing it
+/// signs every user out, but ends no grant at auth: if the key leaked, rotate the
+/// client secret too, with no grace period, since the refresh tokens in captured
+/// cookies stay valid without it.
 ///
 /// ```
 /// use sourceorigin_auth::axum::CookieKey;
 ///
-/// let key = CookieKey::from_base64("q5xP0Pl8m0l3pkk1Hk0aQe9H6P7l4H6Jt6bq0c5u3jE=")?;
+/// let key = CookieKey::parse("q5xP0Pl8m0l3pkk1Hk0aQe9H6P7l4H6Jt6bq0c5u3jE=")?;
 /// // Keys are never printed.
 /// assert_eq!(format!("{key:?}"), "CookieKey(REDACTED)");
 /// # Ok::<(), sourceorigin_auth::axum::CookieKeyError>(())
@@ -126,9 +180,9 @@ impl fmt::Debug for CookieKey {
 /// A [`CookieKey`] could not be made.
 #[derive(Debug, thiserror::Error)]
 pub enum CookieKeyError {
-    /// The text is not standard base64.
-    #[error("a cookie key must be standard base64, as `openssl rand -base64 32` prints")]
-    NotBase64(#[source] base64::DecodeError),
+    /// The text is neither base64, base64url nor hex.
+    #[error("a cookie key must be 32 bytes in base64, base64url or hex")]
+    Unrecognized,
     /// The key does not hold 32 bytes.
     #[error("a cookie key must hold 32 bytes, not {0}")]
     WrongLength(usize),
@@ -141,19 +195,28 @@ pub enum CookieKeyError {
 }
 
 impl CookieKey {
-    /// The key `text` holds: 32 bytes in standard base64, surrounding whitespace
-    /// ignored, as `openssl rand -base64 32` prints.
+    /// The key `text` holds: 32 bytes in standard base64, as
+    /// `openssl rand -base64 32` prints, in base64url or in hex, as piqueld generates
+    /// them. Base64 may be padded or not, and surrounding ASCII whitespace is
+    /// ignored.
     ///
     /// # Errors
-    /// [`CookieKeyError::NotBase64`] or [`CookieKeyError::WrongLength`].
-    pub fn from_base64(text: &str) -> Result<Self, CookieKeyError> {
-        let bytes = STANDARD
-            .decode(text.trim())
-            .map_err(CookieKeyError::NotBase64)?;
-        if bytes.len() != SECRET_BYTES {
-            return Err(CookieKeyError::WrongLength(bytes.len()));
+    /// [`CookieKeyError::WrongLength`] if the text holds other than 32 bytes, or
+    /// [`CookieKeyError::Unrecognized`] if it is in none of these encodings.
+    pub fn parse(text: &str) -> Result<Self, CookieKeyError> {
+        let text = text.trim_ascii();
+        let decoded: Vec<Vec<u8>> = Encoding::ALL
+            .iter()
+            .filter_map(|encoding| encoding.decode(text))
+            .collect();
+        match decoded.iter().find(|bytes| bytes.len() == SECRET_BYTES) {
+            Some(secret) => Self::from_secret(secret),
+            None => Err(decoded
+                .first()
+                .map_or(CookieKeyError::Unrecognized, |bytes| {
+                    CookieKeyError::WrongLength(bytes.len())
+                })),
         }
-        Self::from_secret(&bytes)
     }
 
     /// A random key, for development and tests: it lives in this process only, so
@@ -171,7 +234,7 @@ impl CookieKey {
     }
 
     /// The keys derived from `secret`.
-    fn from_secret(secret: &[u8]) -> Result<Self, CookieKeyError> {
+    pub(super) fn from_secret(secret: &[u8]) -> Result<Self, CookieKeyError> {
         let derive = |purpose| SealingKey::derive(secret, purpose).map_err(CookieKeyError::Crypto);
         Ok(Self {
             session: derive(Purpose::Session)?,

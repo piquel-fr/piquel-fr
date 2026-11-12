@@ -1,0 +1,9 @@
+{
+  "description": "standard base64, as `openssl rand -base64 32` prints",
+  "input": {
+    "cookie_key": "++++////++++////++++////++++////++++////++8="
+  },
+  "expected": {
+    "ok": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef"
+  }
+}

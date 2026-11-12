@@ -10,7 +10,7 @@
  *
  * const issuer = await Issuer.discover('https://auth.sourceorigin.dev');
  * const login = new Login(issuer.client({ clientId, clientSecret, redirectUri }), {
- *   cookieKey: CookieKey.fromBase64(process.env.NOTES_COOKIE_KEY ?? ''), // openssl rand -base64 32
+ *   cookieKey: CookieKey.parse(process.env.NOTES_COOKIE_KEY ?? ''), // openssl rand -base64 32
  *   scopes: ['profile']
  * });
  *

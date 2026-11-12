@@ -1,0 +1,9 @@
+{
+  "description": "hex, as piqueld generates",
+  "input": {
+    "cookie_key": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef"
+  },
+  "expected": {
+    "ok": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef"
+  }
+}

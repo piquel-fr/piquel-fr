@@ -1,0 +1,12 @@
+{
+  "description": "16 bytes are refused",
+  "input": {
+    "cookie_key": "++++////++++////++++/w=="
+  },
+  "expected": {
+    "error": {
+      "bytes": 16,
+      "code": "wrong_length"
+    }
+  }
+}

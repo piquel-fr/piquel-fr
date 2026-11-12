@@ -26,20 +26,19 @@ callback on its environment's hostname:
 | `staging` | `https://staging.notes.example/auth/callback` |
 
 Then give each environment its own values as manifest variables: its app's
-client ID, which isn't secret, and the names of the secrets you store below.
+client ID, which isn't secret, and the name of the client secret you store
+below.
 
 ```toml
 [spec.environments.production.variables]
 domain = "notes.example"
 client_id = "c_…"
 client_secret = "notes-client-secret"
-cookie_key = "notes-cookie-key"
 
 [spec.environments.staging.variables]
 domain = "staging.notes.example"
 client_id = "c_…"
 client_secret = "notes-staging-client-secret"
-cookie_key = "notes-staging-cookie-key"
 ```
 
 ## Store the secrets
@@ -56,19 +55,22 @@ the key that seals the SDKs' session cookies.
    piquelctl app secret notes set notes-staging-client-secret --stdin --environments staging --no-previews
    ```
 
-2. Store each environment's cookie key the same way. The cookie key seals a
-   whole session, tokens included, so an environment that could read another's
-   key could forge its sessions: never share one. The SDKs read standard base64,
-   which piqueld's generated secrets don't use, so generate each with `openssl`:
+2. Have piqueld generate the cookie key. Declare it in the manifest:
 
-   ```console
-   openssl rand -base64 32 | piquelctl app secret notes set notes-cookie-key --stdin --environments production --no-previews --yes
-   openssl rand -base64 32 | piquelctl app secret notes set notes-staging-cookie-key --stdin --environments staging --no-previews --yes
+   ```toml
+   [[spec.secrets]]
+   name = "notes-cookie-key"
+   generate = { type = "random", bytes = 32, encoding = "base64url" }
    ```
 
-3. Mount the secrets the environment's `client_secret` and `cookie_key`
-   variables name in `web`, at the same paths in every environment, with the
-   rest of the app's settings:
+   The first deployment of each environment generates its own key, and later
+   deployments keep it. The cookie key seals a whole session, tokens included,
+   so an environment that could read another's key could forge its sessions.
+   A generated key is never shared between environments.
+
+3. Mount the client secret the environment's `client_secret` variable names,
+   and the cookie key, in `web`, at the same paths in every environment, with
+   the rest of the app's settings:
 
    ```toml
    [[spec.services]]
@@ -83,7 +85,7 @@ the key that seals the SDKs' session cookies.
    target = "/run/secrets/sourceorigin-client-secret"
 
    [[spec.services.secrets]]
-   name = "${{ vars.cookie_key }}"
+   name = "notes-cookie-key"
    target = "/run/secrets/sourceorigin-cookie-key"
    ```
 

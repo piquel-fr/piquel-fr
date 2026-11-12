@@ -8,6 +8,7 @@ import {
   parseChallenge,
   type BearerChallenge
 } from '../src/index.ts';
+import * as json from '../src/json.ts';
 import { CookieKey, Login } from '../src/server.ts';
 import {
   DISCOVERY_URL,
@@ -139,6 +140,41 @@ describe('callback vectors', () => {
   }
 });
 
+/** Why `CookieKey.parse` refuses `text`, in the vectors' shape, read from its message. */
+function refusal(text: string): unknown {
+  try {
+    CookieKey.parse(text);
+  } catch (error) {
+    assert.ok(error instanceof TypeError);
+    const length = /must hold 32 bytes, not (\d+)$/.exec(error.message);
+    if (length) return { code: 'wrong_length', bytes: Number(length[1]) };
+    assert.match(error.message, /must be 32 bytes in base64, base64url or hex$/);
+    return { code: 'unrecognized' };
+  }
+  return undefined;
+}
+
+describe('cookie key vectors', () => {
+  for (const vector of cases('cookie-keys')) {
+    test(vector.name, async () => {
+      const text = String(vector.input.cookie_key);
+      const { ok: hex, error } = vector.expected as { ok?: string; error?: unknown };
+      if (hex === undefined) {
+        assert.deepEqual(refusal(text), error);
+        return;
+      }
+      // The same bytes derive the same keys: one opens what the other sealed.
+      const bytes = Uint8Array.from(hex.match(/../g) ?? [], (pair) => parseInt(pair, 16));
+      const expected = CookieKey.parse(btoa(String.fromCharCode(...bytes)));
+      const sealed = await (await CookieKey.parse(text).keys()).session.seal('value', 'context');
+      assert.equal(
+        await (await expected.keys()).session.open(sealed, 'context', json.string),
+        'value'
+      );
+    });
+  }
+});
+
 describe('session cookie vectors', () => {
   for (const vector of cases('sessions')) {
     test(vector.name, async () => {
@@ -152,7 +188,7 @@ describe('session cookie vectors', () => {
         redirectUri: REDIRECT_URI
       });
       const login = new Login(client, {
-        cookieKey: CookieKey.fromBase64(String(vector.input.cookie_key))
+        cookieKey: CookieKey.parse(String(vector.input.cookie_key))
       });
       const request = new Request(REDIRECT_URI, {
         headers: { cookie: String(vector.input.cookie) }

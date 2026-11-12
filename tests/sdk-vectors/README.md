@@ -30,7 +30,9 @@ Each file is one case:
 - `expected` is either `{ "ok": value }` or
   `{ "error": { "code": "...", "reason": "..." } }`. `code` is an error category and
   `reason` the check that failed, from `sourceorigin_common::protocol::sdk`. `reason` is
-  omitted for categories without one.
+  omitted for categories without one. A refused cookie key's `code` is instead
+  `wrong_length`, with the `bytes` its text holds, or `unrecognized` for text in
+  no encoding the SDKs read.
 
 ## Categories
 
@@ -42,6 +44,7 @@ Each file is one case:
 | `challenges/` | `challenge` (format cases) or `header` (parse cases) | `status` and `header`, or `challenge` |
 | `callbacks/` | `issuer`, `authorization_response_iss_parameter_supported`, the expected `state`, and the callback's query `parameters` | `code` |
 | `sessions/` | `cookie_key` (standard base64), `client_id`, and the `cookie` header the browser sends | the session the cookie holds, in the cookie's JSON, or `null` for none |
+| `cookie-keys/` | `cookie_key`, the text the app configures | the key's 32 bytes in hex |
 
 Challenge format cases go both ways: `challenge` must format to exactly `header`,
 and `header` must parse back to `challenge`. Parse cases only parse, since their

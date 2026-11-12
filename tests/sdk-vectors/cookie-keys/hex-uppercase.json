@@ -1,0 +1,9 @@
+{
+  "description": "hex in capitals",
+  "input": {
+    "cookie_key": "FBEFBEFFFFFFFBEFBEFFFFFFFBEFBEFFFFFFFBEFBEFFFFFFFBEFBEFFFFFFFBEF"
+  },
+  "expected": {
+    "ok": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef"
+  }
+}

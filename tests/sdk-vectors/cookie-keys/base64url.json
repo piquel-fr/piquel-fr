@@ -1,0 +1,9 @@
+{
+  "description": "unpadded base64url, as piqueld generates",
+  "input": {
+    "cookie_key": "----____----____----____----____----____--8"
+  },
+  "expected": {
+    "ok": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef"
+  }
+}

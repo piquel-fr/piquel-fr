@@ -1,0 +1,12 @@
+{
+  "description": "hex is read before base64, so 32 hex digits hold 16 bytes",
+  "input": {
+    "cookie_key": "fbefbefffffffbefbefffffffbefbeff"
+  },
+  "expected": {
+    "error": {
+      "bytes": 16,
+      "code": "wrong_length"
+    }
+  }
+}

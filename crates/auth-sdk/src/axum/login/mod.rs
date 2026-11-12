@@ -231,7 +231,7 @@ pub(super) struct Login {
 ///     redirect_uri: "https://notes.sourceorigin.dev/account/callback".parse()?,
 /// });
 /// // The same key on every replica, kept like the client secret.
-/// let key = CookieKey::from_base64(&std::env::var("NOTES_COOKIE_KEY")?)?;
+/// let key = CookieKey::parse(&std::env::var("NOTES_COOKIE_KEY")?)?;
 /// let auth = LoginRoutes::new(client, key)?
 ///     .scopes("profile".parse()?)
 ///     .after_login("/notes".parse()?)
