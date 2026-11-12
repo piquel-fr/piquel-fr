@@ -81,3 +81,5 @@ Apps show your initials instead.
 - **"This handle looks too much like @…"** or **"This handle belonged to
   another account."** Choose another handle. See [handle rules](#handle-rules).
 - **The picture is refused.** Use a PNG, JPEG or GIF of at most 10 MB.
+- **"Another picture is being processed. Try again in a moment."** Origin Auth
+  processes one picture at a time. Upload yours again a few seconds later.

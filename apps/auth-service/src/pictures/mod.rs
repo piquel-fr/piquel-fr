@@ -13,7 +13,7 @@ mod encoding;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use encoding::{Crop, CropFields, MAX_UPLOAD_BYTES, SIDE};
+pub(crate) use encoding::{Crop, CropFields, DecodeTurn, MAX_UPLOAD_BYTES, SIDE};
 
 use crate::{
     account::{AccountError, AccountService, Owner, Subject, Viewer},
@@ -25,7 +25,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, FromRef, Path, Query, State},
+    extract::{DefaultBodyLimit, FromRef, FromRequest, Path, Query, Request, State},
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
     routing::{get, put},
@@ -38,7 +38,11 @@ use sourceorigin_common::{
     events::{DomainEvent, EventContext},
 };
 use sourceorigin_repository::{Database, DatabaseError, StoredPicture};
+use std::time::Duration;
 use thiserror::Error;
+
+/// When an upload refused because another holds the [`DecodeTurn`] may try again.
+const BUSY_RETRY: Duration = Duration::from_secs(5);
 
 /// Why a picture could not be set, removed or served.
 #[derive(Debug, Error)]
@@ -64,9 +68,9 @@ pub(crate) enum PictureError {
     /// Encoding the stored JPEG failed.
     #[error("the picture could not be encoded")]
     Encoding(#[source] image::ImageError),
-    /// The decoding queue closed, which it never does.
-    #[error("the decoding queue closed")]
-    Busy(#[from] tokio::sync::AcquireError),
+    /// Another upload holds the [`DecodeTurn`].
+    #[error("another upload holds the decode turn")]
+    Busy(#[from] tokio::sync::TryAcquireError),
     /// The decoding task panicked or was cancelled.
     #[error("the decoding task failed")]
     Task(#[from] tokio::task::JoinError),
@@ -102,12 +106,16 @@ impl From<PictureError> for ApiError {
             PictureError::TooDetailed => Self::bad_request(
                 "This image has too much fine detail to store. Choose another one.",
             ),
+            PictureError::Busy(_) => Self::busy(
+                "Another picture is being processed. Try again in a moment.",
+                BUSY_RETRY,
+            ),
             PictureError::Missing => Self::not_found("The account has no profile picture."),
             PictureError::Database(error) => error.into(),
-            error @ (PictureError::Encoding(_)
-            | PictureError::Fetch(_)
-            | PictureError::Busy(_)
-            | PictureError::Task(_)) => Self::internal(error),
+            error
+            @ (PictureError::Encoding(_) | PictureError::Fetch(_) | PictureError::Task(_)) => {
+                Self::internal(error)
+            }
         }
     }
 }
@@ -135,17 +143,17 @@ impl From<StoredPicture> for PictureView {
 }
 
 impl AccountService {
-    /// Makes `upload` the owner's picture, replacing any other, once encoded,
-    /// keeping its `crop`, or its centred square. The encoding runs before the
-    /// transaction, which holds no lock meanwhile. A picture grants nothing, so
-    /// the session is enough.
+    /// Makes `upload`, read in `turn`, the owner's picture, replacing any other,
+    /// once encoded, keeping its `crop`, or its centred square. The encoding runs
+    /// before the transaction, which holds no lock meanwhile. A picture grants
+    /// nothing, so the session is enough.
     pub(crate) async fn set_picture(
         &self,
         owner: &Owner,
-        upload: Vec<u8>,
+        (turn, upload): (DecodeTurn, Vec<u8>),
         crop: Option<Crop>,
     ) -> Result<PictureView, AccountError> {
-        let jpeg = Jpeg::encode(upload, crop).await?;
+        let jpeg = Jpeg::encode(turn, upload, crop).await?;
         let id = PictureId::new();
         let mut tx = self.database.begin().await?;
         owner.lock(&mut tx).await?;
@@ -164,7 +172,9 @@ impl AccountService {
     /// the account `user`, which `context` names, unless it has one already: the
     /// first picture of an account a social signup created. The image is fetched
     /// with `client`, which reaches only public addresses and follows no
-    /// redirect, before the transaction.
+    /// redirect, before the transaction, and only once it holds the
+    /// [`DecodeTurn`]: while another upload holds it, it fails with
+    /// [`PictureError::Busy`] and fetches nothing.
     pub(crate) async fn import_picture(
         &self,
         client: &OutboundClient,
@@ -172,6 +182,7 @@ impl AccountService {
         context: &EventContext,
         url: &ProviderPicture,
     ) -> Result<(), AccountError> {
+        let turn = DecodeTurn::take()?;
         let upload = client
             .get(
                 url.as_str(),
@@ -180,7 +191,7 @@ impl AccountService {
             )
             .await
             .map_err(PictureError::Fetch)?;
-        let jpeg = Jpeg::encode(upload, None).await?;
+        let jpeg = Jpeg::encode(turn, upload, None).await?;
         let mut tx = self.database.begin().await?;
         if tx
             .users()
@@ -286,11 +297,29 @@ impl PictureApplication {
         State(app): State<Self>,
         owner: Owner,
         Query(crop): Query<CropFields>,
-        body: Bytes,
+        PictureUpload(turn, body): PictureUpload,
     ) -> Result<Json<PictureView>, ApiError> {
         let picture = AccountService::new(app.database.clone())
-            .set_picture(&owner, body.into(), crop.crop()?)
+            .set_picture(&owner, (turn, body.into()), crop.crop()?)
             .await?;
         Ok(Json(picture))
+    }
+}
+
+/// The body of an upload to the account API, read only once it holds the
+/// [`DecodeTurn`], under the route's body limit. Without a free turn, the upload
+/// is refused with `503` and `Retry-After`, its body unread. It is the handler's
+/// last extractor, so a request the owner's session refuses never takes the turn.
+struct PictureUpload(DecodeTurn, Bytes);
+
+impl<S: Send + Sync> FromRequest<S> for PictureUpload {
+    type Rejection = Response;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Response> {
+        let turn = DecodeTurn::take().map_err(|error| ApiError::from(error).into_response())?;
+        let body = Bytes::from_request(request, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self(turn, body))
     }
 }

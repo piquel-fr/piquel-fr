@@ -1,18 +1,20 @@
 //! The account API's picture upload, through the whole service, and importing a
 //! provider's picture into an account.
 
-use super::PictureError;
+use super::{DecodeTurn, PictureError};
 use crate::{
     account::{AccountError, AccountService},
     deliveries::OutboundClient,
     federation::ProviderPicture,
-    routes::pictures,
+    routes::{page::settings, pictures},
     security::{CSRF_HEADER, RequestContext},
-    tests::{AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, Replicas, TlsListener, detailed_png},
+    tests::{
+        AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, TlsListener, detailed_png,
+    },
 };
 use axum::{
     Router,
-    body::{Body, to_bytes},
+    body::{Body, Bytes, to_bytes},
     http::{Method, Request, StatusCode, header},
     routing::get,
 };
@@ -71,9 +73,64 @@ async fn the_account_api_uploads_a_picture() {
     assert_eq!(read, uploaded);
 }
 
+/// While one upload holds the decode turn, another is refused before any of its
+/// body is read: the account API's `PUT` with `503` and `Retry-After`, and the
+/// settings page's upload with a message to try again.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_upload_without_the_turn_is_refused_unread() {
+    let replicas = Replicas::new().await;
+    let owner = Browser::new_account(&Replicas::database().await).await;
+    let _held = DecodeTurn::take().expect("a free turn");
+    let refused = async |request: axum::http::request::Builder| {
+        let mut request = request;
+        request
+            .headers_mut()
+            .expect("headers")
+            .extend(owner.headers());
+        // Reading any of it fails the test.
+        let unread = Body::from_stream(tokio_stream::iter(std::iter::from_fn(
+            || -> Option<Result<Bytes, std::io::Error>> { panic!("the upload's body was read") },
+        )));
+        let request = request.body(unread).expect("request");
+        let response = replicas.a.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let retry = response.headers().get(header::RETRY_AFTER).cloned();
+        let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
+            .await
+            .expect("body");
+        (retry, String::from_utf8(body.to_vec()).expect("UTF-8"))
+    };
+
+    let (retry, body) = refused(
+        Request::put(pictures::OWN)
+            .header(header::ORIGIN, AUTH_ORIGIN)
+            .header(CSRF_HEADER, "1")
+            .header(header::CONTENT_TYPE, "image/png"),
+    )
+    .await;
+    assert_eq!(retry.expect("Retry-After"), "5");
+    assert!(
+        body.contains("Another picture is being processed."),
+        "{body}"
+    );
+
+    let mut page = Request::post(settings::PROFILE)
+        .header(header::CONTENT_TYPE, "multipart/form-data; boundary=unread");
+    for (name, value) in OWN_PAGE {
+        page = page.header(*name, *value);
+    }
+    let (_, body) = refused(page).await;
+    assert!(
+        body.contains("Another picture is being processed. Try again in a moment."),
+        "{body}"
+    );
+}
+
 /// A signup's provider picture becomes the account's first picture; a second
 /// import leaves a picture the account already has; a picture that is not there
-/// fails, changing nothing.
+/// fails, changing nothing. While another upload holds the decode turn, an import
+/// fails at once, fetching nothing, so the signup goes without its picture.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_provider_picture_is_imported_once() {
@@ -119,5 +176,14 @@ async fn a_provider_picture_is_imported_once() {
         import("/missing").await,
         Err(AccountError::Picture(PictureError::Fetch(_)))
     ));
+    assert_eq!(current().await, None);
+
+    let held = DecodeTurn::take().expect("a free turn");
+    // A fetch would fail; this fails first.
+    assert!(matches!(
+        import("/missing").await,
+        Err(AccountError::Picture(PictureError::Busy(_)))
+    ));
+    drop(held);
     assert_eq!(current().await, None);
 }

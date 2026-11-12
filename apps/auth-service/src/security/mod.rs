@@ -127,6 +127,15 @@ impl ApiError {
         }
     }
 
+    /// Refuses a request this replica can't take now, though it or another may in
+    /// `retry`: `503`, with `Retry-After`.
+    pub(crate) fn busy(message: impl Into<Cow<'static, str>>, retry: StdDuration) -> Self {
+        Self {
+            retry_after: Some(retry),
+            ..Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
+        }
+    }
+
     /// Logs why this replica cannot serve the request now and answers `503`, since
     /// another replica, or this one later, may.
     pub(crate) fn unavailable(error: impl std::error::Error) -> Self {
@@ -184,7 +193,7 @@ impl From<HandleError> for ApiError {
 }
 
 impl IntoResponse for ApiError {
-    /// Serializes the fixed browser error and adds the retry delay for rate limits.
+    /// Serializes the fixed browser error and adds the retry delay, if any.
     fn into_response(self) -> Response {
         let mut response = (
             self.status,

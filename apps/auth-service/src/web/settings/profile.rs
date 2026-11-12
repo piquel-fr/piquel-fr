@@ -2,7 +2,7 @@
 
 use crate::{
     account::{AccountError, Owner, Subject},
-    pictures::{CropFields, PictureError},
+    pictures::{CropFields, DecodeTurn, PictureError},
     routes::{page::settings, pictures},
     web::{
         Failure, WebApplication,
@@ -39,11 +39,15 @@ impl Profile {
 #[derive(Deserialize)]
 #[serde(from = "ProfileChange")]
 pub(in crate::web) enum ProfileEdit {
-    /// Makes the image the account's picture, keeping the square chosen, or its
-    /// centred one. Empty when a text form named it, which chose no image.
-    Upload(Vec<u8>, CropFields),
+    /// Makes the image, read in the turn, the account's picture, keeping the
+    /// square chosen, or its centred one.
+    Upload(DecodeTurn, Vec<u8>, CropFields),
+    /// An upload a text form named, which carries no image.
+    NoImage,
     /// The upload was over the page's body limit.
     Oversize,
+    /// Another upload held the [`DecodeTurn`], so this one was not read.
+    Busy(PictureError),
     /// Removes the account's picture.
     Remove,
     /// Changes the display name to the one typed.
@@ -56,7 +60,7 @@ impl From<ProfileChange> for ProfileEdit {
     /// The change a text form names: an upload in one carries no image.
     fn from(change: ProfileChange) -> Self {
         match change {
-            ProfileChange::Upload => Self::Upload(Vec::new(), CropFields::default()),
+            ProfileChange::Upload => Self::NoImage,
             ProfileChange::Remove => Self::Remove,
             ProfileChange::DisplayName { display_name } => Self::DisplayName(display_name),
             ProfileChange::Handle { handle } => Self::Handle(handle),
@@ -65,11 +69,11 @@ impl From<ProfileChange> for ProfileEdit {
 }
 
 impl Profile {
-    /// The change `multipart` sends: its action and, for an upload, its picture's
-    /// bytes, in any order. An upload over the body limit is
+    /// The change `multipart` sends, read in `turn`: its action and, for an
+    /// upload, its picture's bytes, in any order. An upload over the body limit is
     /// [`ProfileEdit::Oversize`], so the page says how large an image may be; one
     /// that does not read changes nothing.
-    async fn upload(mut multipart: Multipart) -> Option<ProfileEdit> {
+    async fn upload(turn: DecodeTurn, mut multipart: Multipart) -> Option<ProfileEdit> {
         let (mut action, mut picture) = (None, None);
         let mut crop = CropFields::default();
         loop {
@@ -107,7 +111,7 @@ impl Profile {
         let action = serde_json::json!({ "action": action? });
         Some(match serde_json::from_value(action).ok()? {
             ProfileChange::Upload => {
-                ProfileEdit::Upload(picture.map(Vec::from).unwrap_or_default(), crop)
+                ProfileEdit::Upload(turn, picture.map(Vec::from).unwrap_or_default(), crop)
             }
             change => change.into(),
         })
@@ -124,7 +128,10 @@ impl AccountPage for Profile {
     /// A refused change shows its dialog again, holding what was typed.
     fn reopened(change: &ProfileEdit) -> ProfileState {
         let (open, display_name, handle) = match change {
-            ProfileEdit::Upload(..) | ProfileEdit::Oversize => (ProfileDialog::Picture, None, None),
+            ProfileEdit::Upload(..)
+            | ProfileEdit::NoImage
+            | ProfileEdit::Oversize
+            | ProfileEdit::Busy(_) => (ProfileDialog::Picture, None, None),
             ProfileEdit::Remove => (ProfileDialog::Remove, None, None),
             ProfileEdit::DisplayName(name) => (ProfileDialog::Name, Some(name.clone()), None),
             ProfileEdit::Handle(handle) => (ProfileDialog::Handle, None, Some(handle.clone())),
@@ -136,11 +143,17 @@ impl AccountPage for Profile {
         }
     }
 
-    /// An upload is read here; the remove form posts text, as every other form.
+    /// An upload is read here, only once it holds the [`DecodeTurn`]; without
+    /// it, none of the body is read. The remove form posts text, as every other
+    /// form.
     async fn decode(cx: &Cx, body: Body) -> Option<ProfileEdit> {
         if content_type(cx).is_some_and(|value| value.starts_with("multipart/form-data")) {
+            let turn = match DecodeTurn::take() {
+                Ok(turn) => turn,
+                Err(busy) => return Some(ProfileEdit::Busy(busy)),
+            };
             let multipart = Multipart::from_request(cx, body).await.ok()?;
-            return Self::upload(multipart).await;
+            return Self::upload(turn, multipart).await;
         }
         WebApplication::change(cx, body).await
     }
@@ -152,11 +165,15 @@ impl AccountPage for Profile {
         change: ProfileEdit,
     ) -> Result<Applied<ProfileState>, AccountError> {
         let notice = match change {
-            ProfileEdit::Upload(image, crop) => {
-                web.account.set_picture(&owner, image, crop.crop()?).await?;
+            ProfileEdit::Upload(turn, image, crop) => {
+                web.account
+                    .set_picture(&owner, (turn, image), crop.crop()?)
+                    .await?;
                 Notice::PictureChanged
             }
+            ProfileEdit::NoImage => return Err(PictureError::Unsupported.into()),
             ProfileEdit::Oversize => return Err(PictureError::TooLarge.into()),
+            ProfileEdit::Busy(busy) => return Err(busy.into()),
             ProfileEdit::Remove => {
                 web.account.remove_picture(&Subject::from(owner)).await?;
                 Notice::PictureRemoved

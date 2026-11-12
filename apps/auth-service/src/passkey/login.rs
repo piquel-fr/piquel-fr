@@ -178,9 +178,10 @@ impl PasskeyApplication {
         let mut response =
             Self::complete_sign_up(tx, context, &headers, user_id, Credential::Passkey(passkey))
                 .await?;
-        // Once the account is committed, and off the request, so a slow provider or
-        // uploads waiting to be decoded never hold up the sign-up. A picture that
-        // cannot be imported is only logged: the owner may upload one.
+        // Once the account is committed, and off the request, so a slow provider
+        // never holds up the sign-up. A picture that cannot be imported, as while
+        // another upload holds the decode turn, is only logged: the owner may
+        // upload one.
         if let Some(picture) = picture {
             let (account, outbound) = (app.service(), app.outbound.clone());
             tokio::spawn(
