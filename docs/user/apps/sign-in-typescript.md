@@ -31,16 +31,11 @@ which runs on Node's `http` server.
    Keep it secret, like the client secret, and give every replica the same one.
    Changing it signs every user out. `CookieKey.generate()` makes a random one,
    for development and tests.
-4. Add `@sourceorigin/auth` to your app. It is not on npm yet: build it from a checkout
-   of the repository, then install it from there.
+4. Add `@sourceorigin/auth` to your app:
 
    ```console
-   pnpm install --frozen-lockfile
-   pnpm --filter @sourceorigin/auth build
-   npm install <checkout>/packages/auth
+   npm install @sourceorigin/auth
    ```
-
-   The first two commands run in the checkout, and the last in your app.
 
 ## Sign users in
 

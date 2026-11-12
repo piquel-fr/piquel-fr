@@ -55,6 +55,7 @@
 - [Testing](dev/testing.md)
 - [Rust conventions](dev/rust-conventions.md)
 - [Changing the documentation](dev/documentation.md)
+- [Releasing](dev/releasing.md)
 
 # Architecture
 

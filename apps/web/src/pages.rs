@@ -97,7 +97,7 @@ async fn home(links: HomeLinks<'_>) -> Result<impl View> {
             feature(title: "Sign in with a passkey", text: "Your passkey stays on your device or in your password manager. There is no password to steal or reuse. You can also link GitHub or Google to sign in.", label: "Sign in", href: links.sign_in)
             feature(title: "Your account, in your hands", text: "See and remove your passkeys, linked providers, email addresses, signed-in devices and the apps you allowed. Review your security history, download your data, or delete your account.", label: "Account settings", href: links.settings)
             feature(title: "For developers", text: "Register your app as an OpenID Connect client, so its users sign in with their Origin Account. Apps only get what their users approve.", label: "Developer console", href: links.developers)
-            feature(title: "Open standards and SDKs", text: "Origin Auth speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, sourceorigin-auth, validates tokens and signs users in for you.", label: "Documentation", href: DOCUMENTATION)
+            feature(title: "Open standards and SDKs", text: "Origin Auth speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust and TypeScript SDKs, sourceorigin-auth and @sourceorigin/auth, validate tokens and sign users in for you.", label: "Documentation", href: DOCUMENTATION)
             feature(title: "Public source", text: "All of SourceOrigin's code is public. Read exactly how your data is handled, report a problem, or contribute. You may use it for anything but commercial purposes, and the SDKs are free for any app under Apache 2.0.", label: "Source code", href: SOURCE, wide: true)
         </div>
     })

@@ -9,6 +9,9 @@
 #   rust   -> unit and database tests against PostgreSQL with coverage, and
 #             the SQLx query cache checked to match the migrated schema exactly
 #   rust-lint -> Clippy, rustdoc with warnings denied, and the doc tests
+#   package -> the SDKs packaged as `just publish` publishes them, each crate
+#             built from its package, without uploading anything
+#   msrv   -> the published crates built with their oldest supported Rust
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
 #             with the admin dashboard on its own listener and host, sourceorigin.dev's
 #             web server on its own host, Mailpit receiving auth's email, and
@@ -87,7 +90,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             rust:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,clippy.toml,.cargo/**,justfile,just/**,apps/**,crates/**,tests/sdk-vectors/**,packages/auth/src/protocol.ts,docs/dev/security/audit-key.pub,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,clippy.toml,.cargo/**,justfile,just/**,apps/**,crates/**,tools/**,tests/sdk-vectors/**,packages/auth/src/protocol.ts,docs/dev/security/audit-key.pub,.github/workflows/ci.yml}'
               - '!**/*.md'
             reference:
               - 'docs/dev/operations/{cli-commands,variables/*}.md'
@@ -179,6 +182,45 @@ jobs:
       - run: just rust lint
       - run: just doc
       - run: just doc-test
+
+  # Everything `just publish` does except uploading: packages each crate and
+  # builds it from its package, as `cargo install` and crates.io would, then
+  # packs @sourceorigin/auth, whose `prepack` script builds it.
+  package:
+    name: package
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - *install-just
+      - *setup-pnpm
+      - *setup-node
+      - *rust-cache
+      - run: just install
+      - run: just publish --dry-run
+
+  # Builds the published crates with the oldest Rust their `rust-version`
+  # promises. Warnings aren't errors here: lints differ between Rust versions,
+  # and rust-lint lints with the pinned one.
+  msrv:
+    name: msrv
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # RUSTUP_TOOLCHAIN overrides rust-toolchain.toml for every later step,
+      # the cache key included.
+      - name: Install the oldest supported Rust
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          rustup toolchain install "$msrv" --profile minimal
+          echo "RUSTUP_TOOLCHAIN=$msrv" >> "$GITHUB_ENV"
+      - *rust-cache
+      - run: cargo check --locked --all-features --package sourceorigin-common --package sourceorigin-crypto --package sourceorigin-auth
 
   rust:
     name: rust
@@ -397,6 +439,8 @@ jobs:
       - web
       - rust
       - rust-lint
+      - package
+      - msrv
       - e2e
       - docker
       - infra
@@ -406,5 +450,5 @@ jobs:
     steps:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
-          allowed-skips: checks, web, rust, rust-lint, e2e, docker, infra
+          allowed-skips: checks, web, rust, rust-lint, package, msrv, e2e, docker, infra
           jobs: ${{ toJSON(needs) }}

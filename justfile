@@ -31,8 +31,24 @@ install:
 # Cargo tools used by the test, coverage, audit, database and docs recipes. CI
 # installs mdBook and lychee at the same versions.
 install-tools: db::install-sqlx
-    @cargo install --locked cargo-nextest cargo-llvm-cov cargo-deny cargo-machete
+    @cargo install --locked cargo-nextest cargo-llvm-cov cargo-deny cargo-machete cargo-semver-checks
     @cargo install --locked mdbook@0.5.4 lychee@0.24.2
+
+# Publish the SDKs: the Rust crates to crates.io, then @sourceorigin/auth to npm,
+# skipping versions already published; see docs/dev/releasing.md. `--dry-run`
+# packages and builds them without uploading; `--allow-dirty` allows uncommitted
+# changes.
+[positional-arguments]
+publish *ARGS:
+    @cargo xtask publish "$@"
+
+# Release the workspace version from the latest main: publish the SDKs, tag the
+# commit, create its GitHub release and close its milestone; see
+# docs/dev/releasing.md. `--dry-run` runs the checks and the publish dry run, and
+# only prints the other steps and the release notes.
+[positional-arguments]
+release *ARGS:
+    @cargo xtask release "$@"
 
 # The release auth-service executable.
 build: (rust::build "--release")

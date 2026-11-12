@@ -11,8 +11,12 @@ by passkeys, for SourceOrigin's services and any app built on them.
   a private listener. Administrators manage accounts there, and invite people by
   email or with a link to pass on.
 - **sourceorigin.dev** is the homepage and policies.
-- **The SDKs**, `sourceorigin-auth` for Rust and `@sourceorigin/auth` for TypeScript, sign
-  users in and validate auth's tokens.
+- **The SDKs**, [`sourceorigin-auth`](https://crates.io/crates/sourceorigin-auth) for
+  Rust and [`@sourceorigin/auth`](https://www.npmjs.com/package/@sourceorigin/auth) for
+  TypeScript, sign users in and validate auth's tokens. They are published to
+  crates.io and npm, with `sourceorigin-common` and `sourceorigin-crypto`, which the
+  Rust SDK depends on. Nothing else is published; see
+  [releasing](docs/dev/releasing.md).
 
 ## Documentation
 
@@ -39,6 +43,7 @@ See [getting started](docs/dev/getting-started.md) for the tools these need.
 | `packages/auth` | the TypeScript SDK |
 | `infra/` | Dockerfiles and piqueld deployments |
 | `tests/` | the browser tests and the cases every SDK passes |
+| `tools/xtask` | `cargo xtask`, which publishes the SDKs and releases a version |
 | `docs/` | the documentation book |
 
 ## Contact

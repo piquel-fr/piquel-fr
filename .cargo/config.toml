@@ -2,3 +2,7 @@
 # Checked SQLx queries compile from crates/database/.sqlx, so a DATABASE_URL in
 # the shell never makes a build connect. `just db prepare` overrides it.
 SQLX_OFFLINE = "true"
+
+# `cargo xtask <task>` runs the workspace's development tasks (tools/xtask).
+[alias]
+xtask = "run --package xtask --"

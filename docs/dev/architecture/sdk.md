@@ -13,9 +13,10 @@ behavior and names.
 
 | Path | Package | Published | Role |
 | --- | --- | --- | --- |
-| `crates/common` | `sourceorigin-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
-| `crates/auth-sdk` | `sourceorigin-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
-| `packages/auth` | `@sourceorigin/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Bun and Workers; `@sourceorigin/auth/server` is its server-side login over standard `Request` and `Response`, and `@sourceorigin/auth/browser` its public client for apps without a server, passkey sign-in on the app's page included |
+| `crates/common` | `sourceorigin-common` | crates.io | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
+| `crates/crypto` | `sourceorigin-crypto` | crates.io | The cryptography auth and the Rust SDK share, so both judge keys and signatures alike |
+| `crates/auth-sdk` | `sourceorigin-auth` | crates.io | Rust SDK; the `axum` feature adds the axum integration |
+| `packages/auth` | `@sourceorigin/auth` | npm | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Bun and Workers; `@sourceorigin/auth/server` is its server-side login over standard `Request` and `Response`, and `@sourceorigin/auth/browser` its public client for apps without a server, passkey sign-in on the app's page included |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types
@@ -470,3 +471,10 @@ the parsed value or the expected error code. The generator,
 shared claim types and signs them with auth's signer. `just sdk-vectors` rewrites
 them, and `just test`, and so `just validate`, fails when they are stale. Every
 SDK's test suite runs every case.
+
+## Releases
+
+The Rust crates are released together, at the workspace version, and
+`@sourceorigin/auth` at its own. Both follow semantic versioning: before 1.0, a
+minor release may break the API. [Releasing](../releasing.md) explains how a
+maintainer publishes them.

@@ -18,8 +18,8 @@ The guides behind this skill:
 
 - Registering an app: https://docs.sourceorigin.dev/user/apps/register-an-app.html
 - OpenID Connect reference: https://docs.sourceorigin.dev/user/reference/oidc.html
-- Rust SDK: https://github.com/sourceorigin-dev/sourceorigin/tree/main/crates/auth-sdk
-- TypeScript SDK: https://github.com/sourceorigin-dev/sourceorigin/blob/main/packages/auth/README.md
+- Rust SDK: https://docs.rs/sourceorigin-auth
+- TypeScript SDK: https://www.npmjs.com/package/@sourceorigin/auth
 
 ## 1. Ask the person to register the app
 
@@ -69,11 +69,10 @@ it.
 
 Add the SDK, with axum at the version it uses:
 
-```toml
-[dependencies]
-sourceorigin-auth = { git = "https://github.com/sourceorigin-dev/sourceorigin", features = ["axum"] }
-axum = "0.8"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+```sh
+cargo add sourceorigin-auth --features axum
+cargo add axum@0.8
+cargo add tokio --features macros,rt-multi-thread,net
 ```
 
 Then mount the login routes and their layer:
@@ -144,8 +143,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 `@sourceorigin/auth` runs on Node 22 or later, Bun and Cloudflare Workers.
 `@sourceorigin/auth/server` takes a standard `Request` and returns a `Response`, so
-it fits Node, Bun, Workers, Hono and SvelteKit. The package isn't published to
-npm yet: ask the person how the project should get it before you add it.
+it fits Node, Bun, Workers, Hono and SvelteKit. Add it with the project's package
+manager, such as `npm install @sourceorigin/auth`.
 
 ```ts
 import { Issuer } from '@sourceorigin/auth';

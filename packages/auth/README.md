@@ -7,14 +7,8 @@ WebCrypto, so it runs in browsers, Node 22+, Bun and Cloudflare Workers.
 
 ## Install
 
-The package is not on npm yet. Build it from a checkout of
-[the repository](https://github.com/sourceorigin-dev/sourceorigin), then install it from
-there:
-
 ```console
-pnpm install --frozen-lockfile
-pnpm --filter @sourceorigin/auth build
-npm install <checkout>/packages/auth
+npm install @sourceorigin/auth
 ```
 
 ## Sign users in
@@ -67,5 +61,10 @@ declared as types: see
 - [How sign-in works](https://docs.sourceorigin.dev/user/apps/how-sign-in-works.html)
 - [Step-up authentication](https://docs.sourceorigin.dev/user/apps/step-up.html)
 - [Back-channel logout](https://docs.sourceorigin.dev/user/apps/back-channel-logout.html)
+- [Changes in each release](https://github.com/sourceorigin-dev/sourceorigin/releases)
 - [The SDK's design](https://docs.sourceorigin.dev/dev/architecture/sdk.html), to change
   it
+
+## License
+
+[Apache-2.0](LICENSE).

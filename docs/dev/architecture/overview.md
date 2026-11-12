@@ -62,10 +62,11 @@ Auth renders every page itself, sign-in included, and the account settings at
 | --- | --- |
 | `apps/auth-service` | The auth authority: browser ceremonies, social sign-in, OIDC, the server-rendered pages, the settings API, the admin dashboard and the CLI. `assets/passkey.js` runs the WebAuthn ceremonies and the form hooks that start them, `assets/picture.js` lets the picture form choose its crop, `assets/search.js` ranks the top bar's search, `assets/copy.js` copies a value to the clipboard, and `assets/dashboard.js` confirms the admin dashboard with a passkey |
 | `apps/web` | `sourceorigin-web`, sourceorigin.dev's own web server, with SourceOrigin's policies in `assets/policies/` |
-| `packages/auth` | `@sourceorigin/auth`, the TypeScript SDK, not yet published: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `sourceorigin_common::protocol` |
+| `packages/auth` | `@sourceorigin/auth`, the TypeScript SDK, published to npm: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `sourceorigin_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [SDK design](sdk.md#test-vectors) |
 | `tests/browser` | Playwright tests, and the documentation's screenshots |
 | `infra/` | Dockerfiles and the piqueld manifests |
+| `tools/xtask` | `cargo xtask`: publishing the SDKs and releasing a version; see [releasing](../releasing.md) |
 
 Inside auth-service, each HTTP feature is a module whose `XApplication` serves
 its routes, and `src/routes.rs` declares every path. Pages live in `src/web`, grouped by area:
@@ -85,7 +86,12 @@ explains how applications, routes and services fit together.
 | `sourceorigin-repository` (`crates/database`) | The only crate that runs SQL: connections, migrations, repositories, transactions, events and the delivery queue's storage |
 | `sourceorigin-telemetry` (`crates/telemetry`) | Logs, traces and metrics, and the HTTP layer every router uses |
 | `sourceorigin-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, and the bodies of its emails, which know nothing of the database or HTTP |
-| `sourceorigin-auth` (`crates/auth-sdk`) | The Rust SDK, which depends only on `sourceorigin-common` |
+| `sourceorigin-auth` (`crates/auth-sdk`) | The Rust SDK, which depends only on `sourceorigin-common` and `sourceorigin-crypto` |
+
+The SDK and the two crates it depends on are published to crates.io, under the
+Apache License 2.0. Every other crate is under the PolyForm Noncommercial License
+and sets `publish = false`, so none of them can become a dependency of a published
+crate; see [releasing](../releasing.md#what-gets-published).
 
 [Rust conventions](../rust-conventions.md#crates) describes each crate in full.
 Shared types go in `sourceorigin-common`. Add a crate only for an independently

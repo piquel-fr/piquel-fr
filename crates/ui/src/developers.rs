@@ -23,11 +23,14 @@ use topcoat::{
     view::{View, component, view},
 };
 
-/// The Rust SDK's source and guide.
-const RUST_SDK: &str = "https://github.com/sourceorigin-dev/sourceorigin/tree/main/crates/auth-sdk";
-/// The TypeScript SDK, whose `@sourceorigin/auth/browser` signs users in from the browser.
-const TYPESCRIPT_SDK: &str =
-    "https://github.com/sourceorigin-dev/sourceorigin/tree/main/packages/auth";
+/// The Rust SDK, `sourceorigin-auth`, on docs.rs.
+const RUST_SDK: &str = "https://docs.rs/sourceorigin-auth";
+/// The TypeScript SDK, `@sourceorigin/auth`, on npm. Its `@sourceorigin/auth/browser`
+/// signs users in from the browser.
+const TYPESCRIPT_SDK: &str = "https://www.npmjs.com/package/@sourceorigin/auth";
+/// The Rust SDK's version the example depends on: this crate's, since every
+/// crate shares the workspace version and the SDK is published at it.
+const RUST_SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The guide to asking for a passkey before sensitive actions.
 const STEP_UP_GUIDE: &str = "https://docs.sourceorigin.dev/user/apps/step-up.html";
 
@@ -235,7 +238,7 @@ impl ClientRow<'_> {
         format!(
             r#"// Cargo.toml, with axum at the SDK's version, so its router and layer fit yours:
 // [dependencies]
-// sourceorigin-auth = {{ git = "https://github.com/sourceorigin-dev/sourceorigin", features = ["axum"] }}
+// sourceorigin-auth = {{ version = "{RUST_SDK_VERSION}", features = ["axum"] }}
 // axum = "0.8"
 // tokio = {{ version = "1", features = ["macros", "rt-multi-thread", "net"] }}
 use axum::{{Router, routing::get}};
@@ -323,10 +326,11 @@ pub async fn apps<'a>(links: &'a [AppLink<'a>], limit: u32, new: &'a str) -> Res
             <header><h2 id="docs-heading">"How it works"</h2></header>
             <div class="body">
                 <p>
-                    "Origin Auth is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust SDK, or any OpenID Connect library with the settings on your app's page."
+                    "Origin Auth is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust or TypeScript SDK, or any OpenID Connect library with the settings on your app's page."
                 </p>
                 <ul>
                     <li><a href=(RUST_SDK)>"Rust SDK (" <code>"sourceorigin-auth"</code> ")"</a></li>
+                    <li><a href=(TYPESCRIPT_SDK)>"TypeScript SDK (" <code>"@sourceorigin/auth"</code> ")"</a></li>
                     <li><a href=(STEP_UP_GUIDE)>"Asking for a passkey before sensitive actions (step-up)"</a></li>
                 </ul>
             </div>
@@ -451,7 +455,8 @@ pub async fn overview<'a>(
                 </header>
                 <div class="body">
                     <p class="help">
-                        "The " <a href=(RUST_SDK)>"Rust SDK"</a> " signs users in on your server. Their tokens stay in a cookie sealed with your key, which the browser cannot read."
+                        "The " <a href=(RUST_SDK)>"Rust SDK"</a> " signs users in on your server. Their tokens stay in a cookie sealed with your key, which the browser cannot read. In Node, Bun or Workers, the "
+                        <a href=(TYPESCRIPT_SDK)>"TypeScript SDK"</a> "'s " <code>"@sourceorigin/auth/server"</code> " does the same."
                     </p>
                     <pre><code id="rust-example">(example)</code></pre>
                 </div>

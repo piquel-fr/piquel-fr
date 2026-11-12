@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+keywords = ["jwt", "pkce", "aead", "authentication"]
+categories = ["cryptography", "authentication"]
 
 [dependencies]
 sourceorigin-common.workspace = true
@@ -15,6 +20,11 @@ secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+# Labels feature-gated items with the features they need.
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

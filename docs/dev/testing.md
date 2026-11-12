@@ -167,6 +167,7 @@ expressions included.
 | Validate the piqueld manifests with piquelctl, and the telemetry configs with the images that run them (needs Docker) | `just infra check` |
 | Regenerate the query cache, the SDK vectors, the TypeScript SDK's wire types, or the generated documentation | `just db prepare` / `just sdk-vectors` / `just sdk-types` / `just docs reference` |
 | Build the book and check its links | `just docs` |
+| Package and build the SDKs as `just publish` publishes them, without uploading | `just publish --dry-run --allow-dirty` |
 
 ## What CI runs
 
@@ -178,6 +179,8 @@ CI runs the same recipes, in these jobs:
 | `web` | `just web fmt-check`, `check`, `lint`, `unused`, `test` and `smoke`, and `just web audit` when dependencies change |
 | `rust` | `just coverage` against a PostgreSQL 18 service, then `just db prepare-check` |
 | `rust-lint` | `just rust lint`, `just doc` and `just doc-test` |
+| `package` | `just publish --dry-run`: see [releasing](releasing.md#what-gets-published) |
+| `msrv` | `cargo check` of the published crates with their oldest supported Rust, the workspace's `rust-version` |
 | `e2e` | The browser suite, against the debug binary behind Caddy, with Mailpit receiving auth's email and sourceorigin.dev's web server on its own host |
 | `docker` | Builds the auth, web and docs images, the first two from the layers `main` cached last |
 | `infra` | `just infra check`, with the latest piquelctl |

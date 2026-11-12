@@ -17,12 +17,16 @@ exceptions = [
     { crate = "sourceorigin-repository", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-telemetry", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-ui", allow = ["PolyForm-Noncommercial-1.0.0"] },
+    { crate = "xtask", allow = ["PolyForm-Noncommercial-1.0.0"] },
 ]
 
 [bans]
 # A `*` requirement accepts any future release, breaking or malicious.
 # Workspace crates name their version (Cargo.toml) so they don't count as one.
 wildcards = "deny"
+# Except a path-only dev-dependency, which `cargo publish` strips: the published
+# sourceorigin-common's on sourceorigin-crypto, a dev-dependency cycle.
+allow-wildcard-paths = true
 # Duplicates come from dependencies' own requirements, which this workspace
 # can't change; warning about them would only bury real failures.
 multiple-versions = "allow"
