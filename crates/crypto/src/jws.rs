@@ -6,8 +6,10 @@
 //! ```
 //! use sourceorigin_crypto::{Compact, KeyDefect, Rs256VerifyingKey, VerifyError};
 //!
-//! let token = Compact::split("eyJhbGciOiJSUzI1NiJ9.e30.c2lnbmF0dXJl")?;
-//! assert_eq!(token.header(), br#"{"alg":"RS256"}"#);
+//! let split = Compact::split("eyJhbGciOiJSUzI1NiJ9.e30.c2lnbmF0dXJl")?;
+//! assert_eq!(split.header(), br#"{"alg":"RS256"}"#);
+//! // The header passed the caller's checks, so the rest is decoded.
+//! let token = split.decode()?;
 //! // A 1024-bit modulus verifies nothing: the key is at fault, not the token.
 //! let weak = Rs256VerifyingKey::new(&[0xc5; 128], &[1, 0, 1]);
 //! assert!(matches!(weak.defect(), Some(KeyDefect::ModulusSize(1024))));
@@ -26,7 +28,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use thiserror::Error;
 
 /// Longest compact token read, in bytes: decoding is bounded before it starts.
-pub const MAX_TOKEN_BYTES: usize = 16 * 1024;
+const MAX_TOKEN_BYTES: usize = 16 * 1024;
 /// Shortest RSA modulus a key may have, in bits (RFC 7518 §3.3).
 const MIN_MODULUS_BITS: usize = 2048;
 /// Longest RSA modulus a key may have, in bits, as aws-lc verifies.
@@ -39,6 +41,49 @@ const EXPONENT: [u8; 3] = [1, 0, 1];
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 #[error("{0}")]
 pub struct Malformed(pub &'static str);
+
+/// A compact JWS split into its three segments, with only its header decoded.
+/// The caller checks the header first, then decodes the rest, so a header that
+/// fails its checks is reported before a malformed payload or signature, in the
+/// order every SDK reports failures.
+pub struct Split<'a> {
+    /// The decoded protected header, JSON as sent.
+    header: Vec<u8>,
+    /// `header.payload`, the bytes the signature covers.
+    signing_input: &'a str,
+    /// The base64url payload.
+    payload: &'a str,
+    /// The base64url signature.
+    signature: &'a str,
+}
+
+impl<'a> Split<'a> {
+    /// The decoded protected header, for the caller to parse under its policy.
+    #[must_use]
+    pub fn header(&self) -> &[u8] {
+        &self.header
+    }
+
+    /// Decodes the payload and signature.
+    ///
+    /// # Errors
+    /// [`Malformed`] for a segment that is not unpadded base64url.
+    pub fn decode(self) -> Result<Compact<'a>, Malformed> {
+        Ok(Compact {
+            header: self.header,
+            signing_input: self.signing_input,
+            payload: decode(self.payload)?,
+            signature: decode(self.signature)?,
+        })
+    }
+}
+
+/// A segment's unpadded base64url, decoded.
+fn decode(segment: &str) -> Result<Vec<u8>, Malformed> {
+    URL_SAFE_NO_PAD
+        .decode(segment)
+        .map_err(|_| Malformed("a segment is not base64url"))
+}
 
 /// A compact JWS (RFC 7515 §7.1) split into its decoded parts. Nothing is
 /// verified: read the header, verify the signature, and only then the payload.
@@ -55,13 +100,13 @@ pub struct Compact<'a> {
 }
 
 impl<'a> Compact<'a> {
-    /// Splits a token of at most [`MAX_TOKEN_BYTES`] into exactly three base64url
-    /// segments and decodes them.
+    /// Splits a token of at most 16 KiB into exactly three segments
+    /// and decodes its header.
     ///
     /// # Errors
-    /// [`Malformed`] for a longer token, another number of segments, or a segment
+    /// [`Malformed`] for a longer token, another number of segments, or a header
     /// that is not unpadded base64url.
-    pub fn split(token: &'a str) -> Result<Self, Malformed> {
+    pub fn split(token: &'a str) -> Result<Split<'a>, Malformed> {
         if token.len() > MAX_TOKEN_BYTES {
             return Err(Malformed("the token exceeds 16 KiB"));
         }
@@ -74,16 +119,11 @@ impl<'a> Compact<'a> {
         ) else {
             return Err(Malformed("the token is not three segments"));
         };
-        let decode = |segment: &str| {
-            URL_SAFE_NO_PAD
-                .decode(segment)
-                .map_err(|_| Malformed("a segment is not base64url"))
-        };
-        Ok(Self {
+        Ok(Split {
             header: decode(header)?,
             signing_input: &token[..header.len() + 1 + payload.len()],
-            payload: decode(payload)?,
-            signature: decode(signature)?,
+            payload,
+            signature,
         })
     }
 

@@ -53,10 +53,10 @@ struct Token<'a> {
 impl<'a> Token<'a> {
     /// Splits a bounded token into exactly three parts and parses its header.
     fn parse(token: &'a str) -> Result<Self, CryptoError> {
-        let compact = Compact::split(token).map_err(|_| CryptoError::InvalidToken)?;
+        let split = Compact::split(token).map_err(|_| CryptoError::InvalidToken)?;
         Ok(Self {
-            header: serde_json::from_slice(compact.header())?,
-            compact,
+            header: serde_json::from_slice(split.header())?,
+            compact: split.decode().map_err(|_| CryptoError::InvalidToken)?,
         })
     }
 }
@@ -105,7 +105,6 @@ impl PublicKey {
     /// The key's JWK thumbprint (RFC 7638): the SHA-256 digest of its required
     /// members, in lexicographic order and canonical form, so it names the key
     /// itself, whatever its `kid` or how its JWK spells it.
-    ///
     #[must_use]
     pub fn thumbprint(&self) -> Digest {
         let members = match self.jwk.kty {

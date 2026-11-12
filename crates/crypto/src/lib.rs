@@ -10,7 +10,7 @@ mod scram;
 mod sealing;
 /// RSA signing and verification of compact JWTs, by key set.
 mod signing;
-pub use jws::{Compact, KeyDefect, MAX_TOKEN_BYTES, Malformed, Rs256VerifyingKey, VerifyError};
+pub use jws::{Compact, KeyDefect, Malformed, Rs256VerifyingKey, Split, VerifyError};
 pub use note::{NoteKey, NoteVerifier, NoteVerifiers};
 pub use scram::ScramVerifier;
 pub use sealing::{KeyEncryptionKey, SealingKey};

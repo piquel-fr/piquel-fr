@@ -12,7 +12,7 @@ use sourceorigin_common::protocol::{
     sdk::{ErrorCategory, ErrorReason, SdkError},
 };
 pub use sourceorigin_crypto::KeyDefect;
-use sourceorigin_crypto::{Compact, Rs256VerifyingKey, VerifyError};
+use sourceorigin_crypto::{Compact, Malformed, Rs256VerifyingKey, VerifyError};
 use std::{
     fmt,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -74,6 +74,11 @@ impl JwsHeader {
 ///     Err(TokenError::WrongType { .. })
 /// ));
 /// assert!(matches!(Jws::parse("two.segments"), Err(TokenError::Malformed(_))));
+/// // The header's checks come first, whatever follows it.
+/// assert!(matches!(
+///     Jws::parse("eyJhbGciOiJSUzI1NiIsImNyaXQiOltdfQ.not*base64.not*base64"),
+///     Err(TokenError::UnsupportedCriticalHeader)
+/// ));
 /// # Ok::<(), TokenError>(())
 /// ```
 #[derive(Clone)]
@@ -102,14 +107,17 @@ impl<'a> Jws<'a> {
     /// 16 KiB, with a JSON header; [`TokenError::UnsupportedCriticalHeader`] if that
     /// header sets `crit`.
     pub fn parse(token: &'a str) -> Result<Self, TokenError> {
-        let compact =
-            Compact::split(token).map_err(|malformed| TokenError::Malformed(malformed.0))?;
-        let header: JwsHeader = serde_json::from_slice(compact.header())
+        let malformed = |malformed: Malformed| TokenError::Malformed(malformed.0);
+        let split = Compact::split(token).map_err(malformed)?;
+        let header: JwsHeader = serde_json::from_slice(split.header())
             .map_err(|_| TokenError::Malformed("the header is not a JWS header"))?;
         if header.crit.is_some() {
             return Err(TokenError::UnsupportedCriticalHeader);
         }
-        Ok(Self { header, compact })
+        Ok(Self {
+            header,
+            compact: split.decode().map_err(malformed)?,
+        })
     }
 
     /// The protected header.
