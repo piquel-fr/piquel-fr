@@ -145,6 +145,7 @@ impl AdminOperation {
             | Self::UndoRecovery
             | Self::RotateSigningKey
             | Self::RevokeSigningKey
+            | Self::RewrapSigningKeys
             | Self::SendAnnouncement
             | Self::UpdateAlert => return None,
         })

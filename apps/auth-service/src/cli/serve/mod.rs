@@ -55,7 +55,7 @@ impl Command {
             Some(dashboard) => Some((TcpListener::bind(dashboard.listener).await?, dashboard)),
             None => None,
         };
-        let store = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key));
+        let store = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_keys));
         let keys = store.start().await?;
         let router = config.router(database.clone(), &keys)?;
         let admin = match admin {

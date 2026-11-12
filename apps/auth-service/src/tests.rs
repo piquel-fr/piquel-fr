@@ -2,7 +2,8 @@
 //! and the fixtures shared by the applications' tests.
 
 use crate::{
-    AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator, Reason, SigningKeys,
+    AuthConfig, ClientRegistry, ClientRegistryError, KeyEncryptionKeys, KeyStore, Operator, Reason,
+    SigningKeys,
     account::{AccountService, Owner},
     clients::{ClientSettings, NewClient},
     config::{
@@ -60,6 +61,12 @@ pub(crate) fn key_encryption_key() -> KeyEncryptionKey {
     KeyEncryptionKey::parse(KEY_ENCRYPTION_KEY).expect("test key-encryption key")
 }
 
+/// The key-encryption keys of every test that stores signing keys: the tests'
+/// key, and none accepted.
+pub(crate) fn key_encryption_keys() -> Arc<KeyEncryptionKeys> {
+    Arc::new(KeyEncryptionKeys::new(key_encryption_key(), None))
+}
+
 /// Two routers built by [`AuthConfig::router`] from one configuration. Each has its
 /// own database pool and in-process state, signing keys included, so a test passes
 /// only if everything it relies on is shared through PostgreSQL or the configuration.
@@ -82,7 +89,7 @@ impl AuthConfig {
 
     /// Signing keys on `database`, as a replica starts them.
     pub(crate) async fn test_keys(&self, database: Database) -> SigningKeys {
-        KeyStore::new(database, Arc::clone(&self.key_encryption_key))
+        KeyStore::new(database, Arc::clone(&self.key_encryption_keys))
             .start()
             .await
             .expect("signing keys")
@@ -111,7 +118,7 @@ impl AuthConfig {
                 )),
                 policies: PolicyLinks::on(&WEB_ORIGIN.parse().expect("web origin")),
             },
-            key_encryption_key: Arc::new(key_encryption_key()),
+            key_encryption_keys: key_encryption_keys(),
             audit: AuditConfig::new(
                 origin,
                 NoteKey::generate("auth.sourceorigin.dev/audit").expect("audit key"),

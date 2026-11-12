@@ -536,6 +536,7 @@ impl DomainEvent {
                 ..
             } => origin.version(),
             Self::AuditChainVerified(verification) => verification.version(),
+            Self::SigningKeyChanged { change, .. } => change.version(),
             Self::AlertRaised { alert, .. }
             | Self::AlertUpdated { alert, .. }
             | Self::AlertCleared { alert, .. } => alert.version(),
@@ -776,6 +777,26 @@ impl DomainEvent {
             Self::AlertCleared { .. } => "alert_cleared",
             Self::NotificationPreferenceChanged(_) => "notification_preference_changed",
             Self::Imported(_) => "imported",
+        }
+    }
+}
+
+impl SigningKeyChange {
+    /// Its payload version as a recorded event. A new change is one older
+    /// releases cannot decode, so it fails to compile here until it is given the
+    /// next version.
+    #[must_use]
+    pub const fn version(self) -> i16 {
+        match self {
+            Self::Generated
+            | Self::Imported
+            | Self::Activated
+            | Self::Retiring
+            | Self::Retired
+            | Self::Deleted
+            | Self::Revoked => DomainEvent::FIRST_VERSION,
+            // Releases before it cannot decode it.
+            Self::Rewrapped => 2,
         }
     }
 }

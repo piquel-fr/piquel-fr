@@ -6,7 +6,7 @@ use super::*;
 use crate::{
     routes,
     service::ServiceApplication,
-    tests::{Replicas, key_encryption_key},
+    tests::{Replicas, key_encryption_key, key_encryption_keys},
 };
 use axum::{
     body::Body,
@@ -17,6 +17,7 @@ use sourceorigin_common::{
     events::Actor,
     protocol::jwt::{Jwk, TokenType},
 };
+use sourceorigin_crypto::KeyEncryptionKey;
 use sourceorigin_repository::{EventFilter, InsertSigningKey};
 use tower::ServiceExt;
 
@@ -27,7 +28,7 @@ const ISSUER: &str = "https://auth.example";
 async fn store() -> (KeyStore, Database) {
     let database = Replicas::database().await;
     (
-        KeyStore::new(database.clone(), Arc::new(key_encryption_key())),
+        KeyStore::new(database.clone(), key_encryption_keys()),
         database,
     )
 }
@@ -371,7 +372,10 @@ async fn another_key_encryption_key_neither_opens_nor_changes_the_keys() {
 
     let other = KeyStore::new(
         database.clone(),
-        Arc::new(KeyEncryptionKey::generate().expect("another KEK")),
+        Arc::new(KeyEncryptionKeys::new(
+            KeyEncryptionKey::generate().expect("another KEK"),
+            None,
+        )),
     );
     assert!(matches!(
         other.key_set(&tx.signing_keys().list().await.expect("list")),
@@ -387,6 +391,80 @@ async fn another_key_encryption_key_neither_opens_nor_changes_the_keys() {
         ),
         "a store whose key-encryption key does not open the keys changes nothing"
     );
+    tx.rollback().await.expect("rollback");
+}
+
+/// During a change of key-encryption key, a store opens keys sealed under its
+/// accepted key too. Rewrapping seals every key that still has a private key
+/// under its current one, as an event each, so the old key opens none of them;
+/// a store that cannot open a key refuses to rewrap.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn rewrapping_seals_every_key_under_the_current_key_encryption_key() {
+    let (old, database) = store().await;
+    let mut tx = database.begin().await.expect("transaction");
+    clear(&mut tx).await;
+    let start = Utc::now();
+    assert!(old.tick_in(&mut tx, start).await.expect("first key"));
+    let mut change = Change::new(&mut tx, &old, start, None);
+    change.rotate(true).await.expect("rotate at once");
+    change.rotate(false).await.expect("publish a next key");
+    let later = start + RETIRING_WINDOW;
+    assert!(
+        old.tick_in(&mut tx, later)
+            .await
+            .expect("retire the first key")
+    );
+    let sealed: Vec<_> = tx
+        .signing_keys()
+        .list()
+        .await
+        .expect("list")
+        .into_iter()
+        .filter_map(|key| key.sealed_private_key.is_some().then_some(key.id))
+        .collect();
+    assert_eq!(sealed.len(), 2, "the active and next keys");
+
+    let new = Secret::generate().expect("random").encoded();
+    let store = |accepted| {
+        let current = KeyEncryptionKey::parse(&new).expect("new KEK");
+        KeyStore::new(
+            database.clone(),
+            Arc::new(KeyEncryptionKeys::new(current, accepted)),
+        )
+    };
+    let (changing, changed) = (store(Some(key_encryption_key())), store(None));
+    let signer = key_set(&changing, &mut tx).await.signer().kid().to_owned();
+    let stored = tx.signing_keys().list().await.expect("list");
+    assert!(matches!(
+        changed.key_set(&stored),
+        Err(KeyError::Stored {
+            source: CryptoError::Unsealable,
+            ..
+        })
+    ));
+
+    let mut change = Change::new(&mut tx, &changing, later, None);
+    assert_eq!(change.rewrap().await.expect("rewrap"), sealed);
+    let keys = key_set(&changed, &mut tx).await;
+    assert_eq!(keys.signer().kid(), signer);
+    assert_eq!(
+        kids(&keys).len(),
+        2,
+        "the active and next keys are published"
+    );
+    let stored = tx.signing_keys().list().await.expect("list");
+    assert!(matches!(old.key_set(&stored), Err(KeyError::Stored { .. })));
+    for id in &sealed {
+        assert_eq!(
+            changes(&mut tx, id).await.last(),
+            Some(&SigningKeyChange::Rewrapped)
+        );
+    }
+    assert!(matches!(
+        Change::new(&mut tx, &old, later, None).rewrap().await,
+        Err(KeyError::Stored { .. })
+    ));
     tx.rollback().await.expect("rollback");
 }
 
@@ -576,7 +654,10 @@ async fn a_replica_that_cannot_reload_turns_unready() {
     // Its key-encryption key opens none of the stored keys.
     let failing = KeyStore::new(
         database.clone(),
-        Arc::new(KeyEncryptionKey::generate().expect("another KEK")),
+        Arc::new(KeyEncryptionKeys::new(
+            KeyEncryptionKey::generate().expect("another KEK"),
+            None,
+        )),
     );
     keys.age(UNREADY_AFTER + Duration::from_secs(1));
     failing.reload(&keys).await;

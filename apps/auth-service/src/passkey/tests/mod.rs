@@ -65,7 +65,7 @@ impl Fixture {
         let database = Replicas::database().await;
         let origin = Url::parse(AUTH_ORIGIN).expect("origin");
         let config = crate::AuthConfig::test(&AUTH_ORIGIN.parse().expect("origin"));
-        let keys = crate::KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key))
+        let keys = crate::KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_keys))
             .start()
             .await
             .expect("signing keys");

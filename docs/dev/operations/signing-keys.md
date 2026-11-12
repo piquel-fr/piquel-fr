@@ -1,7 +1,7 @@
 # Signing keys
 
 This page helps you check, rotate and revoke the keys auth signs ID and access
-tokens with, and change the token digest key.
+tokens with, and change the key-encryption key and the token digest key.
 
 Auth keeps its RSA signing keys in PostgreSQL, each private key sealed with
 AES-256-GCM under `AUTH_KEY_ENCRYPTION_KEY`. They rotate on their own, without a
@@ -13,7 +13,7 @@ None of the `keys` commands needs the service running. In an environment, run
 them with `piquelctl app exec` (see
 [running auth-service commands](deploying.md#running-auth-service-commands)), and
 locally with `just auth keys …`. The admin dashboard's **Signing keys** page
-lists, rotates and revokes keys too.
+lists, rotates, revokes and rewraps keys too.
 
 ## Check the signing keys
 
@@ -91,10 +91,93 @@ rotation attempt logs the failure.
 
 Revoking works even when the active key can't be opened, which is how to
 recover a key set whose active key is broken: revoke the active key, and a new
-one signs. Every other change first checks that its `AUTH_KEY_ENCRYPTION_KEY`
-opens the active key. So run the command with the deployment's own key: a key
-sealed with one no replica can open makes the replicas unready, until you revoke
-it again with the right one.
+one signs. Every other change first checks that its `AUTH_KEY_ENCRYPTION_KEY`,
+or its `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED`, opens the active key. So run the
+command with the deployment's own keys: a key sealed with one no replica can
+open makes the replicas unready, until you revoke it again with the right one.
+
+## Change the key-encryption key
+
+Auth seals every signing key's private key under the key-encryption key,
+`AUTH_KEY_ENCRYPTION_KEY`. Nothing changes it on its own. Change it by hand, in
+two deployments, so that during each rolling deployment, and after a rollback,
+every release opens the keys the other seals. A third deployment then removes
+the old key.
+
+Each step is a change to `infra/piqueld.toml`, which reaches staging when it
+merges and production when you [promote](deploying.md#promote-to-production).
+Take each step in every environment before the next. The names below are for
+the first change: the next one adds `key-encryption-key-3`, and so on.
+
+1. Add the new key as accepted. Declare a generated secret for it, next to
+   `key-encryption-key`, and copy the comment that warns against regenerating
+   it to the new one. The old one keeps its comment until step 4 removes it:
+
+   ```toml
+   [[spec.secrets]]
+   name = "key-encryption-key-2"
+   generate = { type = "random", bytes = 32, encoding = "base64url" }
+   ```
+
+   In the `auth` service, add the variable to its `[spec.services.environment]`
+   table, and mount the secret beside its other secrets:
+
+   ```toml
+   AUTH_KEY_ENCRYPTION_KEY_ACCEPTED = "file:///run/secrets/key-encryption-key-2"
+   ```
+
+   ```toml
+   [[spec.services.secrets]]
+   name = "key-encryption-key-2"
+   target = "/run/secrets/key-encryption-key-2"
+   ```
+
+   Deploy. Auth now opens keys sealed under either key, and still seals under
+   the old one.
+2. Swap them: point `AUTH_KEY_ENCRYPTION_KEY` at the new key's file, and
+   `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED` at the old one's. Deploy. New keys are
+   sealed under the new key.
+3. Once that deployment has finished, seal every stored key again under the new
+   key:
+   - **At the terminal**, run `auth-service keys rewrap --reason "…"`. It asks
+     you to confirm, then lists the keys it rewrapped.
+   - **On the dashboard**, select **Rewrap** on the **Signing keys** page, give
+     a reason, and confirm.
+
+   Each key it rewraps records a `rewrapped` change. If a key opens under
+   neither key, it changes nothing and names that key: revoke it, then rewrap
+   again.
+4. Rewrap again, just before you remove the old key, in case a replica sealed a
+   key under it since. Then remove `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED`, and the
+   old key's mount and declaration, and deploy. Once the deployment succeeded,
+   delete the old secret in each environment:
+
+   ```sh
+   piquelctl env secret sourceorigin --env production delete key-encryption-key
+   ```
+
+Don't rewrap while replicas of the deployment before step 2 still run: they
+keep sealing new keys under the old key. A key left sealed only under the old
+key at step 4 stops opening. If it is the active key, the new replicas fail to
+start, so the rollout fails (see
+[roll back production](deploying.md#roll-back-production)). Once the previous
+deployment runs again, which production restores on its own and staging needs
+restored by hand, rewrap again, then deploy. A `next` or
+`retiring` key is left out of the key set instead, and a `next` one is never
+promoted: revoke it, and rotation publishes another.
+
+> **Warning:** once you have rewrapped, never restore a deployment made before
+> step 1: it has only the old key, and opens none of the keys. One made before
+> step 2 seals new keys under the old key again: if you restore one, deploy
+> step 2 again, then rewrap again.
+
+Once the old secret is deleted, a copy of the database taken before the rewrap
+holds keys nothing opens. If you ever restore one, revoke its active key, as
+[replace a key that doesn't open](#replace-a-key-that-doesnt-open) describes,
+and a new key signs.
+
+For a key that leaked, see
+[a leaked key-encryption key](incidents.md#a-leaked-key-encryption-key).
 
 ## Change the token digest key
 

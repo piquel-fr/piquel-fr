@@ -1,7 +1,7 @@
 //! Audit key validation, and the configuration reference.
 
 use super::*;
-use sourceorigin_common::config::{GeneratedFile, Section};
+use sourceorigin_common::config::{GeneratedFile, SecretReference, Section};
 
 /// The audit key is a 32-byte seed in hex, with one trailing newline allowed.
 /// Anything else stops startup with an error naming the variable.

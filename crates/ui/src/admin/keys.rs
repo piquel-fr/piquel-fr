@@ -28,18 +28,22 @@ const fn state_badge(state: SigningKeyState) -> (&'static str, &'static str) {
     }
 }
 
-/// Every signing key, oldest first, `rows`, with the page rotating them at
-/// `rotate`.
+/// Every signing key, oldest first, `rows`, with the pages rotating them at
+/// `rotate` and rewrapping them at `rewrap`.
 #[component]
 pub async fn signing_key_list<'a>(
     rows: &'a [SigningKeyRow<'a>],
     rotate: &'a str,
+    rewrap: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
         page_head(
             title: "Signing keys",
             lead: "The keys that sign tokens. A new key waits a day before it signs, so verifiers have it first, signs for 90 days, then stays published while its tokens may be valid. Every replica picks up a change within a minute.".to_owned(),
-            actions: view! { <a data-confirm-first="" class="button" href=(rotate)>"Rotate"</a> },
+            actions: view! {
+                <a data-confirm-first="" class="button secondary" href=(rewrap)>"Rewrap"</a>
+                <a data-confirm-first="" class="button" href=(rotate)>"Rotate"</a>
+            },
         )
         <section class="card">
             if rows.is_empty() {

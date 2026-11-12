@@ -545,7 +545,7 @@ Each alert says what to look at. Auth raises these:
   `user disable`, `user delete`, `user recover`, `user undo-recovery`,
   `session revoke-all`, `admin revoke`, `client disable`, `client suspend`,
   `client delete`, `client rotate-secret --grace 0`, `keys revoke`, `keys rotate
-  --now`, `handle release`, `audit prune`, `announcement send`, and `account …
+  --now`, `keys rewrap`, `handle release`, `audit prune`, `announcement send`, and `account …
   message`, `passkeys revoke`,
   `identities unlink` and `sessions revoke-all`. Without a terminal, they
   refuse unless given `--yes`.

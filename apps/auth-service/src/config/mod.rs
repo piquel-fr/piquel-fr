@@ -6,22 +6,21 @@ mod database;
 mod email;
 /// External identity providers' credentials.
 mod federation;
-/// Token digest keys, the link keys derived from them, and the audit key.
+/// Key-encryption keys, token digest keys, the link keys derived from them, and
+/// the audit key.
 mod keys;
 
 pub(crate) use email::EmailConfig;
 pub(crate) use federation::{FederationConfig, ProviderConfig};
-use keys::KEY_ENCRYPTION_KEY;
 pub(crate) use keys::LinkKeys;
 #[cfg(test)]
 pub(crate) use keys::TokenDigestKey;
-pub use keys::{AuditConfig, TokenDigestKeys};
+pub use keys::{AuditConfig, KeyEncryptionKeys, TokenDigestKeys};
 
 use crate::{invitations::InvitationLinks, recovery::RecoveryLinks};
 use email::SMTP_URL;
 use ipnet::IpNet;
-use sourceorigin_common::config::{ConfigurationError, Origin, SecretReference, Variable};
-use sourceorigin_crypto::KeyEncryptionKey;
+use sourceorigin_common::config::{ConfigurationError, Origin, Variable};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -193,8 +192,8 @@ pub struct AuthConfig {
     pub(crate) oidc: OidcConfig,
     /// Email to account holders.
     pub(crate) email: EmailConfig,
-    /// Seals and opens the signing keys in the database.
-    pub key_encryption_key: Arc<KeyEncryptionKey>,
+    /// Seal and open the signing keys in the database.
+    pub key_encryption_keys: Arc<KeyEncryptionKeys>,
     /// The audit checkpoint key.
     pub(crate) audit: AuditConfig,
     /// Trusted reverse-proxy peers.
@@ -236,7 +235,7 @@ impl AuthConfig {
                 digest_keys,
                 policies: PolicyLinks::on(&WEB_ORIGIN.parse_or(DEFAULT_WEB_ORIGIN)?),
             },
-            key_encryption_key: Arc::new(Self::key_encryption_key_from_environment()?),
+            key_encryption_keys: Arc::new(KeyEncryptionKeys::from_environment()?),
             trusted_proxies: Self::trusted_proxies()?,
             requests_per_minute: Self::requests_per_minute()?,
         })
@@ -279,24 +278,6 @@ impl AuthConfig {
     /// Names an unreadable variable.
     pub(crate) fn mails_from_environment() -> Result<bool, ConfigurationError> {
         Ok(SMTP_URL.optional()?.is_some())
-    }
-
-    /// Reads the key-encryption key, for serving and for the `keys` commands.
-    ///
-    /// # Errors
-    /// Names a missing or unreadable reference, or a value that is not 32 bytes
-    /// in unpadded base64url.
-    pub fn key_encryption_key_from_environment() -> Result<KeyEncryptionKey, ConfigurationError> {
-        let reference: SecretReference = KEY_ENCRYPTION_KEY.parse()?;
-        let secret = reference.resolve().map_err(|source| {
-            KEY_ENCRYPTION_KEY.error("must resolve through env://NAME or file://PATH", source)
-        })?;
-        let text = secret
-            .text()
-            .map_err(|source| KEY_ENCRYPTION_KEY.error("must contain UTF-8 text", source))?;
-        KeyEncryptionKey::parse(text).map_err(|source| {
-            KEY_ENCRYPTION_KEY.error("must contain 32 bytes in unpadded base64url", source)
-        })
     }
 
     /// Uses the operator override, then piqueld's ingress ranges, then no trusted peers.

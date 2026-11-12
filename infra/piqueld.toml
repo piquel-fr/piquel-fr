@@ -168,6 +168,8 @@ name = "database-runtime-password"
 generate = { type = "random", bytes = 32, encoding = "hex" }
 
 # Seals the signing keys auth stores in its database (AUTH_KEY_ENCRYPTION_KEY).
+# Never regenerate it: change it only as "Change the key-encryption key" in
+# docs/dev/operations/signing-keys.md describes.
 [[spec.secrets]]
 name = "key-encryption-key"
 generate = { type = "random", bytes = 32, encoding = "base64url" }

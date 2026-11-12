@@ -13,8 +13,8 @@
 //! [`STALE_AFTER`], since it may still trust a revoked key.
 
 use crate::{
-    AdminError, Operator, Reason, jobs::Shutdown, oidc::ACCESS_TOKEN_SECONDS, oidc::PublicDocument,
-    security::SESSION_LIFETIME_DAYS,
+    AdminError, KeyEncryptionKeys, Operator, Reason, jobs::Shutdown, oidc::ACCESS_TOKEN_SECONDS,
+    oidc::PublicDocument, security::SESSION_LIFETIME_DAYS,
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use sourceorigin_common::{
@@ -22,9 +22,7 @@ use sourceorigin_common::{
     events::{DomainEvent, EventContext, JobName, SigningKeyChange},
     protocol::jwt::KeyId,
 };
-use sourceorigin_crypto::{
-    CryptoError, Digest, KeyEncryptionKey, KeySet, PublicKey, Rs256Key, Secret,
-};
+use sourceorigin_crypto::{CryptoError, Digest, KeySet, PublicKey, Rs256Key, Secret};
 use sourceorigin_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSigningKey, SigningKeyState,
     SigningKeyType, StoredSigningKey,
@@ -67,8 +65,8 @@ pub enum KeyError {
     /// Generating, sealing or encoding a key failed.
     #[error("signing key cryptography failed")]
     Crypto(#[from] CryptoError),
-    /// A stored key cannot be used, e.g. because it was sealed with another
-    /// key-encryption key.
+    /// A stored key cannot be used, e.g. because it was sealed with a
+    /// key-encryption key that is neither current nor accepted.
     #[error("stored signing key {id} cannot be used")]
     Stored {
         /// The key.
@@ -167,20 +165,21 @@ impl SigningKeys {
     }
 }
 
-/// The signing keys in the database, sealed with the key-encryption key. The
+/// The signing keys in the database, sealed with the key-encryption keys. The
 /// `keys` commands use it without the HTTP service.
 #[derive(Clone)]
 pub struct KeyStore {
     /// Holds the keys.
     database: Database,
-    /// Seals and opens their private keys.
-    kek: Arc<KeyEncryptionKey>,
+    /// Seal and open their private keys.
+    kek: Arc<KeyEncryptionKeys>,
 }
 
 impl KeyStore {
-    /// The keys in `database`, sealed with `kek`.
+    /// The keys in `database`, sealed with `kek`'s current key, and opened with
+    /// either of its keys.
     #[must_use]
-    pub const fn new(database: Database, kek: Arc<KeyEncryptionKey>) -> Self {
+    pub const fn new(database: Database, kek: Arc<KeyEncryptionKeys>) -> Self {
         Self { database, kek }
     }
 
@@ -229,6 +228,25 @@ impl KeyStore {
     ) -> Result<Option<KeyId>, KeyError> {
         self.change(Some((operator, reason)), Some(id), async |change| {
             change.revoke(id).await
+        })
+        .await
+    }
+
+    /// Seals every stored private key again under the current key-encryption
+    /// key, after a change of key, and returns their IDs. Once every key that
+    /// may seal one, on every replica, is the current one, the accepted key
+    /// opens none of them and can be removed.
+    ///
+    /// # Errors
+    /// Refuses, changing nothing, when a stored key opens under neither key or
+    /// does not match its public key: revoke it first.
+    pub async fn rewrap(
+        &self,
+        operator: &Operator,
+        reason: &Reason,
+    ) -> Result<Vec<KeyId>, KeyError> {
+        self.change(Some((operator, reason)), None, async |change| {
+            change.rewrap().await
         })
         .await
     }
@@ -297,10 +315,11 @@ impl KeyStore {
         Ok(true)
     }
 
-    /// Checks that this store's key-encryption key opens the stored active key
-    /// and the stored keys form a key set, before changing them: otherwise a
-    /// command or replica with another key-encryption key would store keys that
-    /// no replica can load, and every replica would keep its stale key set.
+    /// Checks that one of this store's key-encryption keys opens the stored
+    /// active key and the stored keys form a key set, before changing them:
+    /// otherwise a command or replica with other key-encryption keys would store
+    /// keys that no replica can load, and every replica would keep its stale key
+    /// set.
     ///
     /// Revoking the active key, `revoking`, keeps no stored private key, so it
     /// skips the check, which recovers a key set whose active key cannot be
@@ -389,8 +408,9 @@ impl KeyStore {
         )?)
     }
 
-    /// Opens `key`'s sealed private key, under either [`Binding`], and checks it
-    /// is the private half of the public key stored with it.
+    /// Opens `key`'s sealed private key, under either key-encryption key and
+    /// either [`Binding`], and checks it is the private half of the public key
+    /// stored with it.
     fn open(&self, key: &StoredSigningKey) -> Result<Rs256Key, KeyError> {
         let invalid = |source| KeyError::Stored {
             id: key.id.clone(),
@@ -417,6 +437,20 @@ impl KeyStore {
             return Err(KeyError::Mismatched(key.id.clone()));
         }
         Ok(private)
+    }
+
+    /// Seals `key`'s private key, stored as `id` of `key_type`, under the current
+    /// key-encryption key, bound to its public key.
+    fn seal(
+        &self,
+        key: &Rs256Key,
+        id: &KeyId,
+        key_type: SigningKeyType,
+    ) -> Result<Vec<u8>, KeyError> {
+        Ok(self.kek.seal(
+            &key.private_key_der()?,
+            &Binding::SEALS.associated_data(id, key_type, &key.public_key().thumbprint()),
+        )?)
     }
 }
 
@@ -500,10 +534,7 @@ impl<'t, 'c> Change<'t, 'c> {
     async fn insert(&mut self, key: &Rs256Key, state: SigningKeyState) -> Result<KeyId, KeyError> {
         let key_type = SigningKeyType::Rsa;
         let id: KeyId = key.kid().parse().map_err(|_| CryptoError::KeyId)?;
-        let sealed_private_key = self.store.kek.seal(
-            &key.private_key_der()?,
-            &Binding::SEALS.associated_data(&id, key_type, &key.public_key().thumbprint()),
-        )?;
+        let sealed_private_key = self.store.seal(key, &id, key_type)?;
         self.tx
             .signing_keys()
             .insert(&InsertSigningKey {
@@ -620,6 +651,24 @@ impl<'t, 'c> Change<'t, 'c> {
             self.promote(&next, active).await?;
         }
         Ok(next)
+    }
+
+    /// See [`KeyStore::rewrap`]. A key that cannot be opened fails the change,
+    /// whose transaction then rolls back the keys rewrapped before it.
+    async fn rewrap(&mut self) -> Result<Vec<KeyId>, KeyError> {
+        let keys = self.tx.signing_keys().list().await?;
+        let mut rewrapped = Vec::new();
+        for key in keys
+            .into_iter()
+            .filter(|key| key.sealed_private_key.is_some())
+        {
+            let private = self.store.open(&key)?;
+            let sealed = self.store.seal(&private, &key.id, key.key_type)?;
+            self.tx.signing_keys().rewrap(&key.id, &sealed).await?;
+            self.record(&key.id, SigningKeyChange::Rewrapped).await?;
+            rewrapped.push(key.id);
+        }
+        Ok(rewrapped)
     }
 
     /// See [`KeyStore::revoke`].
