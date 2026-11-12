@@ -96,6 +96,26 @@ export class FakeFetch {
   };
 }
 
+/** A key endpoint serving `documents[phase]`, and failing with 503 past the end. */
+export class KeyServer extends FakeFetch {
+  phase = 0;
+
+  constructor(documents: unknown[], headers: HeadersInit = {}) {
+    super({
+      [JWKS_URI]: () => {
+        const document = documents[this.phase];
+        return document === undefined
+          ? new Response(null, { status: 503 })
+          : Response.json(document, { headers });
+      }
+    });
+  }
+
+  get served(): number {
+    return this.count(JWKS_URI);
+  }
+}
+
 /** A clock tests move by hand, in seconds. */
 export class ManualClock {
   seconds: number;

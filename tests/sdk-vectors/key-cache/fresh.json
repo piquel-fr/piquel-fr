@@ -1,0 +1,26 @@
+{
+  "description": "fresh keys verify without a fetch",
+  "now": 1767229199,
+  "input": {
+    "fetched": 1767225600,
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2026",
+          "kty": "RSA",
+          "n": "uIyTduvpF-LYSdNmHoK0TI0HtTEEAlE17LrpIGe4t4RmG8pG-Nocs_FXJB0ErRwoCmiIxxW9dxni9MFsnOPpOgj2YVZJnSlFgvXioU3bpOc9xyTmQtXoarWe96RO50W7vHsuuHrMmGuwRFyN_6Uw7w1FK-mS5Jf5TwBYJjwLpvdmyAiqoOwQv0z4zHfZnaN6AY4QocMJOTB8IdOV4-ej0p2xCKSL5FQS8nkMKg9bT9vxdDjp8CTjFh3Yfb-hgyipDvZ-rB8v41NISDsxJ_yjmxFsYdiEGCrgVaRGHtzfHfar-873Ciz8SqjTK-p7dqKd7LfijdoVLZHQEbaKEZvxsw",
+          "use": "sig"
+        }
+      ]
+    },
+    "max_age": 3600,
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI2IiwidHlwIjoiYXQrand0In0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMTkzNmYzZS04YzAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJhdWQiOiJodHRwczovL25vdGVzLmV4YW1wbGUuY29tIiwiY2xpZW50X2lkIjoibm90ZXMtd2ViIiwianRpIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwic2NvcGUiOiJub3RlczpyZWFkIG9wZW5pZCBwcm9maWxlIiwiaWF0IjoxNzY3MjI1NTQwLCJleHAiOjE3NjcyMjU4NDAsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImF1dGhfdGltZSI6MTc2NzIyMjAwMCwiYW1yIjpbInBvcCIsIm1mYSIsInVzZXIiXSwiYWNyIjoicGhyIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRhIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsInBpY3R1cmUiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20vcGljdHVyZXMvMDE5OWEwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwicHJvZmlsZV92ZXJzaW9uIjoxfQ.syW-5GUDAxW9f2nzGJ4A7j7HZ3YwgrXmt4A3mrp7eqYFBPPgIR74SuO_WlC1g8NzpS_5BLC9CLimf6pkSK2nIKSNuFOFTG0HeU9Tne0QeGj4MX07SL1kK_kkB4iXr1LTSjxw4eSEYAxUDrFwB7QWfGXEZSpKeo7bNCvza_AOOcL2zDPrScDIT_v7zahDwg6qSN6rgUYngDF6flYY89pObeDwMyGQZ__n5wTjB0kelAhcpznAR5tXi2Ue0jlvxtB5Dc9enDwUxztywV8bRlrvwKfFj01vLN5ITwF_jWD71x_H0QO4xigEiIf6oge5xREbq4DBQhTL2FiB_wjpsLkN4g"
+  },
+  "expected": {
+    "ok": {
+      "kid": "key-2026"
+    }
+  }
+}

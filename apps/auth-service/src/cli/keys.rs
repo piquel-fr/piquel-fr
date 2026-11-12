@@ -40,8 +40,8 @@ pub(super) enum KeysCommand {
     },
     /// Delete a signing key at once, e.g. a compromised one. When it was the active
     /// key, the `next` and `retiring` keys go with it, since their private keys
-    /// were stored alongside, and a new one signs at once. Verifiers that cached it keep accepting it
-    /// until their cache expires, up to an hour.
+    /// were stored alongside, and a new one signs at once. Apps verifying with the
+    /// SDKs keep accepting it for up to 90 minutes.
     Revoke {
         /// The key's ID.
         id: KeyId,
@@ -84,7 +84,7 @@ impl KeysCommand {
             .map(|key| format!(", now {},", key.state))
             .unwrap_or_default();
         format!(
-            "Revoke signing key {id}{state} at once: every replica stops accepting the tokens it signed within a minute, or 15 minutes if it cannot reload its keys, and verifiers that cached it within an hour. If it signs when revoked, the keys waiting and retiring beside it go too, and a new key signs at once"
+            "Revoke signing key {id}{state} at once: every replica stops accepting the tokens it signed within a minute, or 15 minutes if it cannot reload its keys, and apps verifying with the SDKs within 90 minutes. If it signs when revoked, the keys waiting and retiring beside it go too, and a new key signs at once"
         )
     }
 

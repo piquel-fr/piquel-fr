@@ -83,7 +83,7 @@ Commands:
 
 - [`auth-service keys list`](#auth-service-keys-list): List signing keys with their state and dates, oldest first.
 - [`auth-service keys rotate`](#auth-service-keys-rotate): Publish a new signing key, which signs after 24 hours. Prints its ID.
-- [`auth-service keys revoke`](#auth-service-keys-revoke): Delete a signing key at once, e.g. a compromised one. When it was the active key, the `next` and `retiring` keys go with it, since their private keys were stored alongside, and a new one signs at once. Verifiers that cached it keep accepting it until their cache expires, up to an hour.
+- [`auth-service keys revoke`](#auth-service-keys-revoke): Delete a signing key at once, e.g. a compromised one. When it was the active key, the `next` and `retiring` keys go with it, since their private keys were stored alongside, and a new one signs at once. Apps verifying with the SDKs keep accepting it for up to 90 minutes.
 - [`auth-service keys rewrap`](#auth-service-keys-rewrap): Seal every stored signing key again under `AUTH_KEY_ENCRYPTION_KEY`, after a change of key-encryption key, so `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED` can be removed. Refuses, changing nothing, if a key opens under neither.
 - [`auth-service keys digest-usage`](#auth-service-keys-digest-usage): Count stored token digests per token digest key, to tell when `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` can be removed.
 - [`auth-service keys audit`](#auth-service-keys-audit): Print the verifier key of the audit key `AUTH_AUDIT_KEY_PROVIDER` names, for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/dev/security/audit-key.pub.
@@ -119,7 +119,7 @@ Options:
 
 ## `auth-service keys revoke`
 
-Delete a signing key at once, e.g. a compromised one. When it was the active key, the `next` and `retiring` keys go with it, since their private keys were stored alongside, and a new one signs at once. Verifiers that cached it keep accepting it until their cache expires, up to an hour.
+Delete a signing key at once, e.g. a compromised one. When it was the active key, the `next` and `retiring` keys go with it, since their private keys were stored alongside, and a new one signs at once. Apps verifying with the SDKs keep accepting it for up to 90 minutes.
 
 ```text
 auth-service keys revoke [OPTIONS] --reason <REASON> <ID>

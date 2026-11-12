@@ -90,7 +90,7 @@ struct Case {
 }
 
 /// A case's expected result.
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Expected {
     /// The operation succeeds with this value.
@@ -164,6 +164,7 @@ impl Vectors {
         let committed: Vec<PathBuf> = [
             "discovery",
             "jwks",
+            "key-cache",
             "tokens",
             "challenges",
             "callbacks",
@@ -418,6 +419,54 @@ impl Vectors {
                 expected: Expected::Ok(json!({ "kids": [OLD_KID] })),
             },
         );
+    }
+
+    /// Key cache cases: how long cached keys keep verifying while every refresh
+    /// fails. The bound is auth's own `STALE_AFTER` for its stale key set.
+    fn key_cache(&mut self) {
+        /// The `max-age` auth serves its key set with.
+        const MAX_AGE: i64 = 3600;
+        /// How long keys verify past their freshness while refreshes fail.
+        const STALE_AFTER: i64 = 15 * 60;
+        let input = json!({
+            "jwks": self.jwks(&[NEW_KID]),
+            "max_age": MAX_AGE,
+            "fetched": NOW,
+            "token": Self::sign(&self.new, TokenType::Access, &Self::access_claims()),
+        });
+        let verified = Expected::Ok(json!({ "kid": NEW_KID }));
+        for (name, description, now, expected) in [
+            (
+                "fresh",
+                "fresh keys verify without a fetch",
+                NOW + MAX_AGE - 1,
+                verified.clone(),
+            ),
+            (
+                "stale",
+                "stale keys keep verifying while refreshes fail, until 15 minutes past \
+                 their freshness",
+                NOW + MAX_AGE + STALE_AFTER - 1,
+                verified,
+            ),
+            (
+                "past-deadline",
+                "15 minutes past their freshness, stale keys may trust a revoked key, so \
+                 verification fails as keys unavailable and a resource server answers 503",
+                NOW + MAX_AGE + STALE_AFTER,
+                Expected::refused(&SdkError::category(ErrorCategory::Network)),
+            ),
+        ] {
+            self.case(
+                &format!("key-cache/{name}.json"),
+                &Case {
+                    description,
+                    now: Some(now),
+                    input: input.clone(),
+                    expected,
+                },
+            );
+        }
     }
 
     /// Token cases: one failing check each, in the documented validation order.
@@ -1536,6 +1585,7 @@ fn sdk_vectors_are_current() {
     let mut vectors = Vectors::new();
     vectors.discovery();
     vectors.jwks_cases();
+    vectors.key_cache();
     vectors.tokens();
     vectors.challenges();
     vectors.callbacks();

@@ -67,9 +67,8 @@ revoke it if `keys list` still lists it, then delete the secret with
    listing them shows only that the replica that answered has.
 5. Then restart the first-party resource servers, which drops the keys they
    cached. Restarting sooner could cache the revoked keys again from a replica
-   that still serves them. The SDKs keep a known key until their cache expires,
-   so other verifiers may accept the revoked keys for up to an hour from this
-   point.
+   that still serves them. Other apps keep the revoked keys as long as their
+   cache allows, which [check that it's over](#check-that-its-over) bounds.
 
 Every access and ID token the revoked keys signed stops working at auth,
 including as an `id_token_hint`. Refresh tokens don't depend on signing keys, so
@@ -80,10 +79,23 @@ apps refresh and receive tokens signed by the new key.
 - `auth-service keys list` lists none of the revoked keys, and a new `active`
   key if you revoked the active one.
 - `https://auth.sourceorigin.dev/.well-known/jwks.json` no longer lists their IDs.
-- An hour after step 5, verifiers that respect `Cache-Control` have dropped them. Until
-  then, whoever holds a revoked key can mint tokens that third parties accept,
-  with any `exp`, so token lifetimes don't shorten this window. Verifiers that
-  ignore `Cache-Control` may accept them longer.
+- 90 minutes after the revocation, every app verifying with the SDKs has
+  dropped them. Until then, whoever holds a revoked key can mint tokens that
+  those apps accept, with any `exp`, so token lifetimes don't shorten this
+  window. The 90 minutes add up two bounds:
+  - **The cache deadline.** An SDK uses the keys it fetched until the key set's
+    `max-age`, an hour, has passed, then refreshes them. When refreshes fail, it
+    keeps the stale keys for 15 more minutes, then stops verifying until a fetch
+    succeeds. So an app drops a key at most 75 minutes after its last successful
+    fetch, even if an attacker makes its fetches fail.
+  - **The replicas' delay.** A replica that can't reload serves the revoked keys
+    for up to 15 minutes after the revocation (step 4), and an app that fetches
+    from it then starts a new hour.
+
+  Verifiers that don't use the SDKs bound this themselves. One that respects
+  `Cache-Control` drops the keys 75 minutes after the revocation, unless it keeps
+  stale keys while its fetches fail. One that ignores `Cache-Control` may accept
+  them longer.
 
 [Signing keys](signing-keys.md) explains revocation and reloads.
 

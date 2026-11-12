@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AuthError, Jws, KeyCache, KeySet } from '../src/index.ts';
 import * as base64 from '../src/base64.ts';
-import { FakeFetch, JWKS_URI, ManualClock, outcome, vector } from './vectors.ts';
+import { JWKS_URI, KeyServer, ManualClock, outcome, vector } from './vectors.ts';
 
 const jwks = (name: string) => vector('jwks', name).input.jwks;
 const token = (name: string) => String(vector('tokens', name).input.token);
@@ -11,26 +11,6 @@ const OLD = token('access-valid');
 const NEW = token('access-new-key');
 /** The old token with a header naming a key no set has. */
 const UNKNOWN = `${base64.encode(new TextEncoder().encode('{"alg":"RS256","kid":"key-2027","typ":"at+jwt"}'))}.${OLD.split('.').slice(1).join('.')}`;
-
-/** A key endpoint serving `documents[phase]`, and failing past the end. */
-class KeyServer extends FakeFetch {
-  phase = 0;
-
-  constructor(documents: unknown[], headers: HeadersInit = {}) {
-    super({
-      [JWKS_URI]: () => {
-        const document = documents[this.phase];
-        return document === undefined
-          ? new Response(null, { status: 503 })
-          : Response.json(document, { headers });
-      }
-    });
-  }
-
-  get served(): number {
-    return this.count(JWKS_URI);
-  }
-}
 
 /** Verifies `compact`'s signature with `keys`, in the vectors' error form. */
 function verify(keys: KeyCache, compact: string) {
@@ -63,7 +43,7 @@ test('a new kid refetches once, no more than every 30 seconds, and outages keep 
   assert.equal(server.served, 2, 'no refetch within 30 seconds');
 
   server.phase = 2;
-  clock.seconds += 2 * 3600;
+  clock.seconds += 3600;
   assert.deepEqual(
     await verify(keys, OLD),
     { ok: 'verified' },
@@ -108,7 +88,7 @@ test('a set with a duplicate kid is rejected and the previous set stays in use',
   const keys = new KeyCache(JWKS_URI, { fetch: server.fetch, clock: clock.now });
   await verify(keys, OLD);
   server.phase = 1;
-  clock.seconds += 2 * 3600;
+  clock.seconds += 3600;
   assert.deepEqual(await verify(keys, OLD), { ok: 'verified' });
   clock.seconds += 31;
   assert.deepEqual(await verify(keys, NEW), {

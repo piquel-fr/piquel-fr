@@ -12,6 +12,12 @@ import { ALGORITHMS, KEY_TYPES, KEY_USES } from './vocabulary.ts';
 const MAX_TOKEN_BYTES = 16 * 1024;
 /** Shortest time between two key fetches, whatever triggers them, in milliseconds. */
 const MIN_FETCH_INTERVAL = 30_000;
+/**
+ * How long keys keep verifying once they stop being fresh, while every refresh fails,
+ * in milliseconds. Stale keys may still trust a revoked key, so they get the same
+ * bound auth gives its own: its `STALE_AFTER` (`apps/auth-service/src/keys/mod.rs`).
+ */
+const STALE_AFTER = 15 * 60_000;
 /** How long fetched keys stay fresh when the response sets no `max-age`. */
 const DEFAULT_LIFETIME = 60 * 60_000;
 /** Longest time fetched keys stay fresh, whatever `max-age` says. */
@@ -336,7 +342,10 @@ type Source = {
  *   seconds through 24 hours, or one hour without one; `no-store` or `no-cache`
  *   keeps them 30 seconds.
  * - Every fetch is `https`, follows no redirect, and gives up after 10 seconds.
- * - A failed fetch keeps the last good keys, and still counts as a fetch.
+ * - A failed fetch keeps the last good keys, and still counts as a fetch. They keep
+ *   verifying until 15 minutes past their freshness, as auth bounds its own stale
+ *   keys. Past that, verification fails with `network` until a fetch succeeds, so a
+ *   resource server answers 503 and clients retry.
  */
 export class KeyCache {
   /** Where keys are fetched from; `undefined` for a fixed set. */
@@ -435,6 +444,15 @@ export class KeyCache {
   }
 
   /**
+   * The key named `kid`, if the cached keys hold it and may still verify at `now`:
+   * until `STALE_AFTER` past their freshness, or always for a fixed set.
+   */
+  #usable(kid: string, now: number): SigningKey | undefined {
+    const usable = this.#freshUntil === undefined || now < this.#freshUntil + STALE_AFTER;
+    return usable ? this.#keys.find(kid) : undefined;
+  }
+
+  /**
    * The key named `kid`, fetching keys when they are stale or lack it and the last
    * fetch is old enough. A fixed set is never fresh, so every lookup reads it here.
    */
@@ -465,7 +483,7 @@ export class KeyCache {
         this.#fetching = undefined;
       }
     }
-    const key = this.#keys.find(kid);
+    const key = this.#usable(kid, now);
     if (key !== undefined) return key;
     if (this.#failed) {
       throw new AuthError({ code: 'network' }, 'signing keys could not be fetched recently');
@@ -487,8 +505,8 @@ export class KeyCache {
       this.#failed = false;
     } catch (error) {
       // Stale keys that hold `kid` are better than failing every request while the
-      // key endpoint is down.
-      if (this.#keys.find(kid) === undefined) throw error;
+      // key endpoint is down, until their deadline.
+      if (this.#usable(kid, now) === undefined) throw error;
     }
   }
 }

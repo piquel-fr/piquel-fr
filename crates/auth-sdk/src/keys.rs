@@ -23,6 +23,10 @@ use url::Url;
 /// Shortest time between two key fetches, whatever triggers them. Bounds how often
 /// unknown key IDs or an outage can make the cache call the issuer.
 const MIN_FETCH_INTERVAL: TimeDelta = TimeDelta::seconds(30);
+/// How long keys keep verifying once they stop being fresh, while every refresh
+/// fails. Stale keys may still trust a revoked key, so they get the same bound
+/// auth gives its own: its `STALE_AFTER` (`apps/auth-service/src/keys/mod.rs`).
+const STALE_AFTER: TimeDelta = TimeDelta::minutes(15);
 /// How long fetched keys stay fresh when the response sets no `max-age`.
 const DEFAULT_LIFETIME: TimeDelta = TimeDelta::hours(1);
 /// Longest time fetched keys stay fresh, whatever `max-age` says.
@@ -193,7 +197,8 @@ pub enum KeyError {
         source: KeyDefect,
     },
     /// The last fetch failed and the next is not due yet, so whether the key exists
-    /// is unknown.
+    /// is unknown, or the cached keys are 15 minutes past their freshness and may no
+    /// longer be trusted.
     #[error("signing keys could not be fetched recently")]
     Unavailable,
     /// The key set URL does not use `https`, so keys would cross the network in the
@@ -335,6 +340,24 @@ struct CachedKeys {
     failed: bool,
 }
 
+impl CachedKeys {
+    /// The key named `kid`, if the keys hold it and are fresh at `now`.
+    fn fresh(&self, kid: &str, now: DateTime<Utc>) -> Option<&Key> {
+        self.keys
+            .find(kid)
+            .filter(|_| self.fresh_until.is_some_and(|until| now < until))
+    }
+
+    /// The key named `kid`, if the keys hold it and may still verify at `now`: until
+    /// [`STALE_AFTER`] past their freshness, or always for a fixed set.
+    fn usable(&self, kid: &str, now: DateTime<Utc>) -> Option<&Key> {
+        self.keys.find(kid).filter(|_| {
+            self.fresh_until
+                .is_none_or(|until| now < until + STALE_AFTER)
+        })
+    }
+}
+
 /// The shared state behind a [`KeyCache`].
 struct KeyCacheInner {
     /// Where keys are fetched from; `None` for a fixed set.
@@ -359,7 +382,10 @@ struct KeyCacheInner {
 ///   hours, or one hour without one; `no-store` or `no-cache` keeps them 30 seconds.
 /// - Every fetch is `https`, follows no redirect, and gives up after 10 seconds,
 ///   whatever the client builder says.
-/// - A failed fetch keeps the last good keys.
+/// - A failed fetch keeps the last good keys, which keep verifying until 15 minutes
+///   past their freshness, as auth bounds its own stale keys. Past that, verification
+///   fails with [`KeyError::Unavailable`] until a fetch succeeds, so a resource server
+///   answers 503 and clients retry.
 ///
 /// ```no_run
 /// # async fn run(token: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -491,10 +517,7 @@ impl KeyCache {
 
     /// The key named `kid`, if the cached keys hold it and are fresh.
     fn fresh(&self, kid: &str) -> Option<Key> {
-        let now = self.0.clock.now();
-        let cached = self.cached();
-        let fresh = cached.fresh_until.is_some_and(|until| now < until);
-        cached.keys.find(kid).filter(|_| fresh).cloned()
+        self.cached().fresh(kid, self.0.clock.now()).cloned()
     }
 
     /// The key named `kid`, fetching keys when they are stale or lack it and the last
@@ -536,16 +559,16 @@ impl KeyCache {
                     cached.failed = false;
                 }
                 // Stale keys that hold `kid` are better than failing every request
-                // while the key endpoint is down.
+                // while the key endpoint is down, until their deadline.
                 Err(error) => {
-                    if cached.keys.find(kid).is_none() {
+                    if cached.usable(kid, now).is_none() {
                         return Err(TokenError::Keys(error));
                     }
                 }
             }
         }
         let cached = self.cached();
-        match cached.keys.find(kid) {
+        match cached.usable(kid, now) {
             Some(key) => Ok(key.clone()),
             None if cached.failed => Err(TokenError::Keys(KeyError::Unavailable)),
             None => Err(TokenError::UnknownKey(Some(kid.to_owned()))),

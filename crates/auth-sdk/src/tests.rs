@@ -311,18 +311,19 @@ fn callback_vectors() {
 }
 
 /// A local key endpoint whose responses tests switch between, counting requests.
-struct KeyServer {
+pub(crate) struct KeyServer {
     /// The JWKS URL.
-    url: Url,
+    pub(crate) url: Url,
     /// Requests served so far.
     requests: Arc<AtomicUsize>,
-    /// Index into the served documents; past the end, the server fails.
-    phase: Arc<AtomicUsize>,
+    /// Index into the served documents; past the end, the server fails with 503.
+    pub(crate) phase: Arc<AtomicUsize>,
 }
 
 impl KeyServer {
-    /// Serves `documents` in turn as `phase` advances.
-    async fn start(documents: Vec<Value>) -> Self {
+    /// Serves `documents` in turn as `phase` advances, with `max_age` as their
+    /// `Cache-Control` when set.
+    pub(crate) async fn start(documents: Vec<Value>, max_age: Option<i64>) -> Self {
         let requests = Arc::new(AtomicUsize::new(0));
         let phase = Arc::new(AtomicUsize::new(0));
         let (served, current) = (requests.clone(), phase.clone());
@@ -332,9 +333,16 @@ impl KeyServer {
             get(move || {
                 served.fetch_add(1, Ordering::SeqCst);
                 let document = documents.get(current.load(Ordering::SeqCst)).cloned();
+                // Empty without `max_age`, which leaves the default lifetime.
+                let cache_control = max_age.map(|seconds| format!("max-age={seconds}"));
                 async move {
                     document
-                        .map(::axum::Json)
+                        .map(|document| {
+                            (
+                                [(header::CACHE_CONTROL, cache_control.unwrap_or_default())],
+                                ::axum::Json(document),
+                            )
+                        })
                         .ok_or(StatusCode::SERVICE_UNAVAILABLE)
                 }
             }),
@@ -350,6 +358,15 @@ impl KeyServer {
     /// Requests served so far.
     fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
+    }
+
+    /// A key cache fetching from this server at `clock`.
+    pub(crate) fn keys(&self, clock: &ManualClock) -> KeyCache {
+        KeyCache::fetched(
+            self.url.clone(),
+            Http::plain(reqwest::Client::builder()),
+            Arc::new(clock.clone()),
+        )
     }
 }
 
@@ -399,13 +416,10 @@ async fn key_rotation_refetches_once_and_survives_outages() {
             .input("jwks")
             .clone()
     };
-    let server = KeyServer::start(vec![jwks("rotation-before"), jwks("rotation-during")]).await;
+    let server =
+        KeyServer::start(vec![jwks("rotation-before"), jwks("rotation-during")], None).await;
     let clock = ManualClock::at(1_767_225_600);
-    let keys = KeyCache::fetched(
-        server.url.clone(),
-        Http::plain(reqwest::Client::builder()),
-        Arc::new(clock.clone()),
-    );
+    let keys = server.keys(&clock);
     let old = vector_token("access-valid");
     let new = vector_token("access-new-key");
     // The same token with a header naming a key no set has.
@@ -443,7 +457,7 @@ async fn key_rotation_refetches_once_and_survives_outages() {
     assert_eq!(server.requests(), 2, "no refetch within 30 seconds");
 
     server.phase.store(2, Ordering::SeqCst);
-    clock.advance(2 * 3600);
+    clock.advance(3600);
     verify(&keys, &old)
         .await
         .expect("stale keys survive a failed refresh");
@@ -460,6 +474,34 @@ async fn key_rotation_refetches_once_and_survives_outages() {
         Err(TokenError::Keys(KeyError::Unavailable))
     ));
     assert_eq!(server.requests(), 4);
+}
+
+/// After one successful fetch, with every later fetch failing, cached keys verify
+/// exactly as the key cache vectors say: until 15 minutes past their freshness.
+#[tokio::test]
+async fn key_cache_vectors() {
+    for case in Case::all("key-cache") {
+        let server = KeyServer::start(
+            vec![case.input("jwks").clone()],
+            case.input("max_age").as_i64(),
+        )
+        .await;
+        let fetched = case.input("fetched").as_i64().expect("fetch time");
+        let clock = ManualClock::at(fetched);
+        let keys = server.keys(&clock);
+        let token = case.text("token");
+        verify(&keys, token)
+            .await
+            .expect("the first fetch succeeds");
+        server.phase.store(1, Ordering::SeqCst);
+        clock.advance(case.json["now"].as_i64().expect("now") - fetched);
+        case.assert(
+            verify(&keys, token)
+                .await
+                .map(|()| serde_json::json!({ "kid": Jws::parse(token).expect("token").header().kid }))
+                .map_err(|error| error.code()),
+        );
+    }
 }
 
 /// Keys served with `no-store` or `no-cache` stay fresh only the 30-second minimum,

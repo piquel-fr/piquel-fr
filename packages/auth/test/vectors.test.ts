@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
   Issuer,
+  Jws,
+  KeyCache,
   KeySet,
   formatChallenge,
   parseChallenge,
@@ -15,6 +17,9 @@ import {
   DOCUMENT,
   FakeFetch,
   ISSUER,
+  JWKS_URI,
+  KeyServer,
+  ManualClock,
   REDIRECT_URI,
   TOKEN_URL,
   cases,
@@ -44,6 +49,27 @@ describe('jwks vectors', () => {
         const result = await outcome(() => Promise.resolve({ kids: KeySet.parse(document).kids }));
         assert.deepEqual(result, vector.expected);
       }
+    });
+  }
+});
+
+describe('key cache vectors', () => {
+  for (const vector of cases('key-cache')) {
+    test(vector.name, async () => {
+      // One successful fetch, then every fetch fails.
+      const { jwks, max_age: maxAge, fetched, token } = vector.input;
+      const server = new KeyServer([jwks], { 'cache-control': `max-age=${String(maxAge)}` });
+      const clock = new ManualClock(Number(fetched));
+      const keys = new KeyCache(JWKS_URI, { fetch: server.fetch, clock: clock.now });
+      const jws = Jws.parse(String(token));
+      await keys.verify(jws, 'RS256');
+      server.phase = 1;
+      clock.seconds = vector.now;
+      const result = await outcome(async () => {
+        await keys.verify(jws, 'RS256');
+        return { kid: jws.header.kid };
+      });
+      assert.deepEqual(result, vector.expected);
     });
   }
 });

@@ -645,7 +645,7 @@ impl Change {
                 "Publishes a new key, which signs after a day, once verifiers have fetched it; the current key signs until then. A key already waiting is kept. Every replica picks up the change within a minute."
             }
             Self::RevokeSigningKey => {
-                "For a compromised key. It leaves the key set at once, and every replica stops accepting its tokens within a minute; verifiers that cached it keep accepting them for up to an hour. Revoking the key that signs also deletes the waiting and retiring keys, whose private keys were stored beside it, and a new key signs at once."
+                "For a compromised key. It leaves the key set at once, and every replica stops accepting its tokens within a minute; apps verifying with the SDKs keep accepting them for up to 90 minutes. Revoking the key that signs also deletes the waiting and retiring keys, whose private keys were stored beside it, and a new key signs at once."
             }
             Self::RewrapSigningKeys => {
                 "Seals every signing key's private key again under this deployment's key-encryption key, so the key it accepts during a change of key-encryption key can be removed. Every replica must open keys under it first: one that has it neither as its key nor as its accepted one can no longer open them. If a key opens under neither, nothing changes: revoke that key first."

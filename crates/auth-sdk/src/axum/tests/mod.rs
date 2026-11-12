@@ -15,7 +15,7 @@ use crate::{
     AuthenticationPolicy, ClientConfig, ClientId, Credentials, Issuer, KeyCache, KeySet, Resource,
     StepUpRequirement,
     http::Http,
-    tests::{Case, ManualClock, issuer, metadata, serve, token_case, vector_token},
+    tests::{Case, KeyServer, ManualClock, issuer, metadata, serve, token_case, vector_token},
 };
 use ::axum::{
     Router,

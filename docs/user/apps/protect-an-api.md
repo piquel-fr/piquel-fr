@@ -153,6 +153,9 @@ lacks fails with `unknown_key`.
 - **Every token is refused with `invalid_token`:** check the identifier. It must
   equal the token's `aud` exactly: your app's client ID, for an app registered in
   the console.
-- **The API answers `503`:** it could not fetch auth's signing keys. It answers
-  again once auth is reachable.
+- **The API answers `503`:** it could not fetch auth's signing keys. While auth
+  is unreachable, the SDKs keep verifying with the keys they last fetched, for up
+  to 15 minutes after those keys' cache lifetime ends. Past that, they refuse
+  every token until auth is reachable again, since the old keys may include a
+  revoked one.
 - **A Rust handler answers `500`:** the route is missing `BearerLayer`.
