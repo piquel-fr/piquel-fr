@@ -1,5 +1,5 @@
 //! What an upload becomes, and which uploads are refused.
-use super::{Crop, Jpeg, MAX_STORED_BYTES, SIDE};
+use super::{Crop, DecodeTurn, Jpeg, MAX_STORED_BYTES, SIDE};
 use crate::pictures::PictureError;
 use image::{
     DynamicImage, GrayImage, ImageEncoder, ImageFormat, Rgb, RgbImage, Rgba, RgbaImage,
@@ -206,7 +206,7 @@ fn a_thin_strip_is_cropped_before_it_is_scaled() {
 async fn an_oversize_upload_is_refused() {
     let upload = vec![0; super::MAX_UPLOAD_BYTES + 1];
     assert!(matches!(
-        Jpeg::encode(upload, None).await,
+        Jpeg::encode(DecodeTurn::take().expect("a free turn"), upload, None).await,
         Err(PictureError::TooLarge)
     ));
 }

@@ -10,7 +10,7 @@ use image::{
 };
 use serde::Deserialize;
 use std::io::Cursor;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 /// The largest upload accepted: a phone's photo fits.
 pub(crate) const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
@@ -31,11 +31,35 @@ const MAX_STORED_BYTES: usize = 128 * 1024;
 /// photos fit the first, at around 50 KiB.
 const QUALITIES: [u8; 3] = [85, 75, 65];
 
-/// Uploads decoded at once on this replica: one. Decoding allocates up to
-/// [`MAX_ALLOC`] for the image and as much for the decoder, and turning a photo
-/// upright and cropping it copy it once each, so one upload takes about 400 MiB at
-/// most; the rest wait their turn. Uploads are rare.
+/// Uploads admitted at once on this replica: one, which holds the [`DecodeTurn`]
+/// from before any of its bytes are read until it is decoded. Decoding allocates
+/// up to [`MAX_ALLOC`] for the image and as much for the decoder, and turning a
+/// photo upright and cropping it copy it once each, so the replica holds at most
+/// one upload of [`MAX_UPLOAD_BYTES`] and about 400 MiB to decode it. Nothing
+/// waits for the turn: uploads are rare, so one that finds it taken is refused.
+/// The request's deadline bounds how long a slowly sent upload holds it.
 static DECODING: Semaphore = Semaphore::const_new(1);
+
+/// This replica's turn to take an upload and decode it, of which [`DECODING`] has
+/// one. An upload takes it before reading any of its bytes, and
+/// [`Jpeg::encode`] needs it, so no upload is buffered while another is.
+pub(crate) struct DecodeTurn {
+    /// Gives the turn back when dropped.
+    _permit: SemaphorePermit<'static>,
+}
+
+impl DecodeTurn {
+    /// Takes the turn, without waiting.
+    ///
+    /// # Errors
+    ///
+    /// [`PictureError::Busy`] while another upload holds it.
+    pub(crate) fn take() -> Result<Self, PictureError> {
+        Ok(Self {
+            _permit: DECODING.try_acquire()?,
+        })
+    }
+}
 
 /// The square of an upload to keep, in the upload's pixels once upright: its
 /// top-left corner and its side, as the owner chose it. A square that leaves the
@@ -107,14 +131,16 @@ pub(crate) struct Jpeg(Vec<u8>);
 impl Jpeg {
     /// Encodes `upload`, a PNG, JPEG or GIF (its first frame), recognised by its
     /// content, keeping its `crop`, or its centred square, on the blocking pool,
-    /// waiting for a turn among [`DECODING`]. The blocking task holds the turn, so
-    /// a request that is cancelled meanwhile gives it back only once its decoding
-    /// is done.
-    pub(crate) async fn encode(upload: Vec<u8>, crop: Option<Crop>) -> Result<Self, PictureError> {
+    /// in the `turn` it was read in. The blocking task holds the turn, so a request
+    /// that is cancelled meanwhile gives it back only once its decoding is done.
+    pub(crate) async fn encode(
+        turn: DecodeTurn,
+        upload: Vec<u8>,
+        crop: Option<Crop>,
+    ) -> Result<Self, PictureError> {
         if upload.len() > MAX_UPLOAD_BYTES {
             return Err(PictureError::TooLarge);
         }
-        let turn = DECODING.acquire().await.map_err(PictureError::Busy)?;
         tokio::task::spawn_blocking(move || {
             let encoded = Self::from_upload(&upload, crop);
             drop(turn);

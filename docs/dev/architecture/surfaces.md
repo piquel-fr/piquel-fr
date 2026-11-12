@@ -355,8 +355,16 @@ may view and remove it, with a reason, such as one that impersonates someone,
 but never set one; their Profile tab links the dashboard's own pages for the
 name and the handle.
 
+- **One upload at a time.** Each replica has one turn to take an upload and
+  decode it (`DecodeTurn`), which an upload takes before auth reads any of it:
+  the account API's extractor before the body, the Profile tab before the form's
+  first field, a social signup's import before the fetch. Nothing waits for the
+  turn. While another upload holds it, the API answers `503` with
+  `Retry-After: 5`, the Profile tab says "Another picture is being processed.
+  Try again in a moment.", and a signup goes without its picture. A replica so
+  holds at most one upload of 10 MiB, and about 400 MiB to decode it.
 - **Only auth's own image.** Auth decodes an upload of at most 10 MiB, a PNG, JPEG
-  or GIF recognized by its content, one at a time per replica. It refuses one
+  or GIF recognized by its content. It refuses one
   whose header declares more than 8192 pixels on a side or 24 megapixels, or
   whose decoded image is over 96 MiB, before decoding it, and bounds what the
   decoder allocates. It turns the image upright from its EXIF orientation, crops
@@ -386,8 +394,8 @@ name and the handle.
   committed, auth fetches it once, off the signup's request, with the client
   deliveries use, which reaches only public addresses and follows no redirect,
   asking only for the formats it reads, and encodes it as an upload. A picture
-  that cannot be fetched or encoded is logged; the signup has already
-  succeeded. Later sign-ins import nothing, so a removed picture stays removed.
+  that cannot be fetched or encoded, or whose import finds the decode turn
+  taken, is logged; the signup has already succeeded. Later sign-ins import nothing, so a removed picture stays removed.
 
 ## Contracts
 
