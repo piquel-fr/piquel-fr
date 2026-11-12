@@ -203,20 +203,32 @@ reads and changes the accounts and sessions auth stores.
 1. If whoever holds it may still reach the host or the application's network,
    close that access first.
 2. A new password doesn't undo what someone who connected as the superuser left
-   behind. If someone may have, check the database before you rotate, so the
-   restart the rotation causes starts it clean:
-   - List the roles that can log in:
+   behind. A superuser can run commands as PostgreSQL's system user and change
+   any file in its volume, so no check proves the database clean. If someone
+   did connect, load a copy of the database made before the leak into a new
+   volume: a dump or a volume backup, not `piquelctl env restore`, which keeps
+   the volume. If you have none, or can't tell whether anyone connected, check
+   at least these before you rotate. Compare each with the same query on a
+   fresh preview, whose database is new:
+   - The roles that can log in:
 
      ```sh
      piquelctl app exec sourceorigin postgres --env <environment> -- psql -U sourceorigin -d sourceorigin -c "SELECT rolname FROM pg_roles WHERE rolcanlogin"
      ```
 
-     Only `sourceorigin` and `sourceorigin_auth` should. Drop any other with
-     `DROP ROLE`.
-   - List the server settings changed with `ALTER SYSTEM`, which SourceOrigin
-     never uses, by running
-     `SELECT name, setting FROM pg_file_settings WHERE sourcefile LIKE '%postgresql.auto.conf'`
-     the same way. If any is listed, run `ALTER SYSTEM RESET ALL`.
+     Only `sourceorigin` and `sourceorigin_auth` should. Remove any other with
+     `DROP OWNED BY <role>` in each database, then `DROP ROLE <role>`.
+   - The authentication rules, from
+     `SELECT type, database, user_name, address, auth_method FROM pg_hba_file_rules`,
+     run the same way. Besides the local and loopback `trust` rules, only
+     `host all all all scram-sha-256` should be listed.
+   - The server settings, from
+     `SELECT sourcefile, name, setting FROM pg_file_settings`. One from
+     `postgresql.auto.conf` came from `ALTER SYSTEM`, which SourceOrigin never
+     uses: run `ALTER SYSTEM RESET ALL`.
+
+   A rule or setting that differs from the preview's in any other way means a
+   changed file: load a copy from before the leak instead.
 3. Generate a new value for the secret that leaked:
 
    ```sh
@@ -237,7 +249,7 @@ reads and changes the accounts and sessions auth stores.
    - Check that they didn't rewrite the history with `auth-service audit verify`.
    - The superuser could also have changed any row, such as an administrator
      grant or a client's redirect URIs, without leaving an event. If you can't
-     rule that out, restore the database from a copy made before the leak.
+     rule that out, load a copy from before the leak, as step 2 says.
    - If they could also have read the `key-encryption-key` secret, follow
      [a compromised signing key](#a-compromised-signing-key).
 
@@ -246,8 +258,9 @@ reads and changes the accounts and sessions auth stores.
 - The deployment succeeded: its `migrate` job logged in with the new value.
 - `piquelctl env secret sourceorigin --env <environment> list` shows the new
   version of the secret.
-- If someone may have connected, only `sourceorigin` and `sourceorigin_auth`
-  can log in, and no setting comes from `ALTER SYSTEM`.
+- If someone may have connected, the database was loaded from a copy made
+  before the leak, or its login roles, authentication rules and settings match
+  a fresh preview's.
 
 ## A stolen administrator session or a compromised administrator account
 
