@@ -68,9 +68,11 @@ test("the dashboard's pages", async ({ browser }) => {
     await expectAccessible(admin, path);
   }
   // An account, and its settings as an administrator changes them, each headed
-  // by the account.
-  await openDashboard(admin, `/users?q=${handle}`);
-  await admin.getByRole('link', { name: `@${handle}`, exact: true }).click();
+  // by the account: one that administers nothing, whose settings they may open.
+  const user = `axe-user-${Date.now().toString(36)}`;
+  await (await signedUp(browser, user)).context().close();
+  await openDashboard(admin, `/users?q=${user}`);
+  await admin.getByRole('link', { name: `@${user}`, exact: true }).click();
   await expectAccessible(admin, 'an account');
   for (const tab of [
     'Sign-in methods',
@@ -86,9 +88,7 @@ test("the dashboard's pages", async ({ browser }) => {
         ? admin
         : admin.getByRole('navigation', { name: 'Account settings' });
     await tabs.getByRole('link', { name: tab, exact: true }).click();
-    await expect(
-      admin.getByRole('heading', { name: `@${handle} · ${tab}`, level: 1 })
-    ).toBeVisible();
+    await expect(admin.getByRole('heading', { name: `${user} · ${tab}`, level: 1 })).toBeVisible();
     await expectAccessible(admin, `an account's ${tab}`);
   }
 });
