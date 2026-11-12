@@ -93,9 +93,7 @@ impl FederationError {
     /// when the browser can start again: `None` for the service's own failures.
     pub(super) const fn callback_error(&self) -> Option<CallbackError> {
         Some(match self {
-            Self::FlowBrowserMissing
-            | Self::InvalidAttempt
-            | Self::Database(DatabaseError::NotFound) => CallbackError::Expired,
+            Self::FlowBrowserMissing | Self::InvalidAttempt => CallbackError::Expired,
             Self::SessionChanged | Self::Session(SessionError::Missing) => {
                 CallbackError::SessionChanged
             }

@@ -24,8 +24,8 @@ use sourceorigin_common::{
 use sourceorigin_crypto::Pkce;
 use sourceorigin_crypto::Secret;
 use sourceorigin_repository::{
-    ConsumedFederationTransaction, Database, DatabaseTransaction, InsertFederationTransaction,
-    PendingFederation, StoredExternalIdentity, StoredSession,
+    ConsumedFederationTransaction, Database, DatabaseError, DatabaseTransaction,
+    InsertFederationTransaction, PendingFederation, StoredExternalIdentity, StoredSession,
 };
 use sourceorigin_ui::{CallbackError, LoginQuery, PendingDestination, Query as _};
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};
@@ -212,7 +212,9 @@ impl FederationApplication {
     }
 
     /// Redirects a callback to the login page saying why it failed, with its
-    /// flow's continuation, once the flow is known.
+    /// flow's continuation, once the flow is known. Only a callback whose flow was
+    /// consumed clears the flow's cookie: another, such as a forged one, leaves a
+    /// sign-in under way in this browser as it is.
     fn failed_callback(
         &self,
         error: CallbackError,
@@ -225,7 +227,9 @@ impl FederationApplication {
         };
         let destination = self.origin.as_url().join(&query.on(routes::page::LOGIN)?)?;
         let mut response = Redirect::to(destination.as_str()).into_response();
-        BrowserCookie::Federation.clear_on(&mut response)?;
+        if return_to.is_some() {
+            BrowserCookie::Federation.clear_on(&mut response)?;
+        }
         Ok(response)
     }
 
@@ -395,7 +399,7 @@ impl FederationApplication {
             .and_then(|value| Secret::parse(value).ok())
             .ok_or(FederationError::InvalidAttempt)?;
         // Cancellation consumes state too; returning to the browser never leaves replayable evidence.
-        Ok(self
+        match self
             .database
             .federation()
             .consume_transaction(
@@ -403,7 +407,12 @@ impl FederationApplication {
                 state.digest().as_bytes(),
                 browser.digest().as_bytes(),
             )
-            .await?)
+            .await
+        {
+            // Another browser's, a used one, or one that expired.
+            Err(DatabaseError::NotFound) => Err(FederationError::InvalidAttempt),
+            consumed => Ok(consumed?),
+        }
     }
 
     /// Completes the consumed `flow` the callback answers.
@@ -493,9 +502,6 @@ impl FederationApplication {
             let user_id = existing.user_id;
             let session = match Self::sign_in_linked(tx, context, headers, existing).await {
                 Ok(session) => session,
-                Err(FederationError::Session(SessionError::PasskeyRequired)) => {
-                    return self.failed_callback(CallbackError::PasskeyRequired, Some(&return_to));
-                }
                 Err(error @ FederationError::LinkedAccountUnavailable) => {
                     context
                         .record_sign_in_failure(

@@ -2,13 +2,13 @@
 
 use super::*;
 use crate::config::PolicyLinks;
-use crate::security::page::ErrorPages;
+use crate::security::{Explanation, page::ErrorPages};
+use sourceorigin_ui::Preferences;
 
-/// The error pages of auth's listener, or the dashboard's with `admin`.
-fn pages(admin: bool) -> ErrorPages {
+/// A listener's error pages.
+fn pages() -> ErrorPages {
     ErrorPages {
         policies: PolicyLinks::on(&crate::tests::WEB_ORIGIN.parse().expect("web origin")),
-        admin,
     }
 }
 
@@ -23,8 +23,8 @@ fn fetched(mode: &str) -> HeaderMap {
 /// body.
 async fn explained(admin: bool, response: impl IntoResponse) -> (Response, String) {
     let mut response = response.into_response();
-    pages(admin)
-        .explain(&fetched("navigate"), &mut response)
+    pages()
+        .explain(admin, Preferences::default(), &mut response)
         .await;
     let (parts, body) = response.into_parts();
     let body = axum::body::to_bytes(body, 1 << 20).await.expect("body");
@@ -85,8 +85,19 @@ async fn a_refusal_navigated_to_is_a_page_saying_why() {
 
 /// A failure that explains nothing, such as Topcoat's plain-text server error or
 /// an empty `404`, gets its status's own words; the dashboard's lead back to it.
+/// A server error's page says only that, whatever the failure explained.
 #[tokio::test]
 async fn an_unexplained_failure_navigated_to_gets_its_status_s_words() {
+    let mut failed = StatusCode::SERVICE_UNAVAILABLE.into_response();
+    failed
+        .extensions_mut()
+        .insert(Explanation("a detail for the logs".to_owned()));
+    let (_, page) = explained(false, failed).await;
+    assert!(
+        page.contains("The service is unavailable right now."),
+        "{page}"
+    );
+    assert!(!page.contains("a detail for the logs"), "{page}");
     let (response, page) = explained(
         true,
         (StatusCode::INTERNAL_SERVER_ERROR, "internal server error"),

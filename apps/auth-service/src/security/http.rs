@@ -3,7 +3,7 @@
 
 use super::endpoint::Endpoint;
 use super::page::ErrorPages;
-use super::{ApiError, CSRF_HEADER, RequestContext};
+use super::{ApiError, BrowserCookie, CSRF_HEADER, RequestContext};
 use axum::{
     extract::{ConnectInfo, MatchedPath, Request, State},
     http::{
@@ -279,7 +279,6 @@ impl HttpSecurity {
             listener: Listener::Public,
             pages: ErrorPages {
                 policies: config.oidc.policies.clone(),
-                admin: false,
             },
         }
     }
@@ -296,15 +295,10 @@ impl HttpSecurity {
             Some(port) => format!("{}:{port}", dashboard.host()),
             None => dashboard.host().to_owned(),
         };
-        let public = Self::new(config, database);
         Ok(Self {
             listener: Listener::Admin(HeaderValue::from_str(&host)?),
             origin: dashboard.as_url().origin(),
-            pages: ErrorPages {
-                admin: true,
-                ..public.pages.clone()
-            },
-            ..public
+            ..Self::new(config, database)
         })
     }
 
@@ -428,12 +422,14 @@ impl HttpSecurity {
     ) -> Response {
         // Reuse the original header for CORS so decoration cannot fail during re-parsing.
         let origin = request.headers().get(header::ORIGIN).cloned();
-        let navigation =
-            ErrorPages::navigation(request.headers()).then(|| request.headers().clone());
         let endpoint = match policy.listener {
             Listener::Public => Endpoint::of(&request),
             Listener::Admin(_) => Endpoint::dashboard(&request),
         };
+        // The theme of a navigation's error page; health probes keep their JSON.
+        let navigation = (!matches!(endpoint, Endpoint::Health)
+            && ErrorPages::navigation(request.headers()))
+        .then(|| BrowserCookie::read_preferences(request.headers()));
         let slot = policy.admit(endpoint);
         // Set by the origin check, which runs under the deadline; an error response
         // still carries CORS headers once the origin is known to be allowed. A
@@ -452,8 +448,12 @@ impl HttpSecurity {
         .map_err(HttpSecurityError::from)
         .flatten()
         .unwrap_or_else(|error| ApiError::from(error).into_response());
-        if let Some(headers) = &navigation {
-            policy.pages.explain(headers, &mut response).await;
+        if let Some(preferences) = navigation {
+            let admin = matches!(policy.listener, Listener::Admin(_));
+            policy
+                .pages
+                .explain(admin, preferences, &mut response)
+                .await;
         }
         let grant = match endpoint {
             Endpoint::Discovery | Endpoint::Checkpoints | Endpoint::Picture => {

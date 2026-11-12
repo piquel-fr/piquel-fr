@@ -336,9 +336,6 @@ class Passkeys {
   }
 }
 
-/** How long a form marked `data-download` stays posted, in milliseconds. */
-const DOWNLOAD_PAUSE = 3000;
-
 /**
  * Wires auth's server-rendered pages, which load this module as their only script and
  * mark what needs it:
@@ -348,8 +345,8 @@ const DOWNLOAD_PAUSE = 3000;
  * - a form marked `data-passkey-confirm` confirms the session with a passkey, then
  *   posts it with `form.submit()`, which sends no button's value: its action and
  *   every other value come from its inputs, never from the button.
- * - a form also marked `data-download` answers with a file, so its page stays: it
- *   posts again, and its passkey button works again, a moment after it posted.
+ * - a form also marked `data-download` answers with a file, so its page stays: its
+ *   passkey button works again as soon as it posted.
  * - a form marked `data-passkey-sign-in` signs in with a passkey, of the account its
  *   `handle` names, or one the browser offers when it names none, then posts, so its
  *   page sends the browser on.
@@ -455,12 +452,7 @@ function wire(document) {
     if (!(form instanceof HTMLFormElement)) return;
     if (form.hasAttribute('data-submit-once')) {
       if (form.dataset.submitted) event.preventDefault();
-      else {
-        form.dataset.submitted = 'true';
-        // A download's page stays: its form may post again once the file is on its way.
-        if (form.hasAttribute('data-download'))
-          setTimeout(() => delete form.dataset.submitted, DOWNLOAD_PAUSE);
-      }
+      else form.dataset.submitted = 'true';
     }
     if (form.hasAttribute('data-passkey-confirm')) {
       event.preventDefault();

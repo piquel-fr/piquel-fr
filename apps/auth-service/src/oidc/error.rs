@@ -271,18 +271,13 @@ impl IntoResponse for OAuthError {
             return Redirect::to(location.as_str()).into_response();
         }
         let challenge = Self::challenge(&code);
-        // A server error's page says only that, with its trace ID.
-        let explanation = status
-            .is_client_error()
-            .then(|| Explanation(format!("The app's request was refused: {description}.")));
+        let explanation = Explanation(format!("The app's request was refused: {description}."));
         let body = ErrorResponse {
             error: code,
             error_description: Some(ErrorDescription::lossy(description)),
         };
         let mut response = (status, Json(body)).into_response();
-        if let Some(explanation) = explanation {
-            response.extensions_mut().insert(explanation);
-        }
+        response.extensions_mut().insert(explanation);
         if let Some(challenge) =
             challenge.and_then(|challenge| HeaderValue::try_from(challenge).ok())
         {

@@ -60,10 +60,12 @@ test('a form larger than a page reads says so', async ({ page }) => {
     input.type = 'hidden';
     input.name = 'action';
     input.value = 'x'.repeat(70 * 1024);
-    form.append(input);
+    const button = document.createElement('button');
+    button.textContent = 'Post it all';
+    form.append(input, button);
     document.body.append(form);
-    form.submit();
   });
+  await page.getByRole('button', { name: 'Post it all', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText(
     'What you entered is too long to send. Shorten it and try again.'
   );
@@ -73,9 +75,7 @@ test('downloading the data works again once the file is on its way', async ({ br
   const page = await signedUp(browser, `download-${Date.now().toString(36)}`);
   await page.goto('/settings/data');
   const button = page.getByRole('button', { name: 'Download your data', exact: true });
-  await Promise.all([page.waitForEvent('download'), button.click()]);
   // The page never changes for a download, so the button must not stay locked.
-  await expect(async () => {
-    await Promise.all([page.waitForEvent('download', { timeout: 2000 }), button.click()]);
-  }).toPass({ timeout: 15_000 });
+  for (let time = 0; time < 2; time++)
+    await Promise.all([page.waitForEvent('download'), button.click()]);
 });

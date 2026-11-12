@@ -113,7 +113,6 @@ impl SecurityFixture {
                 policies: crate::config::PolicyLinks::on(
                     &crate::tests::WEB_ORIGIN.parse().expect("web origin"),
                 ),
-                admin: false,
             },
         };
         let mut router = Router::new();

@@ -406,7 +406,7 @@ impl WebApplication {
     /// Why a page's form that failed to read with `error` was refused: too large,
     /// or out of date.
     pub(super) fn unread(error: &Error) -> ApiError {
-        if error.downcast_ref::<ContentTooLargeError>().is_some() {
+        if error.is::<ContentTooLargeError>() {
             ApiError::too_large(sourceorigin_ui::TOO_LARGE)
         } else {
             ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE)

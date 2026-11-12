@@ -216,9 +216,10 @@ A browser's navigation never shows JSON or plain text. When a response to a
 navigation, told apart by `Sec-Fetch-Mode: navigate`, or by `Accept: text/html`
 from a browser that sends no fetch metadata, is a `4xx` or `5xx` that is not
 already a page, `ErrorPages::explain` (`src/security/page.rs`) replaces its body
-with an error page: its status in words, what `ApiError` said, or what the status
-means when nothing did, a link back to auth's or the dashboard's home, and the
-trace ID of a server error. Its status and headers, such as `Retry-After`, stay.
+with an error page: its status in words, what `ApiError` or an OAuth refusal
+said, or what the status means when nothing did, a link back to auth's or the
+dashboard's home, and, for a server error, only that it failed, with its trace
+ID. Health probes keep their JSON. Its status and headers, such as `Retry-After`, stay.
 That covers the security layer's refusals, unknown paths, a JSON route opened as
 a page and Topcoat's plain-text failures, on both listeners. A `fetch` still gets
 the JSON.

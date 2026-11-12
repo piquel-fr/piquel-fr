@@ -651,6 +651,11 @@ async fn linking_for_an_application_says_so_before_going_on() {
         .expect("linked");
     assert_eq!(identity.user_id, owner.user_id);
 
+    // A link anyone can write says nothing was linked when nothing is.
+    let other = Browser::new_account(&database).await;
+    let page = html(other.visit(&replicas.a, &link(LOGIN, &shown)).await).await;
+    assert!(!page.contains("Sign-in method added"), "{page}");
+
     let page = owner.visit(&replicas.a, &link(LOGIN, &shown)).await;
     assert_eq!(page.status(), StatusCode::OK);
     let page = html(page).await;

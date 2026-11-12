@@ -213,7 +213,7 @@ fn opaque_tokens_preserve_envelopes_and_reject_wrong_purpose() {
 
 /// Checks that protocol failures retain both internal and rejected-input source
 /// chains. A rejection's description is what a browser navigating to it, as to the
-/// authorization endpoint, reads on its error page; a server error's is not.
+/// authorization endpoint, reads on its error page.
 #[tokio::test]
 async fn oauth_failures_preserve_sources_and_statuses() {
     use crate::security::Explanation;
@@ -228,7 +228,6 @@ async fn oauth_failures_preserve_sources_and_statuses() {
     );
     let response = error.into_response();
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(response.extensions().get::<Explanation>().is_none());
     let error = OAuthCode::InvalidGrant.reject_with(
         "code is \"malformed\" \u{2014} retry",
         sourceorigin_crypto::CryptoError::SecretLength,

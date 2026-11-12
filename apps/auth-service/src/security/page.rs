@@ -3,7 +3,7 @@
 //! opened as a page, an address with no page, or Topcoat's plain-text failure.
 //! `fetch` requests still read JSON.
 
-use super::{ApiError, BrowserCookie};
+use super::ApiError;
 use crate::{assets::EmbeddedAssets, config::PolicyLinks, routes};
 use axum::{
     body::Body,
@@ -11,6 +11,7 @@ use axum::{
     response::Response,
 };
 use sourceorigin_telemetry::HttpTelemetry;
+use sourceorigin_ui::Preferences;
 use topcoat::{
     context::Cx,
     view::{ViewExt, view},
@@ -21,14 +22,12 @@ use topcoat::{
 #[derive(Clone, Debug)]
 pub(crate) struct Explanation(pub(crate) String);
 
-/// The error pages of one listener: auth's, or the admin dashboard's, coloured
-/// as it, each linking SourceOrigin's `policies`.
+/// The error pages of a listener, auth's or the admin dashboard's, each linking
+/// SourceOrigin's `policies`.
 #[derive(Clone)]
 pub(super) struct ErrorPages {
     /// SourceOrigin's policies, which every page's status bar links.
     pub(super) policies: PolicyLinks,
-    /// Whether the pages are the admin dashboard's.
-    pub(super) admin: bool,
 }
 
 impl ErrorPages {
@@ -86,11 +85,18 @@ impl ErrorPages {
         }
     }
 
-    /// Makes `response`, the failure of a navigation with `headers`, its page: its
-    /// status and headers stay, such as `Retry-After`, and a server error's page
-    /// shows its trace ID. A success, a redirect or a page already explaining
-    /// itself stays as it is, and so does the failure if its page cannot render.
-    pub(super) async fn explain(&self, headers: &HeaderMap, response: &mut Response) {
+    /// Makes `response`, a navigation's failure, its page, the `admin`
+    /// dashboard's or auth's, in the theme of the browser's `preferences`: its
+    /// status and headers stay, such as `Retry-After`. A server error's page says
+    /// only that, with its trace ID, whatever the failure explained. A success, a
+    /// redirect or a page already explaining itself stays as it is, and so does
+    /// the failure if its page cannot render.
+    pub(super) async fn explain(
+        &self,
+        admin: bool,
+        preferences: Preferences,
+        response: &mut Response,
+    ) {
         let status = response.status();
         let html = response
             .headers()
@@ -104,8 +110,12 @@ impl ErrorPages {
         let message = response
             .extensions()
             .get::<Explanation>()
+            .filter(|_| !status.is_server_error())
             .map_or(default, |explanation| explanation.0.as_str());
-        let page = match self.render(headers, status, title, message).await {
+        let page = match self
+            .render(admin, preferences, status, title, message)
+            .await
+        {
             Ok(page) => page,
             Err(error) => {
                 ApiError::log_error(&*error);
@@ -125,18 +135,19 @@ impl ErrorPages {
         );
     }
 
-    /// The page titled `title` saying `message`, at `status`, in the theme the
-    /// browser sending `headers` prefers.
+    /// The `admin` dashboard's page, or auth's, titled `title` saying `message`,
+    /// at `status`, in the theme of the browser's `preferences`.
     async fn render(
         &self,
-        headers: &HeaderMap,
+        admin: bool,
+        preferences: Preferences,
         status: StatusCode,
         title: &str,
         message: &str,
     ) -> topcoat::Result<String> {
         let cx = &Cx::default();
         let stylesheet = EmbeddedAssets::STYLESHEET.path();
-        let back = if self.admin {
+        let back = if admin {
             "Back to the dashboard"
         } else {
             "Go to Origin Auth"
@@ -145,12 +156,12 @@ impl ErrorPages {
             sourceorigin_ui::document(
                 title: title,
                 stylesheet: &stylesheet,
-                preferences: BrowserCookie::read_preferences(headers),
-                admin: self.admin,
+                preferences: preferences,
+                admin: admin,
                 sourceorigin_ui::auth_shell(
                     home: routes::page::ROOT,
                     reference: HttpTelemetry::trace_id(status),
-                    admin: self.admin,
+                    admin: admin,
                     policies: self.policies.links(),
                     sourceorigin_ui::error_page(
                         title: title,

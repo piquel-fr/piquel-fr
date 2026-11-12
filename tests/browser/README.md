@@ -4,7 +4,7 @@ The browser suite drives Chromium against a running deployment of auth: the real
 binary and PostgreSQL, over HTTPS, with Chromium's virtual passkey authenticator.
 Nothing is mocked. Each spec says at its top what it covers.
 `no-javascript.spec.ts` runs in a project of its own, `no-javascript`, with
-JavaScript disabled: run it alone with `just web test-browser --project no-javascript`.
+JavaScript disabled: run it alone with `just web test-browser no-javascript`.
 
 Run it against a deployment you can throw away: the tests create accounts,
 passkeys and sessions in it. CI runs it on every pull request that can affect

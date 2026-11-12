@@ -592,6 +592,19 @@ impl WebApplication {
         Ok((targets, target_acr))
     }
 
+    /// The provider the `query` says was just linked, if the signed-in account
+    /// holds an identity at it: a link anyone can write never says so otherwise.
+    async fn just_linked(&self, cx: &Cx, query: &LoginQuery) -> Result<Option<Provider>, Failure> {
+        let (Some(provider), Some(owner)) = (query.linked, self.owner(cx).await?) else {
+            return Ok(None);
+        };
+        let identities = self.account.identities(&Viewer::from(&owner)).await?;
+        Ok(identities
+            .iter()
+            .any(|identity| identity.provider == provider)
+            .then_some(provider))
+    }
+
     /// Renders the sign-in page `page` at the step the `visit` finds, at `refused`'s
     /// status and saying why, if anything was. Its forms may redirect to the
     /// providers, to the application whose authorization the sign-in continues,
@@ -611,8 +624,9 @@ impl WebApplication {
         } = visit;
         // A provider just linked says so even when the authorization it goes on to
         // expired meanwhile: going on says that instead.
+        let linked = self.just_linked(cx, &query).await?;
         let (targets, target_acr) = match self.targets(&continuation, &query).await {
-            Err(Failure::Explained { .. }) if query.linked.is_some() => (Vec::new(), None),
+            Err(Failure::Explained { .. }) if linked.is_some() => (Vec::new(), None),
             found => found?,
         };
         if let Some(question) = self
@@ -641,12 +655,10 @@ impl WebApplication {
                 handle: &offer.handle,
                 purge_after: offer.purge_after,
             },
-            _ if let (Some(provider), Some(signed_in)) = (query.linked, &signed_in) => {
-                Step::Linked {
-                    provider,
-                    signed_in,
-                }
-            }
+            _ if let (Some(provider), Some(signed_in)) = (linked, &signed_in) => Step::Linked {
+                provider,
+                signed_in,
+            },
             (Some(pending), Some(kind), _) => Step::Link {
                 kind,
                 provider: pending.provider,

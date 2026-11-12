@@ -23,29 +23,37 @@ use url::{Url, form_urlencoded};
 /// What the verification page posts: the link's token, which the passkey script
 /// copies from its fragment, or, without scripts, the whole link, pasted.
 #[derive(Deserialize)]
-struct Verification {
-    /// The link's token, when the script read it.
-    #[serde(default)]
-    token: String,
-    /// The link, when pasted.
-    #[serde(default)]
-    link: String,
+#[serde(untagged)]
+enum Verification {
+    /// The link's token, as the script read it.
+    Token {
+        /// The token.
+        token: String,
+    },
+    /// The link, pasted.
+    Link {
+        /// The link.
+        link: String,
+    },
 }
 
 impl Verification {
     /// The link's token: the one posted, or the one in the pasted link's fragment.
+    /// A link that does not parse, or has no token, says to paste it whole.
     fn token(self) -> Result<String, ApiError> {
-        if !self.token.is_empty() {
-            return Ok(self.token);
-        }
-        Url::parse(self.link.trim())
+        let link = match self {
+            Self::Token { token } => return Ok(token),
+            Self::Link { link } => link,
+        };
+        let token = Url::parse(link.trim())
+            .inspect_err(|error| tracing::debug!(%error, "pasted verification link rejected"))
             .ok()
             .and_then(|link| {
                 form_urlencoded::parse(link.fragment()?.as_bytes())
                     .find(|(name, _)| name == "token")
                     .map(|(_, token)| token.into_owned())
-            })
-            .ok_or_else(|| ApiError::bad_request(sourceorigin_ui::PASTE_WHOLE_LINK))
+            });
+        token.ok_or_else(|| ApiError::bad_request(sourceorigin_ui::PASTE_WHOLE_LINK))
     }
 }
 

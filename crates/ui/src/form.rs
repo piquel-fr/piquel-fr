@@ -429,7 +429,8 @@ pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
 /// button stays disabled, saying why, until the script finds the browser can run
 /// it. With `on`, the button is instead a [`switch`] named `label`, showing
 /// whether the setting `change` toggles is on. A `download` answers with a file,
-/// so its page stays: the script lets it post again once the file is on its way.
+/// so its page stays: it may post again at once, which only downloads again, and
+/// the script lets its passkey button work again as soon as it posted.
 #[component]
 pub(crate) async fn change_form<'a>(
     action: &'a str,
@@ -455,7 +456,7 @@ pub(crate) async fn change_form<'a>(
             method="post"
             action=(action)
             data-passkey-confirm=(confirm)
-            data-submit-once=(!confirm)
+            data-submit-once=(!confirm && !download)
             data-download=(download)
         >
             hidden(fields: change)
