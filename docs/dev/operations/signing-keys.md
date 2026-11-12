@@ -139,8 +139,8 @@ Take each step in every environment before the next.
    Each key it rewraps records a `rewrapped` change. If a key opens under
    neither key, it changes nothing and names that key: revoke it, then rewrap
    again.
-4. Remove `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED` and the old key's mount, and
-   deploy. Then delete the old secret in each environment:
+4. Remove `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED`, and the old key's mount and
+   declaration, and deploy. Then delete the old secret in each environment:
 
    ```sh
    piquelctl env secret sourceorigin --env production delete key-encryption-key
