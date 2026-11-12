@@ -31,7 +31,8 @@ detail.
   [handles](handles.md)).
   The Profile settings change the handle, which needs a passkey confirmation
   like other sensitive changes and is refused within 30 days of the last change,
-  saying when it may change again. They change the display name too, which
+  saying when it may change again. The handle chosen at signup has no cooldown,
+  so it can be corrected at once. They change the display name too, which
   grants nothing, so it needs only ordinary login and no cooldown
   (`PATCH /account/profile` with `{"display_name": …}`). Either bumps the profile
   version, so relying parties refresh `preferred_username` or `name`.

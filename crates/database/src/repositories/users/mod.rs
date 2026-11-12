@@ -299,7 +299,8 @@ impl UserRepository<'_> {
     }
 
     /// Moves the account's last handle change `days` into the past, so tests need
-    /// not wait out the rename cooldown.
+    /// not wait out the rename cooldown. An account whose handle never changed
+    /// has no change to move, and stays as it is.
     ///
     /// # Errors
     ///

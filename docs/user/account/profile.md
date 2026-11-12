@@ -42,7 +42,8 @@ they refresh your profile. The old handle stays reserved for you, so nobody
 else can take it, and you can take it back later.
 
 If the handle you chose when you signed up isn't right, you can change it
-straight away. After that, each change waits 30 days from the one before.
+straight away. After that, each change waits 30 days from the one before,
+including a change support makes for you.
 Until then, its **Change** button is disabled, and the page says when you can
 change it again.
 

@@ -9,13 +9,14 @@ use sourceorigin_repository::{Database, DatabaseError, DatabaseTransaction, Stor
 mod error;
 pub use error::HandlesError;
 
-/// How long a handle stays before its account may change it again. Settings
-/// renames wait for it; operators do not.
+/// How long a handle stays before its account may change it again. Every change,
+/// an operator's included, starts it; the handle chosen at signup has none.
+/// Settings renames wait for it; operators do not.
 pub(crate) const COOLDOWN: Duration = Duration::days(30);
 
-/// When the owner of `user` may change its handle again, while the [`COOLDOWN`]
-/// since its last change lasts. The handle chosen at signup has none, so a new
-/// account can correct it at once.
+/// When the owner of `user` may next change its handle, or `None` if they may
+/// now: within the [`COOLDOWN`] of its last change. The handle chosen at signup
+/// has none, so a new account can correct it at once.
 pub(crate) fn changeable_at(user: &StoredUser) -> Option<DateTime<Utc>> {
     user.handle_changed_at
         .map(|changed| changed + COOLDOWN)

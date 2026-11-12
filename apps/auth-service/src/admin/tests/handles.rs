@@ -64,7 +64,7 @@ async fn operators_rename_and_release_handles() {
         })
     );
     // The old handle stays the second account's: the first cannot take it, but
-    // its owner can, at once, as operators skip the cooldown.
+    // an operator can give it back at once, as operators skip the cooldown.
     assert!(matches!(
         refused(rename(first, handle("second"), false).await),
         HandlesError::Retired
