@@ -1,6 +1,7 @@
 //! Validated `PostgreSQL` transport, bounded pools and explicit maintenance.
 
 use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction, LockKey};
+use secrecy::{ExposeSecret, SecretString};
 use sourceorigin_crypto::ScramVerifier;
 use sqlx::{
     ConnectOptions, Connection, PgConnection, PgPool,
@@ -161,8 +162,8 @@ impl DatabaseConfig {
 pub struct RuntimeRole {
     /// A plain lowercase identifier, so SQL never needs to quote it.
     name: String,
-    /// What the role logs in with.
-    password: String,
+    /// What the role logs in with, zeroized when dropped.
+    password: SecretString,
 }
 
 impl RuntimeRole {
@@ -184,7 +185,7 @@ impl RuntimeRole {
         }
         Ok(Self {
             name: name.to_owned(),
-            password: password.to_owned(),
+            password: password.into(),
         })
     }
 }
@@ -336,7 +337,7 @@ impl Database {
     /// `PUBLIC` was granted a server parameter, if its verifier cannot be
     /// derived, or if a statement fails, e.g. when the owner is not a superuser.
     pub async fn provision(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
-        let verifier = ScramVerifier::new(&role.password)
+        let verifier = ScramVerifier::new(role.password.expose_secret())
             .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
         let options = self.pool.connect_options().as_ref().clone();
         let mut connection = self

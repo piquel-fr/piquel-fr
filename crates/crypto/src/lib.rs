@@ -233,9 +233,13 @@ impl ClientSecret {
     /// # Errors
     /// Preserves failures from the random source.
     pub fn generate() -> Result<Self, CryptoError> {
-        Ok(Self(
-            format!("{CLIENT_SECRET_PREFIX}{}", Secret::generate()?.encoded()).into(),
-        ))
+        // Built at its exact length, so the conversion to the box doesn't
+        // reallocate, and the encoded copy is zeroized.
+        let encoded = Zeroizing::new(Secret::generate()?.encoded());
+        let mut secret = String::with_capacity(CLIENT_SECRET_PREFIX.len() + encoded.len());
+        secret.push_str(CLIENT_SECRET_PREFIX);
+        secret.push_str(&encoded);
+        Ok(Self(secret.into()))
     }
     /// A secret generated elsewhere, such as by the deployment of the client that
     /// uses it: 256 random bits in unpadded base64url, with or without the prefix.

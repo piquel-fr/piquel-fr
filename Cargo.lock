@@ -3128,6 +3128,7 @@ name = "sourceorigin-repository"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "secrecy",
  "serde",
  "serde_json",
  "sourceorigin-common",

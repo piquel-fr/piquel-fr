@@ -37,15 +37,19 @@ impl SealingKey {
         Ok(Self(RandomizedNonceKey::new(&AES_256_GCM, key.as_slice())?))
     }
 
-    /// Encrypts `plaintext`, authenticating `aad` with it.
+    /// Encrypts `plaintext`, authenticating `aad` with it. The plaintext is
+    /// copied only into a buffer with room for the tag, which is zeroized when
+    /// dropped, so no copy of it outlives the call.
     ///
     /// # Errors
     /// Preserves failures from the random source and the cryptographic provider.
     pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let mut sealed = plaintext.to_vec();
+        let mut sealed =
+            Zeroizing::new(Vec::with_capacity(plaintext.len() + AES_256_GCM.tag_len()));
+        sealed.extend_from_slice(plaintext);
         let nonce = self
             .0
-            .seal_in_place_append_tag(Aad::from(aad), &mut sealed)?;
+            .seal_in_place_append_tag(Aad::from(aad), &mut *sealed)?;
         Ok([nonce.as_ref().as_slice(), &sealed].concat())
     }
 
@@ -63,11 +67,13 @@ impl SealingKey {
         let nonce = Nonce::try_assume_unique_for_key(nonce)?;
         let mut opened = Zeroizing::new(rest.to_vec());
         // A failed tag check says nothing more than this variant does.
-        let plaintext = self
+        let length = self
             .0
             .open_in_place(nonce, Aad::from(aad), &mut opened)
-            .map_err(|_| CryptoError::Unsealable)?;
-        Ok(Zeroizing::new(plaintext.to_vec()))
+            .map_err(|_| CryptoError::Unsealable)?
+            .len();
+        opened.truncate(length);
+        Ok(opened)
     }
 }
 

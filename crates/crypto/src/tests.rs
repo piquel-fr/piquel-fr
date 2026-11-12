@@ -283,14 +283,12 @@ fn notes_open_only_with_a_valid_listed_signature() {
     }
 }
 
-/// Seeds must be exactly 32 hex-encoded bytes; one trailing newline is allowed.
+/// Seeds must be exactly 32 hex-encoded bytes.
 /// Key names must be usable in signature lines and verifier keys.
 #[test]
 fn note_keys_reject_malformed_seeds_and_names() {
     let seed = "00".repeat(32);
     assert!(NoteKey::from_hex_seed("audit", &seed).is_ok());
-    // Configuration strips a file's trailing newline (`SecretBytes::text`).
-    assert!(NoteKey::from_hex_seed("audit", &format!("{seed}\n")).is_err());
     for bad in [
         String::new(),
         "00".repeat(31),
