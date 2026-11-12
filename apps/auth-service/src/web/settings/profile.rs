@@ -4,6 +4,7 @@ use crate::{
     account::{AccountError, Owner, Subject},
     pictures::{CropFields, DecodeTurn, PictureError},
     routes::{page::settings, pictures},
+    security::ApiError,
     web::{
         Failure, WebApplication,
         account::{AccountPage, Applied, Reader},
@@ -146,14 +147,18 @@ impl AccountPage for Profile {
     /// An upload is read here, only once it holds the [`DecodeTurn`]; without
     /// it, none of the body is read. The remove form posts text, as every other
     /// form.
-    async fn decode(cx: &Cx, body: Body) -> Option<ProfileEdit> {
+    async fn decode(cx: &Cx, body: Body) -> Result<ProfileEdit, ApiError> {
         if content_type(cx).is_some_and(|value| value.starts_with("multipart/form-data")) {
             let turn = match DecodeTurn::take() {
                 Ok(turn) => turn,
-                Err(busy) => return Some(ProfileEdit::Busy(busy)),
+                Err(busy) => return Ok(ProfileEdit::Busy(busy)),
             };
-            let multipart = Multipart::from_request(cx, body).await.ok()?;
-            return Self::upload(turn, multipart).await;
+            let multipart = Multipart::from_request(cx, body)
+                .await
+                .map_err(|error| WebApplication::unread(&error))?;
+            return Self::upload(turn, multipart)
+                .await
+                .ok_or_else(|| ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE));
         }
         WebApplication::change(cx, body).await
     }

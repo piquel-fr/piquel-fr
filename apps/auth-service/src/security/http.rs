@@ -2,6 +2,7 @@
 //! in-flight-limit policy, and the cache, isolation and CORS headers of every response.
 
 use super::endpoint::Endpoint;
+use super::page::ErrorPages;
 use super::{ApiError, CSRF_HEADER, RequestContext};
 use axum::{
     extract::{ConnectInfo, MatchedPath, Request, State},
@@ -248,6 +249,8 @@ pub(crate) struct HttpSecurity {
     pub origin: url::Origin,
     /// Which listener it guards.
     pub(super) listener: Listener,
+    /// The pages a navigation's failure shows.
+    pub(super) pages: ErrorPages,
 }
 
 /// The listener an [`HttpSecurity`] guards.
@@ -274,6 +277,10 @@ impl HttpSecurity {
             in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
             origin: config.passkey.origin.as_url().origin(),
             listener: Listener::Public,
+            pages: ErrorPages {
+                policies: config.oidc.policies.clone(),
+                admin: false,
+            },
         }
     }
 
@@ -289,10 +296,15 @@ impl HttpSecurity {
             Some(port) => format!("{}:{port}", dashboard.host()),
             None => dashboard.host().to_owned(),
         };
+        let public = Self::new(config, database);
         Ok(Self {
             listener: Listener::Admin(HeaderValue::from_str(&host)?),
             origin: dashboard.as_url().origin(),
-            ..Self::new(config, database)
+            pages: ErrorPages {
+                admin: true,
+                ..public.pages.clone()
+            },
+            ..public
         })
     }
 
@@ -406,7 +418,8 @@ impl HttpSecurity {
 
     /// Middleware: sheds the request if the listener is full, runs the trust checks
     /// and the handler under one deadline, then adds the cache, isolation and CORS
-    /// headers to every response, errors included.
+    /// headers to every response, errors included. A navigation's failure becomes
+    /// its page ([`ErrorPages`]).
     /// Discovery's errors and preflights get the public grant from their endpoint.
     pub(crate) async fn protect(
         State(policy): State<Self>,
@@ -415,6 +428,8 @@ impl HttpSecurity {
     ) -> Response {
         // Reuse the original header for CORS so decoration cannot fail during re-parsing.
         let origin = request.headers().get(header::ORIGIN).cloned();
+        let navigation =
+            ErrorPages::navigation(request.headers()).then(|| request.headers().clone());
         let endpoint = match policy.listener {
             Listener::Public => Endpoint::of(&request),
             Listener::Admin(_) => Endpoint::dashboard(&request),
@@ -437,6 +452,9 @@ impl HttpSecurity {
         .map_err(HttpSecurityError::from)
         .flatten()
         .unwrap_or_else(|error| ApiError::from(error).into_response());
+        if let Some(headers) = &navigation {
+            policy.pages.explain(headers, &mut response).await;
+        }
         let grant = match endpoint {
             Endpoint::Discovery | Endpoint::Checkpoints | Endpoint::Picture => {
                 Some(CorsGrant::Public)

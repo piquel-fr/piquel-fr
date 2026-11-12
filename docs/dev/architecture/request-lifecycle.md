@@ -201,7 +201,25 @@ cause to the client:
   means.
 - **Pages** answer a `Failure` (`src/web/mod.rs`), which renders the page
   explaining it at its status. An internal failure is logged and shows a server
-  error with its trace ID, since a browser never shows `X-Trace-Id`.
+  error with its trace ID, since a browser never shows `X-Trace-Id`. A form
+  larger than a page reads answers `413`, and one from an older page that no
+  longer decodes `400`, each on the page saying so.
+- **Provider callbacks** (`/login/{provider}/callback`) that the browser can
+  start again from, such as one that expired, was replayed, or came back to
+  another browser or session, redirect to the sign-in page with an `error` its
+  alert explains (`FederationError::callback_error`). Only internal failures
+  answer as errors.
+
+A browser's navigation never shows JSON or plain text. When a response to a
+navigation, told apart by `Sec-Fetch-Mode: navigate`, or by `Accept: text/html`
+from a browser that sends no fetch metadata, is a `4xx` or `5xx` that is not
+already a page, `ErrorPages::explain` (`src/security/page.rs`) replaces its body
+with an error page: its status in words, what `ApiError` said, or what the status
+means when nothing did, a link back to auth's or the dashboard's home, and the
+trace ID of a server error. Its status and headers, such as `Retry-After`, stay.
+That covers the security layer's refusals, unknown paths, a JSON route opened as
+a page and Topcoat's plain-text failures, on both listeners. A `fetch` still gets
+the JSON.
 
 ## Responses
 
@@ -220,7 +238,9 @@ errors and preflights included:
   its class takes, which may then read `X-Trace-Id` and `Retry-After`. A refusal
 for the in-flight limit grants any origin, since it skips the origin check.
 
-Pages add their own `Content-Security-Policy` when they render
+An error page carries its own `Content-Security-Policy`, which loads the
+stylesheet and its typefaces and nothing else. Pages add their own
+`Content-Security-Policy` when they render
 (`WebApplication::render_document`): the stylesheet, the passkey and picture
 scripts, auth's own images and the `blob:` of a picture being chosen, and a
 `form-action` naming auth and the origins the form may redirect to.

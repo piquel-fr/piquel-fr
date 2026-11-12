@@ -30,6 +30,15 @@ sourceorigin_common::str_enum! {
         /// The browser's session was confirmed with a passkey, which social sign-in
         /// cannot re-authenticate.
         PasskeyRequired = "passkey_required",
+        /// The sign-in did not start in this browser, expired or was used already.
+        Expired = "social_expired",
+        /// The browser's session changed while it linked the provider.
+        SessionChanged = "session_changed",
+        /// The provider's account is linked to another Origin Account.
+        AlreadyLinked = "already_linked",
+        /// The Origin Account the provider's account is linked to is disabled or has
+        /// no passkey.
+        AccountUnavailable = "account_unavailable",
     }
 }
 
@@ -44,6 +53,18 @@ impl CallbackError {
             }
             Self::PasskeyRequired => {
                 "You last confirmed this session with a passkey. Use your passkey to sign in again."
+            }
+            Self::Expired => {
+                "This sign-in did not start in this browser, has expired or was already used. Please start again."
+            }
+            Self::SessionChanged => {
+                "Your session changed while the provider was being linked. Please start linking it again."
+            }
+            Self::AlreadyLinked => {
+                "This provider account is already linked to another Origin Account."
+            }
+            Self::AccountUnavailable => {
+                "The Origin Account linked to this provider account is disabled or has no passkey."
             }
         }
     }
@@ -90,6 +111,13 @@ pub struct LoginQuery {
         skip_serializing_if = "Option::is_none"
     )]
     pub error: Option<CallbackError>,
+    /// The provider the browser's account was just linked to, before it goes on.
+    #[serde(
+        default,
+        deserialize_with = "Fields::lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub linked: Option<Provider>,
     /// A provider's sign-in waits in this browser, for a signup or a link.
     #[serde(
         default,
@@ -232,6 +260,15 @@ pub enum Step<'a> {
         /// "Use a handle instead" is open: signing in asks for the handle.
         handle_open: bool,
     },
+    /// The provider just linked to the signed-in account, before the browser goes
+    /// on to the application: going on may fail, as for an authorization that
+    /// expired, but the link is made.
+    Linked {
+        /// The provider.
+        provider: Provider,
+        /// The account it was linked to.
+        signed_in: &'a SignedIn,
+    },
     /// Restoring the account a passkey just signed in to, which is scheduled for
     /// deletion, instead of signing in.
     Restore {
@@ -249,7 +286,7 @@ impl<'a> Step<'a> {
         match self {
             Self::SignIn { .. } => Title::SignIn,
             Self::SignUp { .. } => Title::SignUp,
-            Self::Link { .. } => Title::Link,
+            Self::Link { .. } | Self::Linked { .. } => Title::Link,
             Self::Restore { .. } => Title::Restore,
         }
     }
@@ -258,6 +295,7 @@ impl<'a> Step<'a> {
     const fn signed_in(&self) -> Option<&'a SignedIn> {
         match self {
             Self::SignIn { signed_in, .. } | Self::Link { signed_in, .. } => *signed_in,
+            Self::Linked { signed_in, .. } => Some(signed_in),
             Self::SignUp { .. } | Self::Restore { .. } => None,
         }
     }
@@ -291,6 +329,13 @@ impl<'a> Step<'a> {
                     ),
                 },
             ),
+            Self::Linked { provider, .. } => (
+                "Sign-in method added",
+                format!(
+                    "{} is now linked to your Origin Account: you can sign in with it too.",
+                    provider.name()
+                ),
+            ),
             Self::Restore { handle, .. } => (
                 "Restore your account?",
                 format!("@{handle} is scheduled for deletion."),
@@ -303,8 +348,8 @@ impl<'a> Step<'a> {
 /// page with `query`, which keeps where the browser goes on to, and its links open
 /// the sign-in page, `login`, and the page creating an account, `register`, with
 /// it. `alert` says why the change just posted failed, or the provider sign-in
-/// that brought the browser here. Creating an account links SourceOrigin's `policies`,
-/// which it agrees to.
+/// that brought the browser here. Creating an account links SourceOrigin's
+/// `policies`, which it agrees to.
 #[component]
 pub async fn sign_in<'a>(
     step: Step<'a>,
@@ -332,7 +377,7 @@ pub async fn sign_in<'a>(
             "Sign in",
             query.continued().on(login)?,
         )),
-        Step::Link { .. } | Step::Restore { .. } => None,
+        Step::Link { .. } | Step::Linked { .. } | Step::Restore { .. } => None,
     };
     Ok(view! {
         <div>
@@ -364,34 +409,7 @@ pub async fn sign_in<'a>(
             <p class="notice error" role="alert">(alert)</p>
         }
         <div class="stack">
-            match step {
-                Step::SignIn { passkey_only, handle_open, providers, signed_in } => sign_in_forms(
-                    action: &action,
-                    page: page,
-                    query: query,
-                    passkey_only: passkey_only,
-                    handle_open: handle_open,
-                    providers: providers,
-                    signed_in: signed_in.is_some(),
-                ),
-                Step::SignUp { social, invitation, invited, invite_required, android } => sign_up_form(
-                    action: &action,
-                    social: social,
-                    invitation: invitation,
-                    invited: invited,
-                    invite_required: invite_required,
-                    android: android,
-                ),
-                Step::Link { kind, signed_in, handle_open, .. } => link_forms(
-                    action: &action,
-                    page: page,
-                    query: query,
-                    kind: kind,
-                    signed_in: signed_in,
-                    handle_open: handle_open,
-                ),
-                Step::Restore { .. } => restore_forms(action: &action),
-            }
+            step_forms(step: step, action: &action, page: page, query: query)
         </div>
         <footer>
             if let Some((question, label, href)) = &footer {
@@ -408,6 +426,52 @@ pub async fn sign_in<'a>(
             }
             <p class="help">"Your passkey stays with your device or password manager."</p>
         </footer>
+    })
+}
+
+/// The forms of `step`, posting to `action`, on the sign-in `page` with `query`.
+#[component]
+async fn step_forms<'a>(
+    step: Step<'a>,
+    action: &'a str,
+    page: &'a str,
+    query: &'a LoginQuery,
+) -> Result<impl View> {
+    Ok(view! {
+        match step {
+            Step::SignIn { passkey_only, handle_open, providers, signed_in } => sign_in_forms(
+                action: action,
+                page: page,
+                query: query,
+                passkey_only: passkey_only,
+                handle_open: handle_open,
+                providers: providers,
+                signed_in: signed_in.is_some(),
+            ),
+            Step::SignUp { social, invitation, invited, invite_required, android } => sign_up_form(
+                action: action,
+                social: social,
+                invitation: invitation,
+                invited: invited,
+                invite_required: invite_required,
+                android: android,
+            ),
+            Step::Link { kind, signed_in, handle_open, .. } => link_forms(
+                action: action,
+                page: page,
+                query: query,
+                kind: kind,
+                signed_in: signed_in,
+                handle_open: handle_open,
+            ),
+            Step::Linked { .. } => change_form(
+                action: action,
+                change: LoginChange::SignedIn {},
+                label: "Continue",
+                class: "full",
+            ),
+            Step::Restore { .. } => restore_forms(action: action),
+        }
     })
 }
 

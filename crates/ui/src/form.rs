@@ -125,6 +125,13 @@ impl Notice {
 /// What a page says when its form came from an older page and does not decode.
 pub const OUT_OF_DATE: &str = "This page was out of date. Try again.";
 
+/// Why a change that confirms the session with a passkey first stays disabled,
+/// until the passkey script finds the browser can run the ceremony.
+const CONFIRM_UNAVAILABLE: &str = "This change needs your passkey: open this page in a browser that supports passkeys, with scripts allowed.";
+
+/// What a page says of a form larger than it reads.
+pub const TOO_LARGE: &str = "What you entered is too long to send. Shorten it and try again.";
+
 /// Why the change just posted failed.
 #[derive(Clone, Copy, Debug)]
 pub enum Alert<'a> {
@@ -418,9 +425,11 @@ pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
 /// the user fills in as `child`, the reason an administrator gives when `reason`
 /// asks for one, holding what they typed last, and a button labelled `label`, of `class`, beside a link back to
 /// `cancel` when there is one. With `confirm`, the passkey script first confirms
-/// the session with a passkey; a ceremony that fails says why in the form. With
-/// `on`, the button is instead a [`switch`] named `label`, showing whether the
-/// setting `change` toggles is on.
+/// the session with a passkey; a ceremony that fails says why in the form, and the
+/// button stays disabled, saying why, until the script finds the browser can run
+/// it. With `on`, the button is instead a [`switch`] named `label`, showing
+/// whether the setting `change` toggles is on. A `download` answers with a file,
+/// so its page stays: the script lets it post again once the file is on its way.
 #[component]
 pub(crate) async fn change_form<'a>(
     action: &'a str,
@@ -432,6 +441,7 @@ pub(crate) async fn change_form<'a>(
     #[default]
     aria_label: Option<String>,
     #[default] confirm: bool,
+    #[default] download: bool,
     #[into]
     #[default]
     reason: Option<&'a str>,
@@ -446,6 +456,7 @@ pub(crate) async fn change_form<'a>(
             action=(action)
             data-passkey-confirm=(confirm)
             data-submit-once=(!confirm)
+            data-download=(download)
         >
             hidden(fields: change)
             (child)
@@ -457,12 +468,13 @@ pub(crate) async fn change_form<'a>(
             }
             if confirm {
                 <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
+                <p class="help" data-unavailable="">(CONFIRM_UNAVAILABLE)</p>
             }
             <div class="row actions">
                 if let Some(on) = on {
-                    switch(on: on, label: label.as_str())
+                    switch(on: on, label: label.as_str(), disabled: confirm)
                 } else {
-                    <button class=(class) aria-label=(aria_label.as_deref())>(label.as_str())</button>
+                    <button class=(class) aria-label=(aria_label.as_deref()) disabled=(confirm)>(label.as_str())</button>
                 }
                 if let Some(cancel) = &cancel {
                     <a class="button secondary" href=(cancel.as_str())>"Cancel"</a>
@@ -473,8 +485,9 @@ pub(crate) async fn change_form<'a>(
 }
 
 /// A switch named `label`, showing whether its setting is `on`: a button the
-/// stylesheet draws as a sliding toggle, which posts its form, or with
-/// `disabled`, only shows the setting to whom cannot change it.
+/// stylesheet draws as a sliding toggle, which posts its form, or, `disabled`, only
+/// shows the setting: to whom cannot change it, or until the passkey script
+/// enables it.
 #[component]
 pub(crate) async fn switch<'a>(
     on: bool,

@@ -876,9 +876,11 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     assert_eq!(redirect(&reported), shown);
 }
 
-/// The verification page never verifies on its own: its form does, signed out.
-/// Neither another account nor a token that does not match can, and a refused
-/// confirmation still leads to the addresses.
+/// The verification page never verifies on its own: its form does, signed out,
+/// with the token its script reads from the link, or, without scripts, the link
+/// pasted whole. Neither another account nor a token that does not match can, nor
+/// a link without its token, and a refused confirmation still leads to the
+/// addresses.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn verification_links_are_confirmed_by_their_form() {
@@ -902,6 +904,8 @@ async fn verification_links_are_confirmed_by_their_form() {
     assert_eq!(page.status(), StatusCode::OK);
     let page = html(page).await;
     assert!(page.contains("data-fragment-form"), "{page}");
+    // Without scripts, the link itself is pasted.
+    assert!(page.contains(r#"<input type="url" name="link""#), "{page}");
     let refused = browser
         .submit(
             &replicas.b,
@@ -931,13 +935,23 @@ async fn verification_links_are_confirmed_by_their_form() {
         "{page}"
     );
 
-    let verified = browser
+    let partial = browser
         .submit(
             &replicas.b,
             settings::VERIFY,
-            &[("token", &token)],
+            &[("link", &format!("{AUTH_ORIGIN}{}", settings::VERIFY))],
             OWN_PAGE,
         )
+        .await;
+    assert_eq!(partial.status(), StatusCode::BAD_REQUEST);
+    let page = html(partial).await;
+    assert!(
+        page.contains("Paste the whole link from the email"),
+        "{page}"
+    );
+    let link = format!("{AUTH_ORIGIN}{}#token={token}", settings::VERIFY);
+    let verified = browser
+        .submit(&replicas.b, settings::VERIFY, &[("link", &link)], OWN_PAGE)
         .await;
     assert_eq!(verified.status(), StatusCode::OK);
     let page = html(verified).await;

@@ -336,6 +336,9 @@ class Passkeys {
   }
 }
 
+/** How long a form marked `data-download` stays posted, in milliseconds. */
+const DOWNLOAD_PAUSE = 3000;
+
 /**
  * Wires auth's server-rendered pages, which load this module as their only script and
  * mark what needs it:
@@ -345,6 +348,8 @@ class Passkeys {
  * - a form marked `data-passkey-confirm` confirms the session with a passkey, then
  *   posts it with `form.submit()`, which sends no button's value: its action and
  *   every other value come from its inputs, never from the button.
+ * - a form also marked `data-download` answers with a file, so its page stays: it
+ *   posts again, and its passkey button works again, a moment after it posted.
  * - a form marked `data-passkey-sign-in` signs in with a passkey, of the account its
  *   `handle` names, or one the browser offers when it names none, then posts, so its
  *   page sends the browser on.
@@ -380,8 +385,9 @@ class Passkeys {
  *   when clicked, hiding it from then on and giving the focus to the page's heading.
  *   Where the browser keeps no local storage, it shows on every page, and a dismissal
  *   hides it on that page only.
- * A passkey form's button starts disabled until passkeys are known to work here; its
- * `data-unavailable` note says why, and hides once it is enabled.
+ * A passkey form's button, a confirming form's included, starts disabled until
+ * passkeys are known to work here; its `data-unavailable` note says why, and hides
+ * once it is enabled.
  * While a passkey form's ceremony runs, the form is busy: its button is disabled and
  * says so, and its `data-passkey-error` element, which says why the last one failed,
  * hides.
@@ -431,19 +437,30 @@ function wire(document) {
     };
     if (alert) alert.hidden = true;
     busy(true);
-    ceremony().catch((/** @type {unknown} */ cause) => {
-      busy(false);
-      if (!alert) return;
-      alert.textContent = Passkeys.message(cause);
-      alert.hidden = false;
-    });
+    ceremony().then(
+      () => {
+        // A download's page stays: its form may post again.
+        if (form.hasAttribute('data-download')) busy(false);
+      },
+      (/** @type {unknown} */ cause) => {
+        busy(false);
+        if (!alert) return;
+        alert.textContent = Passkeys.message(cause);
+        alert.hidden = false;
+      }
+    );
   };
   document.addEventListener('submit', (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
     if (form.hasAttribute('data-submit-once')) {
       if (form.dataset.submitted) event.preventDefault();
-      else form.dataset.submitted = 'true';
+      else {
+        form.dataset.submitted = 'true';
+        // A download's page stays: its form may post again once the file is on its way.
+        if (form.hasAttribute('data-download'))
+          setTimeout(() => delete form.dataset.submitted, DOWNLOAD_PAUSE);
+      }
     }
     if (form.hasAttribute('data-passkey-confirm')) {
       event.preventDefault();
@@ -544,7 +561,7 @@ function wire(document) {
   if (Passkeys.available())
     for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (
       document.querySelectorAll(
-        'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll], form[data-passkey-recover], form[data-passkey-undo], form[data-passkey-assertion]'
+        'form[data-passkey-confirm], form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll], form[data-passkey-recover], form[data-passkey-undo], form[data-passkey-assertion]'
       )
     ))
       enable(form);

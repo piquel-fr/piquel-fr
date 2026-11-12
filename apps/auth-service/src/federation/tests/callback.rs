@@ -58,7 +58,8 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
         ))
         .await
         .expect("unbound callback");
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    // Another browser's callback names no continuation it may go on to.
+    assert_eq!(TestApp::refused(&response, "social_expired"), None);
     let response = router
         .clone()
         .oneshot(TestApp::request(
@@ -90,7 +91,7 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
         ))
         .await
         .expect("replay");
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    TestApp::refused(&response, "social_expired");
 }
 
 /// Cancelled or failed authorization preserves the original continuation and consumes state.
@@ -154,6 +155,6 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
             ))
             .await
             .expect("replay");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        TestApp::refused(&response, "social_expired");
     }
 }

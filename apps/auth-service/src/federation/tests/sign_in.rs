@@ -73,12 +73,9 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
     );
     let subject_owner = test.user(Some(&original), false).await;
     test.link(subject_owner).await;
+    // Known accounts cannot bootstrap from social login.
     let response = test.callback().await;
-    assert_eq!(
-        response.status(),
-        StatusCode::UNAUTHORIZED,
-        "known accounts cannot bootstrap from social login"
-    );
+    TestApp::refused(&response, "account_unavailable");
     let mut tx = test.app.database.begin().await.expect("tx");
     test.key(&mut tx, subject_owner).await;
     tx.commit().await.expect("commit");

@@ -24,8 +24,8 @@ use sourceorigin_common::{
 use sourceorigin_crypto::Pkce;
 use sourceorigin_crypto::Secret;
 use sourceorigin_repository::{
-    Database, DatabaseTransaction, InsertFederationTransaction, PendingFederation,
-    StoredExternalIdentity, StoredSession,
+    ConsumedFederationTransaction, Database, DatabaseTransaction, InsertFederationTransaction,
+    PendingFederation, StoredExternalIdentity, StoredSession,
 };
 use sourceorigin_ui::{CallbackError, LoginQuery, PendingDestination, Query as _};
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};
@@ -211,15 +211,16 @@ impl FederationApplication {
             .user_agent(HTTP_USER_AGENT)
     }
 
-    /// Redirects a consumed callback to the login page with its stored continuation.
+    /// Redirects a callback to the login page saying why it failed, with its
+    /// flow's continuation, once the flow is known.
     fn failed_callback(
         &self,
         error: CallbackError,
-        return_to: &str,
+        return_to: Option<&str>,
     ) -> Result<Response, FederationError> {
         let query = LoginQuery {
             error: Some(error),
-            return_to: Some(return_to.to_owned()),
+            return_to: return_to.map(str::to_owned),
             ..LoginQuery::default()
         };
         let destination = self.origin.as_url().join(&query.on(routes::page::LOGIN)?)?;
@@ -334,7 +335,10 @@ impl FederationApplication {
         Ok((url, FlowCookie(Flow::Started(browser))))
     }
 
-    /// Converts provider callbacks into a verified login or pending identity.
+    /// Converts provider callbacks into a verified login or pending identity. A
+    /// callback the browser cannot go on from, such as an expired or replayed one,
+    /// goes back to the sign-in page saying why, with its flow's continuation once
+    /// the flow is known; only internal failures answer as errors.
     async fn callback(
         State(app): State<Self>,
         context: RequestContext,
@@ -343,28 +347,45 @@ impl FederationApplication {
         headers: HeaderMap,
         Query(query): Query<CallbackQuery>,
     ) -> Result<Response, ApiError> {
-        Ok(app
-            .complete_callback(
-                context,
-                provider
-                    .parse()
-                    .map_err(FederationError::UnsupportedProvider)?,
-                &headers,
-                query,
-                session,
-            )
-            .await?)
+        let provider = provider
+            .parse()
+            .map_err(FederationError::UnsupportedProvider)?;
+        let flow = match app.consume(provider, &headers, &query).await {
+            Ok(flow) => flow,
+            Err(error) => return app.refused(error, None),
+        };
+        let return_to = flow.return_to.clone();
+        match app
+            .complete_callback(context, provider, &headers, query, session, flow)
+            .await
+        {
+            Ok(response) => Ok(response),
+            Err(error) => app.refused(error, Some(&return_to)),
+        }
     }
 
-    /// Consumes state before exchange or cancellation so every callback is single-use.
-    async fn complete_callback(
+    /// The answer to a callback that failed with `error`: the sign-in page saying
+    /// why, going on to `return_to`, or the error itself when the browser cannot
+    /// do anything about it.
+    fn refused(
         &self,
-        context: RequestContext,
+        error: FederationError,
+        return_to: Option<&str>,
+    ) -> Result<Response, ApiError> {
+        match error.callback_error() {
+            Some(reason) => Ok(self.failed_callback(reason, return_to)?),
+            None => Err(error.into()),
+        }
+    }
+
+    /// Consumes the flow the callback names, bound to this browser, before
+    /// exchange or cancellation, so every callback is single-use.
+    async fn consume(
+        &self,
         provider: Provider,
         headers: &HeaderMap,
-        query: CallbackQuery,
-        session: Option<StoredSession>,
-    ) -> Result<Response, FederationError> {
+        query: &CallbackQuery,
+    ) -> Result<ConsumedFederationTransaction, FederationError> {
         let browser = BrowserCookie::Federation
             .read(headers)
             .ok_or(FederationError::FlowBrowserMissing)?;
@@ -374,7 +395,7 @@ impl FederationApplication {
             .and_then(|value| Secret::parse(value).ok())
             .ok_or(FederationError::InvalidAttempt)?;
         // Cancellation consumes state too; returning to the browser never leaves replayable evidence.
-        let flow = self
+        Ok(self
             .database
             .federation()
             .consume_transaction(
@@ -382,15 +403,27 @@ impl FederationApplication {
                 state.digest().as_bytes(),
                 browser.digest().as_bytes(),
             )
-            .await?;
+            .await?)
+    }
+
+    /// Completes the consumed `flow` the callback answers.
+    async fn complete_callback(
+        &self,
+        context: RequestContext,
+        provider: Provider,
+        headers: &HeaderMap,
+        query: CallbackQuery,
+        session: Option<StoredSession>,
+        flow: ConsumedFederationTransaction,
+    ) -> Result<Response, FederationError> {
         if query.error.is_some() {
-            return self.failed_callback(CallbackError::Cancelled, &flow.return_to);
+            return self.failed_callback(CallbackError::Cancelled, Some(&flow.return_to));
         }
         let Some(code) = query
             .code
             .filter(|code| !code.is_empty() && code.len() <= MAX_CODE_BYTES)
         else {
-            return self.failed_callback(CallbackError::Failed, &flow.return_to);
+            return self.failed_callback(CallbackError::Failed, Some(&flow.return_to));
         };
         let identity = match self
             .exchange(provider, &code, &flow.pkce_verifier, &flow.nonce)
@@ -410,7 +443,7 @@ impl FederationApplication {
                         )
                         .await?;
                 }
-                return self.failed_callback(CallbackError::Failed, &flow.return_to);
+                return self.failed_callback(CallbackError::Failed, Some(&flow.return_to));
             }
         };
         if let Some(user_id) = flow.link_user_id {
@@ -461,7 +494,7 @@ impl FederationApplication {
             let session = match Self::sign_in_linked(tx, context, headers, existing).await {
                 Ok(session) => session,
                 Err(FederationError::Session(SessionError::PasskeyRequired)) => {
-                    return self.failed_callback(CallbackError::PasskeyRequired, &return_to);
+                    return self.failed_callback(CallbackError::PasskeyRequired, Some(&return_to));
                 }
                 Err(error @ FederationError::LinkedAccountUnavailable) => {
                     context

@@ -10,7 +10,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "unused": "knip",
-    "test:browser": "playwright test --project chromium"
+    "test:browser": "playwright test --project chromium --project no-javascript"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

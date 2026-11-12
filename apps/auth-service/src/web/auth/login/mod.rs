@@ -277,12 +277,12 @@ impl WebApplication {
         let web = app_context::<Self>(cx);
         let visit = Visit::new(web, cx).await;
         let refused = match Self::change::<LoginChange>(cx, body).await {
-            Some(change) => match web.make(cx, page, visit, change).await {
+            Ok(change) => match web.make(cx, page, visit, change).await {
                 Ok(response) => return Ok(response),
                 Err(Refusal::Failure(failure)) => return Err(failure),
                 Err(Refusal::Alert(error)) => error,
             },
-            None => ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE),
+            Err(refused) => refused,
         };
         web.sign_in_page(cx, page, Visit::new(web, cx).await, Some(refused))
             .await
@@ -299,9 +299,10 @@ impl WebApplication {
     ) -> Result<Response, Refusal> {
         let recovery = RecoveryQuestion::from(&change);
         let (mut response, cookie) = match change {
-            // The passkey script signed the browser in before posting, unless its
-            // passkey's account is scheduled for deletion: then it left an offer to
-            // restore it instead, which the page shows.
+            // The passkey script signed the browser in before posting, or it was
+            // signed in already, as when it goes on after linking a provider,
+            // unless its passkey's account is scheduled for deletion: then it left
+            // an offer to restore it instead, which the page shows.
             LoginChange::SignedIn {} | LoginChange::Registered {} => {
                 if self.restore_offer(cx).await?.is_some() {
                     return Ok(see_other(Self::here(cx, page)).into_response(cx)?);
@@ -336,18 +337,34 @@ impl WebApplication {
                 self.start_social(cx, page, &visit.continuation, provider)
                     .await?
             }
+            // Linked, the browser goes on by a redirect, so going on, which may
+            // fail, as for an expired authorization, never shows a link that was
+            // made as failed: to the path, or to this page, which says it is
+            // linked and offers to go on to the application.
             LoginChange::Link {} => {
                 let owner = self
                     .owner(cx)
                     .await?
                     .ok_or_else(|| ApiError::from(SessionError::Missing))?;
+                let provider = match &visit.pending {
+                    Some(Ok(pending)) => Some(pending.provider),
+                    Some(Err(_)) | None => None,
+                };
                 let (return_to, cookie) = self
                     .account
                     .link_identity(&owner, &self.email, headers(cx))
                     .await
                     .map_err(ApiError::from)?;
-                let continuation = Continuation::new(&visit.query, Some(&return_to));
-                (self.go_on(cx, page, continuation, recovery).await?, cookie)
+                let next = match Continuation::new(&visit.query, Some(&return_to)) {
+                    Continuation::Path(path) => path.as_str().to_owned(),
+                    continuation @ Continuation::Authorization(_) => continuation
+                        .on(LoginQuery {
+                            linked: provider,
+                            ..LoginQuery::default()
+                        })
+                        .on(page.path())?,
+                };
+                (see_other(next).into_response(cx)?, cookie)
             }
             // An explicit link goes back to where it started; an email match offers
             // to sign in before going on.
@@ -549,6 +566,32 @@ impl WebApplication {
         }))
     }
 
+    /// Where the sign-in page's forms may redirect on the way to `continuation`:
+    /// the providers, the application whose authorization the sign-in continues,
+    /// and auth's handoff to the admin dashboard. With them, the class of
+    /// authentication the application asks for, or else the `query`'s.
+    async fn targets(
+        &self,
+        continuation: &Continuation,
+        query: &LoginQuery,
+    ) -> Result<(Vec<url::Url>, Option<Acr>), Failure> {
+        let mut targets = self
+            .federation
+            .authorization_endpoints()
+            .map_err(Error::from)?;
+        if let Some(sign_in) = self.dashboard.as_ref().filter(|_| continuation.hands_off()) {
+            targets.push(sign_in.dashboard().as_url().clone());
+        }
+        let target_acr = match continuation.authorization(&self.oidc).await? {
+            Some(authorization) => {
+                targets.push(authorization.redirect_uri);
+                authorization.target_acr
+            }
+            None => query.acr,
+        };
+        Ok((targets, target_acr))
+    }
+
     /// Renders the sign-in page `page` at the step the `visit` finds, at `refused`'s
     /// status and saying why, if anything was. Its forms may redirect to the
     /// providers, to the application whose authorization the sign-in continues,
@@ -566,19 +609,11 @@ impl WebApplication {
             pending,
             continuation,
         } = visit;
-        let mut targets = self
-            .federation
-            .authorization_endpoints()
-            .map_err(Error::from)?;
-        if let Some(sign_in) = self.dashboard.as_ref().filter(|_| continuation.hands_off()) {
-            targets.push(sign_in.dashboard().as_url().clone());
-        }
-        let target_acr = match continuation.authorization(&self.oidc).await? {
-            Some(authorization) => {
-                targets.push(authorization.redirect_uri);
-                authorization.target_acr
-            }
-            None => query.acr,
+        // A provider just linked says so even when the authorization it goes on to
+        // expired meanwhile: going on says that instead.
+        let (targets, target_acr) = match self.targets(&continuation, &query).await {
+            Err(Failure::Explained { .. }) if query.linked.is_some() => (Vec::new(), None),
+            found => found?,
         };
         if let Some(question) = self
             .recovery_question(cx, page, &query, &continuation, &targets)
@@ -606,6 +641,12 @@ impl WebApplication {
                 handle: &offer.handle,
                 purge_after: offer.purge_after,
             },
+            _ if let (Some(provider), Some(signed_in)) = (query.linked, &signed_in) => {
+                Step::Linked {
+                    provider,
+                    signed_in,
+                }
+            }
             (Some(pending), Some(kind), _) => Step::Link {
                 kind,
                 provider: pending.provider,
@@ -639,6 +680,7 @@ impl WebApplication {
             .or_else(|| query.error.map(CallbackError::message));
         let kept = continuation.on(LoginQuery {
             error: None,
+            linked: None,
             ..query.clone()
         });
         let view = view! { cx =>

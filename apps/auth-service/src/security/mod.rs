@@ -21,6 +21,8 @@ mod cookie;
 mod endpoint;
 /// Origin, proxy, cache, timeout and request-limit policy of each listener.
 mod http;
+/// The page a navigation's failure shows.
+mod page;
 /// Browser sessions, their credentials and their extractors.
 mod session;
 
@@ -42,7 +44,8 @@ pub(crate) const DASHBOARD_IDLE_MINUTES: u32 = 30;
 pub(crate) use sourceorigin_common::protocol::step_up::CONFIRMATION_MAX_AGE;
 
 /// Browser JSON error `{"error": message}`, plus a machine-readable `code` when the
-/// frontend can resolve it. Internal causes only reach the logs.
+/// frontend can resolve it. A navigation gets the page saying `message` instead.
+/// Internal causes only reach the logs.
 #[derive(Debug)]
 pub(crate) struct ApiError {
     /// Status code of the error response.
@@ -85,6 +88,11 @@ impl ApiError {
     /// Rejects invalid browser input, explaining what is wrong.
     pub(crate) fn bad_request(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
+    }
+
+    /// Rejects a request whose body is larger than its route reads.
+    pub(crate) fn too_large(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(StatusCode::PAYLOAD_TOO_LARGE, message)
     }
 
     /// Reports a missing browser resource.
@@ -194,15 +202,18 @@ impl From<HandleError> for ApiError {
 
 impl IntoResponse for ApiError {
     /// Serializes the fixed browser error and adds the retry delay, if any.
+    /// The response keeps the message for a navigation's page.
     fn into_response(self) -> Response {
+        let message = self.message.into_owned();
         let mut response = (
             self.status,
             Json(ErrorBody {
-                error: self.message.into_owned(),
+                error: message.clone(),
                 code: self.code,
             }),
         )
             .into_response();
+        response.extensions_mut().insert(page::Explanation(message));
         if let Some(retry_after) = self.retry_after {
             response.headers_mut().insert(
                 header::RETRY_AFTER,
