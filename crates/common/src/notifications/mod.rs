@@ -288,6 +288,8 @@ impl DomainEvent {
             | Self::AccountPurged {}
             // These concern no account's owner.
             | Self::InvitationCreated { .. }
+            | Self::InvitationMailed { .. }
+            | Self::InvitationRedeemed { .. }
             | Self::InvitationRevoked { .. }
             | Self::HandleReleased { .. }
             | Self::HandleReserved { .. }

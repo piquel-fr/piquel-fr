@@ -518,6 +518,10 @@ img.avatar {
   flex: 1;
   min-width: 0;
 }
+/* Once the copy script shows its button, clicking the value copies it too. */
+.code-line:has(button[data-copy]:not([hidden])) code {
+  cursor: copy;
+}
 
 /* Tabs within a page, such as an app's. */
 .tabs {

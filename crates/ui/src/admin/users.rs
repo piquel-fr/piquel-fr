@@ -72,15 +72,13 @@ pub struct SessionRow<'a> {
 
 /// The account search: the accounts `q` found, by handle, and the `pages`
 /// through them. The top bar holds the search form; `invite` links the page
-/// inviting someone, while signup needs invitations.
+/// inviting someone.
 #[component]
 pub async fn user_search<'a>(
     q: &'a str,
     rows: &'a [UserRow<'a>],
     pages: &'a Pager,
-    #[into]
-    #[default]
-    invite: Option<&'a str>,
+    invite: &'a str,
 ) -> Result<impl View> {
     let total = pages.paging.total;
     let plural = if total == 1 { "" } else { "s" };
@@ -94,9 +92,7 @@ pub async fn user_search<'a>(
             title: "Users",
             lead: lead,
             actions: view! {
-                if let Some(invite) = invite {
-                    <a data-confirm-first="" class="button secondary" href=(invite)>"Invite someone"</a>
-                }
+                <a data-confirm-first="" class="button secondary" href=(invite)>"Invite someone"</a>
             },
         )
         <section class="card">

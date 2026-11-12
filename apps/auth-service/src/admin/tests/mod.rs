@@ -3,11 +3,11 @@
 
 use super::*;
 use crate::security::RequestContext;
-use crate::tests::{AUTH_ORIGIN, Browser, Replicas, until_blocked};
+use crate::tests::{Browser, Replicas, until_blocked};
 use chrono::{Duration, Utc};
 use sourceorigin_common::{
     AccountStatus, AuthenticationMethod, Handle, Personal, SessionId, TokenId, UserId,
-    admin::EventSearch, config::Origin, events::DomainEvent, protocol::step_up::StepUpRequirement,
+    admin::EventSearch, events::DomainEvent, protocol::step_up::StepUpRequirement,
 };
 use sourceorigin_repository::{Database, DatabaseTransaction, InsertUser};
 use std::mem::discriminant;
@@ -131,11 +131,6 @@ impl Harness {
             .map(|stored| stored.event.known().cloned().expect("a known event"))
             .collect()
     }
-}
-
-/// Auth's origin, which invitations link to.
-fn origin() -> Origin {
-    AUTH_ORIGIN.parse().expect("origin")
 }
 
 /// `admin` signed in to the dashboard, as its session cookie finds them, with a

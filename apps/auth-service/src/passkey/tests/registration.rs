@@ -1,7 +1,8 @@
-//! Signup: handle rules and attaching a pending social signup.
+//! Signup: handle rules, invitations and attaching a pending social signup.
 
 use super::*;
 use crate::tests::pending_sign_in;
+use sourceorigin_repository::InsertInvitation;
 
 impl Fixture {
     /// Registers a new account with a fresh software credential; returns the finish response.
@@ -73,6 +74,57 @@ async fn signup_applies_the_handle_rules() {
         .request("/webauthn/register/start", Method::POST, "", taken)
         .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+/// With signup open, an invitation's link is still redeemed, once: a mailed one
+/// starts the account with its address, verified and primary.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_mailed_invitation_starts_the_account_with_its_address() {
+    let fixture = Fixture::new().await;
+    let database = fixture.app.database.clone();
+    let (id, token) = (TokenId::new(), Secret::generate().expect("token"));
+    let address = format!("{id}@example.com");
+    database
+        .security()
+        .create_invitation(&InsertInvitation {
+            id,
+            secret_digest: token.digest().as_bytes(),
+            expires_at: chrono::Utc::now() + chrono::Duration::days(1),
+            email: Some(&address),
+        })
+        .await
+        .expect("invitation");
+    let handle = format!("inv-{}", &id.to_string()[24..]);
+    let invited = json!({"handle": handle, "invitation": token.encoded()});
+    let response = fixture.register("", invited).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let user = database
+        .users()
+        .find_active_by_handle(&Handle::parse(&handle).expect("handle"))
+        .await
+        .expect("user")
+        .expect("registered");
+    let emails = database.emails().list(user.id).await.expect("emails");
+    let [email] = &emails[..] else {
+        panic!("one address: {emails:?}");
+    };
+    assert_eq!(email.normalized_email, address);
+    assert!(email.is_primary && email.verified_at.is_some(), "{email:?}");
+    let history = database.events().history_for_user(user.id, 100).await;
+    let redeemed = DomainEvent::InvitationRedeemed { invitation_id: id };
+    assert!(
+        history
+            .expect("history")
+            .iter()
+            .any(|stored| stored.event.known() == Some(&redeemed)),
+        "recorded"
+    );
+    let again = json!({"handle": format!("{handle}-2"), "invitation": token.encoded()});
+    let response = fixture
+        .request("/webauthn/register/start", Method::POST, "", again)
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN, "used once");
 }
 
 /// Checks that abandoned social signup state never attaches to unrelated registration.

@@ -318,6 +318,41 @@ impl EmailApplication {
             imported => imported,
         }
     }
+
+    /// Checks that the sender can send to `address`, which is stricter than
+    /// [`NormalizedEmail::parse`]: a link mailed to an address it can't send to
+    /// would never arrive.
+    pub(crate) fn sendable(address: &NormalizedEmail) -> Result<(), lettre::address::AddressError> {
+        address.as_str().parse::<lettre::Address>().map(drop)
+    }
+
+    /// Starts the new account `user_id` with `address`, the one the invitation it
+    /// redeemed was mailed to, verified and primary, as `context`'s, in `tx`:
+    /// opening the mailed link proved what a verification email would. An address
+    /// another account verified since the invitation was mailed is skipped, as a
+    /// provider's is, and the account starts without one.
+    pub(crate) async fn invited(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        user_id: UserId,
+        address: &NormalizedEmail,
+    ) -> Result<(), EmailError> {
+        if tx
+            .emails()
+            .is_owned_elsewhere(address.as_str(), user_id)
+            .await?
+        {
+            tracing::info!("invited address held by another account; not added");
+            return Ok(());
+        }
+        let added = Added {
+            context,
+            user_id,
+            address,
+            provider: None,
+        };
+        added.verified(tx).await
+    }
 }
 
 /// An address joining an account, as `context`'s, and the provider it is
@@ -347,11 +382,7 @@ impl Added<'_> {
         if config.smtp.is_none() {
             return Err(EmailError::Disabled);
         }
-        // The sender must be able to send to it, or its link would never arrive.
-        self.address
-            .as_str()
-            .parse::<lettre::Address>()
-            .map_err(EmailError::Unsendable)?;
+        EmailApplication::sendable(self.address).map_err(EmailError::Unsendable)?;
         EmailApplication::limit(tx, self.user_id, client_ip, self.address).await?;
         let id = EmailId::new();
         let digest = config
@@ -373,7 +404,8 @@ impl Added<'_> {
     }
 
     /// Adds the address verified, as the primary one of an account that has
-    /// none, which a provider authoritative for it vouches for.
+    /// none, which a provider authoritative for it, or the invitation mailed to
+    /// it, vouches for.
     async fn verified(self, tx: &mut DatabaseTransaction<'_>) -> Result<(), EmailError> {
         let id = EmailId::new();
         tx.emails()

@@ -181,11 +181,14 @@ impl Table {
             Self::ReservedHandles => Holds::Withheld(
                 "handles administrators reserved, maybe for a person, tied to no account",
             ),
+            Self::Invitations => Holds::Withheld(
+                "addresses administrators invited, tied to no account, deleted once the \
+                invitation expires or a day after it is redeemed",
+            ),
             Self::Alerts
             | Self::AuditAnchor
             | Self::AuditCheckpoints
             | Self::DeliveryOrderings
-            | Self::Invitations
             | Self::SigningKeys => Holds::Nothing,
         }
     }

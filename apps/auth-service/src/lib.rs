@@ -33,6 +33,8 @@ mod grants;
 mod handles;
 /// The signed-in user's security history and its reports.
 mod history;
+/// Signup invitations' links.
+mod invitations;
 /// Periodic background work, coordinated across replicas.
 mod jobs;
 /// Signing keys: sealed storage, rotation and the key set every replica reloads.

@@ -12,11 +12,15 @@ instead.
   a password manager, or a security key.
 - An invitation link. SourceOrigin only lets people sign up with an invitation
   for now. To ask for one, write to [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev).
+  The invitation may come by email, from SourceOrigin, or as a link someone
+  sends you.
 
 ## Create an account with a passkey
 
-1. Open the invitation link you received. It opens **Create your account** at
-   `auth.sourceorigin.dev/register`, with the **Invitation** field already filled in.
+1. Open the invitation link you received, or select **Create your account** in
+   the invitation email. It opens **Create your account** at
+   `auth.sourceorigin.dev/register`, with the **Invitation** field already filled
+   in. If the invitation was emailed to you, the page names your address.
 2. Under **Handle**, choose your [handle](profile.md#your-handle): 3 to 32
    lowercase letters, numbers, or single hyphens between them.
 3. Under **Passkey name**, name the passkey after where it is kept, such as
@@ -30,6 +34,10 @@ instead.
 SourceOrigin creates the account, signs you in and opens your settings. Your display
 name starts as your handle; you can change it on the
 [Profile](profile.md) tab.
+
+If the invitation was emailed to you, your account starts with that address,
+already confirmed, as its primary address. You can add others, or remove it, on
+the [Email addresses](email-addresses.md) tab.
 
 An invitation works once. After it creates an account, or once it expires, it
 no longer works.
@@ -76,7 +84,10 @@ can always get back in.
   you started with GitHub or Google, paste only the code after `invitation=`
   instead: opening the link would start a new account without them.
 - **"This invitation has expired or has already been used."** Ask for a new
-  invitation.
+  invitation. The page says so as soon as it opens, too.
+- **Your account doesn't have the address the invitation was emailed to.**
+  Another account confirmed it before you signed up. Use another address, or
+  contact SourceOrigin support.
 - **"This handle is taken. Choose another one."** Another account has it.
   Handles that [look alike](profile.md#handle-rules), or that belonged to
   another account, are refused too, and the page says which.

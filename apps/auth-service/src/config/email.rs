@@ -6,6 +6,7 @@ use super::LinkKeys;
 use super::TokenDigestKeys;
 use crate::{
     emails::VerificationKeys,
+    invitations::InvitationLinks,
     notifications::{SignOutLinks, UnsubscribeLinks},
     recovery::RecoveryLinks,
 };
@@ -43,8 +44,8 @@ const SUBMISSION_PORT: u16 = 587;
 /// The longest one SMTP command may take, like an outbound HTTP request.
 const SMTP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Email to account holders: where it is sent, as whom, and the keys of its
-/// verification and recovery links.
+/// Email to account holders and the people they invite: where it is sent, as
+/// whom, and the keys of the links it carries.
 #[derive(Clone)]
 pub(crate) struct EmailConfig {
     /// The SMTP relay; `None` when `AUTH_SMTP_URL` is unset, which disables email.
@@ -57,6 +58,8 @@ pub(crate) struct EmailConfig {
     pub verification_keys: VerificationKeys,
     /// Derives recovery links from recovery IDs.
     pub recovery_links: RecoveryLinks,
+    /// Derives invitation links from invitation IDs.
+    pub invitation_links: InvitationLinks,
     /// Derives and checks the unsubscribe links of announcements' emails.
     pub unsubscribe_links: UnsubscribeLinks,
     /// Derives and checks the "sign me out everywhere" links of security
@@ -84,6 +87,7 @@ impl EmailConfig {
             origin: origin.clone(),
             verification_keys: digest_keys.verification_keys(),
             recovery_links: digest_keys.recovery_links(origin),
+            invitation_links: digest_keys.invitation_links(origin),
             unsubscribe_links: digest_keys.unsubscribe_links(origin),
             sign_out_links: digest_keys.sign_out_links(origin),
         })
@@ -182,6 +186,7 @@ impl EmailConfig {
             origin: origin.clone(),
             verification_keys: VerificationKeys::new(LinkKeys::generate()),
             recovery_links: RecoveryLinks::new(origin.clone(), LinkKeys::generate()),
+            invitation_links: InvitationLinks::new(origin.clone(), LinkKeys::generate()),
             unsubscribe_links: UnsubscribeLinks::new(origin.clone(), LinkKeys::generate()),
             sign_out_links: SignOutLinks::new(origin.clone(), LinkKeys::generate()),
         }

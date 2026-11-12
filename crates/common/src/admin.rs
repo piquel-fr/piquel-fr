@@ -263,6 +263,9 @@ pub struct Consent {
 pub struct Invitation {
     /// Invitation ID.
     pub id: TokenId,
+    /// The normalized address it was mailed to, which the account created with
+    /// it starts with. `None` for a link administrators passed on themselves.
+    pub email: Option<String>,
     /// When it was created.
     pub created_at: DateTime<Utc>,
     /// When it stops being accepted.
@@ -276,6 +279,10 @@ pub struct Invitation {
 /// The form creating an invitation.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateInvitation {
+    /// The address to mail the link to, which the account created with it starts
+    /// with, verified. Without one, the link is shown once to pass on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     /// How long the link stays valid: 1 hour to 365 days, a number followed by `m`,
     /// `h` or `d`, e.g. `24h`.
     /// Seven days when absent.
@@ -286,15 +293,25 @@ pub struct CreateInvitation {
     pub reason: String,
 }
 
-/// A new invitation. Its link holds the secret and is shown only this once.
+/// A new invitation, and how its link reaches the person it invites.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreatedInvitation {
-    /// Invitation ID, to revoke it.
+    /// Invitation ID, to resend or revoke it.
     pub id: TokenId,
-    /// The single-use signup link.
-    pub url: Url,
+    /// How its link reaches them.
+    pub sent: InvitationSent,
     /// When the link stops working.
     pub expires_at: DateTime<Utc>,
+}
+
+/// How a new invitation's single-use link reaches the person it invites.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvitationSent {
+    /// The link, shown only this once, for administrators to pass on.
+    Link(Url),
+    /// Mailed to this normalized address. Nobody else sees the link.
+    Mailed(String),
 }
 
 /// An OIDC client: everything but its secret.

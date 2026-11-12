@@ -10,8 +10,8 @@
 
 /// Back-channel logout tokens, [`BackchannelLogoutSender`].
 mod backchannel;
-/// Account holders' email and announcements' email, sent over SMTP,
-/// [`EmailSender`] and [`AnnouncementSender`].
+/// Account holders' email, announcements' email and invitations' email, sent
+/// over SMTP, [`EmailSender`], [`AnnouncementSender`] and [`InvitationSender`].
 mod email;
 /// The HTTP client for destinations third parties supply, [`OutboundClient`].
 mod outbound;
@@ -20,7 +20,7 @@ mod outbound;
 mod tests;
 
 pub(crate) use backchannel::BackchannelLogoutSender;
-pub(crate) use email::{AnnouncementSender, EmailSender};
+pub(crate) use email::{AnnouncementSender, EmailSender, InvitationSender};
 pub(crate) use outbound::OutboundClient;
 
 use crate::jobs::{Jobs, Shutdown};

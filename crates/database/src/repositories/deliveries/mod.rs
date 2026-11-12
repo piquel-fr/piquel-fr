@@ -60,7 +60,7 @@ pub(crate) trait Channels {
 }
 
 /// Every channel `record` fans out to. Add a channel here once it is implemented.
-pub(crate) type Registered = (BackchannelLogout, (Email, (Announcement, ())));
+pub(crate) type Registered = (BackchannelLogout, (Email, (Announcement, (Invitation, ()))));
 
 impl Channels for () {
     /// The end of the list.
@@ -521,6 +521,9 @@ pub use backchannel::{BackchannelLogout, LogoutRecipient};
 /// Messages to account holders.
 mod email;
 pub use email::{Email, EmailMessage, PendingAddress, PendingRecovery};
+/// Invitations' emails, to addresses of no account.
+mod invitation;
+pub use invitation::Invitation;
 /// Database tests for fan-out, claims and leases.
 #[cfg(test)]
 mod tests;

@@ -16,7 +16,8 @@ use sourceorigin_common::{
 };
 use sourceorigin_crypto::Secret;
 use sourceorigin_repository::{
-    DraftedAnnouncement, InsertRecovery, InsertUnverifiedEmail, InsertUser, Recipients,
+    DraftedAnnouncement, InsertInvitation, InsertRecovery, InsertUnverifiedEmail, InsertUser,
+    Recipients,
 };
 use std::{
     net::{IpAddr, Ipv6Addr},
@@ -411,6 +412,44 @@ async fn a_recovery_link_is_sent_while_it_works() {
     assert!(used.expect("complete"));
     let content = unkeyed.content(user_id, &link).await.expect("content");
     assert!(content.is_none(), "no link once used");
+}
+
+/// An invitation's link goes to the address it invites, rebuilt from its ID,
+/// only while it is open.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_invitation_is_mailed_while_it_is_open() {
+    let database = Replicas::database().await;
+    let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
+    let sender =
+        EmailSender::with_mailer(database.clone(), Some(Arc::new(Outbox::default())), &config);
+    let id = TokenId::new();
+    let token = config.invitation_links.token(id).expect("token");
+    let address = format!("{id}@example.com");
+    database
+        .security()
+        .create_invitation(&InsertInvitation {
+            id,
+            secret_digest: token.digest().as_bytes(),
+            expires_at: chrono::Utc::now() + chrono::Duration::days(1),
+            email: Some(&address),
+        })
+        .await
+        .expect("invitation");
+    let content = sender.invitation(id).await.expect("content");
+    let Some(Content {
+        address: to,
+        said: EmailContent::Invitation { link, .. },
+    }) = content
+    else {
+        panic!("an open invitation has a recipient");
+    };
+    assert_eq!(to, address);
+    assert_eq!(link, config.invitation_links.url(&token).as_str());
+    let revoked = database.security().revoke_invitation(id).await;
+    assert!(revoked.expect("revoke"));
+    let content = sender.invitation(id).await.expect("content");
+    assert!(content.is_none(), "no link once revoked");
 }
 
 /// The link email and the notification that a recovery enrolled a passkey link
@@ -858,6 +897,10 @@ async fn a_messages_email_is_its_preview() {
 /// plain-text and HTML bodies, a tag a line. A change to what any of them says
 /// shows in its snapshot under `snapshots/`.
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one literal per kind of email, so it grows with `EmailContent`"
+)]
 async fn every_email_reads_as_its_snapshot() {
     let link = |path: &str| format!("https://auth.sourceorigin.dev{path}");
     let origin: Origin = AUTH_ORIGIN.parse().expect("origin");
@@ -894,6 +937,14 @@ async fn every_email_reads_as_its_snapshot() {
                 link: link("/recover#token=TOKEN"),
                 hours: 72,
                 undo: link("/recover/undo#recovery=RECOVERY"),
+            },
+        ),
+        (
+            "invitation",
+            EmailContent::Invitation {
+                address: address(),
+                link: link("/register?invitation=TOKEN"),
+                expires_at: "2026-11-18T09:30:00Z".parse().expect("time"),
             },
         ),
         (

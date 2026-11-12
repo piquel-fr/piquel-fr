@@ -99,8 +99,8 @@ it again with the right one.
 ## Change the token digest key
 
 Auth stores refresh tokens, authorization codes and pending logins as HMAC
-digests under the token digest key, and email verification, recovery and
-unsubscribe links derive from it (see [configuration](configuration.md)). Nothing rotates it.
+digests under the token digest key, and email verification, recovery,
+unsubscribe, sign-out and invitation links derive from it (see [configuration](configuration.md)). Nothing rotates it.
 Change it by hand, rarely, in two deployments, so that during each rolling
 deployment, and after a rollback, every release accepts what the other issues:
 
@@ -113,7 +113,12 @@ deployment, and after a rollback, every release accepts what the other issues:
 4. Remove `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`, and deploy. Removing it sooner ends
    the refresh tokens still under it. Announcements' unsubscribe links made under
    the old key stop working then, whenever it is removed: their owners turn the
-   email off in their settings instead.
+   email off in their settings instead. `digest-usage` doesn't count
+   invitations: also wait until every invitation created before step 2 has
+   expired or been revoked. A mailed link already delivered keeps working, but
+   one still queued, or sent again with **Resend**, is rebuilt under the old
+   key, and fails without it. Revoke such an invitation and invite again
+   instead.
 
 In the manifest, each key is a generated secret mounted as a file, as
 `token-digest-key` is (see [secrets](secrets.md#generated-secrets)).

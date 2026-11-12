@@ -119,7 +119,7 @@ enum Administration {
     /// End an account's sessions.
     #[command(subcommand)]
     Session(SessionCommand),
-    /// Create, list and revoke signup invitations.
+    /// Create, list, resend and revoke signup invitations.
     #[command(subcommand)]
     Invite(InviteCommand),
     /// Register, inspect and change OIDC clients. Changes apply to the next request.
@@ -236,6 +236,7 @@ impl Administration {
             Self::Invite(command) => match command {
                 InviteCommand::Create { .. } => Op::CreateInvitation,
                 InviteCommand::List => Op::ListInvitations,
+                InviteCommand::Resend { .. } => Op::ResendInvitation,
                 InviteCommand::Revoke { .. } => Op::RevokeInvitation,
             },
             Self::Client(command) => match **command {

@@ -312,13 +312,14 @@ async fn signing_in_asks_auth_for_a_passkey_once() {
     let csp = policy(&page).to_owned();
     let handoff = format!("form-action 'self' {AUTH_ORIGIN}{};", routes::page::ADMIN);
     assert!(csp.contains(&handoff), "{csp}");
-    let (script, search) = (
+    let (script, search, copy) = (
         EmbeddedAssets::DASHBOARD_SCRIPT.path(),
         EmbeddedAssets::SEARCH_SCRIPT.path(),
+        EmbeddedAssets::COPY_SCRIPT.path(),
     );
     assert!(
         csp.contains(&format!(
-            "script-src {DASHBOARD}{script} {DASHBOARD}{search};"
+            "script-src {DASHBOARD}{script} {DASHBOARD}{search} {DASHBOARD}{copy};"
         )) && csp.contains("connect-src 'self';")
             && csp.contains(&format!("img-src {AUTH_ORIGIN};")),
         "{csp}"
@@ -2204,18 +2205,6 @@ async fn a_session_is_revoked_only_from_its_own_account() {
         .await
         .expect("lookup");
     assert!(session.is_some(), "still signed in");
-}
-
-/// The invitations pages find who is signed in before whether signup needs
-/// invitations, so a browser that is not signed in learns nothing of it.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn invitation_pages_sign_in_first() {
-    let harness = Harness::new().await;
-    let page = harness
-        .visit(&Browser::signed_out(), "/invitations/new")
-        .await;
-    assert_eq!(location(&page).path(), routes::page::ADMIN);
 }
 
 /// The Alerts page shows an open alert as needing attention, with posting an

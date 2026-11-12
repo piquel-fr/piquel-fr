@@ -5,17 +5,17 @@ use super::AdminService;
 use crate::{
     account::AccountService,
     admin::{AdminError, DashboardSignIn, InviteExpiry, Operator, Reason},
-    routes,
+    emails::EmailApplication,
+    invitations::InvitationLinks,
 };
 use chrono::Utc;
 use sourceorigin_common::{
-    AccountStatus, TokenId, UserId,
-    admin::{Administrator, CreatedInvitation, Invitation},
-    config::Origin,
+    AccountStatus, Personal, TokenId, UserId,
+    admin::{Administrator, CreatedInvitation, Invitation, InvitationSent},
+    email::NormalizedEmail,
     events::DomainEvent,
 };
-use sourceorigin_crypto::Secret;
-use sourceorigin_ui::{LoginQuery, Query};
+use sourceorigin_repository::{DatabaseTransaction, InsertInvitation, InvitationKey};
 
 impl AdminService {
     /// Lists invitations that have not been purged yet, newest first.
@@ -27,39 +27,111 @@ impl AdminService {
         Ok(self.database.security().list_invitations().await?)
     }
 
-    /// Creates a single-use signup link to the registration page on `origin`, auth's
-    /// own, for `reason`. Only the secret's digest is stored, so the link cannot be
-    /// shown again.
+    /// Creates a single-use signup invitation, valid for `expires_in`, for
+    /// `reason`, whatever the signup setting: while signup is open, it is a
+    /// tracked signup link. With an `email`, its link is mailed there, and the
+    /// account created with it starts with that address, verified; it is refused
+    /// before anything is created while email is disabled, when the sender can't
+    /// send to the address, or when an active account already holds it verified.
+    /// Without one, its link is returned for the operator to pass on: only its
+    /// token's digest is stored, so it is never shown again.
     ///
     /// # Errors
-    /// Fails when the operator may not make changes, or secret generation or
-    /// persistence fails.
-    pub async fn create_invitation(
+    /// Fails when the operator may not make changes, the invitation cannot be
+    /// mailed, or token derivation or persistence fails.
+    pub(crate) async fn create_invitation(
         &self,
         operator: &Operator,
-        origin: &Origin,
+        links: &InvitationLinks,
         expires_in: InviteExpiry,
+        email: Option<NormalizedEmail>,
         reason: Reason,
     ) -> Result<CreatedInvitation, AdminError> {
-        let secret = Secret::generate()?;
+        if let Some(email) = &email {
+            if !self.mails {
+                return Err(AdminError::InvitationNeedsEmail);
+            }
+            EmailApplication::sendable(email).map_err(AdminError::InvitationUnsendable)?;
+        }
         let id = TokenId::new();
+        let token = links.token(id)?;
         let expires_at = Utc::now() + expires_in.duration();
         let mut tx = self.database.begin().await?;
-        tx.security()
-            .create_invitation(id, secret.digest().as_bytes(), expires_at)
-            .await?;
-        let created = DomainEvent::InvitationCreated { expires_at };
-        Self::finish(tx, operator, &reason, None, vec![created]).await?;
-        let url = LoginQuery {
-            invitation: Some(secret.encoded()),
-            ..LoginQuery::default()
+        if let Some(email) = &email {
+            Self::untaken(&mut tx, email).await?;
         }
-        .url(origin.as_url(), routes::page::REGISTER)?;
+        tx.security()
+            .create_invitation(&InsertInvitation {
+                id,
+                secret_digest: token.digest().as_bytes(),
+                expires_at,
+                email: email.as_ref().map(NormalizedEmail::as_str),
+            })
+            .await?;
+        let mut events = vec![DomainEvent::InvitationCreated {
+            invitation_id: Some(id),
+            expires_at,
+        }];
+        let sent = match email {
+            Some(email) => {
+                events.push(Self::mailed(id, email.clone()));
+                InvitationSent::Mailed(email.into())
+            }
+            None => InvitationSent::Link(links.url(&token)),
+        };
+        Self::finish(tx, operator, &reason, None, events).await?;
         Ok(CreatedInvitation {
             id,
-            url,
+            sent,
             expires_at,
         })
+    }
+
+    /// Mails an open invitation's link again, to the address it was mailed to,
+    /// for `reason`, unless an active account holds that address verified since.
+    /// The link and its expiry stay the same: to give more time, revoke it and
+    /// invite again.
+    pub(crate) async fn resend_invitation(
+        &self,
+        operator: &Operator,
+        invitation_id: TokenId,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        if !self.mails {
+            return Err(AdminError::InvitationNeedsEmail);
+        }
+        let mut tx = self.database.begin().await?;
+        let invitation = tx
+            .security()
+            .open_invitation(InvitationKey::Id(invitation_id))
+            .await?
+            .ok_or(AdminError::InvitationNotFound)?;
+        let email = invitation.email.ok_or(AdminError::InvitationNotMailed)?;
+        let email = NormalizedEmail::parse(&email)?;
+        Self::untaken(&mut tx, &email).await?;
+        let mailed = Self::mailed(invitation_id, email);
+        Self::finish(tx, operator, &reason, None, vec![mailed]).await
+    }
+
+    /// Refuses to mail an invitation to `email` while an active account holds it
+    /// verified: its owner signs in rather than signing up.
+    async fn untaken(
+        tx: &mut DatabaseTransaction<'_>,
+        email: &NormalizedEmail,
+    ) -> Result<(), AdminError> {
+        match tx.emails().find_active_verified(email.as_str()).await? {
+            Some(_) => Err(AdminError::InvitationAddressTaken),
+            None => Ok(()),
+        }
+    }
+
+    /// The event mailing invitation `invitation_id` to `email`, which queues its
+    /// email.
+    fn mailed(invitation_id: TokenId, email: NormalizedEmail) -> DomainEvent {
+        DomainEvent::InvitationMailed {
+            invitation_id,
+            recipient: Personal::Value(email),
+        }
     }
 
     /// Revokes an unredeemed invitation, for `reason`.

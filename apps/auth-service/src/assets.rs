@@ -41,15 +41,27 @@ impl EmbeddedAssets {
     /// load it.
     pub(crate) const SEARCH_SCRIPT: Asset =
         Asset::script("search", include_bytes!("../assets/search.js"));
+    /// The copy script, whose buttons, and the values beside them, copy a value
+    /// to the clipboard; auth's pages and the dashboard's both load it.
+    pub(crate) const COPY_SCRIPT: Asset =
+        Asset::script("copy", include_bytes!("../assets/copy.js"));
     /// The scripts every page of auth's own loads.
-    pub(crate) const SCRIPTS: [Asset; 3] =
-        [Self::SCRIPT, Self::PICTURE_SCRIPT, Self::SEARCH_SCRIPT];
+    pub(crate) const SCRIPTS: [Asset; 4] = [
+        Self::SCRIPT,
+        Self::PICTURE_SCRIPT,
+        Self::SEARCH_SCRIPT,
+        Self::COPY_SCRIPT,
+    ];
     /// The admin dashboard's script, which confirms it with a passkey in a
     /// dialog on its page. Auth's own pages never load it.
     pub(crate) const DASHBOARD_SCRIPT: Asset =
         Asset::script("dashboard", include_bytes!("../assets/dashboard.js"));
     /// The scripts every dashboard page loads.
-    pub(crate) const DASHBOARD_SCRIPTS: [Asset; 2] = [Self::DASHBOARD_SCRIPT, Self::SEARCH_SCRIPT];
+    pub(crate) const DASHBOARD_SCRIPTS: [Asset; 3] = [
+        Self::DASHBOARD_SCRIPT,
+        Self::SEARCH_SCRIPT,
+        Self::COPY_SCRIPT,
+    ];
     /// The files the admin dashboard serves too: the stylesheet and the
     /// typefaces it links.
     pub(crate) const SHARED: [Asset; 4] = [
@@ -96,6 +108,10 @@ mod tests {
             ),
             (
                 EmbeddedAssets::SEARCH_SCRIPT,
+                "text/javascript; charset=utf-8",
+            ),
+            (
+                EmbeddedAssets::COPY_SCRIPT,
                 "text/javascript; charset=utf-8",
             ),
             (sourceorigin_ui::FONTS[0], "font/woff2"),

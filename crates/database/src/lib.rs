@@ -39,8 +39,8 @@ pub use repositories::{
     deletions::{AccountDeletion, RestoreToken},
     deliveries::{
         Announcement, AnnouncementEmail, BackchannelLogout, Channel, Delivery, DeliveryBacklog,
-        DeliveryOutcome, DeliveryStatus, DeliverySummary, Email, EmailMessage, LogoutRecipient,
-        NewDelivery, PendingAddress, PendingRecovery,
+        DeliveryOutcome, DeliveryStatus, DeliverySummary, Email, EmailMessage, Invitation,
+        LogoutRecipient, NewDelivery, PendingAddress, PendingRecovery,
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent, Verifications},
@@ -60,6 +60,7 @@ pub use repositories::{
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
     pictures::StoredPicture,
     recoveries::{InsertRecovery, RecentRecovery, RecoveryPasskey, RecoveryState, StoredRecovery},
+    security::{InsertInvitation, InvitationKey, OpenInvitation},
     sessions::{
         InsertSession, LAST_SEEN_INTERVAL, SessionAuthentication, SessionScope, StoredSession,
     },

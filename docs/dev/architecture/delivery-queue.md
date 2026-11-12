@@ -4,8 +4,8 @@ This page explains how auth sends messages to other systems without slowing a
 request: the queue's guarantees, the life of a delivery, its channels, and how
 to add one.
 
-Auth sends messages to other systems through a PostgreSQL queue. Three channels
-exist: back-channel logout tokens, email and announcements (see
+Auth sends messages to other systems through a PostgreSQL queue. Four channels
+exist: back-channel logout tokens, email, announcements and invitations (see
 [Channels](#channels)). Other
 kinds, such as audit witness checkpoints, would join them as channels of their
 own. Request handlers never send them inline. A slow or unreachable
@@ -174,6 +174,19 @@ same message. `MAX_AGE` is three days, as an announcement stays worth reading
 through a long relay outage or a slow send to every account. A purge deletes the
 account's announcement deliveries, which would find no recipient left.
 
+## Invitations
+
+The `invitation` channel (`deliveries/invitation.rs` in the database crate,
+`InvitationSender` beside `EmailSender` in auth-service) mails an invitation's
+link to the address it invites, which belongs to no account yet, so it cannot
+be the `email` channel's recipient. Creating a mailed invitation, or sending it
+again, records `InvitationMailed`, whose fan-out creates one delivery.
+It stores only the invitation's ID, as its recipient and in its `destination`.
+The sender reads the address and the token's digest when it sends, and derives
+the link's token again from the ID, as a recovery link's is, so the token is
+stored nowhere. An invitation redeemed, revoked or expired meanwhile is skipped:
+the delivery succeeds without a send. `MAX_AGE` is three days.
+
 ## Operations
 
 ```sh
@@ -221,5 +234,7 @@ gauges until the next one succeeds.
 - **`email`**: messages to account holders, sent over SMTP; see [Email](#email).
 - **`announcement`**: announcements' emails to their recipients, sent over SMTP;
   see [Announcements](#announcements).
+- **`invitation`**: invitations' links, mailed to the addresses they invite, sent
+  over SMTP; see [Invitations](#invitations).
 
 To add a channel, see [adding a delivery channel](../extending/delivery-channel.md).

@@ -7,7 +7,8 @@ use sourceorigin_common::{
     },
 };
 use sourceorigin_repository::{
-    Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser, SessionScope,
+    Database, DatabaseConfig, DatabaseError, InsertInvitation, InsertSession, InsertUser,
+    InvitationKey, SessionScope,
 };
 use std::net::IpAddr;
 /// Invitations are single-use, and passkey confirmations belong to one session and end with it.
@@ -28,7 +29,12 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
     let user = UserId::new();
     let digest = user.as_uuid().as_bytes().repeat(2);
     db.security()
-        .create_invitation(TokenId::new(), &digest, Utc::now() + Duration::minutes(1))
+        .create_invitation(&InsertInvitation {
+            id: TokenId::new(),
+            secret_digest: &digest,
+            expires_at: Utc::now() + Duration::minutes(1),
+            email: None,
+        })
         .await
         .expect("invite");
     let mut tx = db.begin().await.expect("transaction");
@@ -37,19 +43,22 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
             .redeem_invitation(&digest)
             .await
             .expect("redeem")
+            .is_some()
     );
     tx.rollback().await.expect("rollback");
     assert!(
         db.security()
-            .invitation_active(&digest)
+            .open_invitation(InvitationKey::Digest(&digest))
             .await
             .expect("rollback preserves invitation")
+            .is_some()
     );
     let redeem = || async {
         db.security()
             .redeem_invitation(&digest)
             .await
             .expect("redemption")
+            .is_some()
     };
     let (a, b) = tokio::join!(redeem(), redeem());
     assert_ne!(a, b, "exactly one concurrent redemption succeeds");

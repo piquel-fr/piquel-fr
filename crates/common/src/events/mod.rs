@@ -195,10 +195,28 @@ pub enum DomainEvent {
         /// Why it failed.
         reason: CodeRedemptionFailure,
     },
-    /// A signup invitation was created.
+    /// A signup invitation was created. A mailed one is then
+    /// [`Self::InvitationMailed`].
     InvitationCreated {
+        /// The new invitation. Events recorded before invitations could be
+        /// mailed have none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invitation_id: Option<TokenId>,
         /// When the invitation stops being accepted.
         expires_at: DateTime<Utc>,
+    },
+    /// An open invitation's link was mailed to the address it invites, when it
+    /// was created or sent again. Its email is queued with it.
+    InvitationMailed {
+        /// The mailed invitation.
+        invitation_id: TokenId,
+        /// The address it went to.
+        recipient: Personal<NormalizedEmail>,
+    },
+    /// An invitation was redeemed by creating the account the event concerns.
+    InvitationRedeemed {
+        /// The redeemed invitation.
+        invitation_id: TokenId,
     },
     /// An unredeemed signup invitation was revoked.
     InvitationRevoked {
@@ -568,6 +586,8 @@ impl DomainEvent {
             | Self::PrimaryEmailChanged { .. }
             | Self::EmailRemoved { .. }
             | Self::InvitationCreated { .. }
+            | Self::InvitationMailed { .. }
+            | Self::InvitationRedeemed { .. }
             | Self::InvitationRevoked { .. }
             | Self::AccountDisabled { .. }
             | Self::AccountEnabled {}
@@ -634,6 +654,8 @@ impl DomainEvent {
             | Self::CodeReplayed { .. }
             | Self::CodeRedemptionFailed { .. }
             | Self::InvitationCreated { .. }
+            | Self::InvitationMailed { .. }
+            | Self::InvitationRedeemed { .. }
             | Self::InvitationRevoked { .. }
             | Self::AccountDisabled { .. }
             | Self::AccountEnabled {}
@@ -706,6 +728,8 @@ impl DomainEvent {
             Self::CodeReplayed { .. } => "code_replayed",
             Self::CodeRedemptionFailed { .. } => "code_redemption_failed",
             Self::InvitationCreated { .. } => "invitation_created",
+            Self::InvitationMailed { .. } => "invitation_mailed",
+            Self::InvitationRedeemed { .. } => "invitation_redeemed",
             Self::InvitationRevoked { .. } => "invitation_revoked",
             Self::AccountDisabled { .. } => "account_disabled",
             Self::AccountEnabled {} => "account_enabled",

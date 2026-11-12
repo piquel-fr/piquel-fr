@@ -5,6 +5,7 @@
 use crate::{
     AuditKeys,
     emails::VerificationKeys,
+    invitations::InvitationLinks,
     notifications::{SignOutLinks, UnsubscribeLinks},
     recovery::RecoveryLinks,
 };
@@ -29,6 +30,9 @@ const UNSUBSCRIBE_LINK_CONTEXT: &[u8] = b"sourceorigin-email-unsubscribe-link-v1
 /// Separates the sign-out link key from every other use of a token digest key,
 /// as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
 const SIGN_OUT_LINK_CONTEXT: &[u8] = b"sourceorigin-email-sign-out-link-v1";
+/// Separates the invitation link key from every other use of a token digest key,
+/// as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
+const INVITATION_LINK_CONTEXT: &[u8] = b"sourceorigin-signup-invitation-link-v1";
 /// Fewest bytes a token digest key may have.
 const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
 /// Bytes of a token digest key's digest kept as its fingerprint.
@@ -46,8 +50,8 @@ sourceorigin_common::variables! {
     pub(super) const KEY_ENCRYPTION_KEY = "AUTH_KEY_ENCRYPTION_KEY";
     /// Where to read the key under which refresh tokens, authorization codes and
     /// pending logins are stored as HMAC digests. Its raw bytes are the key, at
-    /// least 32 of them. Email verification, recovery and unsubscribe links derive
-    /// from it too.
+    /// least 32 of them. Email verification, recovery, unsubscribe, sign-out and
+    /// invitation links derive from it too.
     /// Required. Replacing it at once ends every refresh token and every login in
     /// progress, so change it in two deploys.
     const TOKEN_DIGEST_KEY = "AUTH_TOKEN_DIGEST_KEY";
@@ -76,11 +80,13 @@ pub(crate) struct TokenDigestKey {
     unsubscribe: Secret,
     /// The sign-out link key, derived and checked like [`Self::unsubscribe`].
     sign_out: Secret,
+    /// The invitation link key, derived and used like [`Self::verification`].
+    invitation: Secret,
 }
 
 impl TokenDigestKey {
-    /// Derives the HMAC, verification, recovery, unsubscribe and sign-out link
-    /// keys from configured bytes.
+    /// Derives the HMAC, verification, recovery, unsubscribe, sign-out and
+    /// invitation link keys from configured bytes.
     pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
         let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
         let fingerprint = URL_SAFE_NO_PAD
@@ -92,6 +98,7 @@ impl TokenDigestKey {
             recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT)?,
             unsubscribe: Secret::derive(bytes, UNSUBSCRIBE_LINK_CONTEXT)?,
             sign_out: Secret::derive(bytes, SIGN_OUT_LINK_CONTEXT)?,
+            invitation: Secret::derive(bytes, INVITATION_LINK_CONTEXT)?,
         })
     }
 
@@ -117,6 +124,12 @@ impl TokenDigestKeys {
     /// rebuilt under the accepted one's for recoveries started before a change.
     pub(crate) fn recovery_links(&self, origin: &Origin) -> RecoveryLinks {
         RecoveryLinks::new(origin.clone(), self.link_keys(|key| &key.recovery))
+    }
+
+    /// Invitation links on `origin`, under the current key's invitation key, and
+    /// rebuilt under the accepted one's for invitations created before a change.
+    pub(crate) fn invitation_links(&self, origin: &Origin) -> InvitationLinks {
+        InvitationLinks::new(origin.clone(), self.link_keys(|key| &key.invitation))
     }
 
     /// Unsubscribe links on `origin`, under the current key's unsubscribe key,

@@ -30,7 +30,7 @@ Commands:
 - [`auth-service keys`](#auth-service-keys): Inspect, rotate and revoke signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
 - [`auth-service user`](#auth-service-user): Search, show, disable, reactivate and recover accounts.
 - [`auth-service session`](#auth-service-session): End an account's sessions.
-- [`auth-service invite`](#auth-service-invite): Create, list and revoke signup invitations.
+- [`auth-service invite`](#auth-service-invite): Create, list, resend and revoke signup invitations.
 - [`auth-service client`](#auth-service-client): Register, inspect and change OIDC clients. Changes apply to the next request.
 - [`auth-service audit`](#auth-service-audit): Page through, verify and prune the audit history.
 - [`auth-service admin`](#auth-service-admin): Grant, revoke or list administrators.
@@ -397,7 +397,7 @@ Options:
 
 ## `auth-service invite`
 
-Create, list and revoke signup invitations.
+Create, list, resend and revoke signup invitations.
 
 ```text
 auth-service invite [OPTIONS] <COMMAND>
@@ -410,13 +410,14 @@ Options:
 
 Commands:
 
-- [`auth-service invite create`](#auth-service-invite-create): Print a single-use signup link. Only its digest is stored, so it is shown only this once.
+- [`auth-service invite create`](#auth-service-invite-create): Create a single-use signup link. With --email, Origin Auth mails it there and prints the invitation's ID. Without, it prints the link, only this once: only its digest is stored.
 - [`auth-service invite list`](#auth-service-invite-list): List invitations, newest first, without their links.
+- [`auth-service invite resend`](#auth-service-invite-resend): Mail an open invitation's link again, to the address it was mailed to. Its expiry stays the same.
 - [`auth-service invite revoke`](#auth-service-invite-revoke): Revoke an unredeemed invitation.
 
 ## `auth-service invite create`
 
-Print a single-use signup link. Only its digest is stored, so it is shown only this once.
+Create a single-use signup link. With --email, Origin Auth mails it there and prints the invitation's ID. Without, it prints the link, only this once: only its digest is stored.
 
 ```text
 auth-service invite create [OPTIONS] --reason <REASON>
@@ -424,6 +425,7 @@ auth-service invite create [OPTIONS] --reason <REASON>
 
 Options:
 
+- `--email <EMAIL>`: Mail the link to this address, which the account created with it starts with, verified. Needs email enabled (`AUTH_SMTP_URL`).
 - `--expires-in <EXPIRES_IN>`: How long the link stays valid, e.g. 24h or 7d. Default: `7d`.
 - `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
@@ -439,6 +441,24 @@ auth-service invite list [OPTIONS]
 
 Options:
 
+- `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
+- `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
+
+## `auth-service invite resend`
+
+Mail an open invitation's link again, to the address it was mailed to. Its expiry stays the same.
+
+```text
+auth-service invite resend [OPTIONS] --reason <REASON> <ID>
+```
+
+Arguments:
+
+- `<ID>`: The invitation's ID, as `invite list` shows it.
+
+Options:
+
+- `--reason <REASON>`: Why, recorded with the change: 1 to 500 characters. Required.
 - `--operator <NAME>`: Who runs the command, as its events record them, such as your handle. Defaults to `AUTH_OPERATOR`, then `$USER`; administrative commands need one.
 - `--json`: Print the result as JSON for scripts, and every message, prompt and failure as one JSON object per line on standard error, among the service's log lines: read only the lines that start with `{`. A result has the shape of the view the admin dashboard shows, where it has one.
 

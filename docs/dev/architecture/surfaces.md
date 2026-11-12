@@ -31,7 +31,9 @@ serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
 never cached. Their scripts are the passkey script, which runs the passkey
 ceremonies their forms need and keeps a form from posting twice, the picture
-script, which lets the picture form choose its crop, and the search script.
+script, which lets the picture form choose its crop, the search script, and
+the copy script, whose buttons, and the values beside them, copy a value such as
+a client secret or a signup link to the clipboard.
 
 The search script ranks the top bar's results as the user types. Every signed-in
 page holds its area's pages, settings and actions as results
@@ -88,8 +90,8 @@ The admin listener has a security layer of its own. It answers only requests tha
 name the dashboard's host, takes a form only from the dashboard's own pages (the
 same-origin rule auth's pages follow), spends a request budget of its own, and
 limits bodies to 512 KiB, which an announcement's text and accounts need. Every
-page loads only the stylesheet, the dashboard's own script and the search
-script, which its Content-Security-Policy names alone, and its forms post only
+page loads only the stylesheet, the dashboard's own script, the search script
+and the copy script, which its Content-Security-Policy names alone, and its forms post only
 to the dashboard, whose answer may go on to auth's handoff page.
 
 The dashboard is no OIDC client. An administrator signs in by a handoff from auth:
@@ -189,6 +191,20 @@ confirmation that ran out while it was written, as long as the dashboard's
 script asks for one before sending. Unlike the dashboard's changes, a message
 also goes to an administrator's account, since it changes nothing about it (see
 [message an account](../operations/administration.md#message-an-account)).
+
+Administrators also invite people, whether or not signup needs an invitation:
+with signup open, an invitation is a tracked signup link. An invitation mailed to
+an address binds the account created with it to that address, which starts
+verified and primary, since opening the mailed link proves what a verification
+email would. `AdminService::create_invitation` holds the rule for both surfaces:
+it refuses a mailed invitation before anything changes while email is disabled,
+or when an active account holds the address verified. Its link's token is
+derived from its ID, so the email sender, and **Resend**, rebuild the link and
+nobody sees it; one without an address is shown once instead (see
+[invite someone](../operations/administration.md#invite-someone) and
+[the delivery queue](delivery-queue.md#invitations)). Signup checks and redeems
+any invitation it is given, whatever the setting, and records
+`invitation_redeemed` with the new account.
 
 Administrators also follow alerts: conditions auth's background jobs find that
 need their attention, such as a broken audit chain. The dashboard's **Alerts**

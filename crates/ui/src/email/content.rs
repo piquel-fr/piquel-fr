@@ -1,6 +1,7 @@
 //! What each kind of email says.
 
 use super::{Block, Inline, Mail};
+use chrono::{DateTime, Utc};
 use sourceorigin_common::{
     Handle,
     notifications::{NotificationAction, SIGN_OUT_LINK_LIFETIME},
@@ -34,6 +35,16 @@ pub enum EmailContent {
         /// The recovery's undo page, where a passkey the owner still has cancels
         /// it.
         undo: String,
+    },
+    /// An invitation administrators mailed to someone without an account.
+    Invitation {
+        /// The address it invites, which the account created with it starts
+        /// with, verified.
+        address: String,
+        /// The registration page, with the invitation's token.
+        link: String,
+        /// When the link stops working.
+        expires_at: DateTime<Utc>,
     },
     /// A notification of the account's.
     Notification {
@@ -89,6 +100,7 @@ impl EmailContent {
         match self {
             Self::VerifyAddress { .. } => "Confirm your email address for your Origin Account",
             Self::RecoveryLink { .. } => "Recover your Origin Account",
+            Self::Invitation { .. } => "You’re invited to SourceOrigin",
             Self::Notification { subject, .. }
             | Self::Message { subject, .. }
             | Self::Announcement { subject, .. } => subject,
@@ -151,6 +163,30 @@ impl EmailContent {
                         href: undo.clone(),
                     },
                     ".",
+                ]),
+            ],
+            Self::Invitation {
+                address,
+                link,
+                expires_at,
+            } => vec![
+                Block::Paragraph(inlines![
+                    "SourceOrigin invited you to create an Origin Account, the account you sign in to SourceOrigin and its apps with. Open the link below to choose a handle and add a passkey.",
+                ]),
+                Block::Action {
+                    label: "Create your account",
+                    href: link.clone(),
+                },
+                Block::Paragraph(inlines![
+                    "Your account starts with this address, ",
+                    Inline::Strong(address.clone().into()),
+                    format!(
+                        ", already confirmed. The link works once, until {} UTC.",
+                        expires_at.format("%-d %B %Y, %H:%M")
+                    ),
+                ]),
+                Block::Fine(inlines![
+                    "If you weren’t expecting this invitation, ignore this email: no account is created unless someone opens the link.",
                 ]),
             ],
             Self::Notification {

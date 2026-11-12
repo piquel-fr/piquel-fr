@@ -45,13 +45,14 @@ use sourceorigin_repository::{Database, DatabaseTransaction};
 pub struct AdminService {
     /// Accounts, sessions, invitations, clients, events, deliveries and administrators.
     pub(super) database: Database,
-    /// Whether email is enabled, so a recovery link can be mailed.
+    /// Whether email is enabled, so a recovery link or an invitation can be
+    /// mailed.
     mails: bool,
 }
 
 impl AdminService {
-    /// Operates on `database`, mailing recovery links if `mails`, as email is
-    /// enabled.
+    /// Operates on `database`, mailing recovery links and invitations if
+    /// `mails`, as email is enabled.
     #[must_use]
     pub const fn new(database: Database, mails: bool) -> Self {
         Self { database, mails }

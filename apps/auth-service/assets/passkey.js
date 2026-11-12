@@ -1,8 +1,8 @@
 /**
- * The passkey script: the one script of auth's server-rendered pages. It runs the
- * WebAuthn passkey ceremonies their forms ask for, and wires their forms by their
- * attributes. It exports nothing, and nothing compiles it: auth embeds this file as
- * it is, under a path naming its content, and `tsc` only checks its JSDoc types.
+ * The passkey script of auth's server-rendered pages. It runs the WebAuthn passkey
+ * ceremonies their forms ask for, and wires their forms by their attributes. It
+ * exports nothing, and nothing compiles it: auth embeds this file as it is, under
+ * a path naming its content, and `tsc` only checks its JSDoc types.
  */
 
 /** @typedef {'standard' | 'google_password_manager'} PasskeyKind */
@@ -366,9 +366,6 @@ class Passkeys {
  *   `data-fragment` inputs as it posts, then drops the fragment from the address. It
  *   shows, with its button enabled, while the link has every value; otherwise the
  *   page's `data-fragment-missing` notice shows instead.
- * - a `data-copy` button copies the text of the element its value names, and says
- *   whether it did, for a moment, in the `role="status"` element just before it. It
- *   starts hidden, and shows once the browser can write to the clipboard.
  * - an element marked `data-passkey-user`, the signed-in account's ID, tells the
  *   password manager the account's current `data-passkey-name` and
  *   `data-passkey-display-name`, so its passkeys show them after a change, and
@@ -567,36 +564,6 @@ function wire(document) {
   showFragmentForms();
   // Following a link that differs only in its fragment does not reload the page.
   window.addEventListener('hashchange', showFragmentForms);
-  if ('clipboard' in navigator)
-    for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (
-      document.querySelectorAll('button[data-copy]')
-    )) {
-      const status = button.previousElementSibling;
-      /** @type {ReturnType<typeof setTimeout> | undefined} */
-      let cleared;
-      /**
-       * Says `message` in the button's status for a moment.
-       * @param {string} message
-       */
-      const say = (message) => {
-        if (!status) return;
-        status.textContent = message;
-        clearTimeout(cleared);
-        cleared = setTimeout(() => (status.textContent = ''), 2000);
-      };
-      button.hidden = false;
-      button.addEventListener('click', () => {
-        const text = document.getElementById(button.dataset.copy ?? '')?.textContent ?? '';
-        navigator.clipboard.writeText(text).then(
-          () => {
-            say('Copied');
-          },
-          () => {
-            say('Could not copy: select the text instead');
-          }
-        );
-      });
-    }
   /**
    * What `use` reads or writes in this browser's local storage, or `undefined` where
    * the browser keeps none or refuses, as when storage is blocked or full.

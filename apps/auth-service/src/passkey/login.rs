@@ -10,6 +10,7 @@ use super::{
     types::{AuthenticationFinish, DisplayName, LoginStart, RegistrationFinish, RegistrationStart},
 };
 use crate::deletion::Deletions;
+use crate::emails::{EmailApplication, EmailError};
 use crate::federation::FederationApplication;
 use crate::handles::{Handles, HandlesError};
 use crate::security::{ApiError, BrowserCookie, Credential, RequestContext};
@@ -21,10 +22,10 @@ use axum::{
 };
 use sourceorigin_common::{
     AuthenticationMethod, ErrorChain, Handle, UserId,
-    events::{Actor, DomainEvent},
+    email::NormalizedEmail,
+    events::{Actor, DomainEvent, EventContext},
 };
-use sourceorigin_crypto::Secret;
-use sourceorigin_repository::{DatabaseError, InsertUser};
+use sourceorigin_repository::{DatabaseError, DatabaseTransaction, InsertUser, OpenInvitation};
 use tracing::Instrument;
 use webauthn_rs::{Webauthn, prelude::*};
 
@@ -44,19 +45,22 @@ impl PasskeyApplication {
         } else {
             input.display_name
         })?;
-        let invitation = input
+        // An invitation given is checked whatever the setting, so the account it
+        // creates is the invitation's, and its address, if it was mailed one.
+        let invitation = match input
             .invitation
             .as_deref()
-            .and_then(|value| Secret::parse(value).ok())
-            .map(|secret| secret.digest().as_bytes().to_vec());
-        if app.invite_required {
-            let digest = invitation
-                .as_ref()
-                .ok_or(PasskeyError::InvitationRequired)?;
-            if !app.database.security().invitation_active(digest).await? {
-                return Err(PasskeyError::InvitationExpired.into());
-            }
-        }
+            .filter(|value| !value.is_empty())
+        {
+            Some(presented) => Some(
+                app.invitation(presented)
+                    .await?
+                    .ok_or(PasskeyError::InvitationExpired)?
+                    .secret_digest,
+            ),
+            None if app.invite_required => return Err(PasskeyError::InvitationRequired.into()),
+            None => None,
+        };
         let pending = match input.pending_signup {
             Some(id) => {
                 Some(FederationApplication::pending_signup(&app.database, &headers, id).await?)
@@ -116,18 +120,7 @@ impl PasskeyApplication {
             .finish_passkey_registration(&input.credential, &state)
             .map_err(PasskeyError::from)?;
         let mut tx = app.database.begin().await?;
-        if app.invite_required
-            && !tx
-                .security()
-                .redeem_invitation(
-                    invitation
-                        .as_deref()
-                        .ok_or(PasskeyError::InvitationMissingAtFinish)?,
-                )
-                .await?
-        {
-            return Err(PasskeyError::InvitationExpired.into());
-        }
+        let redeemed = app.redeem(&mut tx, invitation.as_deref()).await?;
         let inserted = tx
             .users()
             .insert(&InsertUser {
@@ -157,10 +150,15 @@ impl PasskeyApplication {
                 } else {
                     AuthenticationMethod::Passkey
                 },
-                invited: app.invite_required,
+                invited: redeemed.is_some(),
             },
         )
         .await?;
+        if let Some(redeemed) = redeemed {
+            // Before a social signup's address, which is then skipped: a provider
+            // never replaces an address the account holds verified.
+            Self::invited(&mut tx, &actor, user_id, redeemed).await?;
+        }
         let passkey = Self::insert_passkey(&mut tx, &actor, user_id, key, friendly_name).await?;
         let picture = match pending {
             Some(pending) => {
@@ -204,6 +202,43 @@ impl PasskeyApplication {
                 .map_err(PasskeyError::CookieHeader)?;
         }
         Ok(response)
+    }
+
+    /// Redeems the invitation whose token's digest a signup presented, in its
+    /// transaction `tx`, or none without one while signup is open.
+    async fn redeem(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        digest: Option<&[u8]>,
+    ) -> Result<Option<OpenInvitation>, ApiError> {
+        match digest {
+            Some(digest) => Ok(Some(
+                tx.security()
+                    .redeem_invitation(digest)
+                    .await?
+                    .ok_or(PasskeyError::InvitationExpired)?,
+            )),
+            None if self.invite_required => Err(PasskeyError::InvitationMissingAtFinish.into()),
+            None => Ok(None),
+        }
+    }
+
+    /// Records that the new account `user_id` redeemed `redeemed`, as `actor`'s,
+    /// and starts it with the address the invitation was mailed to, if any.
+    async fn invited(
+        tx: &mut DatabaseTransaction<'_>,
+        actor: &EventContext,
+        user_id: UserId,
+        redeemed: OpenInvitation,
+    ) -> Result<(), ApiError> {
+        let invitation_id = redeemed.id;
+        let event = DomainEvent::InvitationRedeemed { invitation_id };
+        tx.record(actor, Some(user_id), event).await?;
+        if let Some(email) = redeemed.email {
+            let address = NormalizedEmail::parse(&email).map_err(EmailError::Invalid)?;
+            EmailApplication::invited(tx, actor, user_id, &address).await?;
+        }
+        Ok(())
     }
 
     /// Starts handle-based authentication or lets the authenticator identify the account.

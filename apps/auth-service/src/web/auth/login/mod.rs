@@ -20,9 +20,10 @@ use crate::{
 };
 use axum::extract::Query as UriQuery;
 use sourceorigin_common::{Provider, events::RevocationReason, protocol::claims::Acr};
+use sourceorigin_repository::OpenInvitation;
 use sourceorigin_ui::{
-    CallbackError, LinkKind, LoginChange, LoginQuery, Onward, Query, QueryError, SignedIn, Step,
-    Title,
+    CallbackError, Invited, LinkKind, LoginChange, LoginQuery, Onward, Query, QueryError, SignedIn,
+    Step, Title,
 };
 use topcoat::{
     Error,
@@ -493,6 +494,29 @@ impl WebApplication {
         ))
     }
 
+    /// The invitation `presented` in the sign-up page's link, if any, and
+    /// whether it can still be used. It is looked up only to say what it gives:
+    /// signup checks it again.
+    async fn invitation(
+        &self,
+        presented: Option<&str>,
+    ) -> Result<Option<Option<OpenInvitation>>, Failure> {
+        let Some(presented) = presented.filter(|presented| !presented.is_empty()) else {
+            return Ok(None);
+        };
+        let found = self.passkeys.invitation(presented).await;
+        Ok(Some(found.map_err(Error::from)?))
+    }
+
+    /// What the sign-up page says of the invitation [`Self::invitation`] `found`.
+    fn invited(found: Option<&Option<OpenInvitation>>) -> Invited<'_> {
+        match found {
+            None => Invited::No,
+            Some(Some(open)) => Invited::Open(open.email.as_deref()),
+            Some(None) => Invited::Closed,
+        }
+    }
+
     /// The sign-in page `cx` requests, as requested: what a change that keeps the
     /// browser on it goes back to.
     fn here(cx: &Cx, page: SignInPage) -> &str {
@@ -574,6 +598,7 @@ impl WebApplication {
         };
         let providers: Vec<_> = self.federation.enabled().collect();
         let invitation = query.invitation.as_deref();
+        let found = self.invitation(invitation).await?;
         let android = PasskeyApplication::offers_google_password_manager(headers(cx));
         let offer = self.restore_offer(cx).await?;
         let step = match (&pending, link, page) {
@@ -599,6 +624,7 @@ impl WebApplication {
                     .as_ref()
                     .map(|pending| (pending.provider, pending.id)),
                 invitation,
+                invited: Self::invited(found.as_ref()),
                 invite_required: self.invite_required,
                 android,
             },

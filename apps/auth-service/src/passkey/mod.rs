@@ -4,6 +4,7 @@
 use crate::account::AccountService;
 use crate::config::{EmailConfig, PasskeyConfig};
 use crate::deliveries::OutboundClient;
+use crate::invitations::InvitationLinks;
 use crate::oidc::OidcApplication;
 use crate::routes;
 use crate::security::{self, BrowserCookie, Credential, RequestContext, SignedIn};
@@ -19,7 +20,8 @@ use sourceorigin_common::{
     events::{DomainEvent, EventContext},
 };
 use sourceorigin_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertPasskey, PasskeyRepository, StoredPasskey,
+    Database, DatabaseError, DatabaseTransaction, InsertPasskey, InvitationKey, OpenInvitation,
+    PasskeyRepository, StoredPasskey,
 };
 use std::sync::Arc;
 use url::Url;
@@ -102,6 +104,25 @@ impl PasskeyApplication {
             outbound: OutboundClient::new().map_err(PasskeyConfigError::Outbound)?,
             email: email.clone(),
         })
+    }
+
+    /// The invitation whose token a browser `presented`, if it can still be
+    /// used, as the sign-up page and signup find it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the lookup fails.
+    pub(crate) async fn invitation(
+        &self,
+        presented: &str,
+    ) -> Result<Option<OpenInvitation>, DatabaseError> {
+        let Some(digest) = InvitationLinks::digest(presented) else {
+            return Ok(None);
+        };
+        self.database
+            .security()
+            .open_invitation(InvitationKey::Digest(&digest))
+            .await
     }
 
     /// A verifier for auth's RP ID that accepts assertions signed for `origin`, and
