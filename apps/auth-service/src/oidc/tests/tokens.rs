@@ -287,8 +287,9 @@ async fn another_client_isnt_told_an_account_is_disabled() {
 }
 
 /// The same refresh token, refreshed on two replicas at once: a public client's
-/// rotates exactly once, and the other attempt is a replay, which revokes the
-/// family. A confidential client's serves both and stays valid.
+/// rotates once, and both refreshes answer with that one successor. Presented
+/// after the reuse window, the old token is a replay, which revokes the family.
+/// A confidential client's serves both and stays valid.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn concurrent_refreshes_across_replicas() {
@@ -306,27 +307,35 @@ async fn concurrent_refreshes_across_replicas() {
             .expect("token response contains a refresh token")
             .to_owned();
         let (first, second) = tokio::join!(a.refresh(&token), b.refresh(&token));
+        let mut successors = Vec::new();
+        for response in [first, second] {
+            assert_eq!(response.status(), StatusCode::OK);
+            successors.push(Flow::json(response).await["refresh_token"].clone());
+        }
         if confidential {
-            for response in [first, second] {
-                assert_eq!(response.status(), StatusCode::OK);
-                assert!(Flow::json(response).await.get("refresh_token").is_none());
-            }
+            assert!(
+                successors.iter().all(serde_json::Value::is_null),
+                "{successors:?}"
+            );
             assert_eq!(a.refresh(&token).await.status(), StatusCode::OK, "kept");
             continue;
         }
-        let (rotated, replayed) = if first.status() == StatusCode::OK {
-            (first, second)
-        } else {
-            (second, first)
-        };
-        assert_eq!(rotated.status(), StatusCode::OK);
-        assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
-        let rotated = Flow::json(rotated).await["refresh_token"]
-            .as_str()
-            .expect("refresh response contains the rotated token")
-            .to_owned();
+        assert_eq!(successors[0], successors[1], "one successor");
+        let successor = successors[0].as_str().expect("the successor").to_owned();
+        assert_ne!(successor, token);
+        let mut tx = flow.app.database.begin().await.expect("transaction");
+        tx.tokens()
+            .end_reuse_window(
+                OpaqueToken::parse(TokenPrefix::RefreshToken, &token)
+                    .expect("issued token parses")
+                    .id,
+            )
+            .await
+            .expect("the window ends");
+        tx.commit().await.expect("commit");
+        assert_eq!(a.refresh(&token).await.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
-            a.refresh(&rotated).await.status(),
+            b.refresh(&successor).await.status(),
             StatusCode::BAD_REQUEST,
             "the replay revoked the family"
         );

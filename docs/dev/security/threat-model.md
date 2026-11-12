@@ -61,7 +61,7 @@ own. It builds on the [security boundaries](boundaries.md); the
 | --- | --- |
 | A code or token used by another app, or sent elsewhere | Exact redirect URIs, S256 PKCE for every client, codes tried once, and tokens bound to their audience ([OIDC](../../user/reference/oidc.md#codes-tokens-and-consent)). |
 | An app impersonating another, or SourceOrigin | Console apps are never trusted, so the consent page shows unless the user already consented to the scopes asked, naming the host it returns to and labelling the app unverified with its owner's handle. `prompt=consent` forces it. Their names may not contain a well-known brand ([OIDC clients](../operations/clients.md)). |
-| An app keeping access | The owner, an administrator or an operator removes an app's access, which ends its refresh grants and outstanding codes. A public client's refresh token rotates, and replaying a spent one revokes the grant. |
+| An app keeping access | The owner, an administrator or an operator removes an app's access, which ends its refresh grants and outstanding codes. A public client's refresh token rotates, and replaying a spent one revokes the grant, unless it repeats the newest rotation within 10 seconds, which answers with the same new token. |
 | A logout URI aimed at the internal network | Deliveries go only over HTTPS to public addresses, and never follow a redirect ([outbound HTTP](../architecture/delivery-queue.md#outbound-http)). |
 | Registering apps in bulk | An account may hold 10 apps and register 20 a day ([OIDC clients](../operations/clients.md)). |
 
@@ -79,7 +79,7 @@ own. It builds on the [security boundaries](boundaries.md); the
 | Threat | Mitigation |
 | --- | --- |
 | Rewriting or deleting history | The runtime role cannot change sealed events or checkpoints. Through the schema owner, changes break the hash chain or the signed checkpoints, and `audit verify` names the first position that no longer matches ([audit history](audit-history.md)). Auth's own verification, at least every six hours, raises an alert that notifies every administrator. |
-| Reading secrets from a dump | Signing keys are sealed under a key the database never holds. Cookies, client secrets, codes, refresh tokens and emailed links' tokens are stored only as digests ([boundaries](boundaries.md#secrets-and-keys)). |
+| Reading secrets from a dump | Signing keys are sealed under a key the database never holds. Cookies, client secrets, codes, refresh tokens and emailed links' tokens are stored only as digests ([boundaries](boundaries.md#secrets-and-keys)). A dump with the token digest key and any spent refresh token of a public client's grant derives the grant's live token ([refresh tokens](../architecture/oidc.md#refresh-families)). |
 | A bug in auth bypassing a way-in rule | Database triggers hold the recovery rules a way in depends on, for every writer ([database backstops](account-recovery.md#database-backstops)). |
 
 Beyond these, database access is trusted: it can bind any passkey to any account

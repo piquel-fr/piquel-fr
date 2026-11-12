@@ -39,7 +39,10 @@ passkey-only accounts have no email claim. Browser clients should keep tokens in
 memory and use SSO again after reload. Refresh permission is off unless explicitly
 enabled and `offline_access` is allowed/requested. A public client's refresh token
 rotates: each refresh answers with a new one, and presenting a spent one revokes
-the whole grant, so a stolen copy is caught as soon as both are used. A confidential
+the whole grant, so a stolen copy is caught as soon as both are used. The one
+exception is a refresh repeated within 10 seconds, such as two tabs refreshing
+at once or a retry after a lost response: presenting the token just replaced
+answers with the same new one, as long as that one hasn't been used yet. A confidential
 client keeps its token, and a refresh answers with none: without the client's
 secret the token is useless, so it needs no rotation (RFC 9700 §4.14), and a
 refresh writes nothing.

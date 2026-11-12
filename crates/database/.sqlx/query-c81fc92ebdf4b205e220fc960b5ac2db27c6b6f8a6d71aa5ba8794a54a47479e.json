@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE refresh_tokens\n                SET consumed_at = consumed_at - make_interval(secs => $2)\n                WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c81fc92ebdf4b205e220fc960b5ac2db27c6b6f8a6d71aa5ba8794a54a47479e"
+}

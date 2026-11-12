@@ -778,6 +778,7 @@ pub(crate) async fn refresh_grant(
                 secret_digest: digest.clone(),
                 digest_key: "test".into(),
                 expires_at: Utc::now() + Duration::hours(1),
+                predecessor_id: None,
             },
         )
         .await

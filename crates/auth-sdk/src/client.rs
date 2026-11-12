@@ -333,8 +333,9 @@ pub struct Tokens {
     /// The validated ID token, when `openid` was granted.
     pub id_token: Option<IdToken>,
     /// A refresh token, when `offline_access` was granted. A public client's rotates
-    /// on every refresh, and auth revokes the whole family if an old one is reused; a
-    /// confidential client's is kept.
+    /// on every refresh, and auth revokes the whole family if an old one is reused,
+    /// unless it repeats the latest refresh within 10 seconds, which gets the same
+    /// new token; a confidential client's is kept.
     pub refresh_token: Option<RefreshToken>,
 }
 

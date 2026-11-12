@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id AS \"id: TokenId\", s.secret_digest\n                FROM refresh_tokens t\n                JOIN refresh_tokens s ON s.predecessor_id = t.id\n                WHERE t.id = $1\n                AND t.consumed_at > now() - make_interval(secs => $2)\n                AND s.consumed_at IS NULL\n                AND s.expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "secret_digest",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0b83f27a1df8f46adab343c4135a566e8317273478f7271cb976866cc3c4da09"
+}
