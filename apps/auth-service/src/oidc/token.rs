@@ -313,12 +313,13 @@ impl OidcApplication {
         let mut tx = self.database.begin().await?;
         // Lock the account before the code, as a refresh and removing an app
         // do: a removal then either commits first and expires the code, or waits
-        // for this exchange and revokes the refresh family it creates.
+        // for this exchange and revokes the refresh family it creates. The lock
+        // is taken whatever the account's status, and refuses nothing: a disabled
+        // account's code goes through the checks below like any other, so its
+        // replay is recorded, and a client it wasn't issued to isn't told that the
+        // account is disabled.
         if let Some(user) = tx.oidc().code_user(opaque.id, &digests).await? {
-            tx.users()
-                .find_active_by_id_for_update(user)
-                .await?
-                .ok_or_else(|| OAuthCode::InvalidGrant.reject(ACCOUNT_DISABLED))?;
+            tx.users().find_by_id_for_update(user).await?;
         }
         // Checked with the code locked, before it is consumed: a failed redemption
         // still uses the code up, and is recorded, so a code is tried once. It
