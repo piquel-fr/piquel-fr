@@ -135,6 +135,15 @@ impl Flow {
         tx.commit().await.expect("commit");
         self.cookie = format!("{}={}", BrowserCookie::Session.as_str(), session.encoded());
     }
+    /// Disables the scenario's account, without ending its sessions or grants.
+    async fn disable(&self) {
+        let mut tx = self.app.database.begin().await.expect("transaction");
+        tx.users()
+            .set_status(self.user_id, sourceorigin_common::AccountStatus::Disabled)
+            .await
+            .expect("disable");
+        tx.commit().await.expect("commit");
+    }
     /// Lists the events recorded about the scenario account, newest first.
     async fn events(&self) -> Vec<DomainEvent> {
         self.app

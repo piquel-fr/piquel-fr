@@ -139,10 +139,13 @@ period.
 1. It locks the code's account, then the code (`lock_code`), and checks that the
    form redeems it: the same client, the same `redirect_uri`, and a
    `code_verifier` matching its PKCE challenge. A failed check expires the code
-   and records `CodeRedemptionFailed`, so a code is tried once.
-2. It consumes the code. A code redeemed before is a replay: the refresh
-   families issued from it are revoked and `CodeReplayed` is recorded, before the
-   request is rejected. The browser session stays signed in, since a leaked code
+   and records `CodeRedemptionFailed`, so a code is tried once. The account is
+   locked whatever its status, and a disabled one isn't refused here. Its code
+   fails as any other would: another client presenting it gets the usual
+   rejection, and a replay of it is recorded.
+2. It consumes the code, if its session and account are still active. A code
+   redeemed before is a replay: the refresh families issued from it are revoked
+   and `CodeReplayed` is recorded, before the request is rejected. The browser session stays signed in, since a leaked code
    exposes the client's callback, not the session cookie.
 3. It locks the session, which must still be active, share-locks the client and
    checks its policy, and, for an untrusted client, reads the consent again, so

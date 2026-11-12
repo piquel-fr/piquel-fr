@@ -233,6 +233,59 @@ async fn code_replay_revokes_its_refresh_family() {
     assert_eq!(revoked, issued, "the replay revoked the code's own family");
 }
 
+/// Replaying a redeemed code after its account is disabled is still recorded as
+/// a replay, and revokes the code's refresh family.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_disabled_accounts_code_replay_is_recorded() {
+    let flow = Flow::new(false, true).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let response = flow.exchange(&code, Flow::verifier(), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    flow.disable().await;
+    Flow::assert_invalid_grant(flow.exchange(&code, Flow::verifier(), None).await).await;
+    let events = flow.events().await;
+    let [
+        DomainEvent::GrantRevoked {
+            reason: GrantRevocation::CodeReplay,
+            ..
+        },
+        DomainEvent::CodeReplayed { .. },
+        ..,
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+}
+
+/// Another client presenting a disabled account's code gets the rejection it
+/// gets for an active account's, so it doesn't learn the account is disabled.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn another_client_isnt_told_an_account_is_disabled() {
+    let flow = Flow::new(false, true).await;
+    let other = crate::tests::registration(ClientKind::Public, "https://other.example");
+    crate::tests::register(&flow.app.database, &other)
+        .await
+        .expect("register another client");
+    let other = Flow {
+        client: other,
+        ..flow.clone()
+    };
+    let (active, disabled) = (
+        flow.code(REFRESH_SCOPES).await,
+        flow.code(REFRESH_SCOPES).await,
+    );
+    let rejection = async |code: &str| {
+        let response = other.exchange(code, Flow::verifier(), None).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        Flow::json(response).await
+    };
+    let expected = rejection(&active).await;
+    flow.disable().await;
+    assert_eq!(rejection(&disabled).await, expected);
+}
+
 /// The same refresh token, refreshed on two replicas at once: a public client's
 /// rotates exactly once, and the other attempt is a replay, which revokes the
 /// family. A confidential client's serves both and stays valid.
