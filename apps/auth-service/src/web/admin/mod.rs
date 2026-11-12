@@ -6,11 +6,11 @@
 //!
 //! The pages declare their own paths, under [`routes::dashboard::PREFIXES`], and
 //! the admin listener mounts them there, never as the fallback, so the listener's
-//! security layer gives each its request context and rate budget. Every answer
-//! carries the dashboard's Content-Security-Policy: its own script and
-//! stylesheet alone, with auth's profile pictures, fetching from the dashboard
-//! only, and forms posting only to the dashboard, whose answer may go on to
-//! auth's handoff page.
+//! security layer gives each its request context and rate budget, and gives every
+//! answer the dashboard's Content-Security-Policy (`security::content`): its own
+//! scripts and stylesheet alone, with auth's profile pictures, fetching from the
+//! dashboard only, and forms posting only to the dashboard, whose answer may go
+//! on to auth's handoff page.
 //!
 //! A browser without a dashboard session, or whose session timed out, goes
 //! through auth's handoff page, which asks for a passkey, and back. A page that
@@ -1014,8 +1014,9 @@ impl AdminApplication {
         }
     }
 
-    /// What the request's change page acts on, as [`Self::parent`] finds it: the
-    /// account or client, which its page names beside its button.
+    /// What the request's page acts on, as [`Self::parent`] finds it: the account
+    /// or client, which a change's page names beside its button, and an account's
+    /// settings page in its heading.
     async fn target(cx: &Cx) -> Option<Target<'_>> {
         Self::parent(cx).await.as_ref().map(Parent::target)
     }

@@ -16,7 +16,7 @@ use crate::{
     oidc::{AuthorizationView, OAuthError, OidcApplication, RecoveryQuestion, TransactionQuery},
     passkey::PasskeyApplication,
     routes,
-    security::{ApiError, SessionError},
+    security::{ApiError, FormTarget, SessionError},
 };
 use axum::extract::Query as UriQuery;
 use sourceorigin_common::{Provider, events::RevocationReason, protocol::claims::Acr};
@@ -430,7 +430,7 @@ impl WebApplication {
             .await
             .map_err(ApiError::from)?;
         let response = match authorization {
-            Some(authorization) if Self::source(&authorization.redirect_uri).is_none() => {
+            Some(authorization) if FormTarget::of(&authorization.redirect_uri).is_none() => {
                 self.link(cx, page.title(), &to, Onward::Provider(provider))
                     .await?
             }

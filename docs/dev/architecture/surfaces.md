@@ -87,7 +87,7 @@ sourceorigin.dev serves pages of its own at those paths, such as public profiles
 *(planned)*.
 
 Every response, redirects and errors included, carries the same isolation headers
-as auth's, `Cross-Origin-Resource-Policy: same-site` and a Content-Security-Policy
+as auth's, `Cross-Origin-Resource-Policy: same-origin` and a Content-Security-Policy
 that loads only the stylesheet and its typefaces.
 
 ## admin.sourceorigin.dev

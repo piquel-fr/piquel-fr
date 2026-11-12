@@ -252,8 +252,8 @@ errors and preflights included:
   off every other powerful feature (`sourceorigin_common::protocol::isolation`).
 - **`Cross-Origin-Resource-Policy`:** `cross-origin` for what other sites may
   embed or read, the responses with the public CORS grant, such as profile
-  pictures, discovery and the keys; `same-site` for the build assets, which the
-  dashboard's pages share; `same-origin` for everything else.
+  pictures, discovery and the keys, and `same-origin` for everything else: each
+  listener's pages load only its own files.
 - **CORS**, once the origin check allowed the request's origin: `*` for public
   documents, or the exact origin with `Vary: Origin` and the methods and headers
   its class takes, which may then read `X-Trace-Id` and `Retry-After`. A refusal

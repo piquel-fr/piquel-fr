@@ -141,8 +141,9 @@ acts, calls the service in-process and renders `sourceorigin-ui` components, or 
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy,
-which the security layer sets on every response, loads only the stylesheet, its typefaces and the passkey, picture, search and
-copy scripts embedded under `/assets/`, auth's own profile pictures and the `blob:` of one
+which the security layer sets on every response, loads only the stylesheet, its
+typefaces and the passkey, picture, search, copy and client form scripts embedded
+under `/assets/`, auth's own profile pictures and the `blob:` of one
 being chosen, lets the passkey script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect

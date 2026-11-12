@@ -2,7 +2,8 @@
 //! carries.
 
 use super::*;
-use crate::security::{FormTargets, content::ContentPolicy};
+use crate::security::{FormTarget, FormTargets, content::ContentPolicy};
+use sourceorigin_common::protocol::isolation;
 
 /// Decorates `response` as [`HttpSecurity::protect`] does on the given CORS `grant`.
 fn decorated(response: impl IntoResponse, grant: Option<CorsGrant>) -> Response {
@@ -13,7 +14,7 @@ fn decorated(response: impl IntoResponse, grant: Option<CorsGrant>) -> Response 
 
 /// Every response keeps other sites' pages from holding a window on it and from
 /// using powerful features but passkeys and the clipboard; only public responses
-/// may be embedded by other sites, and the build assets by SourceOrigin's own.
+/// may be embedded by other sites.
 #[test]
 fn every_response_is_isolated_and_only_public_ones_embeddable() {
     for (response, resource_policy) in [
@@ -21,7 +22,7 @@ fn every_response_is_isolated_and_only_public_ones_embeddable() {
         (decorated(StatusCode::FORBIDDEN, None), "same-origin"),
         (
             decorated(Cached(CacheClass::Immutable, StatusCode::OK), None),
-            "same-site",
+            "same-origin",
         ),
         (
             decorated(StatusCode::OK, Some(CorsGrant::Public)),
@@ -31,31 +32,40 @@ fn every_response_is_isolated_and_only_public_ones_embeddable() {
         let headers = response.headers();
         assert_eq!(headers["cross-origin-opener-policy"], "same-origin");
         assert_eq!(headers["cross-origin-resource-policy"], resource_policy);
-        let permissions = headers["permissions-policy"].to_str().expect("text");
-        assert!(
-            permissions.starts_with(
-                "publickey-credentials-get=(self), publickey-credentials-create=(self), clipboard-write=(self),"
-            ),
-            "{permissions}"
-        );
-        assert!(permissions.contains(" camera=(),"), "{permissions}");
+        assert_eq!(headers["permissions-policy"], isolation::PERMISSIONS_POLICY);
     }
 }
 
-/// A page widens its listener's policy only by the origins its forms redirect on
-/// to: a target that names anything else could widen the policy past its
-/// `form-action`, so it is left out.
+/// A page's forms may redirect on only to origins a policy can name: never an IP
+/// address, such as a native app's loopback callback, nor anything but the origin.
 #[test]
-fn a_page_widens_only_form_action_by_origins() {
+fn form_targets_are_origins_a_policy_can_name() {
+    let target = |url: &str| FormTarget::of(&url::Url::parse(url).expect("URL"));
+    assert_eq!(
+        target("https://app.example:8443/callback?state=x#y"),
+        target("https://app.example:8443")
+    );
+    for url in [
+        "http://127.0.0.1:4100/callback",
+        "http://[::1]/callback",
+        "com.example.app:/callback",
+        "https://bad_label.example/",
+    ] {
+        assert_eq!(target(url), None, "{url}");
+    }
+}
+
+/// A page widens its listener's policy only in its `form-action`, by the origins
+/// it names.
+#[test]
+fn a_page_widens_only_form_action() {
     let config = crate::AuthConfig::test(&crate::tests::AUTH_ORIGIN.parse().expect("origin"));
-    let content = ContentPolicy::auth(&config);
+    let content = ContentPolicy::auth(&config).expect("policy");
+    let app = FormTarget::of(&url::Url::parse("https://app.example/callback").expect("URL"));
     let mut response = StatusCode::OK.into_response();
-    response.extensions_mut().insert(FormTargets(vec![
-        "https://app.example".to_owned(),
-        "https://app.example; script-src *".to_owned(),
-        "*".to_owned(),
-        "'unsafe-inline'".to_owned(),
-    ]));
+    response
+        .extensions_mut()
+        .insert(FormTargets(app.into_iter().collect()));
     content.set_on(&mut response);
     let policy = crate::tests::policy(&response);
     assert!(policy.starts_with("default-src 'none'; "), "{policy}");

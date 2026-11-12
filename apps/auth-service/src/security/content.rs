@@ -4,97 +4,135 @@
 
 use crate::{AuthConfig, assets::EmbeddedAssets, routes};
 use axum::{
-    http::{HeaderValue, header},
+    http::{HeaderValue, header, header::InvalidHeaderValue},
     response::Response,
 };
 use sourceorigin_common::config::Origin;
+use std::sync::Arc;
+use url::{Host, Url};
+
+/// An origin a page's forms may post or redirect to, as a Content-Security-Policy
+/// source names it. Only [`FormTarget::of`] makes one, so it never holds anything
+/// but a scheme, a host and a port.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FormTarget(String);
+
+impl FormTarget {
+    /// The source naming `target`'s origin, or `None` when no policy can name it.
+    /// Host sources name domains whose labels are letters, digits and hyphens, and
+    /// never match an IP address (CSP3 §6.7.2.6), such as a native application's
+    /// loopback callback (RFC 8252 §7.3).
+    pub(crate) fn of(target: &Url) -> Option<Self> {
+        let nameable = match target.host() {
+            Some(Host::Domain(domain)) => domain.split('.').all(|label| {
+                !label.is_empty()
+                    && label
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            }),
+            Some(Host::Ipv4(_) | Host::Ipv6(_)) | None => false,
+        };
+        let origin = target.origin();
+        (nameable && origin.is_tuple()).then(|| Self(origin.ascii_serialization()))
+    }
+}
 
 /// Where a page's forms may also post, or redirect on to, besides the listener's
-/// own origin: sources a page adds to its response for its policy to allow, since
-/// browsers apply `form-action` to a form's redirects too.
+/// own origin, which a page puts on its response for its policy to allow: browsers
+/// apply `form-action` to a form's redirects too.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct FormTargets(pub(crate) Vec<String>);
+pub(crate) struct FormTargets(pub(crate) Vec<FormTarget>);
 
 /// A listener's Content-Security-Policy.
 #[derive(Clone)]
 pub(super) struct ContentPolicy {
-    /// Every directive but `form-action`.
-    base: String,
-    /// The `form-action` sources of every response.
-    form_action: String,
+    /// The policy of a response that names no [`FormTargets`].
+    policy: HeaderValue,
+    /// The same, which a page's targets extend, as it ends with `form-action`.
+    text: Arc<str>,
 }
 
 impl ContentPolicy {
+    /// The policy of every directive in `base` and the `form_action` sources.
+    ///
+    /// # Errors
+    /// Fails when a configured origin cannot be sent in a header.
+    fn new(base: &str, form_action: &str) -> Result<Self, InvalidHeaderValue> {
+        let text = format!("{base}; form-action {form_action}");
+        Ok(Self {
+            policy: HeaderValue::try_from(&text)?,
+            text: text.into(),
+        })
+    }
+
     /// Auth's: its stylesheet, typefaces and scripts, whose passkey ceremonies
     /// fetch auth's own JSON routes, and its own images, which the profile's
     /// pictures are, with the `blob:` URL the picture script shows a picture being
     /// chosen from, before it is uploaded. A source with a path needs the whole URL:
     /// `'self'` names none.
-    pub(super) fn auth(config: &AuthConfig) -> Self {
+    ///
+    /// # Errors
+    /// Fails when auth's origin cannot be sent in a header.
+    pub(super) fn auth(config: &AuthConfig) -> Result<Self, InvalidHeaderValue> {
         let origin = &config.oidc.origin;
         let scripts = EmbeddedAssets::SCRIPTS.map(|script| origin.join(&script.path()));
-        Self {
-            base: format!(
+        Self::new(
+            &format!(
                 "default-src 'none'; style-src {}; script-src {}; font-src 'self'; \
                  connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; \
                  base-uri 'none'",
                 origin.join(&EmbeddedAssets::STYLESHEET.path()),
                 scripts.join(" "),
             ),
-            form_action: "'self'".to_owned(),
-        }
+            "'self'",
+        )
     }
 
     /// The admin dashboard's, on `dashboard`: its stylesheet, typefaces and
     /// scripts, which fetch only the dashboard's own passkey ceremonies and
     /// search, and auth's images, which serve the profile pictures. A form's answer
     /// may send the browser on to auth's handoff page, to sign in or confirm again.
-    pub(super) fn dashboard(config: &AuthConfig, dashboard: &Origin) -> Self {
+    ///
+    /// # Errors
+    /// Fails when the dashboard's or auth's origin cannot be sent in a header.
+    pub(super) fn dashboard(
+        config: &AuthConfig,
+        dashboard: &Origin,
+    ) -> Result<Self, InvalidHeaderValue> {
         let auth = &config.passkey.origin;
         let scripts =
             EmbeddedAssets::DASHBOARD_SCRIPTS.map(|script| dashboard.join(&script.path()));
-        Self {
-            base: format!(
+        Self::new(
+            &format!(
                 "default-src 'none'; script-src {}; style-src {}; font-src 'self'; \
                  img-src {}; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
                 scripts.join(" "),
                 dashboard.join(&EmbeddedAssets::STYLESHEET.path()),
                 auth.serialized(),
             ),
-            form_action: format!("'self' {}", auth.join(routes::page::ADMIN)),
-        }
-    }
-
-    /// Whether `target` is a source naming an origin and nothing else: no
-    /// keyword, wildcard, space or `;` could widen the policy past its
-    /// `form-action`.
-    fn names_an_origin(target: &str) -> bool {
-        target.contains("://")
-            && target
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b":/.-".contains(&byte))
+            &format!("'self' {}", auth.join(routes::page::ADMIN)),
+        )
     }
 
     /// Sets the policy on `response`, its `form-action` widened by the
-    /// [`FormTargets`] the response names, if any. A target that names no origin is
-    /// left out, so its form's redirect is refused rather than the policy widened.
+    /// [`FormTargets`] the response names, if any.
     pub(super) fn set_on(&self, response: &mut Response) {
-        let mut form_action = self.form_action.clone();
-        if let Some(FormTargets(targets)) = response.extensions().get::<FormTargets>() {
-            for target in targets
-                .iter()
-                .filter(|target| Self::names_an_origin(target))
-            {
-                form_action.push(' ');
-                form_action.push_str(target);
+        let widened = match response.extensions().get::<FormTargets>() {
+            Some(FormTargets(targets)) if !targets.is_empty() => {
+                let mut text = self.text.to_string();
+                for FormTarget(target) in targets {
+                    text.push(' ');
+                    text.push_str(target);
+                }
+                // A target holds only an origin, which a header always takes; the
+                // listener's own policy stays should one ever not.
+                HeaderValue::try_from(text).ok()
             }
-        }
-        let policy = format!("{}; form-action {form_action}", self.base);
-        // Its sources are origins and paths, and each target names an origin.
-        if let Ok(value) = HeaderValue::try_from(policy) {
-            response
-                .headers_mut()
-                .insert(header::CONTENT_SECURITY_POLICY, value);
-        }
+            Some(_) | None => None,
+        };
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            widened.unwrap_or_else(|| self.policy.clone()),
+        );
     }
 }

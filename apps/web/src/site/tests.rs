@@ -59,7 +59,7 @@ async fn sends_every_other_path_to_auth() {
     let headers = response.headers();
     assert_eq!(headers[header::CONTENT_SECURITY_POLICY], POLICY);
     assert_eq!(headers["cross-origin-opener-policy"], "same-origin");
-    assert_eq!(headers["cross-origin-resource-policy"], "same-site");
+    assert_eq!(headers["cross-origin-resource-policy"], "same-origin");
     assert_eq!(
         headers["permissions-policy"],
         sourceorigin_common::protocol::isolation::PERMISSIONS_POLICY

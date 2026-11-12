@@ -156,16 +156,16 @@ impl Site {
             (header::CONTENT_SECURITY_POLICY, POLICY),
             // A page that opens one of sourceorigin.dev's keeps no handle on it.
             (
-                HeaderName::from_static("cross-origin-opener-policy"),
+                HeaderName::from_static(isolation::OPENER_POLICY_HEADER),
                 isolation::OPENER_POLICY,
             ),
-            // Only SourceOrigin's sites may embed what it serves.
+            // No other site may embed what it serves.
             (
-                HeaderName::from_static("cross-origin-resource-policy"),
-                isolation::RESOURCE_POLICY_ASSETS,
+                HeaderName::from_static(isolation::RESOURCE_POLICY_HEADER),
+                isolation::RESOURCE_POLICY_PRIVATE,
             ),
             (
-                HeaderName::from_static("permissions-policy"),
+                HeaderName::from_static(isolation::PERMISSIONS_POLICY_HEADER),
                 isolation::PERMISSIONS_POLICY,
             ),
             // No MIME sniffing.

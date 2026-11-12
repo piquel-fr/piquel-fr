@@ -7,14 +7,7 @@
  */
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import {
-  adminUrl,
-  administrator,
-  grantAdmin,
-  openDashboard,
-  signedUp,
-  withPasskeys
-} from './helpers';
+import { adminUrl, administrator, grantAdmin, openDashboard, signedUp } from './helpers';
 
 /** The WCAG levels axe checks against. */
 const levels = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
@@ -22,7 +15,7 @@ const levels = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 /** Expects the page `page` shows, named `name`, to break no rule axe checks, in either theme. */
 async function expectAccessible(page: Page, name: string): Promise<void> {
   for (const colorScheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme });
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
     const { violations } = await new AxeBuilder({ page }).withTags(levels).analyze();
     const found = violations.map(
       ({ id, nodes }) => `${id}: ${nodes.map(({ target }) => target.join(' ')).join(', ')}`
@@ -31,8 +24,7 @@ async function expectAccessible(page: Page, name: string): Promise<void> {
   }
 }
 
-test("auth's pages, signed out", async ({ browser }) => {
-  const page = await withPasskeys(browser);
+test("auth's pages, signed out", async ({ page }) => {
   for (const path of ['/login', '/register', '/no-such-page']) {
     await page.goto(path);
     await expectAccessible(page, path);

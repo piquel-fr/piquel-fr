@@ -35,12 +35,13 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 pub(crate) const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 /// Whether another site's page that opens this one keeps a handle on it.
 const CROSS_ORIGIN_OPENER_POLICY: HeaderName =
-    HeaderName::from_static("cross-origin-opener-policy");
+    HeaderName::from_static(isolation::OPENER_POLICY_HEADER);
 /// Which sites' pages may embed or read a response.
 const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
-    HeaderName::from_static("cross-origin-resource-policy");
+    HeaderName::from_static(isolation::RESOURCE_POLICY_HEADER);
 /// Which powerful features a page, and what it embeds, may use.
-const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-policy");
+const PERMISSIONS_POLICY: HeaderName =
+    HeaderName::from_static(isolation::PERMISSIONS_POLICY_HEADER);
 /// Trusted ingress must overwrite this header with exactly one client address.
 pub(super) const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 /// Requests refused because their client's budget was exhausted, by category, or
@@ -282,8 +283,14 @@ pub(super) enum Listener {
 
 impl HttpSecurity {
     /// Derives the public listener's policy from validated startup configuration.
-    pub(crate) fn new(config: &crate::AuthConfig, database: Database) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Fails when auth's origin cannot be sent in its Content-Security-Policy.
+    pub(crate) fn new(
+        config: &crate::AuthConfig,
+        database: Database,
+    ) -> Result<Self, InvalidHeaderValue> {
+        Ok(Self {
             database,
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
@@ -294,8 +301,8 @@ impl HttpSecurity {
             pages: ErrorPages {
                 policies: config.oidc.policies.clone(),
             },
-            content: ContentPolicy::auth(config),
-        }
+            content: ContentPolicy::auth(config)?,
+        })
     }
 
     /// Derives the admin listener's policy, for the dashboard at `dashboard`, from
@@ -313,8 +320,8 @@ impl HttpSecurity {
         Ok(Self {
             listener: Listener::Admin(HeaderValue::from_str(&host)?),
             origin: dashboard.as_url().origin(),
-            content: ContentPolicy::dashboard(config, dashboard),
-            ..Self::new(config, database)
+            content: ContentPolicy::dashboard(config, dashboard)?,
+            ..Self::new(config, database)?
         })
     }
 
@@ -570,8 +577,7 @@ impl HttpSecurity {
     /// `grant` when set. A cacheable response is the same for every origin, so public
     /// data is granted to all origins and other cached responses to none. Other
     /// sites' pages may embed or read only public responses, such as profile
-    /// pictures (`Cross-Origin-Resource-Policy`), and the build assets only
-    /// SourceOrigin's own sites.
+    /// pictures (`Cross-Origin-Resource-Policy`).
     pub(super) fn decorate(response: &mut Response, grant: Option<CorsGrant>) {
         let class = CacheClass::enforced(response);
         let grant = match class {
@@ -580,9 +586,8 @@ impl HttpSecurity {
             // Pictures are public; the build assets need no grant.
             CacheClass::Immutable => grant.filter(|grant| matches!(grant, CorsGrant::Public)),
         };
-        let resource_policy = match (&grant, class) {
-            (Some(CorsGrant::Public), _) => isolation::RESOURCE_POLICY_PUBLIC,
-            (_, CacheClass::Immutable) => isolation::RESOURCE_POLICY_ASSETS,
+        let resource_policy = match grant {
+            Some(CorsGrant::Public) => isolation::RESOURCE_POLICY_PUBLIC,
             _ => isolation::RESOURCE_POLICY_PRIVATE,
         };
         let headers = response.headers_mut();

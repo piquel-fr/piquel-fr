@@ -117,7 +117,8 @@ impl SecurityFixture {
             },
             content: super::content::ContentPolicy::auth(&crate::AuthConfig::test(
                 &crate::tests::AUTH_ORIGIN.parse().expect("auth origin"),
-            )),
+            ))
+            .expect("policy"),
         };
         let mut router = Router::new();
         for path in [

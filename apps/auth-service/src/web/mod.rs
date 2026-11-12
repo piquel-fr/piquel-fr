@@ -10,10 +10,11 @@
 //! and their trailing-slash twins, which Topcoat redirects to the page, never as the
 //! fallback, so the security layer classifies them as pages by their route: it
 //! attaches the request context, spends the pages' own rate budget, and accepts a
-//! form only from auth's own pages. Every page's Content-Security-Policy loads
-//! nothing but the stylesheet, the passkey, picture, search and copy scripts and
-//! auth's own images, the profile pictures and the `blob:` of one being chosen,
-//! and lets its forms post only to auth and to where they redirect.
+//! form only from auth's own pages. The security layer's Content-Security-Policy
+//! (`security::content`) loads nothing but the stylesheet, the scripts and auth's
+//! own images, the profile pictures and the `blob:` of one being chosen, and lets
+//! a page's forms post only to auth and to where they redirect, the
+//! [`FormTargets`] the page names.
 
 /// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
 /// and taking its form, whose failures explain themselves as the page `title`.
@@ -52,7 +53,7 @@ use crate::{
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
     passkey::PasskeyApplication,
     pictures, routes,
-    security::{ApiError, BrowserCookie, FormTargets, RequestContext},
+    security::{ApiError, BrowserCookie, FormTarget, FormTargets, RequestContext},
 };
 pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
@@ -77,7 +78,7 @@ use topcoat::{
     },
     view::{Child, View, ViewExt, view},
 };
-use url::{Host, Url};
+use url::Url;
 
 /// The pages, and what every one of them needs.
 #[derive(Clone)]
@@ -382,29 +383,11 @@ impl WebApplication {
         Ok(form)
     }
 
-    /// The Content-Security-Policy source naming `target`'s origin, or `None` when no
-    /// policy can name it. Host sources name domains whose labels are letters,
-    /// digits and hyphens, and never match an IP address (CSP3 §6.7.2.6), such as a
-    /// native application's loopback callback (RFC 8252 §7.3).
-    fn source(target: &Url) -> Option<String> {
-        let nameable = match target.host() {
-            Some(Host::Domain(domain)) => domain.split('.').all(|label| {
-                !label.is_empty()
-                    && label
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            }),
-            Some(Host::Ipv4(_) | Host::Ipv6(_)) | None => false,
-        };
-        let origin = target.origin();
-        (nameable && origin.is_tuple()).then(|| origin.ascii_serialization())
-    }
-
     /// Sends the browser on to `target` once a form is done: a `303`, or, when the
     /// page's `form-action` could not name `target`, a page linking there, since the
     /// browser would block the form's redirect.
     async fn onward(&self, cx: &Cx, title: &str, target: &Url) -> Result<Response> {
-        if Self::source(target).is_some() {
+        if FormTarget::of(target).is_some() {
             return see_other(target).into_response(cx);
         }
         self.link(cx, title, target, Onward::Application).await
@@ -438,7 +421,7 @@ impl WebApplication {
     }
 
     /// Answers with `page` in the narrow frame of a page outside the account's
-    /// shell, titled `title`, under the page policy, with the trace ID of a server
+    /// shell, titled `title`, with the trace ID of a server
     /// error. Its forms may post to auth's own pages, and redirect on to the
     /// origins of `targets`.
     fn render<'a>(
@@ -478,7 +461,7 @@ impl WebApplication {
     }
 
     /// Answers with the whole `page`, its shell included, inside the document
-    /// titled `title`, under the page policy, with the browser's theme and sidebar
+    /// titled `title`, with the browser's theme and sidebar
     /// preferences, coloured as the admin dashboard when `admin`. Its forms may
     /// post to auth's own pages, and redirect on to the origins of `targets`:
     /// browsers apply `form-action` to a form's redirects too.
@@ -510,7 +493,7 @@ impl WebApplication {
         .await?
         .render(cx);
         // The security layer's policy lets the page's forms redirect on to them.
-        let targets = FormTargets(targets.iter().filter_map(Self::source).collect());
+        let targets = FormTargets(targets.iter().filter_map(FormTarget::of).collect());
         let mut response = (
             status,
             [(
