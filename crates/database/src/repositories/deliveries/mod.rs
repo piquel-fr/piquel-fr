@@ -290,8 +290,8 @@ impl DeliveryRepository<'_> {
     ///
     /// A delivery whose recipient or payload does not decode into `C`'s types, as a
     /// newer release's may not during a deploy, is left for a release that can
-    /// decode it: it is released without spending an attempt, due again after
-    /// [`UNDECODABLE_DELAY`], and the claim moves on to the next due delivery.
+    /// decode it: it is released without spending an attempt, due again 30
+    /// seconds later, and the claim moves on to the next due delivery.
     ///
     /// # Errors
     ///
