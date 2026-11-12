@@ -1,7 +1,7 @@
 //! Handles: whether an account may take one, and the renames signup, settings and
 //! the admin operations share.
 use crate::account::{AccountError, AccountService, Owner};
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use sourceorigin_common::{Handle, HandleError, Personal, UserId, events::DomainEvent};
 use sourceorigin_repository::{Database, DatabaseError, DatabaseTransaction, StoredUser};
 
@@ -9,9 +9,19 @@ use sourceorigin_repository::{Database, DatabaseError, DatabaseTransaction, Stor
 mod error;
 pub use error::HandlesError;
 
-/// How long a handle stays before its account may change it again. Settings
-/// renames wait for it; operators do not.
+/// How long a handle stays before its account may change it again. Every change,
+/// an operator's included, starts it; the handle chosen at signup has none.
+/// Settings renames wait for it; operators do not.
 pub(crate) const COOLDOWN: Duration = Duration::days(30);
+
+/// When the owner of `user` may next change its handle, or `None` if they may
+/// now: within the [`COOLDOWN`] of its last change. The handle chosen at signup
+/// has none, so a new account can correct it at once.
+pub(crate) fn changeable_at(user: &StoredUser) -> Option<DateTime<Utc>> {
+    user.handle_changed_at
+        .map(|changed| changed + COOLDOWN)
+        .filter(|at| *at > Utc::now())
+}
 
 /// The handle rules that need the database: whether a handle is free, and claiming
 /// it. Signup, the owner's rename and the admin operations share them.
@@ -100,8 +110,9 @@ impl<'a> Handles<'a> {
 }
 
 impl AccountService {
-    /// Changes the owner's handle to `input`, at most once per [`COOLDOWN`], once
-    /// they confirmed with a passkey: the handle is the login name. Only the owner
+    /// Changes the owner's handle to `input`, once they confirmed with a passkey:
+    /// the handle is the login name. The first change after signup is free; each
+    /// later one waits out the [`COOLDOWN`] since the one before. Only the owner
     /// renames here; operators rename through `AdminService`, without the cooldown.
     /// The profile version is bumped, so relying parties refresh
     /// `preferred_username`.
@@ -122,8 +133,9 @@ impl AccountService {
             .find_active_by_id_for_update(owner.user())
             .await?
             .ok_or(crate::security::SessionError::Missing)?;
-        let retry_after = user.handle_changed_at + COOLDOWN;
-        if retry_after > Utc::now() && user.handle != handle {
+        if let Some(retry_after) = changeable_at(&user)
+            && user.handle != handle
+        {
             return Err(HandlesError::Cooldown { retry_after }.into());
         }
         let (mut tx, changed) = Handles::new(&self.database)

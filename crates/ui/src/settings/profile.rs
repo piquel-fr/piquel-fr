@@ -288,7 +288,7 @@ async fn profile_dialogs<'a>(
                             <strong>(format!("{handle} stops working right away."))</strong>
                             " Links to it, and apps that look you up by it, stop finding you."
                         </p>
-                        <p>"It stays reserved for you, so nobody else can take it, and you can take it back later. You can change your handle once every 30 days."</p>
+                        <p>"It stays reserved for you, so nobody else can take it, and you can take it back later. After this change, you can change it again in 30 days."</p>
                     </div>
                 )
             )

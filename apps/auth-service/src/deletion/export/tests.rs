@@ -45,7 +45,7 @@ fn serializes_every_section_in_its_documented_shape() {
         profile: Profile {
             id: user,
             handle: "ada".parse().expect("handle"),
-            handle_changed_at: at,
+            handle_changed_at: Some(at),
             display_name: "Ada".into(),
             status: AccountStatus::Active,
             created_at: at,
@@ -203,7 +203,7 @@ fn serializes_every_section_in_its_documented_shape() {
         serde_json::to_value(&records).expect("export"),
         json!({
             "format": "sourceorigin.account-export",
-            "version": 5,
+            "version": 6,
             "exported_at": time,
             "profile": {
                 "id": user,
