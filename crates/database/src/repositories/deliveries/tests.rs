@@ -12,17 +12,20 @@ use std::collections::HashSet;
 
 /// A lease no test outlives.
 const LEASE: Duration = Duration::from_mins(1);
+/// A maximum age no test outlives.
+const MAX_AGE: Duration = Duration::from_hours(1);
 
-/// Declares channels whose deliveries tests insert themselves.
+/// Declares channels whose deliveries tests insert themselves, each with its
+/// stored name and payload type.
 macro_rules! test_channels {
-    ($($(#[doc = $doc:literal])* $name:ident = $value:literal;)*) => {$(
+    ($($(#[doc = $doc:literal])* $name:ident = $value:literal: $payload:ty;)*) => {$(
         $(#[doc = $doc])*
         struct $name;
 
         impl Channel for $name {
             const NAME: &'static str = $value;
             type Recipient = String;
-            type Payload = u32;
+            type Payload = $payload;
 
             /// Causes nothing: tests insert deliveries directly.
             fn deliveries(
@@ -39,13 +42,34 @@ macro_rules! test_channels {
 
 test_channels! {
     /// Claimed by many workers at once.
-    Concurrent = "test_concurrent";
+    Concurrent = "test_concurrent": u32;
     /// Claimed again once its lease expires.
-    Leased = "test_leased";
+    Leased = "test_leased": u32;
     /// Retried and cancelled by an operator.
-    Operated = "test_operated";
+    Operated = "test_operated": u32;
     /// Counted for the backlog gauges.
-    Backlogged = "test_backlogged";
+    Backlogged = "test_backlogged": u32;
+    /// A channel as the previous release declares it during a deploy.
+    OldRelease = "test_versions": OldMessage;
+    /// The same channel as the next release declares it.
+    NewRelease = "test_versions": NewMessage;
+}
+
+/// [`OldRelease`]'s messages.
+#[derive(Debug, Serialize, serde::Deserialize)]
+enum OldMessage {
+    /// Known to both releases.
+    Known,
+}
+
+/// [`NewRelease`]'s messages, with a kind the previous release does not know, as
+/// a release may add an `EmailMessage` variant.
+#[derive(Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+enum NewMessage {
+    /// Known to both releases.
+    Known,
+    /// Added by the new release.
+    Added,
 }
 
 /// Copies the subject's handle into each event's delivery, as back-channel
@@ -108,7 +132,7 @@ async fn insert<C: Channel<Recipient = String, Payload = u32>>(pool: &PgPool) ->
 /// Claims the next due delivery of `C`.
 async fn claim<C: Channel>(pool: &PgPool, lease: Duration) -> Option<Delivery<C>> {
     DeliveryRepository::from_pool(pool)
-        .claim::<C>(lease)
+        .claim::<C>(lease, MAX_AGE)
         .await
         .expect("claim")
 }
@@ -318,6 +342,7 @@ async fn operators_retry_and_cancel_deliveries() {
     let repository = || DeliveryRepository::from_pool(&pool);
 
     let attempt = next().await.expect("first attempt");
+    let first_expiry = attempt.expires_at;
     repository().cancel(id).await.expect("cancel");
     assert!(matches!(
         finish(&pool, &attempt, &DeliveryOutcome::Succeeded).await,
@@ -337,7 +362,7 @@ async fn operators_retry_and_cancel_deliveries() {
     let retried = next().await.expect("retried");
     assert_eq!((retried.id, retried.attempts), (id, 2));
     assert!(
-        retried.retried_at.is_some(),
+        retried.expires_at > first_expiry,
         "retrying restarts the maximum age"
     );
     finish(&pool, &retried, &failed()).await.expect("fail");
@@ -357,6 +382,93 @@ async fn operators_retry_and_cancel_deliveries() {
         repository().cancel(id).await,
         Err(DatabaseError::NotFound)
     ));
+}
+
+/// During a deploy, the previous release's worker leaves a delivery it cannot
+/// decode for the next release, without spending an attempt, and still sends the
+/// ones it can. A delivery no release decodes fails at its maximum age.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn an_older_release_leaves_a_delivery_it_cannot_decode_to_a_newer_one() {
+    let pool = Database::test_pool().await;
+    clear::<NewRelease>(&pool).await;
+    let queue = async |payload| {
+        DeliveryRepository::from_pool(&pool)
+            .insert::<NewRelease>(
+                None,
+                NewDelivery {
+                    destination: "someone@example.com".into(),
+                    recipient: "recipient".into(),
+                    payload,
+                },
+            )
+            .await
+            .expect("insert")
+    };
+    let listed = async |id| {
+        DeliveryRepository::from_pool(&pool)
+            .list(None, Some(NewRelease::NAME), 10)
+            .await
+            .expect("list")
+            .into_iter()
+            .find(|delivery| delivery.id == id)
+            .expect("listed")
+    };
+    let added = queue(NewMessage::Added).await;
+    let known = queue(NewMessage::Known).await;
+
+    let old = claim::<OldRelease>(&pool, LEASE)
+        .await
+        .expect("the old release sends what it decodes");
+    assert_eq!(old.id, known);
+    finish(&pool, &old, &DeliveryOutcome::Succeeded)
+        .await
+        .expect("succeeded");
+    assert!(
+        claim::<OldRelease>(&pool, LEASE).await.is_none(),
+        "the old release leaves what it cannot decode"
+    );
+    let waiting = listed(added).await;
+    assert_eq!(
+        (
+            waiting.status,
+            waiting.attempts,
+            waiting.last_error.as_deref()
+        ),
+        (DeliveryStatus::Pending, 0, Some(UNDECODABLE))
+    );
+
+    // The new release claims it once it is due again.
+    assert!(claim::<NewRelease>(&pool, LEASE).await.is_none());
+    sqlx::query("UPDATE deliveries SET next_attempt_at = now() WHERE id = $1")
+        .bind(added.as_uuid())
+        .execute(&pool)
+        .await
+        .expect("due");
+    let new = claim::<NewRelease>(&pool, LEASE)
+        .await
+        .expect("the new release sends it");
+    assert_eq!(
+        (new.id, &new.payload, new.attempts),
+        (added, &NewMessage::Added, 1)
+    );
+    finish(&pool, &new, &DeliveryOutcome::Succeeded)
+        .await
+        .expect("succeeded");
+
+    let undecoded = queue(NewMessage::Added).await;
+    let expired = DeliveryRepository::from_pool(&pool)
+        .claim::<OldRelease>(LEASE, Duration::ZERO)
+        .await;
+    assert!(matches!(
+        expired,
+        Err(DatabaseError::InvalidStoredData { .. })
+    ));
+    let failed = listed(undecoded).await;
+    assert_eq!(
+        (failed.status, failed.last_error.as_deref()),
+        (DeliveryStatus::Failed, Some(UNDECODABLE))
+    );
 }
 
 /// Ending a session queues, in the revocation's transaction, one logout token per

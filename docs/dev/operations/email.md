@@ -88,6 +88,10 @@ Auth queues every message as a delivery, which a worker sends (see
   while the Resend key was wrong goes out once auth runs with the right one.
 - A delivery's recorded error is the SMTP reply code, never its text, which can
   quote the recipient.
+- An email the running release can't decode, such as one of a kind the release
+  being deployed added, waits for a release that can, until its channel's
+  `MAX_AGE`. Its last error reads `stored recipient or payload does not decode`
+  meanwhile (see [the delivery queue](../architecture/delivery-queue.md#life-of-a-delivery)).
 
 `auth-service deliveries list --channel email --status failed` lists what didn't
 go out, and the Auth overview dashboard's **Deliveries** row charts the queue

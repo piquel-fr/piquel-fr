@@ -81,8 +81,9 @@ static BACKLOGS: Backlogs = Backlogs(Mutex::new(BTreeMap::new()));
 pub(crate) trait Sender: Send + Sync + 'static {
     /// The channel sent, which defines what its deliveries hold.
     type Channel: Channel;
-    /// How long after its creation a delivery keeps being retried. A retryable
-    /// failure that would retry later than this fails it instead.
+    /// How long after its creation, or an operator's last retry, a delivery keeps
+    /// being retried. A retryable failure that would retry later than this fails it
+    /// instead, and so does a delivery no release could decode by then.
     const MAX_AGE: Duration;
     /// How long a worker holds a claimed delivery: well beyond [`SEND_TIMEOUT`].
     /// Tests shorten it to see another replica take over a stalled attempt.
@@ -254,7 +255,7 @@ impl<S: Sender> Worker<S> {
             let claimed = tokio::select! {
                 biased;
                 () = shutdown.requested() => return,
-                claimed = deliveries.claim::<S::Channel>(S::LEASE) => claimed,
+                claimed = deliveries.claim::<S::Channel>(S::LEASE, S::MAX_AGE) => claimed,
             };
             match claimed {
                 Ok(Some(delivery)) => {
@@ -302,24 +303,10 @@ impl<S: Sender> Worker<S> {
         }
     }
 
-    /// When `delivery` stops being attempted: [`Sender::MAX_AGE`] after it was
-    /// created, or after an operator last retried it.
-    fn expires(delivery: &Delivery<S::Channel>) -> DateTime<Utc> {
-        TimeDelta::from_std(S::MAX_AGE)
-            .ok()
-            .and_then(|age| {
-                delivery
-                    .retried_at
-                    .unwrap_or(delivery.created_at)
-                    .checked_add_signed(age)
-            })
-            .unwrap_or(DateTime::<Utc>::MAX_UTC)
-    }
-
     /// Sends `delivery` within [`SEND_TIMEOUT`], unless it expired while it waited,
     /// and records the outcome, which is discarded if the lease was lost meanwhile.
     async fn send(sender: Arc<S>, database: Database, delivery: Delivery<S::Channel>) {
-        let expires = Self::expires(&delivery);
+        let expires = delivery.expires_at;
         let result = if Utc::now() > expires {
             Err(DeliveryError::Permanent(Failure::Expired))
         } else {
