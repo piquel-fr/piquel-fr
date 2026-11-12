@@ -59,7 +59,7 @@ for the audit keys, which change in a commit.
 ## Rotate a generated secret
 
 Check the secret's row in [generated secrets](#generated-secrets) first: some
-must never be regenerated, and others need care.
+change another way, and others need care.
 
 1. Generate a new value:
 
