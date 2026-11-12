@@ -28,8 +28,8 @@ use sourceorigin_common::{
 };
 use sourceorigin_repository::{
     CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, InsertRefreshFamily,
-    InsertRefreshToken, RefreshRedemption, RefreshRedemptionError, SessionAuthentication,
-    StoredOidcClient,
+    InsertRefreshToken, RefreshOutcome, RefreshRedemption, RefreshRedemptionError,
+    RefreshSuccessor, SessionAuthentication, StoredOidcClient,
 };
 use sourceorigin_telemetry::{Counter, Label};
 
@@ -406,7 +406,9 @@ impl OidcApplication {
 
     /// Redeems the authenticated client's valid token, and commits replay or policy
     /// revocation before rejecting it. A public client's token rotates: the response
-    /// carries its replacement. A confidential client keeps its token, so the
+    /// carries its replacement. The same token presented again within seconds of
+    /// its rotation, by a second tab or a retry, is answered with that same
+    /// replacement and writes nothing. A confidential client keeps its token, so the
     /// response carries none and the refresh writes nothing. The new tokens report
     /// the grant's original authentication, not the session's current one (OIDC
     /// Core §12.2).
@@ -451,13 +453,15 @@ impl OidcApplication {
             .find_by_id(redeemed.session_id)
             .await?
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
-        let refresh_token = match redemption {
-            RefreshRedemption::Rotate => {
-                let (token, raw) = self.new_refresh(redeemed.family_id, session.expires_at)?;
+        let refresh_token = match &redeemed.outcome {
+            RefreshOutcome::Kept => None,
+            RefreshOutcome::Rotated => {
+                let (token, raw) =
+                    self.new_refresh(redeemed.family_id, session.expires_at, Some(&opaque))?;
                 tx.tokens().insert_token(&token).await?;
                 Some(raw)
             }
-            RefreshRedemption::Keep => None,
+            RefreshOutcome::Retried(successor) => Some(self.rebuild_successor(&opaque, successor)?),
         };
         let email = tx.oidc().primary_email(user.id).await?;
         let tokens = TokenGrant {
@@ -490,7 +494,7 @@ impl OidcApplication {
             .await?
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let family_id = TokenId::new();
-        let (token, raw) = self.new_refresh(family_id, session.expires_at)?;
+        let (token, raw) = self.new_refresh(family_id, session.expires_at, None)?;
         tx.tokens()
             .insert_family(
                 &InsertRefreshFamily {
@@ -510,13 +514,28 @@ impl OidcApplication {
     }
 
     /// Generates a refresh token of `family_id`, accepted until `expires_at`, the
-    /// end of its browser session. Returns the row to insert and the encoded token.
+    /// end of its browser session. A family's first token is random; the
+    /// successor of a rotated `predecessor` has its secret derived from the
+    /// predecessor's, so a retry can be answered with it again
+    /// ([`Self::rebuild_successor`]). Returns the row to insert and the encoded
+    /// token.
     fn new_refresh(
         &self,
         family_id: TokenId,
         expires_at: DateTime<Utc>,
+        predecessor: Option<&OpaqueToken>,
     ) -> Result<(InsertRefreshToken, String), OAuthError> {
-        let opaque = OpaqueToken::new(TokenPrefix::RefreshToken)?;
+        let opaque = match predecessor {
+            None => OpaqueToken::new(TokenPrefix::RefreshToken)?,
+            Some(predecessor) => {
+                let id = TokenId::new();
+                OpaqueToken {
+                    id,
+                    secret: self.digest_keys.successor(id, &predecessor.secret),
+                    prefix: TokenPrefix::RefreshToken,
+                }
+            }
+        };
         let (secret_digest, digest_key) = self.token_digest(&opaque);
         let token = InsertRefreshToken {
             id: opaque.id,
@@ -524,8 +543,33 @@ impl OidcApplication {
             secret_digest,
             digest_key,
             expires_at,
+            predecessor_id: predecessor.map(|predecessor| predecessor.id),
         };
         Ok((token, opaque.encoded()))
+    }
+
+    /// The encoded `successor` that the rotation of `presented` issued moments
+    /// ago, rebuilt from `presented`, since only its digest is stored. Fails only
+    /// if the token digest key changed in between and no accepted key derives it
+    /// any more: the refresh is then refused, and revokes nothing.
+    fn rebuild_successor(
+        &self,
+        presented: &OpaqueToken,
+        successor: &RefreshSuccessor,
+    ) -> Result<String, OAuthError> {
+        let secret = self
+            .digest_keys
+            .rebuild_successor(successor.id, &presented.secret, &successor.secret_digest)
+            .ok_or_else(|| {
+                OAuthCode::InvalidGrant
+                    .reject("refresh_token was already replaced; use its replacement")
+            })?;
+        Ok(OpaqueToken {
+            id: successor.id,
+            secret,
+            prefix: TokenPrefix::RefreshToken,
+        }
+        .encoded())
     }
 
     /// Revokes the authenticated client’s refresh family, concealing invalid-token existence.

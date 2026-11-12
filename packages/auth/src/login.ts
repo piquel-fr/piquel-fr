@@ -199,8 +199,8 @@ export class Login {
 
   /**
    * Signs users in with `client`, as `options` say. A public client, which has no
-   * secret, throws a `TypeError`: its refresh token rotates, so two requests
-   * refreshing one session would revoke it. Invalid options throw one too.
+   * secret, throws a `TypeError`: its refresh token rotates, so a copy of the
+   * session cookie refreshing more than a few seconds after another would revoke it. Invalid options throw one too.
    */
   constructor(client: Client, options: LoginOptions) {
     const { scopes = [], afterLogin = '/', afterLogout, mount = '/auth' } = options;

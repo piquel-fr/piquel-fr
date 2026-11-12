@@ -45,7 +45,15 @@ pub struct InsertRefreshToken {
     pub digest_key: String,
     /// When the token stops being accepted.
     pub expires_at: DateTime<Utc>,
+    /// The token this one replaced when it rotated; `None` for a family's first.
+    pub predecessor_id: Option<TokenId>,
 }
+
+/// How long after a rotation its consumed token still redeems, answered with
+/// the successor that rotation issued ([`RefreshOutcome::Retried`]). Two tabs of
+/// a browser app refreshing at once, or a retry after a lost response, present
+/// the same token moments apart; later, a second use is a replay.
+pub const REFRESH_REUSE_SECONDS: f64 = 10.0;
 
 /// What redeeming a refresh token does to it, set by the client's kind.
 ///
@@ -72,6 +80,31 @@ impl From<ClientKind> for RefreshRedemption {
     }
 }
 
+/// What redeeming a refresh token did to it, so which refresh token the response
+/// carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RefreshOutcome {
+    /// The token stays valid: the response carries none.
+    Kept,
+    /// The token is consumed: the caller adds its successor to the family before
+    /// committing, and the response carries it.
+    Rotated,
+    /// The token was consumed less than [`REFRESH_REUSE_SECONDS`] ago, and its
+    /// successor is still the family's live token: the response carries that
+    /// successor again, and nothing is written.
+    Retried(RefreshSuccessor),
+}
+
+/// The live successor of a token that rotated moments ago. Only its digest is
+/// stored, so the caller rebuilds its secret from the presented token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefreshSuccessor {
+    /// The successor's identifier.
+    pub id: TokenId,
+    /// Digest of the successor's secret.
+    pub secret_digest: Vec<u8>,
+}
+
 /// The grant behind a refresh token redeemed by
 /// [`TokenRepository::redeem_refresh`].
 #[derive(Clone, Debug)]
@@ -90,6 +123,8 @@ pub struct RedeemedRefreshToken {
     pub scopes: Vec<String>,
     /// How the session had authenticated when the grant's code was issued.
     pub authentication: SessionAuthentication,
+    /// What the redemption did to the token.
+    pub outcome: RefreshOutcome,
 }
 
 /// A refresh grant of an account: one family, without its tokens.
@@ -128,7 +163,8 @@ pub enum RefreshRedemptionError {
     /// revoked or disabled.
     #[error("the refresh token is invalid")]
     Invalid,
-    /// The token was already used; its family is now revoked.
+    /// The token was already used, and is not a retry within
+    /// [`REFRESH_REUSE_SECONDS`] of its rotation; its family is now revoked.
     #[error("the refresh token was replayed")]
     Replay {
         /// Account whose grant was revoked.
@@ -188,13 +224,15 @@ impl TokenRepository<'_> {
             self,
             execute,
             sqlx::query!(
-                "INSERT INTO refresh_tokens (id, family_id, secret_digest, expires_at, digest_key)
-                VALUES ($1, $2, $3, $4, $5)",
+                "INSERT INTO refresh_tokens (
+                    id, family_id, secret_digest, expires_at, digest_key, predecessor_id
+                ) VALUES ($1, $2, $3, $4, $5, $6)",
                 token.id.as_uuid(),
                 token.family_id.as_uuid(),
                 token.secret_digest,
                 token.expires_at,
                 token.digest_key,
+                token.predecessor_id.map(TokenId::as_uuid),
             )
         )?;
         Ok(())
@@ -307,9 +345,40 @@ impl TokenRepository<'_> {
         Ok(())
     }
 
+    /// The live successor of `id`, if `id` was consumed less than
+    /// [`REFRESH_REUSE_SECONDS`] ago. Only a family's newest rotation qualifies:
+    /// once the successor is consumed in turn, `id` has none.
+    async fn retried_successor(
+        &mut self,
+        id: TokenId,
+    ) -> Result<Option<RefreshSuccessor>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                RefreshSuccessor,
+                r#"SELECT s.id AS "id: TokenId", s.secret_digest
+                FROM refresh_tokens t
+                JOIN refresh_tokens s ON s.predecessor_id = t.id
+                WHERE t.id = $1
+                AND t.consumed_at > now() - make_interval(secs => $2)
+                AND s.consumed_at IS NULL
+                AND s.expires_at > now()"#,
+                id.as_uuid(),
+                REFRESH_REUSE_SECONDS,
+            )
+        )
+    }
+
     /// Redeems a refresh token, consuming it if `redemption` rotates it, and
-    /// returns its grant. A replayed (consumed) token revokes its family whatever
-    /// the redemption.
+    /// returns its grant. A consumed token revokes its family as a replay, unless
+    /// it rotates, was consumed less than [`REFRESH_REUSE_SECONDS`] ago, and its
+    /// successor is still unused: that refresh is answered with that successor
+    /// ([`RefreshOutcome::Retried`]).
+    ///
+    /// Concurrent redemptions of one token are serialized by its family's lock:
+    /// the second one waits for the first to commit its successor, then finds
+    /// it, so both answer with the same token and never revoke the family.
     ///
     /// Must run in a transaction kept open through token issuance, insertion of
     /// a rotated token's replacement, and commit: the redemption locks the
@@ -372,10 +441,18 @@ impl TokenRepository<'_> {
         )?
         .ok_or(RefreshRedemptionError::Invalid)?;
         let (family_id, user_id) = (row.family_id, row.user_id);
-        if row.consumed_at.is_some() {
-            self.revoke_family(family_id).await?;
-            return Err(RefreshRedemptionError::Replay { user_id, family_id });
-        }
+        let outcome = match (row.consumed_at, redemption) {
+            (None, RefreshRedemption::Rotate) => RefreshOutcome::Rotated,
+            (None, RefreshRedemption::Keep) => RefreshOutcome::Kept,
+            (Some(_), RefreshRedemption::Rotate) => match self.retried_successor(id).await? {
+                Some(successor) => RefreshOutcome::Retried(successor),
+                None => return Err(self.replay(user_id, family_id).await),
+            },
+            // A token consumed before its client stopped rotating is a replay.
+            (Some(_), RefreshRedemption::Keep) => {
+                return Err(self.replay(user_id, family_id).await);
+            }
+        };
         // The grant's JSON is decoded only after the replay check, so a replayed
         // token revokes its family even if that JSON is invalid.
         let strings = decode::<Vec<String>>;
@@ -388,7 +465,7 @@ impl TokenRepository<'_> {
             self.revoke_family(family_id).await?;
             return Err(RefreshRedemptionError::Policy { user_id, family_id });
         }
-        if redemption == RefreshRedemption::Rotate
+        if outcome == RefreshOutcome::Rotated
             && run!(
                 self,
                 execute,
@@ -410,7 +487,16 @@ impl TokenRepository<'_> {
             audience: row.audience,
             scopes,
             authentication: decode("authentication", row.authentication)?,
+            outcome,
         })
+    }
+
+    /// Revokes a replayed token's family, returning the replay to reject it with.
+    async fn replay(&mut self, user_id: UserId, family_id: TokenId) -> RefreshRedemptionError {
+        match self.revoke_family(family_id).await {
+            Ok(()) => RefreshRedemptionError::Replay { user_id, family_id },
+            Err(error) => error.into(),
+        }
     }
 
     /// Revokes the family of the token matching `id` and any of `digests`, if any.
@@ -488,6 +574,28 @@ impl TokenRepository<'_> {
             sqlx::query_scalar!(
                 "SELECT id FROM refresh_token_families WHERE id = $1 FOR UPDATE",
                 id.as_uuid(),
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Moves the consumption of token `id` back past [`REFRESH_REUSE_SECONDS`],
+    /// for tests of a reuse after the window without waiting it out.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn end_reuse_window(&mut self, id: TokenId) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE refresh_tokens
+                SET consumed_at = consumed_at - make_interval(secs => $2)
+                WHERE id = $1",
+                id.as_uuid(),
+                REFRESH_REUSE_SECONDS,
             )
         )?;
         Ok(())

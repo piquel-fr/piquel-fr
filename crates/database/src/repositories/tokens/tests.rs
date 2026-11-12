@@ -1,7 +1,10 @@
 //! Focused persistence and security contract tests.
 use crate::Database;
 
-use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRedemption, RefreshRedemptionError};
+use super::{
+    InsertRefreshFamily, InsertRefreshToken, RefreshOutcome, RefreshRedemption,
+    RefreshRedemptionError, RefreshSuccessor,
+};
 use crate::repositories::{OidcRepository, SessionRepository, TokenRepository};
 use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication, SessionScope};
 use chrono::{Duration, Utc};
@@ -149,6 +152,7 @@ impl Grant {
                     secret_digest: digest.clone(),
                     digest_key: "test".into(),
                     expires_at: Utc::now() + Duration::hours(1),
+                    predecessor_id: None,
                 },
             )
             .await
@@ -377,6 +381,113 @@ async fn a_kept_token_writes_nothing_and_holds_its_locks_until_commit() {
         .await
         .expect("the token rotates");
     assert_eq!(written(&mut tx).await, before + 1, "the consumed mark");
+}
+
+/// Two redemptions of one rotating token at once: the second waits for the
+/// first's family lock, then finds the successor the first committed and answers
+/// with it, writing nothing. Once that successor rotates in turn, the first token
+/// is no longer the family's previous one, so presenting it is a replay, even
+/// within the reuse window.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn a_concurrent_redemption_answers_with_the_same_successor() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let (first, first_digest) = Grant::new(&pool, &client)
+        .await
+        .family(&mut TokenRepository::from_pool(&pool), &client)
+        .await;
+    let mut first_tx = pool.begin().await.expect("first redemption");
+    let redeemed = TokenRepository::from_connection(&mut first_tx)
+        .redeem_refresh(
+            first,
+            std::slice::from_ref(&first_digest),
+            client.as_str(),
+            RefreshRedemption::Rotate,
+        )
+        .await
+        .expect("first redemption");
+    let mut retry = pool.begin().await.expect("retry");
+    let retry_backend = Database::backend(&mut retry).await;
+    let (retry_digest, retry_client) = (first_digest.clone(), client.clone());
+    let retry_task = tokio::spawn(async move {
+        let before = written(&mut retry).await;
+        let result = TokenRepository::from_connection(&mut retry)
+            .redeem_refresh(
+                first,
+                std::slice::from_ref(&retry_digest),
+                retry_client.as_str(),
+                RefreshRedemption::Rotate,
+            )
+            .await;
+        let wrote = written(&mut retry).await - before;
+        retry.commit().await.expect("commit retry");
+        (result, wrote)
+    });
+    Database::wait_for_lock(&pool, retry_backend).await;
+    let second = TokenId::new();
+    let second_digest = second.as_uuid().as_bytes().repeat(2);
+    TokenRepository::from_connection(&mut first_tx)
+        .insert_token(&InsertRefreshToken {
+            id: second,
+            family_id: redeemed.family_id,
+            secret_digest: second_digest.clone(),
+            digest_key: "test".into(),
+            expires_at: Utc::now() + Duration::hours(1),
+            predecessor_id: Some(first),
+        })
+        .await
+        .expect("successor");
+    first_tx.commit().await.expect("commit first redemption");
+    let (result, wrote) = retry_task.await.expect("retry task");
+    let retried = result.expect("the retry redeems");
+    assert_eq!(
+        retried.outcome,
+        RefreshOutcome::Retried(RefreshSuccessor {
+            id: second,
+            secret_digest: second_digest.clone(),
+        })
+    );
+    assert_eq!(wrote, 0, "the retry writes nothing");
+
+    let mut tx = pool.begin().await.expect("transaction");
+    let mut tokens = TokenRepository::from_connection(&mut tx);
+    let rotated = tokens
+        .redeem_refresh(
+            second,
+            std::slice::from_ref(&second_digest),
+            client.as_str(),
+            RefreshRedemption::Rotate,
+        )
+        .await
+        .expect("the successor rotates");
+    assert_eq!(rotated.outcome, RefreshOutcome::Rotated);
+    let third = TokenId::new();
+    tokens
+        .insert_token(&InsertRefreshToken {
+            id: third,
+            family_id: redeemed.family_id,
+            secret_digest: third.as_uuid().as_bytes().repeat(2),
+            digest_key: "test".into(),
+            expires_at: Utc::now() + Duration::hours(1),
+            predecessor_id: Some(second),
+        })
+        .await
+        .expect("its successor");
+    tx.commit().await.expect("commit rotation");
+    let mut tx = pool.begin().await.expect("transaction");
+    let result = TokenRepository::from_connection(&mut tx)
+        .redeem_refresh(
+            first,
+            std::slice::from_ref(&first_digest),
+            client.as_str(),
+            RefreshRedemption::Rotate,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(RefreshRedemptionError::Replay { family_id, .. }) if family_id == redeemed.family_id),
+        "{result:?}"
+    );
 }
 
 /// A replay racing the first redemption waits for it, then revokes the family

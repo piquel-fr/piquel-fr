@@ -104,7 +104,8 @@ export type Tokens = {
   /**
    * A refresh token, when `offline_access` was granted. Keep it server-side. Auth
    * rotates a public client's on every refresh, and revokes the whole family if an old
-   * one is reused; a confidential client's does not rotate.
+   * one is reused, unless it repeats the latest refresh within 10 seconds, which gets
+   * the same new token; a confidential client's does not rotate.
    */
   refreshToken?: string;
 };

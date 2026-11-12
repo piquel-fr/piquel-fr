@@ -78,10 +78,13 @@ detail.
   hours, ends after 30 minutes without a request, and starts only with a passkey
   proved for it. Access tokens last five minutes. Refresh tokens
   stop when their central session expires or is revoked; a public client's rotate
-  and detect reuse. Ending a
+  and detect reuse, except a repeat of the newest rotation within 10 seconds,
+  which gets the same new token. Ending a
   session tells the clients that registered a back-channel logout URI, which end
   their own sessions; already issued access tokens stay valid until they expire.
 - Browser state and opaque secrets are random, and hashed where lookup is needed.
+  A rotated refresh token's successor is derived from it instead, so a retry
+  can be answered with it again.
   Browser flows are bound, by a cookie, to the browser that started them: WebAuthn
   ceremonies, a social sign-in's provider redirect, a pending social signup or
   link, the offer to restore an account, and a sign-in to the admin dashboard.

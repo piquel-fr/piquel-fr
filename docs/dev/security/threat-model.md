@@ -61,7 +61,7 @@ own. It builds on the [security boundaries](boundaries.md); the
 | --- | --- |
 | A code or token used by another app, or sent elsewhere | Exact redirect URIs, S256 PKCE for every client, codes tried once, and tokens bound to their audience ([OIDC](../../user/reference/oidc.md#codes-tokens-and-consent)). |
 | An app impersonating another, or SourceOrigin | Console apps are never trusted, so the consent page shows unless the user already consented to the scopes asked, naming the host it returns to and labelling the app unverified with its owner's handle. `prompt=consent` forces it. Their names may not contain a well-known brand ([OIDC clients](../operations/clients.md)). |
-| An app keeping access | The owner, an administrator or an operator removes an app's access, which ends its refresh grants and outstanding codes. A public client's refresh token rotates, and replaying a spent one revokes the grant. |
+| An app keeping access | The owner, an administrator or an operator removes an app's access, which ends its refresh grants and outstanding codes. A public client's refresh token rotates, and replaying a spent one revokes the grant, unless it repeats the newest rotation within 10 seconds, which answers with the same new token. |
 | A logout URI aimed at the internal network | Deliveries go only over HTTPS to public addresses, and never follow a redirect ([outbound HTTP](../architecture/delivery-queue.md#outbound-http)). |
 | Registering apps in bulk | An account may hold 10 apps and register 20 a day ([OIDC clients](../operations/clients.md)). |
 

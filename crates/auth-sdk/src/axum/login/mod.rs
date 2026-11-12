@@ -262,7 +262,8 @@ impl LoginRoutes {
     ///
     /// # Errors
     /// [`PublicClient`] if `client` has no secret: a public client's refresh token
-    /// rotates, so two requests refreshing the same session would revoke it.
+    /// rotates, so a copy of the session cookie refreshing more than a few seconds
+    /// after another would revoke it.
     pub fn new(client: Client, cookie_key: CookieKey) -> Result<Self, PublicClient> {
         if matches!(client.config().credentials, Credentials::None) {
             return Err(PublicClient);

@@ -179,6 +179,25 @@ fails on it. What it does depends on the client's kind:
 - A **confidential** client keeps its token, which is useless without the
   client's secret, so its refresh writes nothing.
 
+A public client's retry is not a replay. Two tabs refreshing at once, or a
+client retrying after a lost response, present the same token moments apart. A
+token consumed less than `REFRESH_REUSE_SECONDS` (10) ago, whose successor is
+still unused, is answered with that same successor, and the refresh writes
+nothing. Two concurrent refreshes queue on the family's lock, so the second
+finds the successor the first committed: they never mint two. Only the family's
+previous token qualifies: once the successor rotates in turn, or the window has
+passed, the old token is a replay.
+
+A successor names the token it replaced (`refresh_tokens.predecessor_id`,
+unique), and only its digest is stored, like every token's. To answer a retry
+with it, auth derives a successor's secret rather than drawing it at random: an
+HMAC of the replaced token's secret, under a key derived from the token digest
+key and keyed by the successor's ID (`TokenDigestKeys::successor`). A retry
+presents the replaced token, so auth derives the successor again and checks it
+against the stored digest. The database holds nothing usable, not even sealed:
+deriving a successor takes both the key and the token it replaced, and auth
+does it for a retry only within the window.
+
 A family whose client no longer allows refresh, its audience or its scopes is
 revoked on its next use (`policy_rejected`). A refresh may narrow the scopes,
 never add any. The new tokens keep reporting the family's original

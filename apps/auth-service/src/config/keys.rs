@@ -10,14 +10,18 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use secrecy::zeroize::Zeroizing;
-use sourceorigin_common::config::{
-    ConfigurationError, Origin, SecretBytes, SecretReference, Variable,
+use sourceorigin_common::{
+    TokenId,
+    config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable},
 };
 use sourceorigin_crypto::{CryptoError, Digest, KeyEncryptionKey, NoteKey, NoteVerifier, Secret};
 use std::sync::Arc;
 
 /// Separates opaque token digests from every other use of a token digest key.
 const TOKEN_DIGEST_CONTEXT: &[u8] = b"sourceorigin-refresh-token-digest-v1";
+/// Separates the key deriving a rotated refresh token's successor from every
+/// other use of a token digest key.
+const REFRESH_SUCCESSOR_CONTEXT: &[u8] = b"sourceorigin-refresh-token-successor-v1";
 /// Separates the email verification key from every other use of a token digest
 /// key.
 const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"sourceorigin-email-verification-token-v1";
@@ -143,6 +147,9 @@ pub(crate) struct TokenDigestKey {
     key: Secret,
     /// Identifies the key in stored records, without revealing it.
     fingerprint: String,
+    /// Derives the secret of a rotated refresh token's successor from the
+    /// rotated token's own ([`TokenDigestKeys::successor`]).
+    successor: Secret,
     /// The email verification key, derived from the same bytes. It derives new
     /// links' tokens while this key is current, and rebuilds queued ones while it
     /// is accepted ([`LinkKeys`]).
@@ -159,8 +166,8 @@ pub(crate) struct TokenDigestKey {
 }
 
 impl TokenDigestKey {
-    /// Derives the HMAC, verification, recovery, unsubscribe, sign-out and
-    /// invitation link keys from configured bytes.
+    /// Derives the HMAC, refresh successor, verification, recovery,
+    /// unsubscribe, sign-out and invitation link keys from configured bytes.
     pub(crate) fn derive(bytes: &[u8]) -> Self {
         let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT);
         let fingerprint = URL_SAFE_NO_PAD
@@ -168,6 +175,7 @@ impl TokenDigestKey {
         Self {
             key,
             fingerprint,
+            successor: Secret::derive(bytes, REFRESH_SUCCESSOR_CONTEXT),
             verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT),
             recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT),
             unsubscribe: Secret::derive(bytes, UNSUBSCRIBE_LINK_CONTEXT),
@@ -179,6 +187,14 @@ impl TokenDigestKey {
     /// The digest of `secret` under this key.
     fn digest(&self, secret: &Secret) -> Digest {
         Digest::hmac(self.key.as_bytes(), secret.as_bytes())
+    }
+
+    /// The secret of the successor `id` of the refresh token whose secret is
+    /// `predecessor`, under this key: an HMAC of the predecessor's secret, keyed
+    /// by an HMAC of `id`, so no buffer ever holds the secret beside the ID.
+    fn successor(&self, id: TokenId, predecessor: &Secret) -> Secret {
+        let keyed = Secret::derive(self.successor.as_bytes(), id.as_uuid().as_bytes());
+        Secret::derive(keyed.as_bytes(), predecessor.as_bytes())
     }
 }
 
@@ -266,11 +282,46 @@ impl TokenDigestKeys {
         (self.current.digest(secret), &self.current.fingerprint)
     }
 
-    /// Every digest a presented `secret` may be stored as, one per accepted key.
-    pub(crate) fn accepted(&self, secret: &Secret) -> Vec<Vec<u8>> {
+    /// The secret of a new refresh token `id` replacing the one whose secret is
+    /// `predecessor`, derived under the current key.
+    ///
+    /// A public client that presents its rotated token again within seconds,
+    /// from a second tab or as a retry, gets this same successor back. Deriving
+    /// it lets auth rebuild it from the presented token
+    /// ([`Self::rebuild_successor`]) while storing only its digest: a database
+    /// copy holds no usable refresh token, sealed or not, and only someone who
+    /// holds both the predecessor and this key can derive it. The predecessor
+    /// rebuilds it only within the reuse window; after that it is a replay.
+    pub(crate) fn successor(&self, id: TokenId, predecessor: &Secret) -> Secret {
+        self.current.successor(id, predecessor)
+    }
+
+    /// The successor secret [`Self::successor`] derived for `id` from
+    /// `predecessor`: the one an accepted key derives and digests as the stored
+    /// `digest`, as the key that was current did. `None` once no accepted key
+    /// does.
+    pub(crate) fn rebuild_successor(
+        &self,
+        id: TokenId,
+        predecessor: &Secret,
+        digest: &[u8],
+    ) -> Option<Secret> {
+        self.keys().find_map(|key| {
+            let secret = key.successor(id, predecessor);
+            Digest::constant_time_eq(key.digest(&secret).as_bytes(), digest).then_some(secret)
+        })
+    }
+
+    /// The current key, then the accepted one, if any.
+    fn keys(&self) -> impl Iterator<Item = &TokenDigestKey> {
         [Some(&self.current), self.accepted.as_ref()]
             .into_iter()
             .flatten()
+    }
+
+    /// Every digest a presented `secret` may be stored as, one per accepted key.
+    pub(crate) fn accepted(&self, secret: &Secret) -> Vec<Vec<u8>> {
+        self.keys()
             .map(|key| key.digest(secret).as_bytes().to_vec())
             .collect()
     }

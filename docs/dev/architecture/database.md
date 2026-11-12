@@ -172,7 +172,8 @@ Important invariants:
   check expires the code at `-infinity` instead of consuming it, so it can't be
   tried again and `oidc_session_clients` never records its client.
   Refresh tokens remain bound to their client/session. A public client's rotate
-  transactionally and reuse revokes the family; a confidential client keeps its
+  transactionally, each new token naming the one it replaced, and reuse revokes
+  the family, unless it repeats the newest rotation within seconds; a confidential client keeps its
   own, and its refresh writes nothing but still holds the rotation's locks.
 - Each refresh family records the code it was redeemed from. Redeeming that code
   again with its secret, as the same client, revokes the family and records the
