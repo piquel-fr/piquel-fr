@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries\n                SET attempts = attempts - 1,\n                    next_attempt_at = now() + $3,\n                    last_error = $4,\n                    claim_token = NULL,\n                    leased_until = NULL\n                WHERE id = $1 AND claim_token = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Interval",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5536142913ad35c1ed0ebb922fc3a1ae6eb8fa4861830d38e240f053ed360d75"
+}

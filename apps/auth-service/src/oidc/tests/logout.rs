@@ -91,7 +91,10 @@ async fn logout_posts_a_logout_token_to_the_clients_of_the_session() {
         .app
         .database
         .deliveries()
-        .claim::<BackchannelLogout>(std::time::Duration::from_mins(1))
+        .claim::<BackchannelLogout>(
+            std::time::Duration::from_mins(1),
+            BackchannelLogoutSender::MAX_AGE,
+        )
         .await
         .expect("claim")
     {

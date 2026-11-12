@@ -47,6 +47,15 @@ page.
 2. Every replica runs two workers per channel. A worker claims the longest-due
    delivery with `FOR UPDATE SKIP LOCKED`, sets a fresh claim token and a 60 second
    lease, and commits. Idle workers poll every second.
+
+   A delivery whose recipient or payload doesn't decode into the worker's types
+   waits for a release that can decode it. This happens during a deploy, when the
+   previous release runs beside the next one and claims, say, an email of a kind
+   only the next release knows. The worker releases it without counting an
+   attempt, records `stored recipient or payload does not decode` as its last
+   error, makes it due again in 30 seconds, and claims the next delivery. The
+   next release sends it once it is due. One that no release has decoded by its
+   channel's `MAX_AGE` fails with that error.
 3. It sends outside any transaction, with a 10 second timeout. A delivery that
    waited past its channel's `MAX_AGE`, counted from its creation or from an
    operator's last retry, fails without being sent.
@@ -200,6 +209,13 @@ change is recorded as `delivery_retried` or `delivery_cancelled`. Retrying a
 delivery makes it due now and restarts its channel's `MAX_AGE`. Cancelling an
 attempt in progress cannot stop it from reaching the receiver, but its outcome
 is discarded.
+
+A `pending` delivery whose last error is `stored recipient or payload does not
+decode` is waiting for a release that can decode it (see
+[Life of a delivery](#life-of-a-delivery)). The release being deployed sends it
+within 30 seconds. After a rollback, no running release may decode it: it fails
+at its channel's `MAX_AGE`, and you can retry it once a release that decodes it
+runs again, or cancel it.
 
 ### Metrics
 

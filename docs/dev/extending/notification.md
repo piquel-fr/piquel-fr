@@ -156,7 +156,10 @@ surface needs a change.
   action needs a `NotificationAction` variant, and each surface must say where
   it links: the notification page (`src/web/settings/notifications.rs`) and the
   email (`EmailSender::content`).
-- **During a deploy.** The previous release's email workers may claim the email
-  of a kind they don't know. They can't decode it, so they mark the delivery
-  failed. An operator retries it with `auth-service deliveries retry <id> --reason "…"` once
-  the new release serves; see [the delivery queue](../architecture/delivery-queue.md#operations).
+- **During a deploy or a rollback.** The previous release's email workers may
+  claim the email of a kind they don't know. They can't decode it, so they leave
+  it pending for the new release, which sends it up to 30 seconds later. After a
+  rollback to a release that doesn't know the kind, its emails wait, then fail
+  at the email channel's 24-hour `MAX_AGE`. An operator retries them with
+  `auth-service deliveries retry <id> --reason "…"` once a release that knows the
+  kind serves again; see [the delivery queue](../architecture/delivery-queue.md#operations).

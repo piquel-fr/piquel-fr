@@ -16,8 +16,11 @@ use std::time::Duration;
 use uuid::Uuid;
 
 /// What a claimed delivery that does not decode into its channel's types records
-/// as its error before it fails.
+/// as its error, while it waits for a release that can decode it and once it fails.
 const UNDECODABLE: &str = "stored recipient or payload does not decode";
+/// How long a worker that cannot decode a delivery leaves it: a newer release
+/// that can sends it after at most this, and this release checks it again then.
+const UNDECODABLE_DELAY: Duration = Duration::from_secs(30);
 
 /// A kind of outbound message, such as back-channel logout tokens: its stored
 /// name, the facts it copies about each recipient, and the deliveries an event
@@ -117,10 +120,9 @@ pub struct Delivery<C: Channel> {
     pub payload: C::Payload,
     /// Attempts so far, this one included.
     pub attempts: u64,
-    /// When it was created.
-    pub created_at: DateTime<Utc>,
-    /// When an operator last retried it, which restarts its channel's maximum age.
-    pub retried_at: Option<DateTime<Utc>>,
+    /// When it stops being attempted: the claim's maximum age after it was
+    /// created, or after an operator last retried it.
+    pub expires_at: DateTime<Utc>,
     /// Proves this claim when the outcome is recorded.
     claim_token: Uuid,
 }
@@ -139,10 +141,8 @@ struct ClaimedRow {
     payload: Value,
     /// Attempts so far, this one included.
     attempts: Unsigned,
-    /// When it was created.
-    created_at: DateTime<Utc>,
-    /// When an operator last retried it.
-    retried_at: Option<DateTime<Utc>>,
+    /// When it stops being attempted.
+    expires_at: DateTime<Utc>,
 }
 
 /// How an attempt ended, as [`DeliveryRepository::finish`] records it.
@@ -283,78 +283,118 @@ impl DeliveryRepository<'_> {
     }
 
     /// Claims the longest-due delivery of channel `C` for `lease`, or returns
-    /// `None` when none is due. Concurrent workers never claim the same delivery
-    /// while its lease lasts. Run it outside a transaction, so the claim commits
-    /// before the send starts.
+    /// `None` when none is due. A delivery stops being attempted `max_age` after it
+    /// was created, or after an operator last retried it. Concurrent workers never
+    /// claim the same delivery while its lease lasts. Run it outside a transaction,
+    /// so the claim commits before the send starts.
+    ///
+    /// A delivery whose recipient or payload does not decode into `C`'s types, as a
+    /// newer release's may not during a deploy, is left for a release that can
+    /// decode it: it is released without spending an attempt, due again 30
+    /// seconds later, and the claim moves on to the next due delivery.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::InvalidStoredData`] for a delivery whose recipient
-    /// or payload does not decode into `C`'s types; it is marked failed, since no
-    /// attempt could ever send it. Returns another [`DatabaseError`] if a query fails.
+    /// Returns [`DatabaseError::InvalidStoredData`] for a delivery that does not
+    /// decode once past `max_age`; it is marked failed, since no release sent it in
+    /// time. Returns another [`DatabaseError`] if a query fails.
     pub async fn claim<C: Channel>(
         &mut self,
         lease: Duration,
+        max_age: Duration,
     ) -> Result<Option<Delivery<C>>, DatabaseError> {
-        let claim_token = Uuid::now_v7();
-        // In READ COMMITTED, a row another worker claimed after this statement's
-        // snapshot is skipped while locked, and rechecked against its new lease once
-        // that claim commits, so two workers never hold the same lease.
-        let Some(row) = run!(
-            self,
-            fetch_optional,
-            sqlx::query_as!(
-                ClaimedRow,
-                r#"UPDATE deliveries
-                SET claim_token = $2, leased_until = now() + $3, attempts = attempts + 1
-                WHERE id = (
-                    SELECT d.id
-                    FROM deliveries d
-                    WHERE d.channel = $1
-                    AND d.status = 'pending'
-                    AND d.next_attempt_at <= now()
-                    AND (d.leased_until IS NULL OR d.leased_until < now())
-                    ORDER BY d.next_attempt_at
-                    LIMIT 1
-                    FOR UPDATE SKIP LOCKED
+        loop {
+            let claim_token = Uuid::now_v7();
+            // In READ COMMITTED, a row another worker claimed after this statement's
+            // snapshot is skipped while locked, and rechecked against its new lease
+            // once that claim commits, so two workers never hold the same lease.
+            let Some(row) = run!(
+                self,
+                fetch_optional,
+                sqlx::query_as!(
+                    ClaimedRow,
+                    r#"UPDATE deliveries
+                    SET claim_token = $2, leased_until = now() + $3, attempts = attempts + 1
+                    WHERE id = (
+                        SELECT d.id
+                        FROM deliveries d
+                        WHERE d.channel = $1
+                        AND d.status = 'pending'
+                        AND d.next_attempt_at <= now()
+                        AND (d.leased_until IS NULL OR d.leased_until < now())
+                        ORDER BY d.next_attempt_at
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING
+                        id AS "id: DeliveryId", event_id AS "event_id: EventId", destination,
+                        recipient, payload, attempts::bigint AS "attempts!: Unsigned",
+                        COALESCE(retried_at, created_at) + $4 AS "expires_at!""#,
+                    C::NAME,
+                    claim_token,
+                    lease as _,
+                    max_age as _,
                 )
-                RETURNING
-                    id AS "id: DeliveryId", event_id AS "event_id: EventId", destination,
-                    recipient, payload, attempts::bigint AS "attempts!: Unsigned", created_at,
-                    retried_at"#,
-                C::NAME,
-                claim_token,
-                lease as _,
-            )
-        )?
-        else {
-            return Ok(None);
-        };
-        let decoded = serde_json::from_value(row.recipient)
-            .and_then(|recipient| Ok((recipient, serde_json::from_value(row.payload)?)));
-        match decoded {
-            Ok((recipient, payload)) => Ok(Some(Delivery {
-                id: row.id,
-                event_id: row.event_id,
-                destination: row.destination,
-                recipient,
-                payload,
-                attempts: row.attempts.into(),
-                created_at: row.created_at,
-                retried_at: row.retried_at,
-                claim_token,
-            })),
-            Err(source) => {
-                let failed = DeliveryOutcome::Failed {
-                    error: UNDECODABLE.into(),
-                };
-                self.record_outcome(row.id, claim_token, &failed).await?;
-                Err(DatabaseError::InvalidStoredData {
-                    column: "recipient or payload".into(),
-                    source: source.into(),
-                })
+            )?
+            else {
+                return Ok(None);
+            };
+            let decoded = serde_json::from_value(row.recipient)
+                .and_then(|recipient| Ok((recipient, serde_json::from_value(row.payload)?)));
+            match decoded {
+                Ok((recipient, payload)) => {
+                    return Ok(Some(Delivery {
+                        id: row.id,
+                        event_id: row.event_id,
+                        destination: row.destination,
+                        recipient,
+                        payload,
+                        attempts: row.attempts.into(),
+                        expires_at: row.expires_at,
+                        claim_token,
+                    }));
+                }
+                Err(source) if row.expires_at <= Utc::now() => {
+                    let failed = DeliveryOutcome::Failed {
+                        error: UNDECODABLE.into(),
+                    };
+                    self.record_outcome(row.id, claim_token, &failed).await?;
+                    return Err(DatabaseError::InvalidStoredData {
+                        column: "recipient or payload".into(),
+                        source: source.into(),
+                    });
+                }
+                Err(_) => self.leave_undecodable(row.id, claim_token).await?,
             }
         }
+    }
+
+    /// Releases the delivery `id`, which `claim_token` holds but does not decode,
+    /// for a release that can decode it: refunds the claim's attempt and makes it
+    /// due again after [`UNDECODABLE_DELAY`].
+    async fn leave_undecodable(
+        &mut self,
+        id: DeliveryId,
+        claim_token: Uuid,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE deliveries
+                SET attempts = attempts - 1,
+                    next_attempt_at = now() + $3,
+                    last_error = $4,
+                    claim_token = NULL,
+                    leased_until = NULL
+                WHERE id = $1 AND claim_token = $2",
+                id.as_uuid(),
+                claim_token,
+                UNDECODABLE_DELAY as _,
+                UNDECODABLE,
+            )
+        )?;
+        Ok(())
     }
 
     /// Records how `delivery`'s attempt ended, unless its lease was lost: another
