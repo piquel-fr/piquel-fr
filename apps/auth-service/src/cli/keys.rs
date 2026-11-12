@@ -1,6 +1,6 @@
 //! Signing keys, key-encryption keys, token digest keys and the audit key. None
-//! needs the HTTP
-//! service, and every replica picks up a signing key change within a minute.
+//! needs the HTTP service, and every replica picks up a signing key change
+//! within a minute.
 //! Signing key commands run their admin operation, as the dashboard's signing
 //! keys page does.
 

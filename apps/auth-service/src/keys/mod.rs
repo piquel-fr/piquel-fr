@@ -653,23 +653,22 @@ impl<'t, 'c> Change<'t, 'c> {
         Ok(next)
     }
 
-    /// See [`KeyStore::rewrap`]. Every key is opened before any is written, so
-    /// one that cannot be refuses the change before it starts.
+    /// See [`KeyStore::rewrap`]. A key that cannot be opened fails the change,
+    /// whose transaction then rolls back the keys rewrapped before it.
     async fn rewrap(&mut self) -> Result<Vec<KeyId>, KeyError> {
         let keys = self.tx.signing_keys().list().await?;
-        let mut sealed = Vec::new();
-        for key in keys.iter().filter(|key| key.sealed_private_key.is_some()) {
-            let private = self.store.open(key)?;
-            sealed.push((&key.id, self.store.seal(&private, &key.id, key.key_type)?));
+        let mut rewrapped = Vec::new();
+        for key in keys
+            .into_iter()
+            .filter(|key| key.sealed_private_key.is_some())
+        {
+            let private = self.store.open(&key)?;
+            let sealed = self.store.seal(&private, &key.id, key.key_type)?;
+            self.tx.signing_keys().rewrap(&key.id, &sealed).await?;
+            self.record(&key.id, SigningKeyChange::Rewrapped).await?;
+            rewrapped.push(key.id);
         }
-        for (id, sealed_private_key) in &sealed {
-            self.tx
-                .signing_keys()
-                .rewrap(id, sealed_private_key)
-                .await?;
-            self.record(id, SigningKeyChange::Rewrapped).await?;
-        }
-        Ok(sealed.into_iter().map(|(id, _)| id.clone()).collect())
+        Ok(rewrapped)
     }
 
     /// See [`KeyStore::revoke`].

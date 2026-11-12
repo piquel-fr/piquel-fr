@@ -253,7 +253,7 @@ pub(crate) struct AdminApplication {
     audit_key: NoteVerifier,
     /// Seals what a change shows once, across its redirect.
     kek: Arc<KeyEncryptionKeys>,
-    /// The signing keys, which the signing keys page rotates and revokes.
+    /// The signing keys, which the signing keys page rotates, revokes and rewraps.
     keys: KeyStore,
     /// Every answer's Content-Security-Policy.
     policy: HeaderValue,

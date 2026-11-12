@@ -27,7 +27,7 @@ Commands:
 
 - [`auth-service serve`](#auth-service-serve): Serve the authentication service.
 - [`auth-service migrate`](#auth-service-migrate): Apply database migrations. Connected as the schema owner, also create or reset the role other commands connect as.
-- [`auth-service keys`](#auth-service-keys): Inspect, rotate and revoke signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
+- [`auth-service keys`](#auth-service-keys): Inspect, rotate, revoke and rewrap signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
 - [`auth-service user`](#auth-service-user): Search, show, disable, reactivate and recover accounts.
 - [`auth-service session`](#auth-service-session): End an account's sessions.
 - [`auth-service invite`](#auth-service-invite): Create, list, resend and revoke signup invitations.
@@ -68,7 +68,7 @@ Options:
 
 ## `auth-service keys`
 
-Inspect, rotate and revoke signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
+Inspect, rotate, revoke and rewrap signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
 
 ```text
 auth-service keys [OPTIONS] <COMMAND>

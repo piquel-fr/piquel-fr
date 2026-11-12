@@ -106,19 +106,27 @@ the old key.
 
 Each step is a change to `infra/piqueld.toml`, which reaches staging when it
 merges and production when you [promote](deploying.md#promote-to-production).
-Take each step in every environment before the next.
+Take each step in every environment before the next. The names below are for
+the first change: the next one adds `key-encryption-key-3`, and so on.
 
-1. Add the new key as accepted. Declare a generated secret for it, mount it in
-   `auth`, and point `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED` at it:
+1. Add the new key as accepted. Declare a generated secret for it, next to
+   `key-encryption-key`, and move the comment that warns against regenerating
+   it to the new one:
 
    ```toml
    [[spec.secrets]]
    name = "key-encryption-key-2"
    generate = { type = "random", bytes = 32, encoding = "base64url" }
+   ```
 
-   [spec.services.environment]
+   In the `auth` service, add the variable to its `[spec.services.environment]`
+   table, and mount the secret beside its other secrets:
+
+   ```toml
    AUTH_KEY_ENCRYPTION_KEY_ACCEPTED = "file:///run/secrets/key-encryption-key-2"
+   ```
 
+   ```toml
    [[spec.services.secrets]]
    name = "key-encryption-key-2"
    target = "/run/secrets/key-encryption-key-2"
@@ -139,21 +147,32 @@ Take each step in every environment before the next.
    Each key it rewraps records a `rewrapped` change. If a key opens under
    neither key, it changes nothing and names that key: revoke it, then rewrap
    again.
-4. Remove `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED`, and the old key's mount and
-   declaration, and deploy. Then delete the old secret in each environment:
+4. Rewrap again, just before you remove the old key, in case a replica sealed a
+   key under it since. Then remove `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED`, and the
+   old key's mount and declaration, and deploy. Once the deployment succeeded,
+   delete the old secret in each environment:
 
    ```sh
    piquelctl env secret sourceorigin --env production delete key-encryption-key
    ```
 
 Don't rewrap while replicas of the deployment before step 2 still run: they
-keep sealing new keys under the old key. If a key still opens only under the old
-key at step 4, the new replicas fail to start, so the rollout fails (see
-[roll back production](deploying.md#roll-back-production)). Rewrap again, then
-deploy.
+keep sealing new keys under the old key. A key left sealed only under the old
+key at step 4 stops opening. If it is the active key, the new replicas fail to
+start, so the rollout fails (see
+[roll back production](deploying.md#roll-back-production)). A `next` or
+`retiring` key is left out of the key set instead, and a `next` one is never
+promoted: revoke it, and rotation publishes another.
 
 > **Warning:** once you have rewrapped, never restore a deployment made before
-> step 1: it has only the old key, and opens none of the keys.
+> step 1: it has only the old key, and opens none of the keys. One made before
+> step 2 seals new keys under the old key again, so rewrap again after
+> restoring it.
+
+Once the old secret is deleted, a copy of the database taken before the rewrap
+holds keys nothing opens. If you ever restore one, revoke its active key, as
+[replace a key that doesn't open](#replace-a-key-that-doesnt-open) describes,
+and a new key signs.
 
 For a key that leaked, see
 [a leaked key-encryption key](incidents.md#a-leaked-key-encryption-key).

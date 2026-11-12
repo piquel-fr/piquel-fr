@@ -94,7 +94,7 @@ apps refresh and receive tokens signed by the new key.
 The `key-encryption-key` secret, `AUTH_KEY_ENCRYPTION_KEY`, appears outside the
 environment: in a backup, a log, or on a compromised host.
 
-On its own it opens nothing: the signing keys it seals are in the database.
+On its own it opens no signing key: the keys it seals are in the database.
 With a copy of the database, made before or after the leak, it opens every
 signing key in that copy.
 
@@ -102,16 +102,20 @@ signing key in that copy.
 
 1. If whoever holds it may still read the database or a host that runs auth,
    close that access first.
-2. Change the key-encryption key, as
+2. If a copy of the database may be in the same hands, every signing key is
+   compromised: revoke the active key now, as
+   [a compromised signing key](#a-compromised-signing-key) describes. Its
+   replacement is still sealed under the leaked key, so step 4 revokes again.
+3. Change the key-encryption key, as
    [changing the key-encryption key](signing-keys.md#change-the-key-encryption-key)
    describes. Take each step as soon as the one before has deployed: no step
    needs to wait.
-3. Replace the signing keys sealed under the leaked key. Every copy of the
+4. Replace the signing keys sealed under the leaked key. Every copy of the
    database made before you rewrapped, backups included, still holds them.
-   - If a copy may be in the same hands, every signing key is compromised:
-     follow [a compromised signing key](#a-compromised-signing-key). Revoking
-     the active key replaces it, and the keys stored beside it, with a key
-     sealed under the new key-encryption key.
+   - If a copy may be in the same hands, revoke the active key again, as
+     [a compromised signing key](#a-compromised-signing-key) describes. Its
+     replacement, and the keys stored beside it, are then sealed under the new
+     key-encryption key.
    - Otherwise, rotate ahead of schedule, so the old keys stop signing within
      a day. A `next` key already waiting was sealed under the leaked key too:
      revoke it first with `auth-service keys revoke <id> --reason "…"`. Then run
@@ -121,8 +125,8 @@ signing key in that copy.
 
 - `auth-service keys list` lists an `active` key created after you rewrapped,
   or a `next` key that will sign within a day.
-- `auth-service audit list --kind signing_key_changed` lists a `rewrapped`
-  change for every key that had a private key.
+- The dashboard's **Events** page, filtered by `signing_key_changed`, lists
+  **Signing key rewrapped** for every key that had a private key.
 - `piquelctl env secret sourceorigin --env <env> list` no longer lists the old
   `key-encryption-key`.
 

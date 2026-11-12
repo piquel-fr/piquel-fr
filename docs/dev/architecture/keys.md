@@ -41,8 +41,10 @@ also checks that the private key is the half of the public key stored with it.
 key, and, during a change, an accepted one, which only opens them.
 `KeyStore::rewrap`, behind `keys rewrap` and the dashboard's **Rewrap**, opens
 every key that still has a private key and seals it again under the current
-key, bound to its public key, recording `rewrapped` for each. It opens them all
-before it writes any, so a key that opens under neither changes nothing.
+key, bound to its public key, recording `rewrapped` for each, in one
+transaction: a key that opens under neither changes nothing. A `rewrapped` event
+is payload version 2 of `SigningKeyChanged`, which releases before it read as
+unknown.
 
 The database never sees a private key in the clear. Retiring a key erases its
 private key; only its public key stays, to verify hints.
