@@ -259,13 +259,17 @@ errors and preflights included:
   its class takes, which may then read `X-Trace-Id` and `Retry-After`. A refusal
 for the in-flight limit grants any origin, since it skips the origin check.
 
-Then the listener's one `Content-Security-Policy` goes on every response,
-pages, JSON, redirects, downloads and errors alike (`ContentPolicy`, in
-`src/security/content.rs`). Auth's loads the stylesheet, its typefaces and the
-scripts embedded under `/assets/`, fetches only auth itself, shows auth's own
-images and the `blob:` of a picture being chosen, and lets forms post only to
-auth. The dashboard's loads its own files and auth's images, and lets forms go on
-to auth's handoff page. A page widens only its `form-action`, with the origins its
-forms may redirect to: `WebApplication::render_document` puts them on the
-response as `FormTargets`, and the layer adds each that names an origin and
-nothing else, so no page can loosen another directive.
+Each listener also has one `Content-Security-Policy`, which goes on every
+response: pages, JSON, redirects, downloads and errors (`ContentPolicy`, in
+`src/security/content.rs`). It is built once, at startup.
+
+- **Auth's** loads the stylesheet, its typefaces and the scripts embedded under
+  `/assets/`. It fetches only auth itself, shows auth's own images and the
+  `blob:` of a picture being chosen, and lets forms post only to auth.
+- **The dashboard's** loads its own files and auth's images, and lets forms go
+  on to auth's handoff page.
+
+A page widens only its `form-action`, with the origins its forms may redirect
+to. `WebApplication::render_document` puts them on the response as
+`FormTargets`. Only `FormTarget::of` makes one, from a URL whose origin a policy
+can name, so no page can loosen another directive.

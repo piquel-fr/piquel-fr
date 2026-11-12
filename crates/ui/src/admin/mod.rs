@@ -1043,9 +1043,9 @@ pub(crate) async fn confirm<'a>(
 }
 
 /// An account's settings tab, as an administrator changes them: headed by the
-/// tab and the `account` it belongs to, if found, then the `tabs`, `current`
-/// among them, why the change just posted was refused, if it was, and the tab's
-/// section as `child`.
+/// `account` it belongs to, if found, and the tab, with the account's ID below,
+/// then the `tabs`, `current` among them, why the change just posted was
+/// refused, if it was, and the tab's section as `child`.
 #[component]
 pub async fn account_settings<'a>(
     #[into]
@@ -1059,7 +1059,13 @@ pub async fn account_settings<'a>(
     child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
-        page_head(title: current.label(), lead: account.map(Target::text))
+        page_head(
+            title: account.map_or_else(
+                || current.label().to_owned(),
+                |account| format!("{} · {}", account.name, current.label()),
+            ),
+            lead: account.and_then(|account| account.id).map(str::to_owned),
+        )
         settings_tabs(tabs: tabs, current: current)
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>

@@ -19,8 +19,8 @@
   --brand: #4353e0;
   --on-brand: #fff;
   --brand-soft: rgba(67, 83, 224, 0.1);
-  --danger: #c62f2f;
-  --danger-soft: rgba(198, 47, 47, 0.1);
+  --danger: #ad2727;
+  --danger-soft: rgba(173, 39, 39, 0.1);
   /* Dark enough for 4.5:1 on their soft backgrounds over every surface. */
   --ok: #0f703f;
   --ok-soft: rgba(15, 112, 63, 0.12);

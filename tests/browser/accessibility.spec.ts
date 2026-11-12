@@ -28,7 +28,7 @@ async function expectAccessible(page: Page, name: string): Promise<void> {
 }
 
 test("auth's pages, signed out", async ({ page }) => {
-  for (const path of ['/login', '/register', '/no-such-page']) {
+  for (const path of ['/login', '/register', '/recover', '/no-such-page']) {
     await page.goto(path);
     await expectAccessible(page, path);
   }
@@ -52,20 +52,43 @@ test("auth's pages, signed in", async ({ browser }) => {
     await page.goto(path);
     await expectAccessible(page, path);
   }
+  // The sidebar collapsed, which hides its words.
+  await page.goto('/settings');
+  await page.getByRole('button', { name: 'Collapse the sidebar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Expand the sidebar', exact: true })).toBeVisible();
+  await expectAccessible(page, '/settings, the sidebar collapsed');
 });
 
 test("the dashboard's pages", async ({ browser }) => {
   test.skip(!adminUrl || !grantAdmin, 'Set E2E_ADMIN_URL and E2E_GRANT_ADMIN.');
   const handle = `axe-admin-${Date.now().toString(36)}`;
   const admin = await administrator(browser, handle);
-  for (const path of ['/', '/users', '/clients', '/events']) {
+  for (const path of ['/', '/users', '/clients', '/keys', '/events', '/no-such-page']) {
     await openDashboard(admin, path);
     await expectAccessible(admin, path);
   }
-  // An account's settings, as an administrator changes them.
+  // An account, and its settings as an administrator changes them, each headed
+  // by the account.
   await openDashboard(admin, `/users?q=${handle}`);
   await admin.getByRole('link', { name: `@${handle}`, exact: true }).click();
-  await admin.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
-  await expect(admin.getByRole('heading', { name: 'Sign-in methods', level: 1 })).toBeVisible();
-  await expectAccessible(admin, "an account's sign-in methods");
+  await expectAccessible(admin, 'an account');
+  for (const tab of [
+    'Sign-in methods',
+    'Profile',
+    'Email addresses',
+    'Connected apps',
+    'Security history',
+    'Notifications'
+  ]) {
+    // The account's page links its first tab; each tab, the others.
+    const tabs =
+      tab === 'Sign-in methods'
+        ? admin
+        : admin.getByRole('navigation', { name: 'Account settings' });
+    await tabs.getByRole('link', { name: tab, exact: true }).click();
+    await expect(
+      admin.getByRole('heading', { name: `@${handle} · ${tab}`, level: 1 })
+    ).toBeVisible();
+    await expectAccessible(admin, `an account's ${tab}`);
+  }
 });

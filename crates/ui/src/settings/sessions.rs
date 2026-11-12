@@ -62,6 +62,18 @@ impl DeviceRow<'_> {
         )
     }
 
+    /// The name of its "Sign out" button, as of `now`: what its row shows, so two
+    /// devices of one name are told apart by how and where they signed in, when
+    /// they were last active and when they signed in.
+    pub(crate) fn sign_out_label(&self, now: DateTime<Utc>) -> String {
+        format!(
+            "Sign out {}, {}, signed in {}",
+            self.name(),
+            self.details(now).replace(" · ", ", "),
+            Precision::Day.write(self.authenticated_at)
+        )
+    }
+
     /// How it signed in, from where, and when it was last active, as of `now`.
     pub(crate) fn details(&self, now: DateTime<Utc>) -> String {
         let methods = self
@@ -210,9 +222,7 @@ pub async fn devices<'a>(
                                 change: DeviceChange::SignOut { id: row.id },
                                 label: "Sign out",
                                 class: "secondary small",
-                                // Two devices may share a name: what tells them
-                                // apart names the button too.
-                                aria_label: format!("Sign out {name}, {details}"),
+                                aria_label: row.sign_out_label(now),
                             )
                         }
                     </li>

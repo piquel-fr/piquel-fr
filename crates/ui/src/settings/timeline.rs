@@ -417,7 +417,12 @@ pub async fn history<'a>(
         (None, false) => "Nothing has happened to this account yet.",
     };
     Ok(view! {
-        page_head(title: "Security history", lead: lead.to_owned())
+        // The dashboard heads an account's tab itself.
+        if owner {
+            page_head(title: "Security history", lead: lead.to_owned())
+        } else {
+            <p class="lead">(lead)</p>
+        }
         if let Some(follow_up) = page.reported {
             <div class="notice stack" role="status">
                 <strong>"Your account is secured."</strong>
