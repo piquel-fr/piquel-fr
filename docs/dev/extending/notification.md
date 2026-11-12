@@ -158,8 +158,10 @@ surface needs a change.
   email (`EmailSender::content`).
 - **During a deploy or a rollback.** The previous release's email workers may
   claim the email of a kind they don't know. They can't decode it, so they leave
-  it pending for the new release, which sends it up to 30 seconds later. After a
-  rollback to a release that doesn't know the kind, its emails wait, then fail
-  at the email channel's 24-hour `MAX_AGE`. An operator retries them with
+  it pending for the new release, which sends it at the latest 30 seconds after
+  the previous release stops. After a rollback to a release that doesn't know
+  the kind, its emails wait, then fail at the email channel's 24-hour `MAX_AGE`.
+  A release from before this behaviour marks them failed at once. Either way, an
+  operator retries them with
   `auth-service deliveries retry <id> --reason "…"` once a release that knows the
   kind serves again; see [the delivery queue](../architecture/delivery-queue.md#operations).

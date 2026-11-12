@@ -400,10 +400,9 @@ cannot shadow `account_recoveries`
 - What a rollback loses is availability: the recovery pages, P4 and the typed
   errors, until the release is back. This release's CLI still runs `user
   undo-recovery` against the same schema.
-- A replica of the previous release can't decode the new recovery emails, so
-  it leaves them for this release, which sends them. After a rollback below this
-  release, they wait and fail after 24 hours; resend them with
-  `auth-service deliveries retry <id> --reason "…"` once this release is back.
+- Start recoveries only once a rollout is over. A replica of the previous release
+  can't decode the new recovery emails, and marks them failed; resend them with
+  `auth-service deliveries retry <id> --reason "…"`.
 
 ## Threat model
 

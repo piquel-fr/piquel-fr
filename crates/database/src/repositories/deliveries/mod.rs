@@ -18,8 +18,8 @@ use uuid::Uuid;
 /// What a claimed delivery that does not decode into its channel's types records
 /// as its error, while it waits for a release that can decode it and once it fails.
 const UNDECODABLE: &str = "stored recipient or payload does not decode";
-/// How long a worker that cannot decode a delivery leaves it: a newer release
-/// that can sends it after at most this, and this release checks it again then.
+/// How long a worker that cannot decode a delivery leaves it before it is due
+/// again, for a worker of either release to claim.
 const UNDECODABLE_DELAY: Duration = Duration::from_secs(30);
 
 /// A kind of outbound message, such as back-channel logout tokens: its stored
@@ -290,8 +290,8 @@ impl DeliveryRepository<'_> {
     ///
     /// A delivery whose recipient or payload does not decode into `C`'s types, as a
     /// newer release's may not during a deploy, is left for a release that can
-    /// decode it: it is released without spending an attempt, due again 30
-    /// seconds later, and the claim moves on to the next due delivery.
+    /// decode it: it is released without spending an attempt, due again after
+    /// [`UNDECODABLE_DELAY`], and the claim moves on to the next due delivery.
     ///
     /// # Errors
     ///

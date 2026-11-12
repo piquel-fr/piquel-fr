@@ -53,9 +53,12 @@ page.
    previous release runs beside the next one and claims, say, an email of a kind
    only the next release knows. The worker releases it without counting an
    attempt, records `stored recipient or payload does not decode` as its last
-   error, makes it due again in 30 seconds, and claims the next delivery. The
-   next release sends it once it is due. One that no release has decoded by its
-   channel's `MAX_AGE` fails with that error.
+   error, makes it due again in 30 seconds, and claims the next delivery. While
+   both releases run, a worker of either may claim it each time it comes due, so
+   the next release sends it at the latest 30 seconds after the previous one
+   stops. One that no release has decoded by its channel's `MAX_AGE` fails with
+   that error. A release from before this behaviour marks such a delivery failed
+   at once instead: retry it once a release that decodes it serves.
 3. It sends outside any transaction, with a 10 second timeout. A delivery that
    waited past its channel's `MAX_AGE`, counted from its creation or from an
    operator's last retry, fails without being sent.
@@ -213,7 +216,8 @@ is discarded.
 A `pending` delivery whose last error is `stored recipient or payload does not
 decode` is waiting for a release that can decode it (see
 [Life of a delivery](#life-of-a-delivery)). The release being deployed sends it
-within 30 seconds. After a rollback, no running release may decode it: it fails
+at the latest 30 seconds after the previous release stops. After a rollback, no
+running release may decode it: it fails
 at its channel's `MAX_AGE`, and you can retry it once a release that decodes it
 runs again, or cancel it.
 
