@@ -284,9 +284,10 @@ and other environments cannot reach, so the URL opts into plaintext with
 
 Auth connects as `sourceorigin_auth`, a role with row access to the app tables only
 (see [roles](../architecture/database.md#roles)). Only PostgreSQL itself and the
-`migrate` job get the superuser `sourceorigin`'s password. Once PostgreSQL is healthy,
-`migrate` applies migrations, then creates `sourceorigin_auth` or resets its
-privileges and password.
+`migrate` job get the superuser `sourceorigin`'s password, which PostgreSQL sets
+each time it starts (see [the database password](secrets.md#the-database-password)).
+Once PostgreSQL is healthy, `migrate` applies migrations, then creates
+`sourceorigin_auth` or resets its privileges and password.
 
 An environment's volume survives the environment's deletion. A PostgreSQL major
 upgrade needs an explicit data migration.

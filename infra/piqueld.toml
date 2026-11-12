@@ -155,7 +155,8 @@ name = "no-provider-secret"
 generate = { type = "random", bytes = 32, encoding = "hex" }
 
 # The PostgreSQL superuser's password, which only the database and the `migrate`
-# job get.
+# job get. `postgres` sets it on every start, so regenerating it takes effect on
+# the next deployment.
 [[spec.secrets]]
 name = "database-password"
 generate = { type = "random", bytes = 32, encoding = "hex" }
@@ -327,10 +328,20 @@ path = "/"
 
 [[spec.services]]
 name = "postgres"
+# Sets the superuser's password to `database-password` before PostgreSQL starts:
+# the image reads it only when it initializes a new volume. A deployment rolls
+# `postgres` out before `migrate`, which then logs in with the same version:
+# `migrate` runs in `auth`'s image, and `auth` depends on `postgres`.
+command = ["/usr/local/bin/sourceorigin-start"]
 
 [spec.services.source]
 type = "image"
 image = "postgres:18-bookworm"
+
+[[spec.services.files]]
+target = "/usr/local/bin/sourceorigin-start"
+path = "infra/postgres/start.sh"
+mode = "0555"
 
 [spec.services.environment]
 POSTGRES_USER = "sourceorigin"

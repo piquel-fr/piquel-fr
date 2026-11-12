@@ -185,6 +185,86 @@ old key stop working once the new key replaces it.
 - 24 hours have passed since the deployment, so every link derived from the
   old key has expired.
 
+## A leaked database password
+
+### How you notice
+
+The `database-password` secret, the superuser `sourceorigin`'s password, or
+`database-runtime-password`, `sourceorigin_auth`'s, appears outside the
+environment: in a backup, a log, or on a compromised host.
+
+PostgreSQL answers only on the application's private network, so the password
+alone doesn't open it. With a way onto that network too, the superuser's
+password reads and changes everything in the database, and the runtime role's
+reads and changes the accounts and sessions auth stores.
+
+### What to do
+
+1. If whoever holds it may still reach the host or the application's network,
+   close that access first.
+2. A new password doesn't undo what someone who connected as the superuser left
+   behind. A superuser can run commands as PostgreSQL's system user and change
+   any file in its volume, so no check proves the database clean. If someone
+   did connect, load a copy of the database made before the leak into a new
+   volume: a dump or a volume backup, not `piquelctl env restore`, which keeps
+   the volume. If you have none, or can't tell whether anyone connected, check
+   at least these before you rotate. Compare each with the same query on a
+   fresh preview, whose database is new, run with
+   `piquelctl preview exec sourceorigin <branch> postgres -- psql -U sourceorigin -d sourceorigin -c "…"`:
+   - The roles that can log in:
+
+     ```sh
+     piquelctl app exec sourceorigin postgres --env <environment> -- psql -U sourceorigin -d sourceorigin -c "SELECT rolname FROM pg_roles WHERE rolcanlogin"
+     ```
+
+     Only `sourceorigin` and `sourceorigin_auth` should. Remove any other with
+     `REASSIGN OWNED BY <role> TO sourceorigin` and `DROP OWNED BY <role>` in
+     each database, then `DROP ROLE <role>`.
+   - The authentication rules, from `SELECT * FROM pg_hba_file_rules`, run the
+     same way. Every column must match the preview's, masks included.
+   - The server settings, from
+     `SELECT sourcefile, name, setting FROM pg_file_settings`. One from
+     `postgresql.auto.conf` came from `ALTER SYSTEM`, which SourceOrigin never
+     uses: run `ALTER SYSTEM RESET ALL`.
+   - Settings stored on a database or role, from `SELECT * FROM pg_db_role_setting`,
+     and event triggers, from `SELECT evtname, evtevent FROM pg_event_trigger`.
+     Both are empty on a new database.
+
+   Anything else that differs from the preview's means a changed file or
+   catalog: load a copy from before the leak instead.
+3. Generate a new value for the secret that leaked:
+
+   ```sh
+   piquelctl env secret sourceorigin --env <environment> regenerate database-password
+   ```
+
+   For `database-runtime-password`, regenerate that one instead.
+4. Deploy production's own release again, as
+   [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)
+   describes. For staging, run `piquelctl --timeout 30m env deploy sourceorigin staging`.
+
+   For the superuser's password, PostgreSQL restarts with the new one before
+   `migrate` runs. For the runtime role's, `migrate` sets the new one, and
+   connections already open with the old one stay open until they close. See
+   [the database password](secrets.md#the-database-password) and
+   [the database runtime password](secrets.md#the-database-runtime-password).
+5. If someone may have connected:
+   - Check that they didn't rewrite the history with `auth-service audit verify`.
+   - The superuser could also have changed any row, such as an administrator
+     grant or a client's redirect URIs, without leaving an event. If you can't
+     rule that out, load a copy from before the leak, as step 2 says.
+   - If they could also have read the `key-encryption-key` secret, follow
+     [a compromised signing key](#a-compromised-signing-key).
+
+### Check that it's over
+
+- The deployment succeeded: its `migrate` job logged in with the new value.
+- `piquelctl env secret sourceorigin --env <environment> list` shows the new
+  version of the secret.
+- If someone may have connected, the database was loaded from a copy made
+  before the leak, or its login roles, authentication rules, settings and event
+  triggers match a fresh preview's.
+
 ## A stolen administrator session or a compromised administrator account
 
 ### How you notice
