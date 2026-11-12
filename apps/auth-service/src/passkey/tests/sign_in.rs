@@ -32,6 +32,43 @@ async fn handle_sign_in_refuses_a_handle_without_an_account_at_once() {
     }
 }
 
+/// Handle sign-in lists none of the account's credentials, whose IDs would link
+/// the account across renames. The authenticator names the account instead, and
+/// a passkey of another account is refused, as a failed sign-in of the named one.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn handle_sign_in_lists_no_credentials_and_refuses_another_accounts_passkey() {
+    let mut fixture = Fixture::new().await;
+    let mut other = Fixture::new().await;
+    let (started, browser) = fixture
+        .start(
+            routes::passkey::AUTHENTICATE_START,
+            "",
+            json!({ "handle": fixture.username }),
+        )
+        .await;
+    let allowed = &started["public_key"]["publicKey"]["allowCredentials"];
+    assert!(allowed.as_array().is_none_or(Vec::is_empty), "{allowed}");
+    let response = fixture
+        .request(
+            routes::passkey::AUTHENTICATE_FINISH,
+            Method::POST,
+            &browser,
+            json!({"ceremony_id": started["ceremony_id"], "credential": other.assertion(&started)}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
+    assert_eq!(
+        fixture.events().await.first(),
+        Some(&DomainEvent::SignInFailed {
+            method: AuthenticationMethod::Passkey,
+            reason: SignInFailure::InvalidCredential,
+        })
+    );
+    fixture.login().await;
+}
+
 /// Signing in with a passkey in a browser holding a social session of the same
 /// account confirms that session, keeping its ID but replacing its cookie. A
 /// session records the passkey that signed it in, or confirmed it since; a social

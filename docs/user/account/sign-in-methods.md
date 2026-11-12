@@ -98,7 +98,8 @@ account.
   last passkey. Add another first.
 - **"The passkey request was cancelled or unavailable."** You cancelled the
   browser's prompt, or the device can't create the passkey, as when it
-  already holds one for your account. Try again, or use another device.
+  already holds one for your account, or a security key has no room to store
+  it. Try again, or use another device.
 - **"This provider account is already linked to another Origin Account."**
   Unlink it from that account first, or link another GitHub or Google account.
 - **A provider says it is currently unavailable.** SourceOrigin no longer offers

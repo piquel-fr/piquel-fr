@@ -6,7 +6,7 @@ use super::*;
 use crate::{
     AdminError, AdminService,
     admin::tests::{Harness, cli, operator},
-    passkey::tests::Fixture,
+    passkey::tests::{Fixture, SoftKey},
     security::{BrowserCookie, Credential, Session},
     tests::{
         Browser, reason, recovery_links, recovery_reason, recovery_token, refresh_grant, register,
@@ -25,7 +25,6 @@ use sourceorigin_repository::{
     Database, InsertExternalIdentity, InsertUnverifiedEmail, StoredSession,
 };
 use std::collections::HashSet;
-use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};
 
 mod enroll;
 mod probation;
@@ -45,9 +44,9 @@ struct Scenario {
     keys: Fixture,
     /// Derives the links.
     links: RecoveryLinks,
-    /// The authenticator not signing now: the recovery's, or the original one
+    /// The key not signing now: the recovery's, or the original one
     /// while the recovery's signs ([`Self::swap`]).
-    other: Option<WebauthnAuthenticator<SoftPasskey>>,
+    other: Option<SoftKey>,
 }
 
 impl Scenario {
@@ -105,8 +104,8 @@ impl Scenario {
             .keys
             .start(routes::recovery::START, cookies, body)
             .await;
-        let (credential, authenticator) = self.keys.new_authenticator(&started);
-        self.other = Some(authenticator);
+        let (credential, key) = self.keys.new_key(&started);
+        self.other = Some(key);
         let body = json!({
             "ceremony_id": started["ceremony_id"],
             "credential": credential,
@@ -129,8 +128,8 @@ impl Scenario {
     /// Signs with the other authenticator from now on: the recovery's after
     /// [`Self::enroll`], then the original one again.
     fn swap(&mut self) {
-        let other = self.other.take().expect("another authenticator");
-        self.other = Some(self.keys.replace_authenticator(other));
+        let other = self.other.take().expect("another key");
+        self.other = Some(self.keys.replace_key(other));
     }
 
     /// Signs in with the signing authenticator from the browser holding

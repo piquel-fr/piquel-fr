@@ -7,7 +7,7 @@
 use super::{
     PasskeyApplication, PasskeyError,
     acceptance::SignIn,
-    ceremonies::{AuthenticationCeremony, LoginCeremony, RelatedCeremony},
+    ceremonies::{AuthenticationCeremony, DiscoverCeremony, LoginCeremony, RelatedCeremony},
     types::{AuthenticationFinish, RelatedOrigins, RelatedStart},
 };
 use crate::{
@@ -71,8 +71,9 @@ impl PasskeyApplication {
         ))
     }
 
-    /// Claims the page's client's pushed request and starts its sign-in: with the
-    /// passkeys of the account an `id_token_hint` names, or else an account picker.
+    /// Claims the page's client's pushed request and starts its sign-in: to the
+    /// account an `id_token_hint` names, or else with an account picker. Neither
+    /// lists the account's credentials.
     /// The claim and the ceremony commit together, so a refused start leaves the
     /// request for the redirect flow.
     pub(super) async fn start_related_login(
@@ -92,25 +93,17 @@ impl PasskeyApplication {
             .oidc
             .claim_inline(&mut tx, &client_id, &input.request_uri)
             .await?;
-        let (challenge, sign_in) = if let Some(user_id) = claim.hinted_user_id {
+        let (challenge, state) = app.discoverable()?;
+        let sign_in = if let Some(user_id) = claim.hinted_user_id {
             // Read inside `tx`: a second connection per start could exhaust the pool.
-            let keys = Self::decode(tx.passkeys().list_active(user_id).await?)?;
-            if keys.is_empty() {
+            if tx.passkeys().list_active(user_id).await?.is_empty() {
                 return Err(ApiError::interaction_required(
                     "The account this application asked for signs in without a passkey.",
                 ));
             }
-            let (challenge, state) = app
-                .webauthn
-                .start_passkey_authentication(&keys)
-                .map_err(PasskeyError::from)?;
-            (
-                challenge,
-                AuthenticationCeremony::Login(LoginCeremony { user_id, state }),
-            )
+            AuthenticationCeremony::Login(LoginCeremony { user_id, state })
         } else {
-            let (challenge, state) = app.discoverable()?;
-            (challenge, AuthenticationCeremony::Discover(state))
+            AuthenticationCeremony::Discover(DiscoverCeremony { state })
         };
         let ceremony = RelatedCeremony {
             origin,

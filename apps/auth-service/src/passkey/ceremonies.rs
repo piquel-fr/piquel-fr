@@ -43,13 +43,16 @@ pub(super) struct RegistrationCeremony {
     pub(super) state: PasskeyRegistration,
 }
 
-/// Authentication against an already identified account's credentials.
+/// Sign-in to an account named before the challenge, by its handle or a client's
+/// hint. It lists none of the account's credentials, whose IDs would link the
+/// account across renames (`docs/dev/security/handles.md`): the authenticator
+/// names the account, which must be the one named here.
 #[derive(Serialize, Deserialize)]
 pub(super) struct LoginCeremony {
     /// Account named when authentication started.
     pub(super) user_id: UserId,
-    /// Server-side challenge and credential snapshot.
-    pub(super) state: PasskeyAuthentication,
+    /// Server-side challenge, listing no credentials.
+    pub(super) state: DiscoverableAuthentication,
 }
 
 /// Account-picker authentication whose account is learned from the signed response.

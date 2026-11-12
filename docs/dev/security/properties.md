@@ -6,11 +6,14 @@ maps where they are checked, and the [threat model](threat-model.md) says what
 they defend against. The pages after this one explain the larger designs in
 detail.
 
-- Passkeys require user verification and prefer resident credentials. Synced
-  passkeys and security keys are accepted. On Android, signup and adding a passkey
-  offer an explicit Google Password Manager option for devices with Google services,
-  never chosen automatically; a standard passkey or security key stays the default.
-  Authentication supports the browser account picker and a handle fallback.
+- Passkeys require user verification and a resident (discoverable) credential.
+  Synced passkeys and security keys are accepted. On Android, signup and adding a
+  passkey offer an explicit Google Password Manager option for devices with Google
+  services, never chosen automatically; a standard passkey or security key stays
+  the default. Authentication supports the browser account picker and a handle
+  fallback. Neither lists the account's credential IDs, so a rename doesn't leave
+  them linking the new handle to the old one
+  ([handles](handles.md#credential-ids-stay-private)).
 - Every account page tells the browser's password manager, by the WebAuthn Signal
   API, the account's current handle and display name, and the credential ID of
   every passkey that still signs in: the passkeys sign-in itself checks. Where the
