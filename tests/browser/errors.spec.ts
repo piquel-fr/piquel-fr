@@ -14,13 +14,15 @@ test('an address with no page is a page saying so, and a fetch of it JSON', asyn
   expect(response?.headers()['content-type']).toContain('text/html');
   await expect(page.getByRole('heading', { name: 'Page not found', level: 1 })).toBeVisible();
   await expect(page.getByText('There is no page at this address.')).toBeVisible();
+  await page.getByRole('link', { name: 'Go to Origin Auth', exact: true }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  // A fetch from a page of auth's reads the same failure as JSON. The error
+  // page itself fetches nothing: its policy allows none.
   const fetched = await page.evaluate(async () => {
     const answer = await fetch('/no-such-page');
     return { status: answer.status, body: (await answer.json()) as unknown };
   });
   expect(fetched).toEqual({ status: 404, body: { error: 'There is no page at this address.' } });
-  await page.getByRole('link', { name: 'Go to Origin Auth', exact: true }).click();
-  await expect(page).toHaveURL(/\/settings$/);
 });
 
 test("a provider's callback that cannot go on says why on the sign-in page", async ({ page }) => {

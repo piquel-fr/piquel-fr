@@ -16,10 +16,10 @@ use topcoat::{
     view::{ViewExt, view},
 };
 
-/// What an [`ApiError`] tells the user, which its response keeps so a
-/// navigation's page can say it too.
+/// What a failure tells the user, such as an [`ApiError`]'s message, which its
+/// response keeps so a navigation's page can say it too.
 #[derive(Clone, Debug)]
-pub(super) struct Explanation(pub(super) String);
+pub(crate) struct Explanation(pub(crate) String);
 
 /// The error pages of one listener: auth's, or the admin dashboard's, coloured
 /// as it, each linking SourceOrigin's `policies`.

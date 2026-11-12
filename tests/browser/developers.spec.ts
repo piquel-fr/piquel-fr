@@ -143,16 +143,17 @@ test('a rotation retires the old secret, and a disabled or deleted app signs nob
     return (await redeem(page, id, secret, code, verifier)).status();
   };
   /**
-   * Auth refuses to start signing in to the app: it never sends the browser back to
-   * a redirect URI it cannot trust is the app's.
+   * Auth refuses to start signing in to the app, on a page saying why: it never
+   * sends the browser back to a redirect URI it cannot trust is the app's.
    */
   const refused = async () => {
     const answer = await page.goto(authorization(id, redirectUri).url);
     expect(answer?.status()).toBe(400);
-    expect(await answer?.json()).toEqual({
-      error: 'invalid_request',
-      error_description: 'client_id is not a registered, enabled client'
-    });
+    await expect(
+      page.getByText(
+        "The app's request was refused: client_id is not a registered, enabled client."
+      )
+    ).toBeVisible();
   };
   const { url, verifier } = authorization(id, redirectUri);
   await page.goto(url);

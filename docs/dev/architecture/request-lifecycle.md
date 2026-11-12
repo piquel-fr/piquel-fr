@@ -198,7 +198,9 @@ cause to the client:
 - **OIDC endpoints** answer `OAuthError` (`src/oidc/error.rs`): an OAuth error
   JSON body, or, once the redirect URI is verified, a redirect to the client with
   `error`, `state` and `iss`. Its consent and logout pages show what the code
-  means.
+  means. A browser navigating to an endpoint that answers JSON, as to the
+  authorization endpoint with an unknown client, reads the description on the
+  error page below; a server error's page says only that.
 - **Pages** answer a `Failure` (`src/web/mod.rs`), which renders the page
   explaining it at its status. An internal failure is logged and shows a server
   error with its trace ID, since a browser never shows `X-Trace-Id`. A form
