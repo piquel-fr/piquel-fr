@@ -180,7 +180,7 @@ The `invitation` channel (`deliveries/invitation.rs` in the database crate,
 `InvitationSender` beside `EmailSender` in auth-service) mails an invitation's
 link to the address it invites, which belongs to no account yet, so it cannot
 be the `email` channel's recipient. Creating a mailed invitation, or sending it
-again, records `InvitationMailed`, whose fan-out creates one unordered delivery.
+again, records `InvitationMailed`, whose fan-out creates one delivery.
 It stores only the invitation's ID, as its recipient and in its `destination`.
 The sender reads the address and the token's digest when it sends, and derives
 the link's token again from the ID, as a recovery link's is, so the token is

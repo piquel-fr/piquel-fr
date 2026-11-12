@@ -23,7 +23,7 @@ impl Channel for Invitation {
     /// Nothing: the invitation says it all.
     type Payload = ();
 
-    /// One unordered delivery each time an invitation is mailed. Its
+    /// One delivery each time an invitation is mailed. Its
     /// `destination` names the invitation, never the address.
     fn deliveries(
         event: &DomainEvent,
