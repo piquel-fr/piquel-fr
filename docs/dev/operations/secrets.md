@@ -128,7 +128,7 @@ Each is 32 random bytes, as hex or unpadded base64url text.
 | Secret | Mountable by | What it is |
 | --- | --- | --- |
 | `resend-production` | production | the Resend key production sends with: see [email](email.md) |
-| `resend-dev` | staging and previews | the Resend key for `dev.sourceorigin.dev` |
+| `resend-dev` | staging, conformance and previews | the Resend key for `dev.sourceorigin.dev` |
 | `github-production`, `github-staging` | that environment | its GitHub OAuth app's client secret: see [sign-in providers](sign-in-providers.md) |
 | `google-production`, `google-staging` | that environment | its Google OAuth client's secret |
 | `audit-key-production-2`, `audit-key-staging-2` | that environment | the seed that signs its audit checkpoints, whose verifier key is committed: see [audit history](../security/audit-history.md#the-audit-key) |

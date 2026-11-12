@@ -15,7 +15,8 @@ It runs these plans, from [`plans.json`](plans.json):
 | `oidcc-rp-initiated-logout-certification-test-plan` | RP-Initiated Logout |
 | `oidcc-backchannel-rp-initiated-logout-certification-test-plan` | Back-Channel Logout |
 
-The suite runs in Docker, from its prebuilt image. Its own browser can't create
+The suite runs in Docker, from its prebuilt image, or, to test a release, on the
+Foundation's own hosted suite. Its own browser can't create
 passkeys, so [`driver.ts`](driver.ts) plays the browser's part in Chromium with
 a virtual passkey, as the [browser tests](../browser/README.md) do. It signs an
 account up, then, for every test, opens each page the suite asks for, signs in,
@@ -48,6 +49,49 @@ CONFORMANCE_TESTS=oidcc-server,oidcc-prompt-login just conformance
 ```
 
 Only the tests you name are compared then.
+
+### Test a release
+
+Before promoting staging to production, test its release on the OpenID
+Foundation's own hosted suite at <https://www.certification.openid.net>, the one
+certification uses:
+
+```console
+export CONFORMANCE_SUITE_TOKEN=file:///path/to/token
+just conformance release
+```
+
+1. The recipe finds staging's current deployment, and reads `plans.json` and
+   `expected.json` from the commit it was built from.
+2. It promotes that release into the `conformance` environment, which makes it
+   public at `https://auth-conformance.sourceorigin.dev`. piquelctl shows what it
+   deploys and asks first.
+3. It registers the suite's clients and a test account through the environment's
+   CLI, runs every plan on the hosted suite, and compares the results.
+4. It stops the environment, whatever happened, so it is public only while the
+   run lasts.
+5. If every result matched, it offers to promote the same deployment to
+   production, and piquelctl asks again. Otherwise it stops there.
+
+The token is the hosted suite's API token: sign in at
+<https://www.certification.openid.net/login.html> with Google or GitLab, then
+create a permanent token at
+<https://www.certification.openid.net/tokens.html>. Keep it in a file outside the
+repository, and point `CONFORMANCE_SUITE_TOKEN` at it, as `file:///path` or
+`env://NAME`.
+
+You need `piquelctl` with `apps:deploy` and `apps:exec` on `sourceorigin`, and the
+`conformance` environment needs the `resend-dev` secret, granted once:
+
+```console
+piquelctl app secret sourceorigin access resend-dev --environments staging,conformance --previews
+```
+
+The account has no email address, since the run can't read the environment's
+email, so `oidcc-scope-email` isn't compared. The plans stay in your account on
+the hosted suite, where
+[certification](https://github.com/sourceorigin-dev/sourceorigin/issues/52) can
+use them.
 
 ### Against a preview
 
@@ -124,6 +168,7 @@ The recipe sets them for a local run. Against a preview, set
 | Variable | What it is |
 | --- | --- |
 | `CONFORMANCE_CLI` | A command that runs `auth-service` with the deployment's configuration. The driver appends its arguments. |
+| `CONFORMANCE_SUITE_TOKEN` | For `release`: where the hosted suite's API token is, as `file:///path` or `env://NAME`. |
 | `CONFORMANCE_TESTS` | Comma-separated test names to run instead of every test. |
 | `CONFORMANCE_OUTPUT` | Where the results go, instead of `target/conformance`. |
 | `CHROMIUM_EXECUTABLE` | A Chromium to use instead of Playwright's. |
