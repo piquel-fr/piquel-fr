@@ -489,9 +489,9 @@ async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
 /// group `name` choosing it, `checked` or not, which takes the focus if
 /// `autofocus`: its `label` beside it, then its `detail` below, which describes
 /// it. A radio button's `defaults` name the switches choosing it turns on, for
-/// the client form script. The switch is a checkbox with the `switch` role, which the stylesheet
-/// draws as a sliding toggle at the right end of a boxed row; switches inside a
-/// `choices` element share one box.
+/// the client form script. The switch is a checkbox with the `switch` role,
+/// which the stylesheet draws as a sliding toggle at the right end of a boxed
+/// row; switches inside a `choices` element share one box.
 #[component]
 pub(crate) async fn choice<'a>(
     name: &'a str,

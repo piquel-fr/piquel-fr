@@ -8,7 +8,8 @@
  * listing in `data-defaults` the switches its kind starts with on: its default
  * scopes, and `allow_refresh`. Choosing another kind turns on its defaults and off
  * the others those lists name, as long as they are still the last kind's defaults,
- * so a choice the user made stays.
+ * so a choice the user made stays. Without it, the form keeps the defaults of the
+ * kind it starts at, which the user can still change by hand.
  */
 
 for (const form of document.forms) {

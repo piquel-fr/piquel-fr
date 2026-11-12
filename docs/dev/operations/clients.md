@@ -118,7 +118,10 @@ deployment, through `--secret file://<path>` or `env://<name>`: 32 random bytes
 in unpadded base64url, never printed. The client's other secrets keep working
 for `--grace` at most, 1 hour by default, while the deployment rolls out;
 `--grace 0` revokes them. Only the terminal applies clients, since only it takes
-a secret.
+a secret. Like `create`, it gives a client the defaults of its kind for the
+scopes and refresh tokens it doesn't name, so a confidential client applied
+without `--scope` or `--refresh` gets `offline_access` and refresh tokens. To
+keep them off, name its scopes and pass `--no-refresh`.
 
 No deployment of SourceOrigin needs a client: the admin dashboard signs
 administrators in itself (see [the admin dashboard](administration.md#how-the-dashboard-signs-administrators-in)).

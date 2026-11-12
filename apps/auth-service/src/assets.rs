@@ -121,6 +121,10 @@ mod tests {
                 EmbeddedAssets::COPY_SCRIPT,
                 "text/javascript; charset=utf-8",
             ),
+            (
+                EmbeddedAssets::CLIENT_FORM_SCRIPT,
+                "text/javascript; charset=utf-8",
+            ),
             (sourceorigin_ui::FONTS[0], "font/woff2"),
         ] {
             let response = EmbeddedAssets::serve(&asset.path()).expect("found");
