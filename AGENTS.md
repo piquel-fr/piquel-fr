@@ -16,6 +16,9 @@ This repository contains everything under the sourceorigin.dev domain:
 - `infra/`: Dockerfiles and piqueld deployments.
 - `tests/browser` (Playwright) and `tests/sdk-vectors` (cases every SDK passes).
 - `docs/`: the documentation book, a user guide and a contributor guide.
+  `docs/plans/` holds plans for work that isn't built yet, outside the book:
+  read `docs/plans/platform/README.md` before working on the SourceOrigin
+  platform.
 
 This is still very early development. Breaking changes are expected. There are
 no real users yet so breaking things doesn't matter.
