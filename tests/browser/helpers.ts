@@ -261,25 +261,40 @@ export async function serveClient(
 export const mailUrl = process.env.E2E_MAIL_URL ?? '';
 
 /**
- * The first match of `pattern` in the plain text of the newest email Mailpit
- * received for `address` that has one, waiting up to 15 seconds for it: auth
- * sends email from a queue.
+ * The first match of `pattern` in the plain text of each email Mailpit received
+ * for `address` that has one, newest first, once there are at least `count` of
+ * them, waiting up to 15 seconds: auth sends email from a queue.
  */
-export async function mailed(address: string, pattern: RegExp): Promise<string> {
+export async function mailedAll(
+  address: string,
+  pattern: RegExp,
+  count: number
+): Promise<string[]> {
   type Search = { messages: { ID: string }[] };
   const query = new URLSearchParams({ query: `to:"${address}"` });
   for (const deadline = Date.now() + 15_000; Date.now() < deadline;) {
     const search = (await (await fetch(`${mailUrl}/api/v1/search?${query}`)).json()) as Search;
+    const found: string[] = [];
     for (const { ID } of search.messages) {
       const { Text } = (await (await fetch(`${mailUrl}/api/v1/message/${ID}`)).json()) as {
         Text: string;
       };
-      const found = pattern.exec(Text)?.[0];
-      if (found) return found;
+      const match = pattern.exec(Text)?.[0];
+      if (match) found.push(match);
     }
+    if (found.length >= count) return found;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`No email to ${address} matches ${pattern.source}.`);
+  throw new Error(`Fewer than ${String(count)} emails to ${address} match ${pattern.source}.`);
+}
+
+/**
+ * The first match of `pattern` in the plain text of the newest email Mailpit
+ * received for `address` that has one, waiting up to 15 seconds for it.
+ */
+export async function mailed(address: string, pattern: RegExp): Promise<string> {
+  const [newest] = await mailedAll(address, pattern, 1);
+  return newest;
 }
 
 /**

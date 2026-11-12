@@ -60,7 +60,7 @@ Auth renders every page itself, sign-in included, and the account settings at
 
 | Location | Responsibility |
 | --- | --- |
-| `apps/auth-service` | The auth authority: browser ceremonies, social sign-in, OIDC, the server-rendered pages, the settings API, the admin dashboard and the CLI. `assets/passkey.js` runs the WebAuthn ceremonies and the form hooks that start them, and `assets/picture.js` lets the picture form choose its crop |
+| `apps/auth-service` | The auth authority: browser ceremonies, social sign-in, OIDC, the server-rendered pages, the settings API, the admin dashboard and the CLI. `assets/passkey.js` runs the WebAuthn ceremonies and the form hooks that start them, `assets/picture.js` lets the picture form choose its crop, `assets/search.js` ranks the top bar's search, `assets/copy.js` copies a value to the clipboard, and `assets/dashboard.js` confirms the admin dashboard with a passkey |
 | `apps/web` | `sourceorigin-web`, sourceorigin.dev's own web server, with SourceOrigin's policies in `assets/policies/` |
 | `packages/auth` | `@sourceorigin/auth`, the TypeScript SDK, not yet published: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `sourceorigin_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [SDK design](sdk.md#test-vectors) |

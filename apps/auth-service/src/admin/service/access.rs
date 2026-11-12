@@ -5,6 +5,7 @@ use super::AdminService;
 use crate::{
     account::AccountService,
     admin::{AdminError, DashboardSignIn, InviteExpiry, Operator, Reason},
+    emails::EmailApplication,
     invitations::InvitationLinks,
 };
 use chrono::Utc;
@@ -30,10 +31,10 @@ impl AdminService {
     /// `reason`, whatever the signup setting: while signup is open, it is a
     /// tracked signup link. With an `email`, its link is mailed there, and the
     /// account created with it starts with that address, verified; it is refused
-    /// before anything is created while email is disabled, or when an active
-    /// account already holds the address verified. Without one, its link is
-    /// returned for the operator to pass on: only its token's digest is stored, so
-    /// it is never shown again.
+    /// before anything is created while email is disabled, when the sender can't
+    /// send to the address, or when an active account already holds it verified.
+    /// Without one, its link is returned for the operator to pass on: only its
+    /// token's digest is stored, so it is never shown again.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, the invitation cannot be
@@ -46,8 +47,11 @@ impl AdminService {
         email: Option<NormalizedEmail>,
         reason: Reason,
     ) -> Result<CreatedInvitation, AdminError> {
-        if email.is_some() && !self.mails {
-            return Err(AdminError::InvitationNeedsEmail);
+        if let Some(email) = &email {
+            if !self.mails {
+                return Err(AdminError::InvitationNeedsEmail);
+            }
+            EmailApplication::sendable(email).map_err(AdminError::InvitationUnsendable)?;
         }
         let id = TokenId::new();
         let token = links.token(id)?;

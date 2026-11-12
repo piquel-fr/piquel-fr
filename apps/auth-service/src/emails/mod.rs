@@ -319,6 +319,13 @@ impl EmailApplication {
         }
     }
 
+    /// Checks that the sender can send to `address`, which is stricter than
+    /// [`NormalizedEmail::parse`]: a link mailed to an address it can't send to
+    /// would never arrive.
+    pub(crate) fn sendable(address: &NormalizedEmail) -> Result<(), lettre::address::AddressError> {
+        address.as_str().parse::<lettre::Address>().map(drop)
+    }
+
     /// Starts the new account `user_id` with `address`, the one the invitation it
     /// redeemed was mailed to, verified and primary, as `context`'s, in `tx`:
     /// opening the mailed link proved what a verification email would. An address
@@ -375,11 +382,7 @@ impl Added<'_> {
         if config.smtp.is_none() {
             return Err(EmailError::Disabled);
         }
-        // The sender must be able to send to it, or its link would never arrive.
-        self.address
-            .as_str()
-            .parse::<lettre::Address>()
-            .map_err(EmailError::Unsendable)?;
+        EmailApplication::sendable(self.address).map_err(EmailError::Unsendable)?;
         EmailApplication::limit(tx, self.user_id, client_ip, self.address).await?;
         let id = EmailId::new();
         let digest = config

@@ -17,6 +17,7 @@ import {
   authUrl,
   cli,
   mailed,
+  mailedAll,
   mailUrl,
   reason,
   scrollsSideways,
@@ -323,7 +324,7 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
   const link = async () => {
     await invite(admin);
     await expect(admin.getByRole('heading', { name: 'Invitation created' })).toBeVisible();
-    return admin.getByLabel('Signup link').inputValue();
+    return (await admin.locator('#invitation-link').textContent()) ?? '';
   };
   /**
    * Whether `link`'s invitation can no longer be used, as its sign-up page says,
@@ -370,9 +371,11 @@ test('a mailed invitation starts its account with the address, verified', async 
   await invite(admin, address);
   // Nobody but its recipient sees a mailed link.
   await expect(admin.getByRole('heading', { name: 'Invitation sent' })).toBeVisible();
-  await expect(admin.getByLabel('Signup link')).toHaveCount(0);
+  await expect(admin.locator('#invitation-link')).toHaveCount(0);
 
   // The list names its recipient, and sends it again, with the same link.
+  const invitation = /https?:\/\/\S+\/register\?invitation=[\w-]+/;
+  const link = await mailed(address, invitation);
   await admin.getByRole('link', { name: 'Done', exact: true }).click();
   const row = admin.getByRole('row').nth(1);
   await expect(row).toContainText(address);
@@ -381,8 +384,8 @@ test('a mailed invitation starts its account with the address, verified', async 
   await resend.getByLabel('Reason').fill('Browser test');
   await resend.getByRole('button', { name: 'Resend', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/invitations`);
+  expect(await mailedAll(address, invitation, 2)).toEqual([link, link]);
 
-  const link = await mailed(address, /https?:\/\/\S+\/register\?invitation=[\w-]+/);
   const page = await withPasskeys(browser);
   await page.goto(link);
   await expect(page.getByText(address)).toBeVisible();

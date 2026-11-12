@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id AS \"id: TokenId\", email, secret_digest, expires_at\n                FROM invitations\n                WHERE (id = $1 OR secret_digest = $2)\n                AND redeemed_at IS NULL\n                AND revoked_at IS NULL\n                AND expires_at > now()",
+  "query": "SELECT id AS \"id: TokenId\", email, secret_digest, expires_at\n                FROM invitations\n                WHERE (id = $1 OR secret_digest = $2)\n                AND redeemed_at IS NULL\n                AND revoked_at IS NULL\n                AND expires_at > clock_timestamp()",
   "describe": {
     "columns": [
       {
@@ -37,5 +37,5 @@
       false
     ]
   },
-  "hash": "43ff7d6dabf16c72523e7173052d9b983eca974460f4a91750dcef84fdbb516d"
+  "hash": "38d7f337c6c0f8e655884e41035e192bed8af0a5831a434cb33cd1b090e4ab4c"
 }

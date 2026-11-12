@@ -30,7 +30,7 @@ Commands:
 - [`auth-service keys`](#auth-service-keys): Inspect, rotate and revoke signing keys, check token digest keys, and print the audit key's verifier key. Every replica picks up a signing key change within a minute.
 - [`auth-service user`](#auth-service-user): Search, show, disable, reactivate and recover accounts.
 - [`auth-service session`](#auth-service-session): End an account's sessions.
-- [`auth-service invite`](#auth-service-invite): Create, list and revoke signup invitations.
+- [`auth-service invite`](#auth-service-invite): Create, list, resend and revoke signup invitations.
 - [`auth-service client`](#auth-service-client): Register, inspect and change OIDC clients. Changes apply to the next request.
 - [`auth-service audit`](#auth-service-audit): Page through, verify and prune the audit history.
 - [`auth-service admin`](#auth-service-admin): Grant, revoke or list administrators.
@@ -397,7 +397,7 @@ Options:
 
 ## `auth-service invite`
 
-Create, list and revoke signup invitations.
+Create, list, resend and revoke signup invitations.
 
 ```text
 auth-service invite [OPTIONS] <COMMAND>

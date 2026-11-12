@@ -5,10 +5,11 @@ use crate::tests::invitation_links;
 use sourceorigin_common::{admin::InvitationSent, email::NormalizedEmail};
 use sourceorigin_repository::{Channel, Invitation, InvitationKey};
 
-/// A mailed invitation needs email: without it, the service refuses before
-/// anything is created, and a link to pass on still works. With it, the address
-/// is kept and the link is queued for it, never shown; a resend queues it again,
-/// and only a mailed invitation can be resent.
+/// A mailed invitation needs email, and an address the sender can send to:
+/// otherwise, the service refuses before anything is created, and a link to pass
+/// on still works. With both, the address is kept and the link is queued for it,
+/// never shown; a resend queues it again, and only a mailed invitation can be
+/// resent.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn mailed_invitations_need_email_and_queue_their_link() {
@@ -53,6 +54,21 @@ async fn mailed_invitations_need_email_and_queue_their_link() {
     assert!(matches!(link.sent, InvitationSent::Link(_)), "{link:?}");
 
     let service = harness.service();
+    // A valid address the sender can't send to would never get its link.
+    let unsendable = NormalizedEmail::parse("a:b@example.com").expect("valid address");
+    let refused = service
+        .create_invitation(
+            &cli(),
+            &links,
+            InviteExpiry::default(),
+            Some(unsendable),
+            reason("Jane"),
+        )
+        .await;
+    assert!(
+        matches!(refused, Err(AdminError::InvitationUnsendable(_))),
+        "{refused:?}"
+    );
     let mailed = service
         .create_invitation(
             &cli(),

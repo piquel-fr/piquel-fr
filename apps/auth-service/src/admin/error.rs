@@ -80,6 +80,10 @@ pub enum AdminError {
         "email is disabled, so no invitation can be mailed; only a link to pass on yourself, without an address, can be created"
     )]
     InvitationNeedsEmail,
+    /// The sender can't send to the address to invite, though it is a valid one,
+    /// so its link would never arrive.
+    #[error("email can't be sent to the address to invite; check it, or use another one")]
+    InvitationUnsendable(#[source] lettre::address::AddressError),
     /// An active account already holds the address verified: its owner signs in
     /// rather than signing up.
     #[error("an account already holds this address verified; its owner can sign in")]
@@ -242,6 +246,7 @@ impl AdminError {
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
             Self::InvalidInvitationEmail(_) => "invalid_invitation_email",
             Self::InvitationNeedsEmail => "invitation_needs_email",
+            Self::InvitationUnsendable(_) => "invitation_unsendable",
             Self::InvitationAddressTaken => "invitation_address_taken",
             Self::InvitationNotMailed => "invitation_not_mailed",
             Self::RecoveryOfDisabledAccount => "recovery_of_disabled_account",
@@ -311,6 +316,7 @@ impl From<AdminError> for ApiError {
             AdminError::InvalidReason
             | AdminError::InvalidInviteExpiry(_)
             | AdminError::InvalidInvitationEmail(_)
+            | AdminError::InvitationUnsendable(_)
             | AdminError::InvalidHandoff
             | AdminError::InvalidSubject
             | AdminError::InvalidBody

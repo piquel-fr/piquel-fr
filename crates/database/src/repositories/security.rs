@@ -4,6 +4,7 @@ use super::{RepositoryExecutor, SecurityRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use sourceorigin_common::{TokenId, admin::Invitation};
+use std::time::Duration;
 
 /// How [`SecurityRepository::open_invitation`] finds an invitation.
 #[derive(Clone, Copy, Debug)]
@@ -13,7 +14,6 @@ pub enum InvitationKey<'a> {
     /// By the SHA-256 digest of its link's token.
     Digest(&'a [u8]),
 }
-use std::time::Duration;
 
 /// An invitation to store.
 pub struct InsertInvitation<'a> {
@@ -133,7 +133,7 @@ impl SecurityRepository<'_> {
                 WHERE (id = $1 OR secret_digest = $2)
                 AND redeemed_at IS NULL
                 AND revoked_at IS NULL
-                AND expires_at > now()"#,
+                AND expires_at > clock_timestamp()"#,
                 id,
                 digest,
             )

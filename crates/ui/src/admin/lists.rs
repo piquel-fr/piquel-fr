@@ -2,6 +2,7 @@
 
 use super::{Action, Change, UserRow, account_status, confirm, moment, refused_action};
 use crate::{
+    clients::copyable,
     icons::{Icon, icon},
     layout::{Pager, Who, avatar, page_head, pager},
 };
@@ -267,7 +268,7 @@ pub async fn invitation_created<'a>(
         <section class="card">
             <div class="body">
                 if let InvitationSent::Link(link) = sent {
-                    <input readonly="" value=(link.as_str()) aria-label="Signup link">
+                    copyable(id: "invitation-link", label: "signup link", value: link.as_str())
                 }
                 <p class="help">"Expires " moment(at: expires_at)</p>
                 <div class="row"><a class="button secondary" href=(back)>"Done"</a></div>

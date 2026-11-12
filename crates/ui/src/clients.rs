@@ -379,7 +379,7 @@ pub(crate) async fn client_status<'a>(client: ClientRow<'a>) -> Result<impl View
 
 /// A button copying the text of the element whose ID is `target`, named `label` for
 /// screen readers, after the status saying whether it did. It starts hidden; the
-/// passkey script shows it once it can write to the clipboard.
+/// copy script shows it once it can write to the clipboard.
 #[component]
 pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl View> {
     Ok(view! {
@@ -393,6 +393,7 @@ pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl Vie
 }
 
 /// `value` as code, the element `id`, beside a button copying it, named `label`.
+/// Clicking the code copies it too.
 #[component]
 pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
     Ok(view! {
@@ -725,8 +726,7 @@ pub(crate) async fn secrets_list<'a>(
 /// A client `secret` Origin Auth just made, shown once, with a button copying it, on
 /// `page`, whose address the passkey script, where the page loads it, puts back
 /// so that reloading it gets the page without the secret; saving it leads on to
-/// `next`. The admin dashboard loads no passkey script, so its copy button stays
-/// hidden.
+/// `next`.
 #[component]
 pub(crate) async fn secret_panel<'a>(
     secret: &'a Revealed,
