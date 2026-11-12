@@ -113,9 +113,9 @@ signing key in that copy.
 4. Replace the signing keys sealed under the leaked key. Every copy of the
    database made before you rewrapped, backups included, still holds them.
    - If a copy may be in the same hands, revoke the active key again, as
-     [a compromised signing key](#a-compromised-signing-key) describes. Its
-     replacement, and the keys stored beside it, are then sealed under the new
-     key-encryption key.
+     [a compromised signing key](#a-compromised-signing-key) describes. The
+     `next` and `retiring` keys go with it, and its replacement is sealed under
+     the new key-encryption key.
    - Otherwise, rotate ahead of schedule, so the old keys stop signing within
      a day. A `next` key already waiting was sealed under the leaked key too:
      revoke it first with `auth-service keys revoke <id> --reason "…"`. Then run

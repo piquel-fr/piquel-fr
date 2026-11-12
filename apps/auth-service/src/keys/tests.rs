@@ -397,7 +397,7 @@ async fn another_key_encryption_key_neither_opens_nor_changes_the_keys() {
 /// During a change of key-encryption key, a store opens keys sealed under its
 /// accepted key too. Rewrapping seals every key that still has a private key
 /// under its current one, as an event each, so the old key opens none of them;
-/// a store that cannot open a key rewraps none.
+/// a store that cannot open a key refuses to rewrap.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn rewrapping_seals_every_key_under_the_current_key_encryption_key() {

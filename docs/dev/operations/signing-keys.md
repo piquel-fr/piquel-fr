@@ -110,8 +110,8 @@ Take each step in every environment before the next. The names below are for
 the first change: the next one adds `key-encryption-key-3`, and so on.
 
 1. Add the new key as accepted. Declare a generated secret for it, next to
-   `key-encryption-key`, and move the comment that warns against regenerating
-   it to the new one:
+   `key-encryption-key`, and copy the comment that warns against regenerating
+   it to the new one. The old one keeps its comment until step 4 removes it:
 
    ```toml
    [[spec.secrets]]
@@ -160,14 +160,16 @@ Don't rewrap while replicas of the deployment before step 2 still run: they
 keep sealing new keys under the old key. A key left sealed only under the old
 key at step 4 stops opening. If it is the active key, the new replicas fail to
 start, so the rollout fails (see
-[roll back production](deploying.md#roll-back-production)). A `next` or
+[roll back production](deploying.md#roll-back-production)). Once the previous
+deployment runs again, which production restores on its own and staging needs
+restored by hand, rewrap again, then deploy. A `next` or
 `retiring` key is left out of the key set instead, and a `next` one is never
 promoted: revoke it, and rotation publishes another.
 
 > **Warning:** once you have rewrapped, never restore a deployment made before
 > step 1: it has only the old key, and opens none of the keys. One made before
-> step 2 seals new keys under the old key again, so rewrap again after
-> restoring it.
+> step 2 seals new keys under the old key again: if you restore one, deploy
+> step 2 again, then rewrap again.
 
 Once the old secret is deleted, a copy of the database taken before the rewrap
 holds keys nothing opens. If you ever restore one, revoke its active key, as
