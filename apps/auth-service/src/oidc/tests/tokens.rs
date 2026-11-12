@@ -366,8 +366,8 @@ async fn changing_keys_keeps_codes_and_refresh_tokens() {
         &OidcConfig {
             origin: flow.app.issuer.parse().expect("issuer"),
             digest_keys: Arc::new(TokenDigestKeys::new(
-                TokenDigestKey::derive(&[8; 32]).expect("new digest key"),
-                Some(TokenDigestKey::derive(&[7; 32]).expect("old digest key")),
+                TokenDigestKey::derive(&[8; 32]),
+                Some(TokenDigestKey::derive(&[7; 32])),
             )),
             policies: PolicyLinks::on(&crate::tests::WEB_ORIGIN.parse().expect("web origin")),
         },

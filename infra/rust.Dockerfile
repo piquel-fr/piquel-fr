@@ -51,7 +51,11 @@ ENTRYPOINT ["auth-service"]
 CMD ["serve"]
 
 FROM debian:bookworm-slim AS web
-RUN groupadd --gid 10001 web \
+# reqwest trusts the platform's roots, which its telemetry exporter loads.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 web \
     && useradd --uid 10001 --gid web --no-create-home web
 COPY --from=backend /usr/local/bin/sourceorigin-web /usr/local/bin/sourceorigin-web
 USER 10001:10001

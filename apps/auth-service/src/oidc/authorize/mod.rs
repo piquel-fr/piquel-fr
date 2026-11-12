@@ -187,7 +187,7 @@ impl OidcApplication {
         value: &str,
     ) -> Result<StoredAuthorizationRequest, OAuthError> {
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, value)?;
-        let digests = self.accepted_digests(&opaque)?;
+        let digests = self.accepted_digests(&opaque);
         let request = self
             .database
             .oidc()

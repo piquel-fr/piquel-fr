@@ -13,7 +13,7 @@
 
 use crate::{config::LinkKeys, routes};
 use sourceorigin_common::{TokenId, config::Origin};
-use sourceorigin_crypto::{CryptoError, Secret};
+use sourceorigin_crypto::Secret;
 use url::Url;
 
 /// Derives invitation links' tokens from invitations' IDs, with keys derived
@@ -36,24 +36,16 @@ impl InvitationLinks {
     }
 
     /// The token of a new invitation `id`'s link, under the current key.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn token(&self, id: TokenId) -> Result<Secret, CryptoError> {
+    pub(crate) fn token(&self, id: TokenId) -> Secret {
         self.keys.token(id.as_uuid().as_bytes())
     }
 
     /// Invitation `id`'s link, as [`Self::url`] builds it, under the key whose
     /// token has the stored SHA-256 `digest`. `None` once no configured key
     /// derives it, which fails its delivery.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn link(&self, id: TokenId, digest: &[u8]) -> Result<Option<Url>, CryptoError> {
+    pub(crate) fn link(&self, id: TokenId, digest: &[u8]) -> Option<Url> {
         let token = self.keys.rebuild(id.as_uuid().as_bytes(), digest)?;
-        Ok(token.map(|token| self.url(&token)))
+        Some(self.url(&token))
     }
 
     /// The link holding `token`: the registration page, with the token in its

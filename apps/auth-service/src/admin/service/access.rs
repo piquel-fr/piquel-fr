@@ -54,7 +54,7 @@ impl AdminService {
             EmailApplication::sendable(email).map_err(AdminError::InvitationUnsendable)?;
         }
         let id = TokenId::new();
-        let token = links.token(id)?;
+        let token = links.token(id);
         let expires_at = Utc::now() + expires_in.duration();
         let mut tx = self.database.begin().await?;
         if let Some(email) = &email {

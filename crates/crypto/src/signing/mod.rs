@@ -1,15 +1,20 @@
 //! RSA signing for interoperable `OpenID` Connect ID and access tokens, and the key
 //! set that signs with one key and verifies with every key it publishes.
 use super::{CryptoError, Digest};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::Utc;
-use openssl::{
-    bn::BigNum,
-    hash::MessageDigest,
-    pkey::{PKey, Private, Public},
-    rsa::Rsa,
-    sign::{Signer, Verifier},
+use aws_lc_rs::{
+    encoding::{AsDer, Pkcs8V1Der},
+    rand::SystemRandom,
+    rsa::KeySize,
+    signature::{
+        KeyPair, ParsedPublicKey, RSA_PKCS1_2048_8192_SHA256, RSA_PKCS1_SHA256, RsaKeyPair,
+        RsaPublicKeyComponents,
+    },
 };
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
+use chrono::Utc;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sourceorigin_common::protocol::jwt::{
@@ -18,9 +23,13 @@ use sourceorigin_common::protocol::jwt::{
 use std::{borrow::Cow, collections::BTreeSet};
 
 /// RSA key size used by generated keys.
-const GENERATED_RSA_BITS: u32 = 3_072;
+const GENERATED_RSA_SIZE: KeySize = KeySize::Rsa3072;
 /// Minimum RSA modulus size in bits.
-const MIN_RSA_BITS: i32 = 2_048;
+const MIN_RSA_BITS: usize = 2_048;
+/// The PEM label of a PKCS#8 private key.
+const PKCS8_LABEL: &str = "PRIVATE KEY";
+/// The PEM label of a public key.
+const PUBLIC_KEY_LABEL: &str = "PUBLIC KEY";
 /// Bounds allocation before decoding untrusted compact tokens.
 const MAX_TOKEN_LENGTH: usize = 16_384;
 /// Maximum tolerated future issuance time.
@@ -76,8 +85,10 @@ impl<'a> Compact<'a> {
 pub struct PublicKey {
     /// The published form.
     jwk: Jwk,
-    /// The validated key.
-    key: PKey<Public>,
+    /// The modulus and exponent, big-endian without leading zero bytes.
+    components: RsaPublicKeyComponents<Vec<u8>>,
+    /// The validated key, which verifies RS256 signatures.
+    key: ParsedPublicKey,
 }
 
 impl PublicKey {
@@ -87,19 +98,35 @@ impl PublicKey {
     /// Rejects malformed or undersized keys and invalid key identifiers.
     pub fn from_jwk(jwk: Jwk) -> Result<Self, CryptoError> {
         jwk.kid.parse::<KeyId>().map_err(|_| CryptoError::KeyId)?;
-        let key = match jwk.kty {
+        let components = match jwk.kty {
             KeyType::Rsa => {
-                let component = |value: &str| -> Result<BigNum, CryptoError> {
-                    Ok(BigNum::from_slice(&URL_SAFE_NO_PAD.decode(value)?)?)
+                let component = |value: &str| -> Result<Vec<u8>, CryptoError> {
+                    let bytes = URL_SAFE_NO_PAD.decode(value)?;
+                    let start = bytes
+                        .iter()
+                        .position(|byte| *byte != 0)
+                        .unwrap_or(bytes.len());
+                    Ok(bytes[start..].to_vec())
                 };
-                let rsa = Rsa::from_public_components(component(&jwk.n)?, component(&jwk.e)?)?;
-                if rsa.n().num_bits() < MIN_RSA_BITS {
+                let n = component(&jwk.n)?;
+                let bits = n.first().map_or(0, |first| {
+                    n.len() * 8 - usize::try_from(first.leading_zeros()).unwrap_or(0)
+                });
+                if bits < MIN_RSA_BITS {
                     return Err(CryptoError::RsaKeySize);
                 }
-                PKey::from_rsa(rsa)?
+                RsaPublicKeyComponents {
+                    n,
+                    e: component(&jwk.e)?,
+                }
             }
         };
-        Ok(Self { jwk, key })
+        let key = components.to_parsed_public_key(&RSA_PKCS1_2048_8192_SHA256)?;
+        Ok(Self {
+            jwk,
+            components,
+            key,
+        })
     }
 
     /// The key identifier tokens name in their `kid` header.
@@ -118,21 +145,24 @@ impl PublicKey {
     /// members, in lexicographic order and canonical form, so it names the key
     /// itself, whatever its `kid` or how its JWK spells it.
     ///
-    /// # Errors
-    /// Preserves failures reading the key from the provider.
-    pub fn thumbprint(&self) -> Result<Digest, CryptoError> {
+    #[must_use]
+    pub fn thumbprint(&self) -> Digest {
         let members = match self.jwk.kty {
-            KeyType::Rsa => {
-                let rsa = self.key.rsa()?;
-                // Base64url never needs escaping in JSON.
-                format!(
-                    r#"{{"e":"{}","kty":"RSA","n":"{}"}}"#,
-                    URL_SAFE_NO_PAD.encode(rsa.e().to_vec()),
-                    URL_SAFE_NO_PAD.encode(rsa.n().to_vec()),
-                )
-            }
+            // Base64url never needs escaping in JSON.
+            KeyType::Rsa => format!(
+                r#"{{"e":"{}","kty":"RSA","n":"{}"}}"#,
+                URL_SAFE_NO_PAD.encode(&self.components.e),
+                URL_SAFE_NO_PAD.encode(&self.components.n),
+            ),
         };
-        Ok(Digest::sha256(members.as_bytes()))
+        Digest::sha256(members.as_bytes())
+    }
+
+    /// Exports the key as PEM, `SubjectPublicKeyInfo` in the form `openssl`
+    /// writes, for independent verifiers.
+    #[must_use]
+    pub fn pem(&self) -> String {
+        Pem::encode(PUBLIC_KEY_LABEL, self.key.as_ref())
     }
 
     /// Whether this key signs with `alg`. Requiring the header's algorithm to be
@@ -154,11 +184,9 @@ impl PublicKey {
         if token.header.typ != typ || !self.signs_with(token.header.alg) {
             return Err(CryptoError::InvalidToken);
         }
-        let mut verifier = Verifier::new(MessageDigest::sha256(), &self.key)?;
-        verifier.update(token.signing_input.as_bytes())?;
-        if !verifier.verify(&token.signature)? {
-            return Err(CryptoError::Signature);
-        }
+        self.key
+            .verify_sig(token.signing_input.as_bytes(), &token.signature)
+            .map_err(|_| CryptoError::Signature)?;
         let claims: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(token.payload)?)?;
         if claims[Claim::Issuer.as_str()] != issuer
             || claims
@@ -177,18 +205,20 @@ pub struct Rs256Key {
     /// Key identifier written in every token's header.
     kid: String,
     /// Validated RSA private key.
-    key: PKey<Private>,
+    key: RsaKeyPair,
     /// The public half, derived once from the private key.
     public: PublicKey,
 }
 
 impl Rs256Key {
-    /// Loads a PEM RSA private key under `kid`.
+    /// Loads a PKCS#8 PEM RSA private key (`PRIVATE KEY`) under `kid`, for test
+    /// fixtures.
     ///
     /// # Errors
     /// Returns an error for invalid PEM, a non-RSA or undersized key, or an invalid identifier.
     pub fn from_pem(kid: impl Into<String>, pem: &str) -> Result<Self, CryptoError> {
-        Self::from_key(kid.into(), PKey::private_key_from_pem(pem.as_bytes())?)
+        let der = Pem::decode(pem, PKCS8_LABEL).ok_or(CryptoError::Pem)?;
+        Self::from_key(kid.into(), RsaKeyPair::from_pkcs8(&der)?)
     }
 
     /// Loads a PKCS#8 DER RSA private key under `kid`, as [`Self::private_key_der`] exports it.
@@ -196,7 +226,7 @@ impl Rs256Key {
     /// # Errors
     /// Returns an error for invalid DER, a non-RSA or undersized key, or an invalid identifier.
     pub fn from_der(kid: impl Into<String>, der: &[u8]) -> Result<Self, CryptoError> {
-        Self::from_key(kid.into(), PKey::private_key_from_pkcs8(der)?)
+        Self::from_key(kid.into(), RsaKeyPair::from_pkcs8(der)?)
     }
 
     /// Generates a 3072-bit RSA key using the configured cryptographic provider.
@@ -204,22 +234,20 @@ impl Rs256Key {
     /// # Errors
     /// Preserves provider failures and rejects invalid key identifiers.
     pub fn generate(kid: impl Into<String>) -> Result<Self, CryptoError> {
-        Self::from_key(
-            kid.into(),
-            PKey::from_rsa(Rsa::generate(GENERATED_RSA_BITS)?)?,
-        )
+        Self::from_key(kid.into(), RsaKeyPair::generate(GENERATED_RSA_SIZE)?)
     }
 
-    /// Validates RSA size and key identifier for every construction path.
-    fn from_key(kid: String, key: PKey<Private>) -> Result<Self, CryptoError> {
-        let rsa = key.rsa()?;
+    /// Validates RSA size and key identifier for every construction path. The
+    /// provider refuses keys under 2048 bits before this runs.
+    fn from_key(kid: String, key: RsaKeyPair) -> Result<Self, CryptoError> {
+        let public = key.public_key();
         let public = PublicKey::from_jwk(Jwk {
             alg: Some(Algorithm::Rs256),
-            e: URL_SAFE_NO_PAD.encode(rsa.e().to_vec()),
+            e: URL_SAFE_NO_PAD.encode(public.exponent().big_endian_without_leading_zero()),
             key_ops: None,
             kid: kid.clone(),
             kty: KeyType::Rsa,
-            n: URL_SAFE_NO_PAD.encode(rsa.n().to_vec()),
+            n: URL_SAFE_NO_PAD.encode(public.modulus().big_endian_without_leading_zero()),
             key_use: Some(KeyUse::Signature),
         })?;
         Ok(Self { kid, key, public })
@@ -242,23 +270,16 @@ impl Rs256Key {
     /// # Errors
     /// Preserves encoding failures from the provider.
     pub fn private_key_der(&self) -> Result<Vec<u8>, CryptoError> {
-        Ok(self.key.private_key_to_pkcs8()?)
+        let der: Pkcs8V1Der<'_> = self.key.as_der()?;
+        Ok(der.as_ref().to_vec())
     }
 
-    /// Exports the private key as PEM, for test fixtures.
+    /// Exports the private key as PKCS#8 PEM, for test fixtures.
     ///
     /// # Errors
     /// Preserves encoding failures from the provider.
-    pub fn private_key_pem(&self) -> Result<Vec<u8>, CryptoError> {
-        Ok(self.key.private_key_to_pem_pkcs8()?)
-    }
-
-    /// Exports the public key as PEM for independent verifiers.
-    ///
-    /// # Errors
-    /// Preserves encoding failures from the provider.
-    pub fn public_key_pem(&self) -> Result<Vec<u8>, CryptoError> {
-        Ok(self.key.public_key_to_pem()?)
+    pub fn private_key_pem(&self) -> Result<String, CryptoError> {
+        Ok(Pem::encode(PKCS8_LABEL, &self.private_key_der()?))
     }
 
     /// Signs claims as a compact RS256 token whose `typ` header is `token_type`.
@@ -276,13 +297,20 @@ impl Rs256Key {
             typ: token_type,
         })?);
         let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims)?);
-        let input = format!("{header}.{payload}");
-        let mut signer = Signer::new(MessageDigest::sha256(), &self.key)?;
-        signer.update(input.as_bytes())?;
-        Ok(format!(
-            "{input}.{}",
-            URL_SAFE_NO_PAD.encode(signer.sign_to_vec()?)
-        ))
+        self.signed(&format!("{header}.{payload}"))
+    }
+
+    /// The compact token of `input`, `header.payload`, with its RS256 signature.
+    fn signed(&self, input: &str) -> Result<String, CryptoError> {
+        let mut signature = vec![0; self.key.public_modulus_len()];
+        // RSASSA-PKCS1-v1_5 is deterministic: the provider ignores the generator.
+        self.key.sign(
+            &RSA_PKCS1_SHA256,
+            &SystemRandom::new(),
+            input.as_bytes(),
+            &mut signature,
+        )?;
+        Ok(format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature)))
     }
 
     /// This key alone as a JSON Web Key Set, for fixtures that publish one key.
@@ -418,6 +446,36 @@ impl KeySet {
         keys.iter()
             .find(|key| key.kid() == token.header.kid)
             .ok_or(CryptoError::UnknownKey)
+    }
+}
+
+/// PEM (RFC 7468): base64 DER between `-----BEGIN <label>-----` and
+/// `-----END <label>-----` lines.
+struct Pem;
+
+impl Pem {
+    /// The DER of the first block labelled `label` in `text`, if it decodes.
+    fn decode(text: &str, label: &str) -> Option<Vec<u8>> {
+        let begin = format!("-----BEGIN {label}-----");
+        let end = format!("-----END {label}-----");
+        let body = text.split_once(&begin)?.1.split_once(&end)?.0;
+        let base64: String = body.split_whitespace().collect();
+        STANDARD.decode(base64).ok()
+    }
+
+    /// `der` as a block labelled `label`, in lines of 64 characters.
+    fn encode(label: &str, der: &[u8]) -> String {
+        let base64 = STANDARD.encode(der);
+        let mut lines = String::new();
+        // Base64 is ASCII, so any split falls between characters.
+        let mut rest = base64.as_str();
+        while !rest.is_empty() {
+            let (line, tail) = rest.split_at(rest.len().min(64));
+            lines.push_str(line);
+            lines.push('\n');
+            rest = tail;
+        }
+        format!("-----BEGIN {label}-----\n{lines}-----END {label}-----\n")
     }
 }
 

@@ -106,8 +106,7 @@ impl AuthConfig {
             oidc: OidcConfig {
                 origin: origin.clone(),
                 digest_keys: Arc::new(TokenDigestKeys::new(
-                    TokenDigestKey::derive(Secret::generate().expect("random").as_bytes())
-                        .expect("digest key"),
+                    TokenDigestKey::derive(Secret::generate().expect("random").as_bytes()),
                     None,
                 )),
                 policies: PolicyLinks::on(&WEB_ORIGIN.parse().expect("web origin")),

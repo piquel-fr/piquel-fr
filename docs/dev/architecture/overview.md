@@ -81,7 +81,7 @@ explains how applications, routes and services fit together.
 | Crate | Owns |
 | --- | --- |
 | `sourceorigin-common` (`crates/common`) | Shared types: IDs, handles, vocabularies, domain events, notifications, and under `protocol` the wire types auth and the SDKs share. Its server-only parts sit behind the `admin`, `config`, `email`, `events` and `similarity` features, so the Rust SDK compiles none of them |
-| `sourceorigin-crypto` (`crates/crypto`) | Every cryptographic primitive: secrets, digests, HMAC, PKCE, RS256 signing and key sets, AES-256-GCM sealing, Ed25519 signed notes and SCRAM verifiers |
+| `sourceorigin-crypto` (`crates/crypto`) | Every cryptographic primitive, on `aws-lc-rs`: secrets, digests, HMAC, PKCE, RS256 signing and key sets, AES-256-GCM sealing, Ed25519 signed notes and SCRAM verifiers |
 | `sourceorigin-repository` (`crates/database`) | The only crate that runs SQL: connections, migrations, repositories, transactions, events and the delivery queue's storage |
 | `sourceorigin-telemetry` (`crates/telemetry`) | Logs, traces and metrics, and the HTTP layer every router uses |
 | `sourceorigin-ui` (`crates/ui`) | The Topcoat components of auth's pages and the admin dashboard, and the bodies of its emails, which know nothing of the database or HTTP |

@@ -98,10 +98,7 @@ impl Flow {
             db.clone(),
             &OidcConfig {
                 origin: origin.clone(),
-                digest_keys: Arc::new(TokenDigestKeys::new(
-                    TokenDigestKey::derive(&[7; 32]).expect("digest key"),
-                    None,
-                )),
+                digest_keys: Arc::new(TokenDigestKeys::new(TokenDigestKey::derive(&[7; 32]), None)),
                 policies: config.oidc.policies.clone(),
             },
             SigningKeys::new(KeySet::single(

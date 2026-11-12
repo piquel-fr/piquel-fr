@@ -98,7 +98,7 @@ async fn insert(
     at: DateTime<Utc>,
 ) -> KeyId {
     let id: KeyId = key.kid().parse().expect("key ID");
-    let thumbprint = key.public_key().thumbprint().expect("thumbprint");
+    let thumbprint = key.public_key().thumbprint();
     let sealed_private_key = sealed.unwrap_or_else(|| {
         let associated = binding.associated_data(&id, SigningKeyType::Rsa, &thumbprint);
         let der = key.private_key_der().expect("DER");
@@ -477,8 +477,8 @@ async fn keys_sealed_either_way_open() {
         panic!("the first start generates one key: {stored:?}");
     };
     let thumbprint = PublicKey::from_jwk(generated.public_jwk.clone())
-        .and_then(|public| public.thumbprint())
-        .expect("thumbprint");
+        .expect("public key")
+        .thumbprint();
     let sealed = generated.sealed_private_key.as_deref().expect("sealed");
     let opens = |binding: Binding| {
         let associated = binding.associated_data(&generated.id, generated.key_type, &thumbprint);

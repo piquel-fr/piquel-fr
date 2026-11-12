@@ -80,7 +80,7 @@ impl AdminService {
             EmailApplication::delete_quietly(&mut tx, &context, user_id, email.id).await?;
         }
         let id = RecoveryId::new();
-        let token = links.token(id)?;
+        let token = links.token(id);
         let expires_at = Utc::now() + LINK_LIFETIME;
         tx.recoveries()
             .insert(&InsertRecovery {

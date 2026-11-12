@@ -5,13 +5,10 @@ use crate::{
     IdToken, Issuer, LogoutToken, TokenError,
     http::{Authorization, NetworkError, Reply},
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
-use rand::{RngCore, rngs::OsRng};
 use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
 use sourceorigin_common::{
     ClientId,
     protocol::{
@@ -24,13 +21,10 @@ use sourceorigin_common::{
         step_up::StepUpRequirement,
     },
 };
+use sourceorigin_crypto::{Digest, Secret};
 use std::{fmt, sync::Arc};
 use thiserror::Error;
 use url::Url;
-
-/// Random bytes in `state`, `nonce` and the PKCE verifier: 256 bits, which encode to
-/// a 43-character verifier, the shortest RFC 7636 allows.
-const RANDOM_BYTES: usize = 32;
 
 /// An auth endpoint failed or answered with an OAuth error.
 ///
@@ -126,7 +120,7 @@ pub enum LoginError {
     /// The operating system could not supply random bytes for `state`, `nonce` and
     /// the PKCE verifier.
     #[error("operating system randomness is unavailable")]
-    Randomness(#[source] rand::Error),
+    Randomness(#[source] sourceorigin_crypto::CryptoError),
     /// The pushed authorization request failed (RFC 9126 §2.3).
     #[error(transparent)]
     Push(OAuthError),
@@ -594,12 +588,12 @@ impl Client {
         &self,
         request: &AuthorizeRequest,
     ) -> Result<(Url, PendingLogin), LoginError> {
+        // `state`, `nonce` and the PKCE verifier are each a secret of 256 random
+        // bits, which encode to a 43-character verifier, the shortest RFC 7636 allows.
         let random = || -> Result<String, LoginError> {
-            let mut bytes = [0; RANDOM_BYTES];
-            OsRng
-                .try_fill_bytes(&mut bytes)
-                .map_err(LoginError::Randomness)?;
-            Ok(URL_SAFE_NO_PAD.encode(bytes))
+            Ok(Secret::generate()
+                .map_err(LoginError::Randomness)?
+                .encoded())
         };
         let pending = PendingLogin {
             issuer: self.issuer().issuer().to_owned(),
@@ -616,7 +610,7 @@ impl Client {
         };
         let mut scopes = request.scopes.clone();
         scopes.insert(Scope::OpenId);
-        let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes()));
+        let challenge = Digest::sha256(pending.verifier.as_bytes()).encoded();
         // `audience` is never sent: auth then picks the client's default resource.
         // `client_id` is added where the request goes, as `post` adds it.
         let mut parameters = vec![

@@ -114,11 +114,11 @@ impl OidcApplication {
                 OAuthCode::InvalidRequestUri.reject_with(UNKNOWN_REQUEST_URI, error)
             })?;
         let opaque = pushed.renewed()?;
-        let (new_digest, new_digest_key) = self.token_digest(&opaque)?;
+        let (new_digest, new_digest_key) = self.token_digest(&opaque);
         let request = oidc
             .claim_pushed_authorization_request(
                 pushed.id,
-                &self.accepted_digests(&pushed)?,
+                &self.accepted_digests(&pushed),
                 client_id,
                 &new_digest,
                 &new_digest_key,

@@ -75,7 +75,7 @@ async fn recover(
     links: &RecoveryLinks,
 ) -> (RecoveryId, Secret) {
     let id = RecoveryId::new();
-    let token = links.token(id).expect("token");
+    let token = links.token(id);
     database
         .recoveries()
         .insert(&InsertRecovery {
@@ -153,7 +153,7 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
     let user_id = account(&database).await;
     let email_id = EmailId::new();
-    let token = config.verification_keys.token(email_id).expect("token");
+    let token = config.verification_keys.token(email_id);
     database
         .emails()
         .insert_unverified(&InsertUnverifiedEmail {
@@ -238,7 +238,7 @@ async fn a_verification_link_survives_a_change_of_key() {
     );
     // Email settings under `current`, accepting `accepted` too.
     let settings = |current: &Secret, accepted: Option<&Secret>| {
-        let derive = |key: &Secret| TokenDigestKey::derive(key.as_bytes()).expect("digest key");
+        let derive = |key: &Secret| TokenDigestKey::derive(key.as_bytes());
         let mut config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
         config.verification_keys =
             TokenDigestKeys::new(derive(current), accepted.map(derive)).verification_keys();
@@ -424,7 +424,7 @@ async fn an_invitation_is_mailed_while_it_is_open() {
     let sender =
         EmailSender::with_mailer(database.clone(), Some(Arc::new(Outbox::default())), &config);
     let id = TokenId::new();
-    let token = config.invitation_links.token(id).expect("token");
+    let token = config.invitation_links.token(id);
     let address = format!("{id}@example.com");
     database
         .security()
@@ -751,7 +751,7 @@ async fn security_emails_carry_the_sign_out_link() {
         id: query["id"].parse().expect("notification"),
         token: query["token"].clone(),
     });
-    assert_eq!(checked.expect("check"), Some(notification_id));
+    assert_eq!(checked, Some(notification_id));
     sender.assert_renders(user_id, &alert).await;
     let service = message(Notification::AlertRaised {
         alert_id: sourceorigin_common::AlertId::new(),
@@ -824,10 +824,7 @@ async fn announcement_emails_offer_unsubscribing_unless_essential() {
         id: query["id"].parse().expect("account"),
         token: query["token"].clone(),
     };
-    assert_eq!(
-        config.unsubscribe_links.check(&unsubscribe).expect("check"),
-        Some(user_id)
-    );
+    assert_eq!(config.unsubscribe_links.check(&unsubscribe), Some(user_id));
     let body = String::from_utf8_lossy(&news.formatted())
         .replace("=\r\n", "")
         .replace("=3D", "=")

@@ -309,7 +309,7 @@ impl OidcApplication {
                 .as_deref()
                 .ok_or_else(|| OAuthCode::InvalidGrant.reject("code is required"))?,
         )?;
-        let digests = self.accepted_digests(&opaque)?;
+        let digests = self.accepted_digests(&opaque);
         let mut tx = self.database.begin().await?;
         // Lock the account before the code, as a refresh and removing an app
         // do: a removal then either commits first and expires the code, or waits
@@ -421,7 +421,7 @@ impl OidcApplication {
                 .as_deref()
                 .ok_or_else(|| OAuthCode::InvalidGrant.reject("refresh_token is required"))?,
         )?;
-        let digests = self.accepted_digests(&opaque)?;
+        let digests = self.accepted_digests(&opaque);
         let redemption = RefreshRedemption::from(client.kind);
         let mut tx = self.database.begin().await?;
         let redeemed = match tx
@@ -516,7 +516,7 @@ impl OidcApplication {
         expires_at: DateTime<Utc>,
     ) -> Result<(InsertRefreshToken, String), OAuthError> {
         let opaque = OpaqueToken::new(TokenPrefix::RefreshToken)?;
-        let (secret_digest, digest_key) = self.token_digest(&opaque)?;
+        let (secret_digest, digest_key) = self.token_digest(&opaque);
         let token = InsertRefreshToken {
             id: opaque.id,
             family_id,
@@ -543,7 +543,7 @@ impl OidcApplication {
             .await?;
         // RFC 7009 requires success even for malformed or unknown tokens.
         if let Ok(opaque) = OpaqueToken::parse(TokenPrefix::RefreshToken, &form.token) {
-            let digests = app.accepted_digests(&opaque)?;
+            let digests = app.accepted_digests(&opaque);
             let mut tx = app.database.begin().await?;
             if let Some(family) = tx
                 .tokens()
