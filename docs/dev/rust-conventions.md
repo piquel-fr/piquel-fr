@@ -71,6 +71,13 @@ and lettre). Don't add another, such as `ring`, `openssl`, `sha2` or `rand`.
 OpenSSL is in the tree only because webauthn-rs needs it, and auth-service names
 it only to build it vendored. `cargo tree -i ring` should print nothing.
 
+Hold a secret in a type that zeroizes it when dropped: the crypto crate's
+`Secret` and `ClientSecret`, `SecretBytes` for configured secrets, `secrecy`'s
+`SecretString`, or `secrecy::zeroize::Zeroizing` around a buffer such as a
+decrypted private key. Read a configured secret with `SecretBytes::text`, the
+one rule every text secret follows; only the token digest keys use their raw
+bytes.
+
 ## Configuration
 
 There is no development mode. Use `just preview` for development over HTTPS through

@@ -12,7 +12,7 @@ admin = ["dep:serde_json"]
 # `SendTraced`: client spans around `reqwest` requests, for auth and the SDK.
 client-spans = ["dep:reqwest", "dep:tracing"]
 # Environment variables, validated origins and secret references, for servers.
-config = []
+config = ["dep:secrecy"]
 # Email address normalization, for servers that store or compare addresses.
 email = ["dep:unicode-normalization"]
 # Domain events recorded by auth. Audit chain verifications are recorded as the
@@ -26,6 +26,7 @@ sqlx = ["dep:sqlx"]
 [dependencies]
 chrono.workspace = true
 reqwest = { workspace = true, optional = true }
+secrecy = { workspace = true, optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 sqlx = { workspace = true, optional = true }

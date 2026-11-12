@@ -32,10 +32,25 @@ fn secrets_are_redacted() {
     ] {
         assert!(SecretReference::parse(value).is_err());
     }
-    let secret = SecretBytes(b"private".to_vec());
-    assert_eq!(secret.utf8().expect("UTF-8"), "private");
-    assert!(!format!("{secret:?}").contains("private"));
-    assert!(SecretBytes(vec![255]).utf8().is_err());
+    let secret = |bytes: &[u8]| SecretBytes(Zeroizing::new(bytes.to_vec()));
+    assert!(!format!("{:?}", secret(b"private")).contains("private"));
+    assert!(secret(&[255]).text().is_err());
+    // One trailing line ending goes, as a file written by a shell or an editor ends;
+    // anything else is the secret's own.
+    for (bytes, text) in [
+        (&b"private"[..], "private"),
+        (b"private\n", "private"),
+        (b"private\r\n", "private"),
+        (b"private\n\n", "private\n"),
+        (b" private ", " private "),
+    ] {
+        assert_eq!(secret(bytes).text().expect("UTF-8"), text);
+        assert_eq!(
+            secret(bytes).expose_secret(),
+            bytes,
+            "raw bytes stay as read"
+        );
+    }
     let missing = SecretReference::parse("file:///nonexistent/sourceorigin-secret-test")
         .expect("reference")
         .resolve()

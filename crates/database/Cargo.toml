@@ -10,6 +10,7 @@ chrono.workspace = true
 sourceorigin-common = { workspace = true, features = ["admin", "events", "sqlx"] }
 sourceorigin-crypto.workspace = true
 sourceorigin-telemetry.workspace = true
+secrecy.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 sqlx.workspace = true

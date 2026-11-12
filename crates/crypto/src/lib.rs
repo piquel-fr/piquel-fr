@@ -20,6 +20,7 @@ use aws_lc_rs::{
     constant_time, digest, error::KeyRejected, error::Unspecified, hmac, rand as random,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use secrecy::{ExposeSecret, SecretBox, SecretString, zeroize::Zeroizing};
 use std::fmt;
 use thiserror::Error;
 
@@ -119,47 +120,57 @@ pub(crate) fn random_bytes<const N: usize>() -> Result<[u8; N], CryptoError> {
     Ok(bytes)
 }
 
-/// A random 256-bit secret with redacted diagnostics.
-#[derive(Clone)]
-pub struct Secret([u8; SECRET_BYTES]);
+/// A random 256-bit secret, zeroized when dropped, with redacted diagnostics.
+pub struct Secret(SecretBox<[u8; SECRET_BYTES]>);
+impl Clone for Secret {
+    /// Copies the secret into a new zeroizing box.
+    fn clone(&self) -> Self {
+        Self::from_bytes(self.as_bytes())
+    }
+}
 impl Secret {
+    /// Boxes `bytes`, copying them only into the box.
+    fn from_bytes(bytes: &[u8; SECRET_BYTES]) -> Self {
+        Self(SecretBox::init_with_mut(|boxed| *boxed = *bytes))
+    }
     /// Generates a secret using operating system randomness.
     ///
     /// # Errors
     /// Preserves failures from the random source.
     pub fn generate() -> Result<Self, CryptoError> {
-        Ok(Self(random_bytes()?))
+        Ok(Self::from_bytes(&Zeroizing::new(random_bytes()?)))
     }
     /// Derives a domain-separated secret key with HMAC-SHA256.
     #[must_use]
     pub fn derive(key: &[u8], context: &[u8]) -> Self {
-        Self(Digest::hmac(key, context).0)
+        Self::from_bytes(&Digest::hmac(key, context).0)
     }
     /// Parses a canonical, unpadded base64url secret.
     ///
     /// # Errors
     /// Rejects invalid encoding and lengths other than 32 bytes.
     pub fn parse(value: &str) -> Result<Self, CryptoError> {
-        let bytes = URL_SAFE_NO_PAD.decode(value)?;
-        // Conversion returns the original secret bytes on failure, not a safe error source.
-        Ok(Self(
-            bytes.try_into().map_err(|_| CryptoError::SecretLength)?,
-        ))
+        let bytes = Zeroizing::new(URL_SAFE_NO_PAD.decode(value)?);
+        let bytes: &[u8; SECRET_BYTES] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| CryptoError::SecretLength)?;
+        Ok(Self::from_bytes(bytes))
     }
     /// Exposes bytes only when required by a cryptographic operation.
     #[must_use]
-    pub const fn as_bytes(&self) -> &[u8; SECRET_BYTES] {
-        &self.0
+    pub fn as_bytes(&self) -> &[u8; SECRET_BYTES] {
+        self.0.expose_secret()
     }
     /// Encodes the secret for transport.
     #[must_use]
     pub fn encoded(&self) -> String {
-        URL_SAFE_NO_PAD.encode(self.0)
+        URL_SAFE_NO_PAD.encode(self.as_bytes())
     }
     /// Hashes the secret for storage.
     #[must_use]
     pub fn digest(&self) -> Digest {
-        Digest::sha256(&self.0)
+        Digest::sha256(self.as_bytes())
     }
 }
 impl fmt::Debug for Secret {
@@ -214,18 +225,21 @@ impl Digest {
 ///
 /// SHA-256 suffices for the digest, rather than a slow password hash: a 256-bit
 /// random value cannot be guessed, so slowing each guess down adds nothing but
-/// latency to every token request.
-pub struct ClientSecret(String);
+/// latency to every token request. The secret is zeroized when dropped.
+pub struct ClientSecret(SecretString);
 impl ClientSecret {
     /// Generates a secret using operating system randomness.
     ///
     /// # Errors
     /// Preserves failures from the random source.
     pub fn generate() -> Result<Self, CryptoError> {
-        Ok(Self(format!(
-            "{CLIENT_SECRET_PREFIX}{}",
-            Secret::generate()?.encoded()
-        )))
+        // Built at its exact length, so the conversion to the box doesn't
+        // reallocate, and the encoded copy is zeroized.
+        let encoded = Zeroizing::new(Secret::generate()?.encoded());
+        let mut secret = String::with_capacity(CLIENT_SECRET_PREFIX.len() + encoded.len());
+        secret.push_str(CLIENT_SECRET_PREFIX);
+        secret.push_str(&encoded);
+        Ok(Self(secret.into()))
     }
     /// A secret generated elsewhere, such as by the deployment of the client that
     /// uses it: 256 random bits in unpadded base64url, with or without the prefix.
@@ -234,17 +248,17 @@ impl ClientSecret {
     /// Rejects other encodings and lengths, so a guessable secret is never stored.
     pub fn parse(value: &str) -> Result<Self, CryptoError> {
         Secret::parse(value.strip_prefix(CLIENT_SECRET_PREFIX).unwrap_or(value))?;
-        Ok(Self(value.to_owned()))
+        Ok(Self(value.into()))
     }
     /// The secret, to show the operator once.
     #[must_use]
     pub fn expose(&self) -> &str {
-        &self.0
+        self.0.expose_secret()
     }
     /// The digest stored for this secret.
     #[must_use]
     pub fn digest(&self) -> Digest {
-        Self::digest_presented(&self.0)
+        Self::digest_presented(self.expose())
     }
     /// The digest of a secret a client presents, to compare with stored digests.
     /// Secrets that predate the prefix are hashed the same way, so they keep working.

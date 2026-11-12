@@ -8,10 +8,13 @@ use base64::{
         general_purpose::{GeneralPurpose, GeneralPurposeConfig, URL_SAFE_NO_PAD},
     },
 };
+use secrecy::zeroize::Zeroizing;
 use serde::{Serialize, de::DeserializeOwned};
 use sourceorigin_crypto::{CryptoError, Secret};
 use std::fmt;
 
+/// The most a browser stores in one cookie, which bounds a sealed value.
+const COOKIE_BYTES: usize = 4096;
 /// Bytes in a cookie key, and in the AES-256 keys derived from it.
 const SECRET_BYTES: usize = 32;
 
@@ -111,9 +114,12 @@ impl SealingKey {
     /// `value` as JSON, sealed for `context`: base64url of the nonce, the ciphertext
     /// and the tag.
     pub(super) fn seal(&self, value: &impl Serialize, context: &str) -> Result<String, SealError> {
-        let sealed = self
-            .0
-            .seal(&serde_json::to_vec(value)?, context.as_bytes())?;
+        // The value holds the user's tokens, so it is serialized into a zeroizing
+        // buffer with room for any cookie, which never reallocates and leaves no
+        // partial copy behind.
+        let mut plaintext = Zeroizing::new(Vec::with_capacity(COOKIE_BYTES));
+        serde_json::to_writer(&mut *plaintext, value)?;
+        let sealed = self.0.seal(&plaintext, context.as_bytes())?;
         Ok(URL_SAFE_NO_PAD.encode(sealed))
     }
 
@@ -185,9 +191,10 @@ impl CookieKey {
     /// [`CookieKeyError::Unrecognized`] if it is in none of these encodings.
     pub fn parse(text: &str) -> Result<Self, CookieKeyError> {
         let text = text.trim_ascii();
-        let decoded: Vec<Vec<u8>> = Encoding::ALL
+        // Each candidate holds the key, so each is zeroized when dropped.
+        let decoded: Vec<Zeroizing<Vec<u8>>> = Encoding::ALL
             .iter()
-            .filter_map(|encoding| encoding.decode(text))
+            .filter_map(|encoding| encoding.decode(text).map(Zeroizing::new))
             .collect();
         match decoded.iter().find(|bytes| bytes.len() == SECRET_BYTES) {
             Some(secret) => Self::from_secret(secret),

@@ -13,6 +13,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use chrono::Utc;
+use secrecy::zeroize::Zeroizing;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sourceorigin_common::protocol::jwt::{
@@ -233,17 +234,20 @@ impl Rs256Key {
     ///
     /// # Errors
     /// Preserves encoding failures from the provider.
-    pub fn private_key_der(&self) -> Result<Vec<u8>, CryptoError> {
+    pub fn private_key_der(&self) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
         let der: Pkcs8V1Der<'_> = self.key.as_der()?;
-        Ok(der.as_ref().to_vec())
+        Ok(Zeroizing::new(der.as_ref().to_vec()))
     }
 
     /// Exports the private key as PKCS#8 PEM, for test fixtures.
     ///
     /// # Errors
     /// Preserves encoding failures from the provider.
-    pub fn private_key_pem(&self) -> Result<String, CryptoError> {
-        Ok(Pem::encode(PKCS8_LABEL, &self.private_key_der()?))
+    pub fn private_key_pem(&self) -> Result<Zeroizing<String>, CryptoError> {
+        Ok(Zeroizing::new(Pem::encode(
+            PKCS8_LABEL,
+            &self.private_key_der()?,
+        )))
     }
 
     /// Signs claims as a compact RS256 token whose `typ` header is `token_type`.
@@ -419,12 +423,13 @@ struct Pem;
 
 impl Pem {
     /// The DER of the first block labelled `label` in `text`, if it decodes.
-    fn decode(text: &str, label: &str) -> Option<Vec<u8>> {
+    /// A private key's base64 and DER are zeroized when dropped.
+    fn decode(text: &str, label: &str) -> Option<Zeroizing<Vec<u8>>> {
         let begin = format!("-----BEGIN {label}-----");
         let end = format!("-----END {label}-----");
         let body = text.split_once(&begin)?.1.split_once(&end)?.0;
-        let base64: String = body.split_whitespace().collect();
-        STANDARD.decode(base64).ok()
+        let base64: Zeroizing<String> = Zeroizing::new(body.split_whitespace().collect());
+        STANDARD.decode(base64.as_str()).ok().map(Zeroizing::new)
     }
 
     /// `der` as a block labelled `label`, in lines of 64 characters.

@@ -120,7 +120,7 @@ impl ProviderConfig {
             variable.error("must resolve through env://NAME or file://PATH", source)
         })?;
         secret
-            .utf8()
+            .text()
             .map_err(|source| variable.error("must contain UTF-8 text", source))?;
         Ok(ResolvedProvider {
             client_id: self.client_id.clone(),

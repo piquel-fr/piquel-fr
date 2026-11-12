@@ -508,7 +508,7 @@ impl ApplyClient {
         self.secret
             .as_ref()
             .map(|reference| {
-                ClientSecret::parse(reference.resolve()?.utf8()?).map_err(CliError::WeakSecret)
+                ClientSecret::parse(reference.resolve()?.text()?).map_err(CliError::WeakSecret)
             })
             .transpose()
     }
