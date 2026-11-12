@@ -424,7 +424,7 @@ async fn an_invitation_is_mailed_while_it_is_open() {
     let sender =
         EmailSender::with_mailer(database.clone(), Some(Arc::new(Outbox::default())), &config);
     let id = TokenId::new();
-    let token = config.invitation_links.token(id).expect("token");
+    let token = config.invitation_links.token(id);
     let address = format!("{id}@example.com");
     database
         .security()

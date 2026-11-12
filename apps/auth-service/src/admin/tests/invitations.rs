@@ -131,7 +131,7 @@ async fn revoked_invitations_cannot_be_redeemed() {
         panic!("a link to pass on: {created:?}");
     };
     assert_eq!(url.path(), crate::routes::page::REGISTER);
-    let digest = links.token(created.id).expect("token").digest();
+    let digest = links.token(created.id).digest();
     let open = || async {
         harness
             .database
@@ -182,7 +182,7 @@ async fn invitation_revocation_waits_for_signup() {
         )
         .await
         .expect("invitation");
-    let digest = links.token(invitation.id).expect("token").digest();
+    let digest = links.token(invitation.id).digest();
     let mut signup = harness.database.begin().await.expect("transaction");
     assert!(
         signup
