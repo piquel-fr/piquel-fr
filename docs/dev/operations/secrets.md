@@ -90,7 +90,7 @@ watch, and fix forward if it fails: a retry reuses the new secret.
 | --- | --- | --- | --- |
 | `database-password` | `postgres`, the `migrate` job | the superuser `sourceorigin`'s password | **never**: the database keeps the password it stored when its volume was created, so the `migrate` job, which logs in with the new value, fails and every deployment after it stops. Regenerating makes a value nobody sees, so it can't be set in PostgreSQL first either: there is no supported way to change this password yet |
 | `database-runtime-password` | `auth` | `sourceorigin_auth`'s password | takes effect on the next deployment: see [the database runtime password](#the-database-runtime-password) |
-| `key-encryption-key` | `auth` | `AUTH_KEY_ENCRYPTION_KEY`, which seals the signing keys in the database | **never**: the stored signing keys would no longer open, and auth can't change it |
+| `key-encryption-key` | `auth` | `AUTH_KEY_ENCRYPTION_KEY`, which seals the signing keys in the database | don't: the stored signing keys would no longer open. Change it with a new secret instead, in two deployments and a `keys rewrap`, as [changing the key-encryption key](signing-keys.md#change-the-key-encryption-key) describes |
 | `token-digest-key` | `auth` | `AUTH_TOKEN_DIGEST_KEY` | ends every refresh token and login in progress under it: change it in two deployments instead, as [changing the token digest key](signing-keys.md#change-the-token-digest-key) describes |
 | `audit-key` | `auth`, in previews | the seed that signs a preview's audit checkpoints | makes the preview's earlier checkpoints fail verification |
 | `no-provider-secret` | `auth` | the placeholder mounted for a sign-in provider that's off | nothing: auth never reads it |

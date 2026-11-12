@@ -218,6 +218,8 @@ pub enum SearchAction {
     RegisterClient,
     /// Publishing a new signing key.
     RotateSigningKey,
+    /// Sealing the signing keys again under the current key-encryption key.
+    RewrapSigningKeys,
     /// Drafting an announcement.
     DraftAnnouncement,
 }
@@ -230,7 +232,7 @@ impl SearchAction {
             Self::Invite => Tab::Invitations,
             Self::ReserveHandle => Tab::Handles,
             Self::RegisterClient => Tab::Clients,
-            Self::RotateSigningKey => Tab::SigningKeys,
+            Self::RotateSigningKey | Self::RewrapSigningKeys => Tab::SigningKeys,
             Self::DraftAnnouncement => Tab::Announcements,
         }
     }
@@ -252,6 +254,9 @@ impl SearchAction {
                 true,
             ),
             Self::RotateSigningKey => Change::RotateSigningKey.spot("new key jwks rotate"),
+            Self::RewrapSigningKeys => {
+                Change::RewrapSigningKeys.spot("reseal kek key-encryption key encryption rewrap")
+            }
             Self::DraftAnnouncement => {
                 Change::DraftAnnouncement.spot("draft write send broadcast email everyone")
             }
@@ -514,6 +519,8 @@ pub enum Change {
     RotateSigningKey,
     /// Deleting a signing key at once.
     RevokeSigningKey,
+    /// Sealing every signing key again under the current key-encryption key.
+    RewrapSigningKeys,
     /// Drafting an announcement, which needs no confirmation.
     DraftAnnouncement,
     /// Changing a draft announcement, which needs no confirmation.
@@ -561,6 +568,7 @@ impl Change {
             Self::CancelDelivery => "Cancel this delivery",
             Self::RotateSigningKey => "Rotate the signing key",
             Self::RevokeSigningKey => "Revoke this signing key",
+            Self::RewrapSigningKeys => "Rewrap the signing keys",
             Self::DraftAnnouncement => "New announcement",
             Self::EditAnnouncement => "Edit the draft",
             Self::SendAnnouncement => "Send this announcement",
@@ -639,6 +647,9 @@ impl Change {
             Self::RevokeSigningKey => {
                 "For a compromised key. It leaves the key set at once, and every replica stops accepting its tokens within a minute; verifiers that cached it keep accepting them for up to an hour. Revoking the key that signs also deletes the waiting and retiring keys, whose private keys were stored beside it, and a new key signs at once."
             }
+            Self::RewrapSigningKeys => {
+                "Seals every signing key's private key again under this deployment's key-encryption key, so the key it accepts during a change of key-encryption key can be removed. Every replica must open keys under it first: one that has it neither as its key nor as its accepted one can no longer open them. If a key opens under neither, nothing changes: revoke that key first."
+            }
             Self::EnableClient => "It can sign users in, exchange codes and refresh tokens again.",
             Self::DisableClient => {
                 "It stops signing users in, exchanging codes and refreshing tokens at once. Its owner can enable it again."
@@ -696,6 +707,7 @@ impl Change {
             // Not "Cancel", which closes its dialog.
             Self::CancelDelivery => "Cancel delivery",
             Self::RotateSigningKey => "Rotate",
+            Self::RewrapSigningKeys => "Rewrap",
             Self::DraftAnnouncement | Self::EditAnnouncement => "Save draft",
             Self::SendAnnouncement | Self::Message => "Send",
             Self::DiscardAnnouncement => "Discard",
@@ -735,6 +747,7 @@ impl Change {
             | Self::CancelDelivery
             | Self::RotateSigningKey
             | Self::RevokeSigningKey
+            | Self::RewrapSigningKeys
             | Self::DraftAnnouncement
             | Self::EditAnnouncement
             | Self::SendAnnouncement
@@ -826,7 +839,8 @@ impl Change {
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RotateSigningKey
-            | Self::RevokeSigningKey => Some(REASON),
+            | Self::RevokeSigningKey
+            | Self::RewrapSigningKeys => Some(REASON),
             // A draft's own changes record nothing, and an announcement's or a
             // message's text says why it is sent; an alert update's note is its
             // reason, which its own fields ask for.

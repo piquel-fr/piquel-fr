@@ -8,7 +8,7 @@ revoking and changing them are in [signing keys](../operations/signing-keys.md).
 | Key | Where it lives | Protects | Changes |
 | --- | --- | --- | --- |
 | Signing keys | `signing_keys`, sealed under the key-encryption key | ID, access and logout tokens | rotate every 90 days by themselves |
-| Key-encryption key | `AUTH_KEY_ENCRYPTION_KEY` | the signing keys' private keys at rest | cannot be changed yet |
+| Key-encryption keys | `AUTH_KEY_ENCRYPTION_KEY`, and `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED` during a change | the signing keys' private keys at rest | by hand, in two deploys and a `keys rewrap` |
 | Token digest keys | `AUTH_TOKEN_DIGEST_KEY`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` during a change | stored opaque tokens, and email verification, recovery and unsubscribe links | by hand, in two deploys |
 | Audit key | `AUTH_AUDIT_KEY_PROVIDER` | the audit chain's checkpoints | by hand |
 
@@ -36,6 +36,13 @@ type and its public key's JWK thumbprint, so a sealed key moved to another row,
 or stored beside another public key, fails to open. Keys sealed before the
 thumbprint was bound have only the ID and type, and still open. Opening a key
 also checks that the private key is the half of the public key stored with it.
+
+`KeyEncryptionKeys` holds the current key-encryption key, which seals every
+key, and, during a change, an accepted one, which only opens them.
+`KeyStore::rewrap`, behind `keys rewrap` and the dashboard's **Rewrap**, opens
+every key that still has a private key and seals it again under the current
+key, bound to its public key, recording `rewrapped` for each. It opens them all
+before it writes any, so a key that opens under neither changes nothing.
 
 The database never sees a private key in the clear. Retiring a key erases its
 private key; only its public key stays, to verify hints.
@@ -68,8 +75,8 @@ step each minute, then reloads the key set. A step runs in a transaction that
 holds `signing_keys().try_lock()`, a transaction-level advisory lock, so one
 replica at a time takes it and the others skip it; the `keys` commands wait for
 the same lock (`signing_keys().lock()`). Before any change, `KeyStore::check`
-makes sure this key-encryption key opens the stored active key, so a replica or
-command with the wrong key never stores keys nobody can open.
+makes sure one of its key-encryption keys opens the stored active key, so a
+replica or command with the wrong keys never stores keys nobody can open.
 
 Every change records `SigningKeyChanged`, naming the key and what happened to
 it. Changes an operator makes, from `auth-service keys` or the dashboard's

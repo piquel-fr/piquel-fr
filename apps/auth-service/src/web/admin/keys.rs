@@ -1,4 +1,4 @@
-//! Signing keys: listing, rotating and revoking them.
+//! Signing keys: listing, rotating, revoking and rewrapping them.
 
 use super::{AdminApplication as App, ReasonForm, Refused};
 use crate::Reason;
@@ -44,9 +44,14 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
             },
         })
         .collect();
-    let (rows, rotating) = (&rows, &href!(rotate).resolve(cx));
-    let page =
-        view! { cx => sourceorigin_ui::signing_key_list(rows: rows, rotate: rotating.as_str()) };
+    let (rows, rotating, rewrapping) = (
+        &rows,
+        &href!(rotate).resolve(cx),
+        &href!(rewrap).resolve(cx),
+    );
+    let page = view! { cx =>
+        sourceorigin_ui::signing_key_list(rows: rows, rotate: rotating.as_str(), rewrap: rewrapping.as_str())
+    };
     App::render(cx, StatusCode::OK, "Signing keys", page).await
 }
 
@@ -106,4 +111,32 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Re
         )
     };
     App::render(cx, StatusCode::OK, Change::RevokeSigningKey.title(), page).await
+}
+
+/// `/keys/rewrap`: seals every signing key again under the current key-encryption
+/// key, after a change of key-encryption key.
+#[route([GET, POST] "/keys/rewrap")]
+pub(super) async fn rewrap(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
+    let admin = App::admin(cx).await?;
+    App::confirm(cx, admin)?;
+    let app = App::of(cx);
+    let back = href!(list).resolve(cx);
+    let refused = App::submit_reason(cx, form, back.clone(), async |reason| {
+        app.service
+            .rewrap_signing_keys(&admin.operator, &app.keys, reason)
+            .await
+            .map(drop)
+    })
+    .await?;
+    let reason = refused.as_ref().map(Refused::reason);
+    let refused = refused.as_deref();
+    let page = view! { cx =>
+        sourceorigin_ui::dashboard_change(
+            change: Change::RewrapSigningKeys,
+            back: back.as_str(),
+            refusal: refused,
+            reason: reason,
+        )
+    };
+    App::render(cx, StatusCode::OK, Change::RewrapSigningKeys.title(), page).await
 }

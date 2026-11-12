@@ -1,4 +1,5 @@
-//! Signing keys, token digest keys and the audit key. None needs the HTTP
+//! Signing keys, key-encryption keys, token digest keys and the audit key. None
+//! needs the HTTP
 //! service, and every replica picks up a signing key change within a minute.
 //! Signing key commands run their admin operation, as the dashboard's signing
 //! keys page does.
@@ -8,7 +9,7 @@ use super::{
     output::{Cell, Output, Single, report},
 };
 use crate::{
-    AuditConfig, AuthConfig, KeyStore, PUBLIC_BASE_URL, Reason, TokenDigestKeys,
+    AuditConfig, KeyEncryptionKeys, KeyStore, PUBLIC_BASE_URL, Reason, TokenDigestKeys,
     admin::{AdminOperation, OperatorName},
 };
 use clap::Subcommand;
@@ -17,8 +18,8 @@ use sourceorigin_common::{admin::SigningKey, protocol::jwt::KeyId};
 use sourceorigin_repository::{Database, DigestUsage};
 use std::sync::Arc;
 
-/// Inspecting, rotating and revoking signing keys, and checking token digest
-/// keys. Changes are recorded as made by the operator at this terminal.
+/// Inspecting, rotating, revoking and rewrapping signing keys, and checking token
+/// digest keys. Changes are recorded as made by the operator at this terminal.
 #[derive(Subcommand)]
 pub(super) enum KeysCommand {
     /// List signing keys with their state and dates, oldest first.
@@ -44,6 +45,17 @@ pub(super) enum KeysCommand {
     Revoke {
         /// The key's ID.
         id: KeyId,
+        /// Why, recorded with the change: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
+    },
+    /// Seal every stored signing key again under `AUTH_KEY_ENCRYPTION_KEY`, after
+    /// a change of key-encryption key, so `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED` can
+    /// be removed. Refuses, changing nothing, if a key opens under neither.
+    Rewrap {
         /// Why, recorded with the change: 1 to 500 characters.
         #[arg(long)]
         reason: Reason,
@@ -84,6 +96,7 @@ impl KeysCommand {
             Self::List => AdminOperation::ListSigningKeys,
             Self::Rotate { .. } => AdminOperation::RotateSigningKey,
             Self::Revoke { .. } => AdminOperation::RevokeSigningKey,
+            Self::Rewrap { .. } => AdminOperation::RewrapSigningKeys,
             Self::DigestUsage | Self::Audit => return None,
         })
     }
@@ -99,7 +112,7 @@ impl KeysCommand {
         let store = || -> Result<KeyStore, CliError> {
             Ok(KeyStore::new(
                 database.clone(),
-                Arc::new(AuthConfig::key_encryption_key_from_environment()?),
+                Arc::new(KeyEncryptionKeys::from_environment()?),
             ))
         };
         let console = || Console::new(database.clone(), operator, out.clone());
@@ -150,6 +163,24 @@ impl KeysCommand {
                         "Revoked key {id}; key {replacement} signs from now on."
                     ))?,
                     None => out.info(format_args!("Revoked key {id}."))?,
+                }
+            }
+            Self::Rewrap { reason, confirm } => {
+                let Console {
+                    service, operator, ..
+                } = &console()?;
+                confirm.ask(
+                    &out,
+                    "Seal every signing key again under AUTH_KEY_ENCRYPTION_KEY: a replica that has it neither as its key-encryption key nor as its accepted one can no longer open them",
+                )?;
+                let ids = service
+                    .rewrap_signing_keys(operator, &store()?, reason)
+                    .await?;
+                if ids.is_empty() {
+                    out.info("No signing key has a private key to rewrap.")?;
+                } else {
+                    let ids: Vec<_> = ids.iter().map(KeyId::as_str).collect();
+                    out.info(format_args!("Rewrapped signing keys {}.", ids.join(", ")))?;
                 }
             }
             Self::DigestUsage => {

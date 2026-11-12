@@ -1,6 +1,5 @@
-//! The keys auth reads from the environment: the key-encryption key, which
-//! `AuthConfig` opens, the token digest keys, the link keys derived from them, and
-//! the audit checkpoint key.
+//! The keys auth reads from the environment: the key-encryption keys, the token
+//! digest keys, the link keys derived from them, and the audit checkpoint key.
 
 use crate::{
     AuditKeys,
@@ -10,10 +9,11 @@ use crate::{
     recovery::RecoveryLinks,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use secrecy::zeroize::Zeroizing;
 use sourceorigin_common::config::{
     ConfigurationError, Origin, SecretBytes, SecretReference, Variable,
 };
-use sourceorigin_crypto::{Digest, NoteKey, NoteVerifier, Secret};
+use sourceorigin_crypto::{CryptoError, Digest, KeyEncryptionKey, NoteKey, NoteVerifier, Secret};
 use std::sync::Arc;
 
 /// Separates opaque token digests from every other use of a token digest key.
@@ -45,8 +45,13 @@ sourceorigin_common::variables! {
 
     /// Where to read the key that seals signing keys in the database: 32 bytes as
     /// unpadded base64url text, through `env://NAME` or `file:///path`. Required.
-    /// It can't be changed yet: the stored signing keys would no longer open.
-    pub(super) const KEY_ENCRYPTION_KEY = "AUTH_KEY_ENCRYPTION_KEY";
+    /// Replacing it at once leaves the stored signing keys unopened, so change it
+    /// in two deploys, then run `auth-service keys rewrap`.
+    const KEY_ENCRYPTION_KEY = "AUTH_KEY_ENCRYPTION_KEY";
+    /// Where to read another key-encryption key, which opens signing keys but
+    /// never seals them: the next key before it becomes current, or the old one
+    /// after, until `auth-service keys rewrap` seals every key under the new one.
+    const KEY_ENCRYPTION_KEY_ACCEPTED = "AUTH_KEY_ENCRYPTION_KEY_ACCEPTED";
     /// Where to read the key under which refresh tokens, authorization codes and
     /// pending logins are stored as HMAC digests. Its raw bytes are the key, at
     /// least 32 of them, a trailing newline included. Email verification,
@@ -60,6 +65,76 @@ sourceorigin_common::variables! {
     /// Where to read the key that signs audit checkpoints: a 32-byte Ed25519 seed
     /// as 64 hex characters. Required.
     const AUDIT_KEY_PROVIDER = "AUTH_AUDIT_KEY_PROVIDER";
+}
+
+/// The key-encryption keys: the current one seals signing keys, and during a
+/// change of key another one opens them too. As with [`TokenDigestKeys`], a change
+/// takes two deploys, so a release never seals a key the release beside it cannot
+/// open: the first accepts the next key, the second makes it current and accepts
+/// the old one. `auth-service keys rewrap` then seals every stored key under the
+/// current one, and the old one can go.
+pub struct KeyEncryptionKeys {
+    /// Seals, and opens.
+    current: KeyEncryptionKey,
+    /// Only opens.
+    accepted: Option<KeyEncryptionKey>,
+}
+
+impl KeyEncryptionKeys {
+    /// Seals with `current`, and opens with `accepted` too.
+    #[must_use]
+    pub const fn new(current: KeyEncryptionKey, accepted: Option<KeyEncryptionKey>) -> Self {
+        Self { current, accepted }
+    }
+
+    /// Reads `AUTH_KEY_ENCRYPTION_KEY` and `AUTH_KEY_ENCRYPTION_KEY_ACCEPTED`, for
+    /// serving and for the `keys` commands.
+    ///
+    /// # Errors
+    /// Names a missing or unreadable reference, or a value that is not 32 bytes
+    /// in unpadded base64url.
+    pub fn from_environment() -> Result<Self, ConfigurationError> {
+        let current = Self::read(KEY_ENCRYPTION_KEY)?;
+        let accepted = KEY_ENCRYPTION_KEY_ACCEPTED
+            .optional()?
+            .map(|_| Self::read(KEY_ENCRYPTION_KEY_ACCEPTED))
+            .transpose()?;
+        Ok(Self::new(current, accepted))
+    }
+
+    /// Resolves and parses the key `variable` references.
+    fn read(variable: Variable) -> Result<KeyEncryptionKey, ConfigurationError> {
+        let reference: SecretReference = variable.parse()?;
+        let secret = reference.resolve().map_err(|source| {
+            variable.error("must resolve through env://NAME or file://PATH", source)
+        })?;
+        let text = secret
+            .text()
+            .map_err(|source| variable.error("must contain UTF-8 text", source))?;
+        KeyEncryptionKey::parse(text)
+            .map_err(|source| variable.error("must contain 32 bytes in unpadded base64url", source))
+    }
+
+    /// Seals `plaintext` under the current key, as [`KeyEncryptionKey::seal`] does.
+    ///
+    /// # Errors
+    /// Preserves failures from the random source and the cryptographic provider.
+    pub fn seal(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.current.seal(plaintext, aad)
+    }
+
+    /// Opens `sealed` under the current key, or else the accepted one.
+    ///
+    /// # Errors
+    /// Returns [`CryptoError::Unsealable`] when neither opens it.
+    pub fn open(&self, sealed: &[u8], aad: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+        // Opening fails only as `Unsealable`, so the attempts lose no detail.
+        [Some(&self.current), self.accepted.as_ref()]
+            .into_iter()
+            .flatten()
+            .find_map(|key| key.open(sealed, aad).ok())
+            .ok_or(CryptoError::Unsealable)
+    }
 }
 
 /// One key under which opaque token secrets are stored as HMAC digests.

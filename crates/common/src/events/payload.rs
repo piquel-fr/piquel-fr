@@ -169,6 +169,9 @@ crate::str_enum! {
         Deleted = "deleted",
         /// An operator removed a key at once, e.g. because it was compromised.
         Revoked = "revoked",
+        /// An operator sealed its private key again under the current
+        /// key-encryption key, after a change of key-encryption key.
+        Rewrapped = "rewrapped",
     }
 }
 

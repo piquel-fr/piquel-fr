@@ -1,5 +1,5 @@
-//! Signing keys: listing, rotating and revoking them, through the
-//! [`KeyStore`] the caller holds, which seals them with its key-encryption key.
+//! Signing keys: listing, rotating, revoking and rewrapping them, through the
+//! [`KeyStore`] the caller holds, which seals them with its key-encryption keys.
 
 use super::AdminService;
 use crate::{
@@ -41,5 +41,16 @@ impl AdminService {
         reason: Reason,
     ) -> Result<Option<KeyId>, AdminError> {
         Ok(keys.revoke(operator, &reason, id).await?)
+    }
+
+    /// Seals every private key in `keys` again under its current key-encryption
+    /// key, as [`KeyStore::rewrap`] does, and returns their IDs.
+    pub(crate) async fn rewrap_signing_keys(
+        &self,
+        operator: &Operator,
+        keys: &KeyStore,
+        reason: Reason,
+    ) -> Result<Vec<KeyId>, AdminError> {
+        Ok(keys.rewrap(operator, &reason).await?)
     }
 }

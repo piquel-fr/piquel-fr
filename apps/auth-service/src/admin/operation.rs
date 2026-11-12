@@ -101,6 +101,8 @@ operations! {
         RotateSigningKey,
         /// Delete a signing key at once, such as a compromised one.
         RevokeSigningKey,
+        /// Seal every signing key again under the current key-encryption key.
+        RewrapSigningKeys,
         /// Recompute the audit chain and check its checkpoints.
         VerifyAuditChain,
         /// Delete the audit history through a checkpoint.

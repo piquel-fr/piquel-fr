@@ -157,6 +157,7 @@ impl AdminOperation {
             Self::ListSigningKeys => &["keys", "list"],
             Self::RotateSigningKey => &["keys", "rotate", "--now", "--reason", "Leaked"],
             Self::RevokeSigningKey => &["keys", "revoke", "primary", "--reason", "Leaked"],
+            Self::RewrapSigningKeys => &["keys", "rewrap", "--reason", "New key-encryption key"],
             Self::ListAnnouncements => &["announcement", "list"],
             Self::ViewAnnouncement => &["announcement", "show", AN_ID],
             Self::DraftAnnouncement => &[

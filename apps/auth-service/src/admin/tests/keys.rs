@@ -13,7 +13,7 @@ async fn signing_key_changes_check_their_administrator() {
     let service = harness.service();
     let keys = crate::KeyStore::new(
         harness.database.clone(),
-        std::sync::Arc::new(crate::tests::key_encryption_key()),
+        crate::tests::key_encryption_keys(),
     );
     let admin = harness.admin().await;
     let revoked = harness.admin().await;

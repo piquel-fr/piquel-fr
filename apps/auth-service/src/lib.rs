@@ -76,7 +76,9 @@ pub use clients::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS,
     MAX_OWNED_CLIENTS,
 };
-pub use config::{AuditConfig, AuthConfig, DashboardConfig, PUBLIC_BASE_URL, TokenDigestKeys};
+pub use config::{
+    AuditConfig, AuthConfig, DashboardConfig, KeyEncryptionKeys, PUBLIC_BASE_URL, TokenDigestKeys,
+};
 pub use deletion::DeletionError;
 use emails::EmailApplication;
 use federation::FederationApplication;

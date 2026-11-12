@@ -60,7 +60,8 @@ mod tests;
 mod users;
 
 use crate::{
-    AdminError, AdminService, AuthConfig, KeyStore, MAX_DASHBOARD_BODY_BYTES, Reason,
+    AdminError, AdminService, AuthConfig, KeyEncryptionKeys, KeyStore, MAX_DASHBOARD_BODY_BYTES,
+    Reason,
     account::{AccountError, AccountService, Viewer},
     admin::{AdminOperation, DashboardCookie, DashboardSignIn, Overview, Problem, SignedInAdmin},
     assets::EmbeddedAssets,
@@ -76,7 +77,7 @@ use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
 use serde::Deserialize;
 use sourceorigin_common::{ClientId, ErrorChain, UserId, config::Origin};
-use sourceorigin_crypto::{KeyEncryptionKey, NoteVerifier};
+use sourceorigin_crypto::NoteVerifier;
 use sourceorigin_repository::Database;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{
@@ -251,7 +252,7 @@ pub(crate) struct AdminApplication {
     /// is committed for this environment.
     audit_key: NoteVerifier,
     /// Seals what a change shows once, across its redirect.
-    kek: Arc<KeyEncryptionKey>,
+    kek: Arc<KeyEncryptionKeys>,
     /// The signing keys, which the signing keys page rotates and revokes.
     keys: KeyStore,
     /// Every answer's Content-Security-Policy.
@@ -358,7 +359,7 @@ impl AdminApplication {
         Ok(Self {
             service: AdminService::new(database.clone(), config.email.smtp.is_some()),
             account: AccountService::new(database.clone()),
-            keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
+            keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_keys)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             passkeys,
             inbox: auth.join(routes::page::settings::NOTIFICATIONS),
@@ -367,7 +368,7 @@ impl AdminApplication {
             links: config.email.recovery_links.clone(),
             invitation_links: config.email.invitation_links.clone(),
             audit_key: config.audit.verifier().clone(),
-            kek: config.key_encryption_key.clone(),
+            kek: Arc::clone(&config.key_encryption_keys),
             policy: HeaderValue::try_from(policy)?,
             policies: config.oidc.policies.clone(),
             attention: Arc::default(),
@@ -456,6 +457,7 @@ impl AdminApplication {
             Op::ReserveHandle => SearchAction::ReserveHandle,
             Op::CreateClient => SearchAction::RegisterClient,
             Op::RotateSigningKey => SearchAction::RotateSigningKey,
+            Op::RewrapSigningKeys => SearchAction::RewrapSigningKeys,
             Op::DraftAnnouncement => SearchAction::DraftAnnouncement,
             // Each acts on one account, which search finds.
             Op::ViewUser
@@ -572,6 +574,7 @@ impl AdminApplication {
             Op::ListSigningKeys => &keys::list,
             Op::RotateSigningKey => &keys::rotate,
             Op::RevokeSigningKey => &keys::revoke,
+            Op::RewrapSigningKeys => &keys::rewrap,
             Op::ListAnnouncements => &announcements::list,
             Op::ViewAnnouncement => &announcements::show,
             Op::DraftAnnouncement => &announcements::draft,

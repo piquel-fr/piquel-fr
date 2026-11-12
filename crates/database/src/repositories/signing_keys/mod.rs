@@ -253,6 +253,33 @@ impl SigningKeyRepository<'_> {
         )
     }
 
+    /// Replaces the sealed private key of a key that still has one, sealed again
+    /// under another key-encryption key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::NotFound`] if no key with a private key has this
+    /// ID, or another [`DatabaseError`].
+    pub async fn rewrap(
+        &mut self,
+        id: &KeyId,
+        sealed_private_key: &[u8],
+    ) -> Result<(), DatabaseError> {
+        Self::found(
+            run!(
+                self,
+                execute,
+                sqlx::query!(
+                    "UPDATE signing_keys SET sealed_private_key = $2
+                    WHERE id = $1 AND sealed_private_key IS NOT NULL",
+                    id.as_str(),
+                    sealed_private_key,
+                )
+            )?
+            .rows_affected(),
+        )
+    }
+
     /// Deletes a key in any state.
     ///
     /// # Errors
