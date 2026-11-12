@@ -330,7 +330,8 @@ path = "/"
 name = "postgres"
 # Sets the superuser's password to `database-password` before PostgreSQL starts:
 # the image reads it only when it initializes a new volume. A deployment rolls
-# `postgres` out before `migrate`, which then logs in with the same version.
+# `postgres` out before `migrate`, which then logs in with the same version:
+# `migrate` runs in `auth`'s image, and `auth` depends on `postgres`.
 command = ["/usr/local/bin/sourceorigin-start"]
 
 [spec.services.source]

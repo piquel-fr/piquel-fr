@@ -202,31 +202,52 @@ reads and changes the accounts and sessions auth stores.
 
 1. If whoever holds it may still reach the host or the application's network,
    close that access first.
-2. Generate a new value for the secret that leaked:
+2. A new password doesn't undo what someone who connected as the superuser left
+   behind. If someone may have, check the database before you rotate, so the
+   restart the rotation causes starts it clean:
+   - List the roles that can log in:
+
+     ```sh
+     piquelctl app exec sourceorigin postgres --env <environment> -- psql -U sourceorigin -d sourceorigin -c "SELECT rolname FROM pg_roles WHERE rolcanlogin"
+     ```
+
+     Only `sourceorigin` and `sourceorigin_auth` should. Drop any other with
+     `DROP ROLE`.
+   - List the server settings changed with `ALTER SYSTEM`, which SourceOrigin
+     never uses, by running
+     `SELECT name, setting FROM pg_file_settings WHERE sourcefile LIKE '%postgresql.auto.conf'`
+     the same way. If any is listed, run `ALTER SYSTEM RESET ALL`.
+3. Generate a new value for the secret that leaked:
 
    ```sh
-   piquelctl env secret sourceorigin --env production regenerate database-password
+   piquelctl env secret sourceorigin --env <environment> regenerate database-password
    ```
 
    For `database-runtime-password`, regenerate that one instead.
-3. Deploy production's own release again, as
+4. Deploy production's own release again, as
    [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)
    describes. For staging, run `piquelctl --timeout 30m env deploy sourceorigin staging`.
 
-   PostgreSQL restarts with the new superuser's password before `migrate`
-   runs, and `migrate` sets the new runtime password: see
+   For the superuser's password, PostgreSQL restarts with the new one before
+   `migrate` runs. For the runtime role's, `migrate` sets the new one, and
+   connections already open with the old one stay open until they close. See
    [the database password](secrets.md#the-database-password) and
    [the database runtime password](secrets.md#the-database-runtime-password).
-4. If someone may have connected with it, check that they didn't rewrite the
-   history with `auth-service audit verify`. If they could also have read the
-   `key-encryption-key` secret, follow
-   [a compromised signing key](#a-compromised-signing-key).
+5. If someone may have connected:
+   - Check that they didn't rewrite the history with `auth-service audit verify`.
+   - The superuser could also have changed any row, such as an administrator
+     grant or a client's redirect URIs, without leaving an event. If you can't
+     rule that out, restore the database from a copy made before the leak.
+   - If they could also have read the `key-encryption-key` secret, follow
+     [a compromised signing key](#a-compromised-signing-key).
 
 ### Check that it's over
 
 - The deployment succeeded: its `migrate` job logged in with the new value.
-- `piquelctl env secret sourceorigin --env production list` shows the new
+- `piquelctl env secret sourceorigin --env <environment> list` shows the new
   version of the secret.
+- If someone may have connected, only `sourceorigin` and `sourceorigin_auth`
+  can log in, and no setting comes from `ALTER SYSTEM`.
 
 ## A stolen administrator session or a compromised administrator account
 
