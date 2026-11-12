@@ -4,6 +4,8 @@
     "cookie_key": "++++////++++////++++////++++////++++////++9="
   },
   "expected": {
-    "ok": null
+    "error": {
+      "code": "unrecognized"
+    }
   }
 }

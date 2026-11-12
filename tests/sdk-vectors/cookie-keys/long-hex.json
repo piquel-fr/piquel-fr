@@ -4,6 +4,9 @@
     "cookie_key": "fbefbefffffffbefbefffffffbefbefffffffbefbefffffffbefbefffffffbef00"
   },
   "expected": {
-    "ok": null
+    "error": {
+      "bytes": 33,
+      "code": "wrong_length"
+    }
   }
 }

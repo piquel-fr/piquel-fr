@@ -140,13 +140,27 @@ describe('callback vectors', () => {
   }
 });
 
+/** Why `CookieKey.parse` refuses `text`, in the vectors' shape, read from its message. */
+function refusal(text: string): unknown {
+  try {
+    CookieKey.parse(text);
+  } catch (error) {
+    assert.ok(error instanceof TypeError);
+    const length = /must hold 32 bytes, not (\d+)$/.exec(error.message);
+    if (length) return { code: 'wrong_length', bytes: Number(length[1]) };
+    assert.match(error.message, /must be 32 bytes in base64, base64url or hex$/);
+    return { code: 'unrecognized' };
+  }
+  return undefined;
+}
+
 describe('cookie key vectors', () => {
   for (const vector of cases('cookie-keys')) {
     test(vector.name, async () => {
       const text = String(vector.input.cookie_key);
-      const { ok: hex } = vector.expected as { ok: string | null };
-      if (hex === null) {
-        assert.throws(() => CookieKey.parse(text), TypeError);
+      const { ok: hex, error } = vector.expected as { ok?: string; error?: unknown };
+      if (hex === undefined) {
+        assert.deepEqual(refusal(text), error);
         return;
       }
       // The same bytes derive the same keys: one opens what the other sealed.

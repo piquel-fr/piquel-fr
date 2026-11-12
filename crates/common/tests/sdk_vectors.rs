@@ -94,8 +94,9 @@ struct Case {
 enum Expected {
     /// The operation succeeds with this value.
     Ok(Value),
-    /// The operation fails with this code.
-    Error(SdkError),
+    /// The operation fails with this error: an [`SdkError`], or, for cookie keys,
+    /// the refusal's code and length.
+    Error(Value),
 }
 
 impl Expected {
@@ -105,8 +106,13 @@ impl Expected {
     }
 
     /// Failure in `code` caused by `reason`.
-    const fn error(code: ErrorCategory, reason: ErrorReason) -> Self {
-        Self::Error(SdkError::new(code, reason))
+    fn error(code: ErrorCategory, reason: ErrorReason) -> Self {
+        Self::refused(&SdkError::new(code, reason))
+    }
+
+    /// Failure with `error`, serialized.
+    fn refused(error: &impl Serialize) -> Self {
+        Self::Error(serde_json::to_value(error).expect("serialize expected error"))
     }
 }
 
@@ -1214,7 +1220,7 @@ impl Vectors {
                 "an error from the issuer is reported as an OAuth error",
                 true,
                 json!({ "error": "access_denied", "error_description": "the user denied the request", "state": STATE, "iss": ISSUER }),
-                Expected::Error(SdkError::category(ErrorCategory::OAuth)),
+                Expected::refused(&SdkError::category(ErrorCategory::OAuth)),
             ),
             (
                 "error-response-iss-mismatch",
@@ -1379,88 +1385,104 @@ impl Vectors {
         trailing_bits.pop();
         trailing_bits.push('9');
         trailing_bits.push('=');
-        // The key's bytes, in hex, or `null` for a refused text.
-        let accepted = Some(hex(&secret));
+        // The key's bytes, in hex, or why it is refused: it holds another length
+        // than 32 bytes, or is in no encoding.
+        let accepted = || Expected::ok(&hex(&secret));
+        let wrong_length =
+            |bytes: usize| Expected::refused(&json!({ "code": "wrong_length", "bytes": bytes }));
+        let unrecognized = || Expected::refused(&json!({ "code": "unrecognized" }));
         for (name, description, text, expected) in [
             (
                 "base64",
                 "standard base64, as `openssl rand -base64 32` prints",
                 standard.clone(),
-                accepted.clone(),
+                accepted(),
             ),
             (
                 "base64-unpadded",
                 "standard base64 without its padding",
                 unpadded.clone(),
-                accepted.clone(),
+                accepted(),
             ),
             (
                 "base64url",
                 "unpadded base64url, as piqueld generates",
                 URL_SAFE_NO_PAD.encode(&secret),
-                accepted.clone(),
+                accepted(),
             ),
             (
                 "base64url-padded",
                 "base64url with padding",
                 URL_SAFE.encode(&secret),
-                accepted.clone(),
+                accepted(),
             ),
-            (
-                "hex",
-                "hex, as piqueld generates",
-                hex(&secret),
-                accepted.clone(),
-            ),
+            ("hex", "hex, as piqueld generates", hex(&secret), accepted()),
             (
                 "hex-uppercase",
                 "hex in capitals",
                 hex(&secret).to_uppercase(),
-                accepted.clone(),
+                accepted(),
             ),
             (
                 "whitespace",
-                "surrounding whitespace is ignored",
+                "surrounding ASCII whitespace is ignored",
                 format!("  {standard}\n"),
-                accepted.clone(),
+                accepted(),
             ),
             (
                 "mixed-alphabets",
                 "base64 mixing the standard and URL-safe alphabets is refused",
                 standard.replacen('/', "_", 1),
-                None,
+                unrecognized(),
             ),
             (
                 "extra-padding",
                 "base64 with more padding than it needs is refused",
                 format!("{standard}="),
-                None,
+                unrecognized(),
             ),
             (
                 "trailing-bits",
                 "base64 whose padding bits are not zero is refused",
                 trailing_bits,
-                None,
+                unrecognized(),
             ),
             (
                 "short",
                 "16 bytes are refused",
                 STANDARD.encode(&secret[..16]),
-                None,
+                wrong_length(16),
             ),
             (
                 "long-hex",
                 "33 bytes are refused",
                 hex(&[&secret[..], &[0]].concat()),
-                None,
+                wrong_length(33),
             ),
             (
                 "not-encoded",
                 "text in no encoding is refused",
                 "not a cookie key".to_owned(),
-                None,
+                unrecognized(),
             ),
-            ("empty", "an empty key is refused", String::new(), None),
+            (
+                "hex-short",
+                "hex is read before base64, so 32 hex digits hold 16 bytes",
+                hex(&secret[..16]),
+                wrong_length(16),
+            ),
+            (
+                "byte-order-mark",
+                "only ASCII whitespace is ignored: a byte order mark is refused",
+                format!("\u{feff}{standard}"),
+                unrecognized(),
+            ),
+            (
+                "empty",
+                "an empty key holds no bytes",
+                String::new(),
+                wrong_length(0),
+            ),
         ] {
             self.case(
                 &format!("cookie-keys/{name}.json"),
@@ -1468,7 +1490,7 @@ impl Vectors {
                     description,
                     now: None,
                     input: json!({ "cookie_key": text }),
-                    expected: Expected::Ok(expected.map_or(Value::Null, Value::String)),
+                    expected,
                 },
             );
         }

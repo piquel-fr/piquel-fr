@@ -1,5 +1,5 @@
 {
-  "description": "surrounding whitespace is ignored",
+  "description": "surrounding ASCII whitespace is ignored",
   "input": {
     "cookie_key": "  ++++////++++////++++////++++////++++////++8=\n"
   },

@@ -26,7 +26,8 @@ callback on its environment's hostname:
 | `staging` | `https://staging.notes.example/auth/callback` |
 
 Then give each environment its own values as manifest variables: its app's
-client ID, which isn't secret, and the names of the secrets you store below.
+client ID, which isn't secret, and the name of the client secret you store
+below.
 
 ```toml
 [spec.environments.production.variables]

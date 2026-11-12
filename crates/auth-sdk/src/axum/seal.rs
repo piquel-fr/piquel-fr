@@ -22,7 +22,8 @@ const SECRET_BYTES: usize = 32;
 
 /// How a cookie key may be written: `openssl rand -base64 32` prints padded
 /// standard base64, and piqueld generates secrets as hex or unpadded base64url.
-/// Their lengths for 32 bytes differ, so no key reads two ways.
+/// No key reads two ways: hex of 32 bytes is longer than their base64, and text
+/// valid in both base64 alphabets decodes to the same bytes in each.
 #[derive(Clone, Copy)]
 enum Encoding {
     /// Hexadecimal, in either case.
@@ -196,13 +197,14 @@ pub enum CookieKeyError {
 impl CookieKey {
     /// The key `text` holds: 32 bytes in standard base64, as
     /// `openssl rand -base64 32` prints, in base64url or in hex, as piqueld generates
-    /// them. Base64 may be padded or not, and surrounding whitespace is ignored.
+    /// them. Base64 may be padded or not, and surrounding ASCII whitespace is
+    /// ignored.
     ///
     /// # Errors
     /// [`CookieKeyError::WrongLength`] if the text holds other than 32 bytes, or
     /// [`CookieKeyError::Unrecognized`] if it is in none of these encodings.
     pub fn parse(text: &str) -> Result<Self, CookieKeyError> {
-        let text = text.trim();
+        let text = text.trim_ascii();
         let decoded: Vec<Vec<u8>> = Encoding::ALL
             .iter()
             .filter_map(|encoding| encoding.decode(text))

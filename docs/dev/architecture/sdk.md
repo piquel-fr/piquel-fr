@@ -269,9 +269,11 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
 
 - **Cookie key.** `CookieKey::parse` and `CookieKey.parse` read the 32 bytes in
   hex, standard base64 or base64url, tried in that order, since hex text is also
-  base64. Base64 may be padded or not, but never with stray trailing bits. The
-  three encodings write 32 bytes at different lengths, so no key reads two ways.
-  Text in another encoding, or holding another length, is refused.
+  base64. Base64 may be padded or not, but never with stray trailing bits, and
+  only surrounding ASCII whitespace is ignored. No key reads two ways: hex of 32
+  bytes is longer than their base64, and text valid in both base64 alphabets
+  decodes to the same bytes in each. Text in another encoding, or holding
+  another length, is refused.
 - **Cookies.** Each name carries the client ID, so apps sharing a host keep their
   own: `__Host-sourceorigin-<client_id>-session`, `-step-up`, and `-login-<state>` for
   each pending login's slot. All are `Secure`, `HttpOnly`, `SameSite=Lax` and host-only.

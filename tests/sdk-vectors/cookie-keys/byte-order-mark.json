@@ -1,0 +1,11 @@
+{
+  "description": "only ASCII whitespace is ignored: a byte order mark is refused",
+  "input": {
+    "cookie_key": "﻿++++////++++////++++////++++////++++////++8="
+  },
+  "expected": {
+    "error": {
+      "code": "unrecognized"
+    }
+  }
+}

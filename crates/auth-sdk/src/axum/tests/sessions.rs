@@ -38,13 +38,22 @@ async fn session_cookie_vectors() {
 }
 
 /// A cookie key holds the bytes the vectors expect, whichever encoding it is written
-/// in, or is refused: with the length it holds, if it is in an encoding.
+/// in, or is refused as they expect: with the length it holds, if it is in an
+/// encoding.
 #[test]
 fn cookie_key_vectors() {
     for case in Case::all("cookie-keys") {
         let parsed = CookieKey::parse(case.text("cookie_key"));
-        let Some(hex) = case.json["expected"]["ok"].as_str() else {
-            assert!(parsed.is_err(), "{}", case.name);
+        let expected = &case.json["expected"];
+        let Some(hex) = expected["ok"].as_str() else {
+            let refusal = match parsed {
+                Err(CookieKeyError::WrongLength(bytes)) => {
+                    serde_json::json!({ "code": "wrong_length", "bytes": bytes })
+                }
+                Err(CookieKeyError::Unrecognized) => serde_json::json!({ "code": "unrecognized" }),
+                other => panic!("{}: {other:?}", case.name),
+            };
+            assert_eq!(refusal, expected["error"], "{}", case.name);
             continue;
         };
         let secret: Vec<u8> = (0..hex.len())
@@ -68,14 +77,6 @@ fn cookie_key_vectors() {
             case.name
         );
     }
-    assert!(matches!(
-        CookieKey::parse("c2l4dGVlbiBieXRlcyEhIQ=="),
-        Err(CookieKeyError::WrongLength(16))
-    ));
-    assert!(matches!(
-        CookieKey::parse("not a cookie key"),
-        Err(CookieKeyError::Unrecognized)
-    ));
 }
 
 /// The app's home page for the browser holding `session`: its status, the access

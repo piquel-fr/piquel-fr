@@ -4,6 +4,8 @@
     "cookie_key": "not a cookie key"
   },
   "expected": {
-    "ok": null
+    "error": {
+      "code": "unrecognized"
+    }
   }
 }

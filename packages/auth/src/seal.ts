@@ -151,10 +151,12 @@ export class CookieKey {
   /**
    * The key `text` holds: 32 bytes in standard base64, as `openssl rand -base64 32`
    * prints, in base64url or in hex, as piqueld generates them. Base64 may be padded or
-   * not, and surrounding whitespace is ignored. Anything else throws a `TypeError`.
+   * not, and surrounding ASCII whitespace is ignored. Anything else throws a
+   * `TypeError`.
    */
   static parse(text: string): CookieKey {
-    const decoded = ENCODINGS.map((decode) => decode(text.trim())).filter(
+    const trimmed = text.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '');
+    const decoded = ENCODINGS.map((decode) => decode(trimmed)).filter(
       (bytes) => bytes !== undefined
     );
     const secret = decoded.find((bytes) => bytes.length === SECRET_BYTES);

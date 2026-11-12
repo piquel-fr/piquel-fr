@@ -4,6 +4,9 @@
     "cookie_key": "++++////++++////++++/w=="
   },
   "expected": {
-    "ok": null
+    "error": {
+      "bytes": 16,
+      "code": "wrong_length"
+    }
   }
 }
