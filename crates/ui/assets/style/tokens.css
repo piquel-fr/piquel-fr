@@ -21,10 +21,11 @@
   --brand-soft: rgba(67, 83, 224, 0.1);
   --danger: #c62f2f;
   --danger-soft: rgba(198, 47, 47, 0.1);
-  --ok: #13874f;
-  --ok-soft: rgba(19, 135, 79, 0.12);
-  --warning: #a85a00;
-  --warning-soft: rgba(168, 90, 0, 0.12);
+  /* Dark enough for 4.5:1 on their soft backgrounds over every surface. */
+  --ok: #0f703f;
+  --ok-soft: rgba(15, 112, 63, 0.12);
+  --warning: #965000;
+  --warning-soft: rgba(150, 80, 0, 0.12);
   --admin-ring: #d62d2d;
   --admin-line: linear-gradient(90deg, #d62d2d, #f07a3c);
   --focus: #4353e0;

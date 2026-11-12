@@ -9,6 +9,9 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { adminUrl, administrator, grantAdmin, openDashboard, signedUp } from './helpers';
 
+// Each test checks many pages, twice.
+test.describe.configure({ timeout: 180_000 });
+
 /** The WCAG levels axe checks against. */
 const levels = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
@@ -20,7 +23,7 @@ async function expectAccessible(page: Page, name: string): Promise<void> {
     const found = violations.map(
       ({ id, nodes }) => `${id}: ${nodes.map(({ target }) => target.join(' ')).join(', ')}`
     );
-    expect(found, `${name}, ${colorScheme}`).toEqual([]);
+    expect.soft(found, `${name}, ${colorScheme}`).toEqual([]);
   }
 }
 
