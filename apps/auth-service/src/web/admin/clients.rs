@@ -32,9 +32,9 @@ use sourceorigin_common::{
 };
 use sourceorigin_repository::StoredOidcClient;
 use sourceorigin_ui::{
-    Action, AdminClientRow, Change, ClientChanges, ClientPage, ClientRow, ClientStatus, Crumb,
-    NewClientForm, OperatorDraft, Query, Registration, Revealed, SecretRow, SecretsChange,
-    SecretsState,
+    Action, AdminClientRow, Change, ClientChanges, ClientDraft, ClientPage, ClientRow,
+    ClientStatus, Crumb, NewClientForm, OperatorDraft, Query, Registration, Revealed, SecretRow,
+    SecretsChange, SecretsState,
 };
 use topcoat::{
     Result,
@@ -513,10 +513,10 @@ impl App {
         }
     }
 
-    /// A new client's form, as it starts: the default scopes chosen.
+    /// A new client's form, as it starts: the defaults of the kind it starts at.
     fn new_client() -> NewClientForm {
         let mut new = NewClientForm::default();
-        new.settings.draft.scopes = crate::DEFAULT_CLIENT_SCOPES.into_iter().collect();
+        new.settings.draft = ClientDraft::new_client(NewClientForm::DEFAULT_KIND);
         new
     }
 

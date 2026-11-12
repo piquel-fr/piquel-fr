@@ -7,7 +7,8 @@
         "apps/auth-service/assets/picture.js",
         "apps/auth-service/assets/dashboard.js",
         "apps/auth-service/assets/search.js",
-        "apps/auth-service/assets/copy.js"
+        "apps/auth-service/assets/copy.js",
+        "apps/auth-service/assets/client-form.js"
       ]
     },
     "packages/auth": {

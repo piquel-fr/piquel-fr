@@ -35,8 +35,9 @@ https://auth.sourceorigin.dev/developers/new, with:
 - **Redirect URIs**: `https://<environment's host>/auth/callback`.
 - **Post-logout URIs**: `https://<environment's host>/`, if the app sends
   users back there after signing out.
-- **Scopes**: the app's scopes, and `offline_access`.
-- **Allow refresh tokens**: on.
+- **Scopes**: the app's scopes. Keep `offline_access`, which an app with a
+  backend starts with.
+- **Allow refresh tokens**: on, as it starts.
 - **Back-channel logout URI**:
   `https://<environment's host>/auth/backchannel-logout`, only if the app
   handles back-channel logout.

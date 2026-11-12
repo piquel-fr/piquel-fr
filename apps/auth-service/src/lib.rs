@@ -73,8 +73,8 @@ use audit::AuditApplication;
 pub use audit::{AuditError, AuditKeys};
 pub use cli::Cli;
 pub use clients::{
-    Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
-    MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
+    Applied, ClientDetails, ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS,
+    MAX_OWNED_CLIENTS,
 };
 pub use config::{AuditConfig, AuthConfig, DashboardConfig, PUBLIC_BASE_URL, TokenDigestKeys};
 pub use deletion::DeletionError;

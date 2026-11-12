@@ -19,7 +19,7 @@ use super::{
     account::{AccountPage, Applied, Framed, NoChange, Reader},
 };
 use crate::{
-    DEFAULT_CLIENT_SCOPES, MAX_OWNED_CLIENTS,
+    MAX_OWNED_CLIENTS,
     account::{AccountError, Owner},
     clients::{ClientSettings, NewClient, OwnedClient, OwnedClientView},
     routes::page::developers::{self, APP, APP_SECRETS, APP_SETTINGS, HOME, NEW},
@@ -141,10 +141,10 @@ impl AccountPage for NewApp {
         state: NewAppState,
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let draft = state.draft.clone().unwrap_or_else(|| ClientDraft {
-            scopes: DEFAULT_CLIENT_SCOPES.into_iter().collect(),
-            ..ClientDraft::default()
-        });
+        let draft = state
+            .draft
+            .clone()
+            .unwrap_or_else(|| ClientDraft::new_client(NewAppChange::DEFAULT_KIND));
         let page = view! { cx =>
             sourceorigin_ui::new_app(
                 page: NEW,

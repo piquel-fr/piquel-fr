@@ -47,7 +47,6 @@ browser-client:
     @just auth client origin add browser-e2e-inline https://localhost:4443 --reason 'Browser tests'
     @just auth client apply browser-e2e-server --name 'Browser E2E server' --trusted --confidential \
         --reason 'Browser tests' \
-        --scope openid --scope profile --scope email --scope offline_access --refresh \
         --redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri http://127.0.0.1:4100/ \
         --secret env://E2E_SERVER_CLIENT_SECRET
 

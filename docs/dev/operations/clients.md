@@ -28,8 +28,8 @@ auth-service client create blog --name Blog --trusted --reason "SourceOrigin's b
 An app with a server, which keeps a secret and may refresh tokens:
 
 ```sh
-auth-service client create notes --name Notes --confidential --refresh --reason "Notes app" \
-    --redirect-uri https://notes.example/callback --scope openid --scope notes:read
+auth-service client create notes --name Notes --confidential --reason "Notes app" \
+    --redirect-uri https://notes.example/callback --scope openid --scope offline_access --scope notes:read
 ```
 
 For a confidential client, the command prints its secret once: store it in the
@@ -118,7 +118,10 @@ deployment, through `--secret file://<path>` or `env://<name>`: 32 random bytes
 in unpadded base64url, never printed. The client's other secrets keep working
 for `--grace` at most, 1 hour by default, while the deployment rolls out;
 `--grace 0` revokes them. Only the terminal applies clients, since only it takes
-a secret.
+a secret. Like `create`, it gives a client the defaults of its kind for the
+scopes and refresh tokens it doesn't name, so a confidential client applied
+without `--scope` or `--refresh` gets `offline_access` and refresh tokens. To
+keep them off, name its scopes and pass `--no-refresh`.
 
 No deployment of SourceOrigin needs a client: the admin dashboard signs
 administrators in itself (see [the admin dashboard](administration.md#how-the-dashboard-signs-administrators-in)).
@@ -149,9 +152,13 @@ sign-in**. See [passkey sign-in on your own pages](../../user/apps/passkey-sign-
   normalizes them: `https://app.example/`, not `https://APP.example`. The
   origins of an enabled public client's redirect URIs may call the token,
   revocation and userinfo endpoints from a browser.
-- **Scopes** default to `openid`, `profile` and `email`.
-- **Refresh tokens** (`--refresh`) are issued when the client also requests
-  `offline_access`.
+- **Scopes** default to `openid`, `profile` and `email`, and `offline_access`
+  for a confidential client, which the SDKs' login routes always request.
+- **Refresh tokens** are issued when the client also requests
+  `offline_access`. A confidential client may receive them unless registered
+  with `--no-refresh`, and a public one only with `--refresh`. The dashboard's
+  and the developer console's forms start with the same defaults for the kind
+  chosen.
 - **Trusted** (`--trusted`) skips the consent screen. It is for first-party
   clients only.
 - **Pushed requests** (`--require-par`) make the client push its authorization

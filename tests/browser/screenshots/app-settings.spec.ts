@@ -20,8 +20,6 @@ test('app settings and secrets', async ({ page, context }) => {
   await page
     .getByRole('textbox', { name: 'Redirect URIs', exact: true })
     .fill(`${app}/auth/callback`);
-  await page.getByRole('switch', { name: 'offline_access' }).check();
-  await page.getByLabel('Allow refresh tokens', { exact: true }).check();
   await page.getByRole('button', { name: 'Register app', exact: true }).click();
   await page.getByRole('link', { name: 'I saved it', exact: true }).click();
   await expect(page.locator('#client-id')).toBeVisible();

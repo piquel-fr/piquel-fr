@@ -343,6 +343,55 @@ async fn sdk_login_routes_push_for_clients_that_must() {
     assert_eq!(LoginApp::location(&callback), "/");
 }
 
+/// An app registered in the developer console with the form's defaults signs in
+/// through the SDK's login routes, which always request `offline_access`, and its
+/// session refreshes.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn sdk_login_routes_sign_in_with_the_consoles_defaults() {
+    use crate::clients::{ClientSettings, OperatorSettings};
+    use sourceorigin_ui::{ClientDraft, NewAppChange};
+    let mut app = LoginApp::start().await;
+    app.flow.client = OperatorSettings {
+        settings: ClientSettings::from(ClientDraft {
+            display_name: "Notes".to_owned(),
+            redirect_uris: app
+                .flow
+                .client
+                .redirect_uris
+                .iter()
+                .map(|uri| uri.as_str().to_owned())
+                .collect(),
+            post_logout_uris: app
+                .flow
+                .client
+                .post_logout_uris
+                .iter()
+                .map(|uri| uri.as_str().to_owned())
+                .collect(),
+            ..ClientDraft::new_client(NewAppChange::DEFAULT_KIND)
+        }),
+        trusted: false,
+    }
+    .registration(app.flow.client.id.clone(), NewAppChange::DEFAULT_KIND)
+    .expect("the console's defaults are valid");
+    crate::tests::replace(&app.flow.app.database, &app.flow.client)
+        .await
+        .expect("register with the console's defaults");
+
+    let callback = app.sign_in("/auth/login", None).await;
+    assert_eq!(LoginApp::location(&callback), "/");
+    let session = LoginApp::cookie(&callback, &app.named("session"));
+    app.clock.advance(290);
+    let refreshed = app.send(Method::GET, "/notes", Some(&session)).await;
+    assert_eq!(refreshed.status(), StatusCode::OK);
+    assert!(
+        LoginApp::cookies(&refreshed)
+            .iter()
+            .any(|cookie| cookie.starts_with(&format!("{}=", app.named("session"))))
+    );
+}
+
 /// A passkey confirmation within five minutes.
 struct RecentPasskey;
 
