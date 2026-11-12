@@ -185,6 +185,49 @@ old key stop working once the new key replaces it.
 - 24 hours have passed since the deployment, so every link derived from the
   old key has expired.
 
+## A leaked database password
+
+### How you notice
+
+The `database-password` secret, the superuser `sourceorigin`'s password, or
+`database-runtime-password`, `sourceorigin_auth`'s, appears outside the
+environment: in a backup, a log, or on a compromised host.
+
+PostgreSQL answers only on the application's private network, so the password
+alone doesn't open it. With a way onto that network too, the superuser's
+password reads and changes everything in the database, and the runtime role's
+reads and changes the accounts and sessions auth stores.
+
+### What to do
+
+1. If whoever holds it may still reach the host or the application's network,
+   close that access first.
+2. Generate a new value for the secret that leaked:
+
+   ```sh
+   piquelctl env secret sourceorigin --env production regenerate database-password
+   ```
+
+   For `database-runtime-password`, regenerate that one instead.
+3. Deploy production's own release again, as
+   [pick up a changed secret](deploying.md#pick-up-a-changed-secret-in-production)
+   describes. For staging, run `piquelctl --timeout 30m env deploy sourceorigin staging`.
+
+   PostgreSQL restarts with the new superuser's password before `migrate`
+   runs, and `migrate` sets the new runtime password: see
+   [the database password](secrets.md#the-database-password) and
+   [the database runtime password](secrets.md#the-database-runtime-password).
+4. If someone may have connected with it, check that they didn't rewrite the
+   history with `auth-service audit verify`. If they could also have read the
+   `key-encryption-key` secret, follow
+   [a compromised signing key](#a-compromised-signing-key).
+
+### Check that it's over
+
+- The deployment succeeded: its `migrate` job logged in with the new value.
+- `piquelctl env secret sourceorigin --env production list` shows the new
+  version of the secret.
+
 ## A stolen administrator session or a compromised administrator account
 
 ### How you notice

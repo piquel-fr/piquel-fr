@@ -84,11 +84,37 @@ If that deployment fails after `migrate`, auth goes down as its pool's
 connections expire, within 30 minutes. So rotate it during a deployment you
 watch, and fix forward if it fails: a retry reuses the new secret.
 
+### The database password
+
+`database-password` is the superuser `sourceorigin`'s password. Rotate it like any
+generated secret:
+
+1. Generate a new value:
+
+   ```sh
+   piquelctl env secret sourceorigin --env production regenerate database-password
+   ```
+
+2. Deploy the environment: staging with
+   `piquelctl --timeout 30m env deploy sourceorigin staging`, and production by
+   [deploying its own release again](deploying.md#pick-up-a-changed-secret-in-production).
+
+The deployment restarts `postgres` with the new value before its `migrate`
+job runs. Each time PostgreSQL starts, it first sets the superuser's password
+to the value it mounts, so `migrate` logs in with the new one. Auth's replicas
+connect as `sourceorigin_auth`, whose password doesn't change, but they can't
+reach the database for the few seconds PostgreSQL restarts.
+
+The password always follows the deployment: a [restore or a rollback](deploying.md#roll-back-production)
+starts PostgreSQL with the earlier value again, and a deployment whose job
+fails returns it to the running one's. A new volume, such as a preview's, is
+created with the value it mounts.
+
 ## Generated secrets
 
 | Secret | Mounted by | What it is | Regenerating it |
 | --- | --- | --- | --- |
-| `database-password` | `postgres`, the `migrate` job | the superuser `sourceorigin`'s password | **never**: the database keeps the password it stored when its volume was created, so the `migrate` job, which logs in with the new value, fails and every deployment after it stops. Regenerating makes a value nobody sees, so it can't be set in PostgreSQL first either: there is no supported way to change this password yet |
+| `database-password` | `postgres`, the `migrate` job | the superuser `sourceorigin`'s password | takes effect on the next deployment, which restarts PostgreSQL: see [the database password](#the-database-password) |
 | `database-runtime-password` | `auth` | `sourceorigin_auth`'s password | takes effect on the next deployment: see [the database runtime password](#the-database-runtime-password) |
 | `key-encryption-key` | `auth` | `AUTH_KEY_ENCRYPTION_KEY`, which seals the signing keys in the database | **never**: the stored signing keys would no longer open, and auth can't change it |
 | `token-digest-key` | `auth` | `AUTH_TOKEN_DIGEST_KEY` | ends every refresh token and login in progress under it: change it in two deployments instead, as [changing the token digest key](signing-keys.md#change-the-token-digest-key) describes |
