@@ -79,7 +79,7 @@ own. It builds on the [security boundaries](boundaries.md); the
 | Threat | Mitigation |
 | --- | --- |
 | Rewriting or deleting history | The runtime role cannot change sealed events or checkpoints. Through the schema owner, changes break the hash chain or the signed checkpoints, and `audit verify` names the first position that no longer matches ([audit history](audit-history.md)). Auth's own verification, at least every six hours, raises an alert that notifies every administrator. |
-| Reading secrets from a dump | Signing keys are sealed under a key the database never holds. Cookies, client secrets, codes, refresh tokens and emailed links' tokens are stored only as digests ([boundaries](boundaries.md#secrets-and-keys)). |
+| Reading secrets from a dump | Signing keys are sealed under a key the database never holds. Cookies, client secrets, codes, refresh tokens and emailed links' tokens are stored only as digests ([boundaries](boundaries.md#secrets-and-keys)). A dump with the token digest key and any spent refresh token of a public client's grant derives the grant's live token ([refresh tokens](../architecture/oidc.md#refresh-families)). |
 | A bug in auth bypassing a way-in rule | Database triggers hold the recovery rules a way in depends on, for every writer ([database backstops](account-recovery.md#database-backstops)). |
 
 Beyond these, database access is trusted: it can bind any passkey to any account

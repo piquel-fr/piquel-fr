@@ -58,9 +58,10 @@ pub const REFRESH_REUSE_SECONDS: f64 = 10.0;
 /// What redeeming a refresh token does to it, set by the client's kind.
 ///
 /// Rotation detects a stolen bearer token: whichever of the thief and the client
-/// redeems second replays a consumed token and revokes the family. A confidential
-/// client's token is useless without its secret, so it needs no rotation
-/// (RFC 9700 §4.14), and its refresh becomes a read.
+/// redeems second, after the reuse window or once the successor is used, replays
+/// a consumed token and revokes the family. A confidential client's token is
+/// useless without its secret, so it needs no rotation (RFC 9700 §4.14), and its
+/// refresh becomes a read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefreshRedemption {
     /// Marks the token consumed. The caller adds its replacement to the family

@@ -195,8 +195,10 @@ HMAC of the replaced token's secret, under a key derived from the token digest
 key and keyed by the successor's ID (`TokenDigestKeys::successor`). A retry
 presents the replaced token, so auth derives the successor again and checks it
 against the stored digest. The database holds nothing usable, not even sealed:
-deriving a successor takes both the key and the token it replaced, and auth
-does it for a retry only within the window.
+deriving a successor takes both the key and the token it replaced. Successors
+form a chain, though. Anyone with the key, the successor IDs from a database
+read and any earlier token of a family, however old, can derive its live token.
+So a spent token is only harmless while the key stays secret.
 
 A family whose client no longer allows refresh, its audience or its scopes is
 revoked on its next use (`policy_rejected`). A refresh may narrow the scopes,

@@ -288,8 +288,8 @@ async fn another_client_isnt_told_an_account_is_disabled() {
 
 /// The same refresh token, refreshed on two replicas at once: a public client's
 /// rotates once, and both refreshes answer with that one successor. Presented
-/// after the reuse window, the old token is a replay, which revokes the family. A confidential client's serves both and
-/// stays valid.
+/// after the reuse window, the old token is a replay, which revokes the family.
+/// A confidential client's serves both and stays valid.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn concurrent_refreshes_across_replicas() {
