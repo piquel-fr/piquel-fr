@@ -16,7 +16,8 @@ This repository contains everything under the sourceorigin.dev domain:
 - `infra/`: Dockerfiles and piqueld deployments.
 - `tools/xtask`: `cargo xtask`, which publishes the SDKs and releases a version
   (`just publish`, `just release`).
-- `tests/browser` (Playwright) and `tests/sdk-vectors` (cases every SDK passes).
+- `tests/browser` (Playwright), `tests/sdk-vectors` (cases every SDK passes) and
+  `tests/conformance` (the OpenID conformance suite, `just conformance`).
 - `docs/`: the documentation book, a user guide and a contributor guide.
 
 This is still very early development. Breaking changes are expected. There are

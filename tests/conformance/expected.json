@@ -1,0 +1,222 @@
+{
+  "oidcc-server": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-userinfo-get": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-userinfo-post-header": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-userinfo-post-body": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-ensure-request-without-nonce-succeeds-for-code-flow": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-scope-profile": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-scope-email": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-scope-address": {
+    "result": "SKIPPED",
+    "reason": "Auth holds no postal address, so it doesn't offer the address scope.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/52"
+  },
+  "oidcc-scope-phone": {
+    "result": "SKIPPED",
+    "reason": "Auth holds no phone number, so it doesn't offer the phone scope.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/52"
+  },
+  "oidcc-scope-all": {
+    "result": "SKIPPED",
+    "reason": "Auth offers neither the address nor the phone scope, which the test requests with the others.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/52"
+  },
+  "oidcc-alternate-happy-flow": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-display-page": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-display-popup": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-prompt-login": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-prompt-none-not-logged-in": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-prompt-none-logged-in": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-max-age-1": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-max-age-10000": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-ensure-request-with-unknown-parameter-succeeds": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-id-token-hint": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-login-hint": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-ui-locales": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-claims-locales": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-ensure-request-with-acr-values-succeeds": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-codereuse": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-codereuse-30seconds": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-ensure-registered-redirect-uri": {
+    "result": "REVIEW",
+    "reason": "The screenshot must show auth refusing an unregistered redirect_uri on its error page.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/52"
+  },
+  "oidcc-ensure-post-request-succeeds": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-server-client-secret-post": {
+    "result": "FAILED",
+    "reason": "Auth doesn't support the client_secret_post client authentication method.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/52"
+  },
+  "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported": {
+    "result": "SKIPPED",
+    "reason": "Auth doesn't support request objects, and discovery says so.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/52"
+  },
+  "oidcc-claims-essential": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-ensure-request-object-with-redirect-uri": {
+    "result": "REVIEW",
+    "reason": "The screenshot must show auth refusing an unregistered redirect_uri on its error page.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/52"
+  },
+  "oidcc-refresh-token": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-bad-post-logout-redirect-uri": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-modified-id-token-hint": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-no-id-token-hint": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-no-params": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-no-post-logout-redirect-uri": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-no-state": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-only-state": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-query-added-to-post-logout-redirect-uri": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-rp-initiated-logout-bad-id-token-hint": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  },
+  "oidcc-backchannel-rp-initiated-logout": {
+    "result": "FAILED",
+    "reason": "Fails at its first authorization: the suite sends no PKCE, which auth requires of every client.",
+    "issue": "https://github.com/sourceorigin-dev/sourceorigin/issues/514"
+  }
+}

@@ -33,7 +33,8 @@ async fn logout_receiver() -> (RedirectUri, OutboundClient, Arc<Mutex<Vec<String
     )
     .parse()
     .expect("logout URI");
-    let outbound = OutboundClient::local(TlsListener::serve(tcp, receiver));
+    let outbound =
+        OutboundClient::local(TlsListener::serve(tcp, receiver)).expect("local outbound client");
     (uri, outbound, posted)
 }
 

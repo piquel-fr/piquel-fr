@@ -154,7 +154,8 @@ async fn a_provider_picture_is_imported_once() {
         "https://localhost:{}",
         tcp.local_addr().expect("address").port()
     );
-    let client = OutboundClient::local(TlsListener::serve(tcp, provider));
+    let client =
+        OutboundClient::local(TlsListener::serve(tcp, provider)).expect("local outbound client");
     let account = AccountService::new(database.clone());
     let context = RequestContext::TEST.actor(Actor::User {
         user_id: user,

@@ -20,7 +20,7 @@ pub use keys::{AuditConfig, KeyEncryptionKeys, TokenDigestKeys};
 use crate::{invitations::InvitationLinks, recovery::RecoveryLinks};
 use email::SMTP_URL;
 use ipnet::IpNet;
-use sourceorigin_common::config::{ConfigurationError, Origin, Variable};
+use sourceorigin_common::config::{ConfigurationError, Origin, SecretReference, Variable};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -72,6 +72,11 @@ sourceorigin_common::variables! {
     /// The gateway ranges piqueld gives every service, trusted when
     /// `AUTH_TRUSTED_PROXIES` is unset.
     const INGRESS_PROXIES = "PIQUELD_INGRESS_PROXIES";
+    /// Only for tests on one machine, such as `just conformance`; never set it
+    /// in a deployment. Where to read a certificate authority, in PEM, through
+    /// `env://NAME` or `file:///path`. Set, back-channel logout tokens may also go
+    /// to loopback addresses, over HTTPS certificates this authority signed.
+    const LOOPBACK_LOGOUT_CA = "AUTH_LOOPBACK_LOGOUT_CA";
 }
 
 /// The removed PEM signing key and its ID. Startup refuses them, so a deployment
@@ -200,6 +205,9 @@ pub struct AuthConfig {
     pub(crate) trusted_proxies: Vec<IpNet>,
     /// How many requests a client may make a minute, in each rate category.
     pub(crate) requests_per_minute: i32,
+    /// The certificate authority of the loopback servers back-channel logout
+    /// tokens may also go to, in tests; `None` in every deployment.
+    pub(crate) loopback_logout_ca: Option<reqwest::Certificate>,
 }
 
 impl AuthConfig {
@@ -238,7 +246,22 @@ impl AuthConfig {
             key_encryption_keys: Arc::new(KeyEncryptionKeys::from_environment()?),
             trusted_proxies: Self::trusted_proxies()?,
             requests_per_minute: Self::requests_per_minute()?,
+            loopback_logout_ca: Self::loopback_logout_ca()?,
         })
+    }
+
+    /// `AUTH_LOOPBACK_LOGOUT_CA`, a PEM certificate, when set.
+    fn loopback_logout_ca() -> Result<Option<reqwest::Certificate>, ConfigurationError> {
+        if LOOPBACK_LOGOUT_CA.optional()?.is_none() {
+            return Ok(None);
+        }
+        let reference: SecretReference = LOOPBACK_LOGOUT_CA.parse()?;
+        let pem = reference.resolve().map_err(|source| {
+            LOOPBACK_LOGOUT_CA.error("must resolve through env://NAME or file://PATH", source)
+        })?;
+        reqwest::Certificate::from_pem(pem.expose_secret())
+            .map(Some)
+            .map_err(|source| LOOPBACK_LOGOUT_CA.error("must contain a PEM certificate", source))
     }
 
     /// `AUTH_REQUESTS_PER_MINUTE`, a positive count the counters can hold.

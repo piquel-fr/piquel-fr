@@ -14,5 +14,5 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true
   },
-  "include": ["*.js", "*.ts", "tests/browser/**/*.ts"]
+  "include": ["*.js", "*.ts", "tests/browser/**/*.ts", "tests/conformance/**/*.ts"]
 }

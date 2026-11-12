@@ -1,0 +1,19 @@
+[
+  {
+    "plan": "oidcc-basic-certification-test-plan",
+    "variant": { "server_metadata": "discovery", "client_registration": "static_client" }
+  },
+  {
+    "plan": "oidcc-config-certification-test-plan",
+    "variant": {}
+  },
+  {
+    "plan": "oidcc-rp-initiated-logout-certification-test-plan",
+    "variant": { "client_registration": "static_client", "response_type": "code" }
+  },
+  {
+    "plan": "oidcc-backchannel-rp-initiated-logout-certification-test-plan",
+    "variant": { "client_registration": "static_client", "response_type": "code" },
+    "backchannel": true
+  }
+]

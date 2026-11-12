@@ -111,10 +111,20 @@ impl Jobs {
         jobs.exclusive(Verifier::new(audit_keys), database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
         jobs.spawn(|shutdown| store.run(reloaded, shutdown));
+        let outbound = match &config.loopback_logout_ca {
+            Some(root) => {
+                tracing::warn!(
+                    "AUTH_LOOPBACK_LOGOUT_CA is set: back-channel logout tokens may go to \
+                     loopback addresses, which only tests should allow"
+                );
+                OutboundClient::local(root.clone())
+            }
+            None => OutboundClient::new(),
+        };
         let logout = BackchannelLogoutSender::new(
             config.oidc.origin.serialized(),
             keys.clone(),
-            OutboundClient::new().map_err(StartupError::Outbound)?,
+            outbound.map_err(StartupError::Outbound)?,
         );
         jobs.deliveries(logout, database);
         let email = EmailSender::new(database.clone(), &config.email, config.dashboard.as_ref());
