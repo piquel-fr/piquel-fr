@@ -209,7 +209,8 @@ reads and changes the accounts and sessions auth stores.
    volume: a dump or a volume backup, not `piquelctl env restore`, which keeps
    the volume. If you have none, or can't tell whether anyone connected, check
    at least these before you rotate. Compare each with the same query on a
-   fresh preview, whose database is new:
+   fresh preview, whose database is new, run with
+   `piquelctl preview exec sourceorigin <branch> postgres -- psql -U sourceorigin -d sourceorigin -c "…"`:
    - The roles that can log in:
 
      ```sh
@@ -217,18 +218,20 @@ reads and changes the accounts and sessions auth stores.
      ```
 
      Only `sourceorigin` and `sourceorigin_auth` should. Remove any other with
-     `DROP OWNED BY <role>` in each database, then `DROP ROLE <role>`.
-   - The authentication rules, from
-     `SELECT type, database, user_name, address, auth_method FROM pg_hba_file_rules`,
-     run the same way. Besides the local and loopback `trust` rules, only
-     `host all all all scram-sha-256` should be listed.
+     `REASSIGN OWNED BY <role> TO sourceorigin` and `DROP OWNED BY <role>` in
+     each database, then `DROP ROLE <role>`.
+   - The authentication rules, from `SELECT * FROM pg_hba_file_rules`, run the
+     same way. Every column must match the preview's, masks included.
    - The server settings, from
      `SELECT sourcefile, name, setting FROM pg_file_settings`. One from
      `postgresql.auto.conf` came from `ALTER SYSTEM`, which SourceOrigin never
      uses: run `ALTER SYSTEM RESET ALL`.
+   - Settings stored on a database or role, from `SELECT * FROM pg_db_role_setting`,
+     and event triggers, from `SELECT evtname, evtevent FROM pg_event_trigger`.
+     Both are empty on a new database.
 
-   A rule or setting that differs from the preview's in any other way means a
-   changed file: load a copy from before the leak instead.
+   Anything else that differs from the preview's means a changed file or
+   catalog: load a copy from before the leak instead.
 3. Generate a new value for the secret that leaked:
 
    ```sh
@@ -259,8 +262,8 @@ reads and changes the accounts and sessions auth stores.
 - `piquelctl env secret sourceorigin --env <environment> list` shows the new
   version of the secret.
 - If someone may have connected, the database was loaded from a copy made
-  before the leak, or its login roles, authentication rules and settings match
-  a fresh preview's.
+  before the leak, or its login roles, authentication rules, settings and event
+  triggers match a fresh preview's.
 
 ## A stolen administrator session or a compromised administrator account
 
