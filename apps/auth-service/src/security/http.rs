@@ -1,13 +1,14 @@
 //! Shared HTTP trust boundaries: origin, proxy, timeout, request-limit and
 //! in-flight-limit policy, and the cache, isolation and CORS headers of every response.
 
+use super::content::ContentPolicy;
 use super::endpoint::Endpoint;
 use super::page::ErrorPages;
 use super::{ApiError, BrowserCookie, CSRF_HEADER, RequestContext};
 use axum::{
     extract::{ConnectInfo, MatchedPath, Request, State},
     http::{
-        HeaderMap, HeaderValue, Method, StatusCode,
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
         header::{self, InvalidHeaderValue},
         uri::Authority,
     },
@@ -15,7 +16,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ipnet::IpNet;
-use sourceorigin_common::{config::Origin, protocol::same_origin::BrowserRequest};
+use sourceorigin_common::{
+    config::Origin,
+    protocol::{isolation, same_origin::BrowserRequest},
+};
 use sourceorigin_crypto::Digest;
 use sourceorigin_repository::{Database, DatabaseError};
 use sourceorigin_telemetry::{Counter, HttpTelemetry, Label};
@@ -29,6 +33,14 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 
 /// Fetch metadata header naming how a request's initiator relates to its target.
 pub(crate) const FETCH_SITE_HEADER: &str = "sec-fetch-site";
+/// Whether another site's page that opens this one keeps a handle on it.
+const CROSS_ORIGIN_OPENER_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-opener-policy");
+/// Which sites' pages may embed or read a response.
+const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-resource-policy");
+/// Which powerful features a page, and what it embeds, may use.
+const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-policy");
 /// Trusted ingress must overwrite this header with exactly one client address.
 pub(super) const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 /// Requests refused because their client's budget was exhausted, by category, or
@@ -251,6 +263,8 @@ pub(crate) struct HttpSecurity {
     pub(super) listener: Listener,
     /// The pages a navigation's failure shows.
     pub(super) pages: ErrorPages,
+    /// The Content-Security-Policy of every response.
+    pub(super) content: ContentPolicy,
 }
 
 /// The listener an [`HttpSecurity`] guards.
@@ -280,6 +294,7 @@ impl HttpSecurity {
             pages: ErrorPages {
                 policies: config.oidc.policies.clone(),
             },
+            content: ContentPolicy::auth(config),
         }
     }
 
@@ -298,6 +313,7 @@ impl HttpSecurity {
         Ok(Self {
             listener: Listener::Admin(HeaderValue::from_str(&host)?),
             origin: dashboard.as_url().origin(),
+            content: ContentPolicy::dashboard(config, dashboard),
             ..Self::new(config, database)
         })
     }
@@ -462,6 +478,7 @@ impl HttpSecurity {
             _ => origin.filter(|_| allowed).map(CorsGrant::Client),
         };
         Self::decorate(&mut response, grant);
+        policy.content.set_on(&mut response);
         response
     }
 
@@ -551,7 +568,10 @@ impl HttpSecurity {
 
     /// Adds the enforced [`CacheClass`] and browser isolation headers, plus the CORS
     /// `grant` when set. A cacheable response is the same for every origin, so public
-    /// data is granted to all origins and other cached responses to none.
+    /// data is granted to all origins and other cached responses to none. Other
+    /// sites' pages may embed or read only public responses, such as profile
+    /// pictures (`Cross-Origin-Resource-Policy`), and the build assets only
+    /// SourceOrigin's own sites.
     pub(super) fn decorate(response: &mut Response, grant: Option<CorsGrant>) {
         let class = CacheClass::enforced(response);
         let grant = match class {
@@ -560,10 +580,20 @@ impl HttpSecurity {
             // Pictures are public; the build assets need no grant.
             CacheClass::Immutable => grant.filter(|grant| matches!(grant, CorsGrant::Public)),
         };
+        let resource_policy = match (&grant, class) {
+            (Some(CorsGrant::Public), _) => isolation::RESOURCE_POLICY_PUBLIC,
+            (_, CacheClass::Immutable) => isolation::RESOURCE_POLICY_ASSETS,
+            _ => isolation::RESOURCE_POLICY_PRIVATE,
+        };
         let headers = response.headers_mut();
         // Replaces any handler value: only the class decides.
         headers.insert(header::CACHE_CONTROL, class.cache_control());
         for (name, value) in [
+            // A page that opens one of auth's keeps no handle on it.
+            (CROSS_ORIGIN_OPENER_POLICY, isolation::OPENER_POLICY),
+            (CROSS_ORIGIN_RESOURCE_POLICY, resource_policy),
+            // Passkeys and the clipboard only.
+            (PERMISSIONS_POLICY, isolation::PERMISSIONS_POLICY),
             // No MIME sniffing.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             // Navigation must not leak authentication URLs.

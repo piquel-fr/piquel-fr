@@ -188,13 +188,14 @@ pub async fn devices<'a>(
             <ul class="list">
                 for row in rows {
                     let name = row.name();
+                    let details = row.details(now);
                     <li>
                         <div class="text">
                             <strong>(name.as_str())</strong>
                             if row.current {
                                 " " <span class="badge ok">"This device"</span>
                             }
-                            <small>(row.details(now))</small>
+                            <small>(details.as_str())</small>
                             for dashboard in row.dashboard {
                                 <small>(DeviceRow::dashboard_details(dashboard, now))</small>
                             }
@@ -209,7 +210,9 @@ pub async fn devices<'a>(
                                 change: DeviceChange::SignOut { id: row.id },
                                 label: "Sign out",
                                 class: "secondary small",
-                                aria_label: format!("Sign out {name}"),
+                                // Two devices may share a name: what tells them
+                                // apart names the button too.
+                                aria_label: format!("Sign out {name}, {details}"),
                             )
                         }
                     </li>

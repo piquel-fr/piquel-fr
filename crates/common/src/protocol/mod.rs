@@ -45,6 +45,8 @@ pub mod api;
 pub mod challenge;
 /// Access token, ID token and `UserInfo` claims, and the `acr` and `amr` values they report.
 pub mod claims;
+/// The browser isolation headers of every response.
+pub mod isolation;
 /// JWT claim and JOSE field vocabulary shared by token issuers and verifiers.
 pub mod jwt;
 /// Authorization server metadata, as published at both well-known discovery paths.

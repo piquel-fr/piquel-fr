@@ -135,8 +135,9 @@ page!(
 ```
 
 It renders with `self.render(cx, status, title, targets, view)`, in the narrow
-shell of a signed-out page. `targets` are the URLs its forms may redirect to,
-which the page's `form-action` must name.
+shell of a signed-out page. `targets` are the URLs its forms may redirect to: the
+security layer adds their origins to the response's `form-action`, the only
+directive a page widens.
 
 A handler never sets a flow or session cookie itself, and never sends messages
 to other systems; see [Rust conventions](../rust-conventions.md#applications-and-routes).

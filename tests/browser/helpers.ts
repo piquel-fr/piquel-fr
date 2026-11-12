@@ -229,6 +229,43 @@ export async function signedUp(browser: Browser, username: string): Promise<Page
   return page;
 }
 
+/** The admin dashboard's origin, if the deployment serves one. */
+export const adminUrl = process.env.E2E_ADMIN_URL ?? '';
+
+/**
+ * A command that makes the account named by its last argument an administrator,
+ * for the reason before it, e.g. `just auth admin grant` or
+ * `piquelctl app exec … -- auth-service --operator <you> admin grant`.
+ */
+export const grantAdmin = process.env.E2E_GRANT_ADMIN ?? '';
+
+/** A browser of its own, signed up as `handle`, an administrator. */
+export async function administrator(browser: Browser, handle: string): Promise<Page> {
+  const page = await signedUp(browser, handle);
+  cli(grantAdmin, ...reason, handle);
+  return page;
+}
+
+/**
+ * Proves a passkey on auth's handoff page, where the dashboard sends a browser
+ * signing in, or confirming a change without the dashboard's dialog: auth asks for
+ * one, for the dashboard only, then the dashboard shows its page, confirmed.
+ */
+export async function confirmThroughAuth(admin: Page): Promise<void> {
+  await expect(admin.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
+  await admin.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  await admin.waitForURL((url) => url.origin === adminUrl);
+}
+
+/**
+ * Opens the dashboard's `path`, signing in with a passkey on auth's handoff page
+ * first if the browser has no dashboard session.
+ */
+export async function openDashboard(admin: Page, path: string): Promise<void> {
+  await admin.goto(`${adminUrl}${path}`);
+  if (new URL(admin.url()).origin !== adminUrl) await confirmThroughAuth(admin);
+}
+
 /**
  * Serves `origin`, a client application with no server, as a blank page through
  * DevTools, which also sees the redirects that reach it: Playwright's routes would

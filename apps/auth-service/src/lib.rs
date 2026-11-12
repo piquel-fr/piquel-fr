@@ -229,7 +229,7 @@ impl AuthConfig {
     ) -> Result<Router, StartupError> {
         let policy = security::HttpSecurity::admin(self, database.clone(), &dashboard.origin)?;
         let passkeys = self.dashboard_passkeys(database.clone(), keys)?;
-        let pages = AdminApplication::new(database, self, dashboard, passkeys)?
+        let pages = AdminApplication::new(database, self, dashboard, passkeys)
             .routes()
             .layer(DefaultBodyLimit::max(MAX_DASHBOARD_BODY_BYTES))
             .layer(middleware::from_fn_with_state(

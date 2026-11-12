@@ -1042,11 +1042,15 @@ pub(crate) async fn confirm<'a>(
     })
 }
 
-/// An account's settings tab, as an administrator changes them: the `tabs`,
-/// `current` among them, why the change just posted was refused, if it was, and
-/// the tab's section as `child`.
+/// An account's settings tab, as an administrator changes them: headed by the
+/// tab and the `account` it belongs to, if found, then the `tabs`, `current`
+/// among them, why the change just posted was refused, if it was, and the tab's
+/// section as `child`.
 #[component]
 pub async fn account_settings<'a>(
+    #[into]
+    #[default]
+    account: Option<Target<'a>>,
     tabs: &'a [(SettingsTab, &'a str)],
     current: SettingsTab,
     #[into]
@@ -1055,6 +1059,7 @@ pub async fn account_settings<'a>(
     child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
+        page_head(title: current.label(), lead: account.map(Target::text))
         settings_tabs(tabs: tabs, current: current)
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>

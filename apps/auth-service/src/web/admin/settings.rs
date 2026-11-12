@@ -537,8 +537,10 @@ impl App {
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
         let section = Child::new(section);
+        let account = App::target(cx).await;
         let page = view! { cx =>
             sourceorigin_ui::account_settings(
+                account: account,
                 tabs: tabs,
                 current: tab,
                 refusal: refusal,

@@ -4,12 +4,12 @@
 use crate::pages::{HomeLinks, Page, page_body};
 use axum::{
     Router,
-    http::{HeaderValue, StatusCode, Uri, header, uri::PathAndQuery},
+    http::{HeaderName, HeaderValue, StatusCode, Uri, header, uri::PathAndQuery},
     middleware,
     response::{IntoResponse, Redirect, Response},
     routing::get,
 };
-use sourceorigin_common::config::Origin;
+use sourceorigin_common::{config::Origin, protocol::isolation};
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{Asset, FONTS, Policies, STYLESHEET};
 use topcoat::{
@@ -20,7 +20,7 @@ use topcoat::{
 /// The health probe piqueld polls. It is free, and quiet in telemetry.
 pub(crate) const HEALTH: &str = "/health";
 
-/// Every page's Content-Security-Policy: the stylesheet and its typefaces, on
+/// Every answer's Content-Security-Policy: the stylesheet and its typefaces, on
 /// SourceOrigin itself, and nothing else. No page has a script or a form.
 const POLICY: &str = "default-src 'none'; style-src 'self'; font-src 'self'; \
                       frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
@@ -135,10 +135,6 @@ impl Site {
                         header::CONTENT_TYPE,
                         HeaderValue::from_static("text/html; charset=utf-8"),
                     ),
-                    (
-                        header::CONTENT_SECURITY_POLICY,
-                        HeaderValue::from_static(POLICY),
-                    ),
                     (header::CACHE_CONTROL, HeaderValue::from_static(PAGE_CACHE)),
                 ],
                 html.render(&cx),
@@ -151,11 +147,27 @@ impl Site {
         }
     }
 
-    /// Adds the headers every answer carries, and forbids caching any that did not
-    /// choose: redirects and errors.
+    /// Adds the headers every answer carries, its Content-Security-Policy
+    /// included, and forbids caching any that did not choose: redirects and
+    /// errors.
     fn secure(mut response: Response) -> Response {
         let headers = response.headers_mut();
         for (name, value) in [
+            (header::CONTENT_SECURITY_POLICY, POLICY),
+            // A page that opens one of sourceorigin.dev's keeps no handle on it.
+            (
+                HeaderName::from_static("cross-origin-opener-policy"),
+                isolation::OPENER_POLICY,
+            ),
+            // Only SourceOrigin's sites may embed what it serves.
+            (
+                HeaderName::from_static("cross-origin-resource-policy"),
+                isolation::RESOURCE_POLICY_ASSETS,
+            ),
+            (
+                HeaderName::from_static("permissions-policy"),
+                isolation::PERMISSIONS_POLICY,
+            ),
             // No MIME sniffing.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             // Links to apps carry no path of sourceorigin.dev.

@@ -119,7 +119,10 @@ CI's, or a [preview](getting-started.md#run-your-changes) of your checkout. Writ
 one for what only a browser shows: a page's layout or script, a passkey ceremony,
 a sign-in that crosses origins. Its `no-javascript` project runs
 `tests/browser/no-javascript.spec.ts` with JavaScript disabled, for what a page
-must do without scripts. The
+must do without scripts. `tests/browser/accessibility.spec.ts` runs
+[axe](https://github.com/dequelabs/axe-core) on auth's pages and the dashboard's,
+in both themes, and fails on any WCAG 2.2 AA rule it breaks: a page you add
+belongs in its list. The
 [browser tests' README](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/browser/README.md)
 says how to run them.
 

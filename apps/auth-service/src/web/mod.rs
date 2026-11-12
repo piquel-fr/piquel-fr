@@ -52,7 +52,7 @@ use crate::{
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
     passkey::PasskeyApplication,
     pictures, routes,
-    security::{ApiError, BrowserCookie, RequestContext},
+    security::{ApiError, BrowserCookie, FormTargets, RequestContext},
 };
 pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
@@ -61,7 +61,7 @@ use sourceorigin_common::config::Origin;
 use sourceorigin_repository::Database;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{Onward, PreferenceChange, QueryError, Title};
-use std::{fmt, sync::Arc};
+use std::fmt;
 use topcoat::{
     Error, Result,
     context::Cx,
@@ -102,8 +102,6 @@ pub(crate) struct WebApplication {
     issuer: Origin,
     /// SourceOrigin's policies on sourceorigin.dev, which every page's footer links.
     policies: PolicyLinks,
-    /// Every page's Content-Security-Policy but its `form-action`.
-    policy: Arc<str>,
 }
 
 /// What a page answers when it cannot show itself.
@@ -177,18 +175,6 @@ impl WebApplication {
         passkeys: PasskeyApplication,
     ) -> Self {
         let origin = &config.oidc.origin;
-        // A source with a path needs the whole URL: `'self'` names none. The passkey
-        // script's ceremonies fetch auth's own JSON routes. Profile pictures are
-        // auth's own, and the picture script shows the one being chosen from a
-        // `blob:` URL of the file, before it is uploaded.
-        let scripts = EmbeddedAssets::SCRIPTS.map(|script| origin.join(&script.path()));
-        let policy = format!(
-            "default-src 'none'; style-src {}; script-src {}; font-src 'self'; \
-             connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; \
-             base-uri 'none'",
-            origin.join(&EmbeddedAssets::STYLESHEET.path()),
-            scripts.join(" "),
-        );
         let dashboard = config.dashboard.as_ref().map(|dashboard| {
             DashboardSignIn::new(database.clone(), origin.clone(), dashboard.origin.clone())
         });
@@ -202,7 +188,6 @@ impl WebApplication {
             email: config.email.clone(),
             issuer: origin.clone(),
             policies: config.oidc.policies.clone(),
-            policy: policy.into(),
         }
     }
 
@@ -524,27 +509,19 @@ impl WebApplication {
         .single()
         .await?
         .render(cx);
-        let mut form_action = "'self'".to_owned();
-        for source in targets.iter().filter_map(Self::source) {
-            form_action.push(' ');
-            form_action.push_str(&source);
-        }
-        let policy = format!("{}; form-action {form_action}", self.policy);
-        (
+        // The security layer's policy lets the page's forms redirect on to them.
+        let targets = FormTargets(targets.iter().filter_map(Self::source).collect());
+        let mut response = (
             status,
-            [
-                (
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static("text/html; charset=utf-8"),
-                ),
-                (
-                    header::CONTENT_SECURITY_POLICY,
-                    HeaderValue::try_from(policy)?,
-                ),
-            ],
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            )],
             html,
         )
-            .into_response(cx)
+            .into_response(cx)?;
+        response.extensions_mut().insert(targets);
+        Ok(response)
     }
 
     /// Answers with why the page titled `title` cannot go on: what `error`'s code
