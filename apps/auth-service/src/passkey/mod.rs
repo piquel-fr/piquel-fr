@@ -346,10 +346,11 @@ impl PasskeyApplication {
                     name,
                     exclusions,
                 )?;
-                // Prefer account-picker credentials while keeping security keys that need a username.
+                // Sign-in lists no credentials (`docs/dev/security/handles.md`), so only
+                // a discoverable credential can sign in: refuse to create any other.
                 if let Some(selection) = challenge.public_key.authenticator_selection.as_mut() {
-                    selection.resident_key = Some(ResidentKeyRequirement::Preferred);
-                    selection.require_resident_key = false;
+                    selection.resident_key = Some(ResidentKeyRequirement::Required);
+                    selection.require_resident_key = true;
                 }
                 Ok((challenge, state))
             }

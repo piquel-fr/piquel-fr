@@ -242,7 +242,8 @@ impl PasskeyApplication {
         Ok(())
     }
 
-    /// Starts handle-based authentication or lets the authenticator identify the account.
+    /// Starts sign-in to the account a handle names, or lets the authenticator
+    /// identify the account. Either way the challenge lists no credentials.
     ///
     /// Handles are public (`docs/dev/security/handles.md`), so a handle without an active
     /// account or passkey is refused at once, before any ceremony. Text that is not a
@@ -252,40 +253,36 @@ impl PasskeyApplication {
         headers: HeaderMap,
         Json(input): Json<LoginStart>,
     ) -> Result<Response, ApiError> {
-        let (ceremony, challenge) =
-            if let Some(input) = input.handle.filter(|handle| !handle.is_empty()) {
-                let keys = match Handle::parse(&input) {
-                    Ok(handle) => {
-                        app.database
-                            .passkeys()
-                            .list_active_by_handle(&handle)
-                            .await?
-                    }
-                    Err(_) => Vec::new(),
-                };
-                let user_id = keys
-                    .first()
-                    .map(|key| key.user_id)
-                    .ok_or(PasskeyError::UnknownHandle)?;
-                let (challenge, state) = app
-                    .webauthn
-                    .start_passkey_authentication(&Self::decode(keys)?)
-                    .map_err(PasskeyError::from)?;
-                (Ceremony::Login(LoginCeremony { user_id, state }), challenge)
-            } else {
-                let (challenge, state) = app.discoverable()?;
-                (Ceremony::Discover(state), challenge)
+        let (challenge, state) = app.discoverable()?;
+        let ceremony = if let Some(input) = input.handle.filter(|handle| !handle.is_empty()) {
+            let keys = match Handle::parse(&input) {
+                Ok(handle) => {
+                    app.database
+                        .passkeys()
+                        .list_active_by_handle(&handle)
+                        .await?
+                }
+                Err(_) => Vec::new(),
             };
+            let user_id = keys
+                .first()
+                .map(|key| key.user_id)
+                .ok_or(PasskeyError::UnknownHandle)?;
+            Ceremony::Login(LoginCeremony { user_id, state })
+        } else {
+            Ceremony::Discover(DiscoverCeremony { state })
+        };
         Ok(app.start(&headers, ceremony, challenge).await?)
     }
 
-    /// Starts an account-picker sign-in, whose account the authenticator names.
+    /// Starts a sign-in whose account the authenticator names, listing no
+    /// credentials.
     pub(super) fn discoverable(
         &self,
-    ) -> Result<(RequestChallengeResponse, DiscoverCeremony), PasskeyError> {
+    ) -> Result<(RequestChallengeResponse, DiscoverableAuthentication), PasskeyError> {
         let (mut challenge, state) = self.webauthn.start_discoverable_authentication()?;
         challenge.mediation = None;
-        Ok((challenge, DiscoverCeremony { state }))
+        Ok((challenge, state))
     }
 
     /// Verifies the assertion and latest credential state before signing the browser in.
@@ -321,8 +318,10 @@ impl PasskeyApplication {
 
     /// Checks `credential` against a sign-in `ceremony` with `webauthn`, and
     /// returns the account it signs in to with `WebAuthn`'s verdict, which
-    /// [`Self::accept_credential`] takes. A discoverable credential that names no
-    /// account is rejected, and recorded, here.
+    /// [`Self::accept_credential`] takes. A credential that names no account, or
+    /// that signed for another account than the ceremony named, is rejected, and
+    /// recorded, here. A forged one naming another account fails in
+    /// [`Self::accept_credential`], as any bad signature for the named account does.
     pub(super) async fn verify(
         &self,
         webauthn: &Webauthn,
@@ -330,20 +329,33 @@ impl PasskeyApplication {
         ceremony: AuthenticationCeremony,
         credential: &PublicKeyCredential,
     ) -> Result<(UserId, Result<AuthenticationResult, WebauthnError>), PasskeyError> {
-        match ceremony {
-            AuthenticationCeremony::Login(LoginCeremony { user_id, state }) => Ok((
-                user_id,
-                webauthn.finish_passkey_authentication(credential, &state),
-            )),
-            AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
-                match self.discover(credential).await {
-                    Ok((user_id, keys)) => Ok((
-                        user_id,
-                        webauthn.finish_discoverable_authentication(credential, state, &keys),
-                    )),
-                    Err(error) => Err(self.reject(context, Actor::Anonymous, None, error).await),
-                }
+        let (named, state) = match ceremony {
+            AuthenticationCeremony::Login(LoginCeremony { user_id, state }) => {
+                (Some(user_id), state)
             }
+            AuthenticationCeremony::Discover(DiscoverCeremony { state }) => (None, state),
+        };
+        let (user_id, keys) = match self.discover(credential).await {
+            Ok(discovered) => discovered,
+            Err(error) => return Err(self.reject(context, Actor::Anonymous, named, error).await),
+        };
+        let verified = webauthn.finish_discoverable_authentication(credential, state, &keys);
+        match named {
+            // Only a passkey that signed learns it is another account's. A forged
+            // assertion fails as one of the named account's would, so naming an
+            // account ID tells nothing about which handle is its.
+            Some(named) if named != user_id => match verified {
+                Ok(_) => Err(self
+                    .reject(
+                        context,
+                        Actor::Anonymous,
+                        Some(named),
+                        PasskeyError::OtherAccount,
+                    )
+                    .await),
+                Err(error) => Ok((named, Err(error))),
+            },
+            _ => Ok((user_id, verified)),
         }
     }
 

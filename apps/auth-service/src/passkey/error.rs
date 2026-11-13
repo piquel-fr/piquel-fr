@@ -71,6 +71,9 @@ pub(crate) enum PasskeyError {
     /// Handle sign-in named a handle without an active account or passkey.
     #[error("no active account has this handle")]
     UnknownHandle,
+    /// The passkey names another account than the one its sign-in was for.
+    #[error("passkey belongs to another account than the one named")]
+    OtherAccount,
     /// The account, or the credential it signed with, was disabled or removed.
     #[error("active account and credential required")]
     AccountInactive,
@@ -187,6 +190,9 @@ impl From<PasskeyError> for ApiError {
             error @ PasskeyError::InvalidUserHandle(_) => {
                 error.rejected("This passkey does not belong to an Origin Account.")
             }
+            error @ PasskeyError::OtherAccount => error.rejected(
+                "This passkey signs in to another account. Choose one for the account you're signing in to.",
+            ),
             error @ PasskeyError::UserVerificationRequired => error
                 .rejected("Your authenticator must verify you with a PIN, fingerprint or face."),
             error @ PasskeyError::CounterRegression => error.rejected(
@@ -222,6 +228,7 @@ impl PasskeyError {
             | Self::SignedForAnotherOrigin
             | Self::ClientData(_)
             | Self::InvalidUserHandle(_)
+            | Self::OtherAccount
             | Self::UserVerificationRequired
             | Self::CredentialRevoked => Some(SignInFailure::InvalidCredential),
             Self::Handle(_)

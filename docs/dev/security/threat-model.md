@@ -105,8 +105,7 @@ Beyond these, database access is trusted: it can bind any passkey to any account
 - **Undo doesn't reach inside apps.** What a recovery's link holder did in an app
   that doesn't ask for `phr` stays done ([undoing a recovery](account-recovery.md#undoing-a-recovery)).
 - **Handles are not private.** Anyone can check whether a handle has an account,
-  add failed sign-ins to its history, and, with its old credential IDs, find it
-  after a rename ([handles](handles.md#limits)).
+  and add failed sign-ins to its history ([handles](handles.md#limits)).
 - **Synced passkeys are accepted.** An account is then as safe as the passkey
   provider's account that syncs it.
 - **Rate limits are per IP.** They slow one source, not an attacker with many

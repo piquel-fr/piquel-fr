@@ -20,12 +20,15 @@ You need an Origin Account. If you don't have one yet, see
 Origin Auth signs you in and goes on to where you were headed: the app, or your
 settings.
 
-If your browser doesn't list your passkey, as with a passkey on a security key
-or another device, sign in with your handle:
+If your passkey is on a security key or another device, choose that option in
+your browser's prompt.
+
+To sign in to one account by name, as when this device keeps passkeys for
+several, use its handle:
 
 1. Select **Use a handle instead**.
 2. Type your handle under **Handle**, then select **Sign in with a passkey**.
-3. Your browser asks for one of that account's passkeys.
+3. Choose a passkey of that account. A passkey of another account is refused.
 
 ## Sign in with GitHub or Google
 
@@ -76,6 +79,10 @@ devices and removing an app's access need no confirmation.
   have changed: you sign in with the handle the account has now.
 - **"This passkey was removed from your account."** Use another of your
   passkeys.
+- **"This passkey signs in to another account. Choose one for the account
+  you're signing in to."** You signed in by handle and chose a passkey of
+  another account. Choose one of that handle's passkeys, or sign in without a
+  handle to use the account the passkey belongs to.
 - **"You last confirmed this session with a passkey. Use your passkey to sign
   in again."** This browser's session was confirmed with a passkey, so signing
   in again with GitHub or Google would weaken it. Sign in with your passkey.

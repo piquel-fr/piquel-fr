@@ -9,7 +9,7 @@ instead.
 - A browser that supports passkeys, such as a recent Safari, Chrome, Firefox or
   Edge, with scripts allowed.
 - A device or password manager that keeps passkeys: your phone or computer,
-  a password manager, or a security key.
+  a password manager, or a security key with room to store one.
 - An invitation link. SourceOrigin only lets people sign up with an invitation
   for now. To ask for one, write to [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev).
   The invitation may come by email, from SourceOrigin, or as a link someone

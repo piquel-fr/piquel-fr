@@ -39,6 +39,16 @@ mod validation;
 /// Maximum JSON response accepted by the software browser fixture.
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
+/// A software authenticator, capable of user verification and monotonic counters,
+/// and the ID of the one credential it holds, which an account picker's challenge
+/// lists for it.
+pub(crate) struct SoftKey {
+    /// The authenticator.
+    authenticator: WebauthnAuthenticator<SoftPasskey>,
+    /// Its credential's ID.
+    credential_id: Vec<u8>,
+}
+
 /// Isolated account and counter-capable software authenticator for database
 /// scenarios. The recovery scenarios use it too.
 pub(crate) struct Fixture {
@@ -46,8 +56,8 @@ pub(crate) struct Fixture {
     app: PasskeyApplication,
     /// Where requests go: the passkey routes, or a replica of the whole service.
     router: axum::Router,
-    /// Software credential capable of user verification and monotonic counters.
-    authenticator: WebauthnAuthenticator<SoftPasskey>,
+    /// The software key that signs.
+    key: SoftKey,
     /// HTTPS origin passed to the authenticator.
     origin: Url,
     /// Seeded account owning the software credential.
@@ -56,8 +66,6 @@ pub(crate) struct Fixture {
     pub(crate) key_id: PasskeyId,
     /// Unique seeded username for identified authentication.
     pub(crate) username: String,
-    /// The signing credential's ID, which an account picker's challenge lists.
-    credential_id: Vec<u8>,
 }
 impl Fixture {
     /// Seeds an account and passkey in the explicitly configured isolated database.
@@ -83,7 +91,7 @@ impl Fixture {
             })
             .await
             .expect("user");
-        let (key_id, credential_id, authenticator) =
+        let (key_id, key) =
             Self::seed_passkey(&app, &origin, user_id, &username, "Original key").await;
         Self {
             router: app
@@ -91,12 +99,11 @@ impl Fixture {
                 .routes()
                 .merge(AccountApplication::new(app.database.clone()).routes()),
             app,
-            authenticator,
+            key,
             origin,
             user_id,
             key_id,
             username,
-            credential_id,
         }
     }
     /// Stores a new software authenticator's passkey named `name` for `user_id`.
@@ -109,7 +116,7 @@ impl Fixture {
         user_id: UserId,
         username: &str,
         name: &str,
-    ) -> (PasskeyId, Vec<u8>, WebauthnAuthenticator<SoftPasskey>) {
+    ) -> (PasskeyId, SoftKey) {
         let (challenge, state) = app
             .webauthn
             .start_passkey_registration(user_id.as_uuid(), username, "Test user", None)
@@ -123,7 +130,7 @@ impl Fixture {
             .finish_passkey_registration(&registration, &state)
             .expect("verified registration");
         let id = PasskeyId::new();
-        let credential_id = key.cred_id().as_ref().to_vec();
+        let credential_id = registration.raw_id.to_vec();
         app.database
             .passkeys()
             .insert(&InsertPasskey {
@@ -135,23 +142,22 @@ impl Fixture {
             })
             .await
             .expect("stored key");
-        (id, credential_id, authenticator)
+        let key = SoftKey {
+            authenticator,
+            credential_id,
+        };
+        (id, key)
     }
-    /// Signs with `authenticator` from now on, and returns the one that signed
-    /// until now.
-    pub(crate) fn replace_authenticator(
-        &mut self,
-        authenticator: WebauthnAuthenticator<SoftPasskey>,
-    ) -> WebauthnAuthenticator<SoftPasskey> {
-        std::mem::replace(&mut self.authenticator, authenticator)
+    /// Signs with `key` from now on, and returns the one that signed until now.
+    pub(crate) fn replace_key(&mut self, key: SoftKey) -> SoftKey {
+        std::mem::replace(&mut self.key, key)
     }
     /// Stores another passkey named `name` on the account, and signs with it from
     /// now on.
     pub(crate) async fn switch_passkey(&mut self, name: &str) -> PasskeyId {
-        let (id, credential_id, authenticator) =
+        let (id, key) =
             Self::seed_passkey(&self.app, &self.origin, self.user_id, &self.username, name).await;
-        self.authenticator = authenticator;
-        self.credential_id = credential_id;
+        self.key = key;
         id
     }
     /// Sends the next requests to `router`, such as one of [`Replicas`].
@@ -235,11 +241,12 @@ impl Fixture {
         if picker {
             challenge.public_key.allow_credentials = vec![webauthn_rs_proto::AllowCredentials {
                 type_: "public-key".into(),
-                id: self.credential_id.clone().into(),
+                id: self.key.credential_id.clone().into(),
                 transports: None,
             }];
         }
         let mut credential = self
+            .key
             .authenticator
             .do_authentication(origin, challenge)
             .expect("software assertion");
@@ -302,24 +309,32 @@ impl Fixture {
     }
     /// Answers a started registration challenge with a fresh software credential.
     pub(crate) fn credential(&self, started: &Value) -> RegisterPublicKeyCredential {
-        self.new_authenticator(started).0
+        self.new_key(started).0
     }
-    /// Answers a started registration challenge with a new software
-    /// authenticator, and returns the credential and the authenticator, which can
-    /// sign with it once stored as [`Self::authenticator`].
-    pub(crate) fn new_authenticator(
-        &self,
-        started: &Value,
-    ) -> (
-        RegisterPublicKeyCredential,
-        WebauthnAuthenticator<SoftPasskey>,
-    ) {
-        let challenge =
+    /// Answers a started registration challenge with a new software key, and
+    /// returns the credential and the key, which can sign with it once given to
+    /// [`Self::replace_key`]. Every registration requires a discoverable
+    /// credential, which the software one is not, so the requirement is checked,
+    /// then dropped: [`Self::assertion_for`] answers as a discoverable credential
+    /// would.
+    pub(crate) fn new_key(&self, started: &Value) -> (RegisterPublicKeyCredential, SoftKey) {
+        let mut challenge: CreationChallengeResponse =
             serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
+        let selection = challenge
+            .public_key
+            .authenticator_selection
+            .as_mut()
+            .expect("authenticator selection");
+        assert!(selection.require_resident_key, "a discoverable credential");
+        selection.require_resident_key = false;
         let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
         let credential = authenticator
             .do_registration(self.origin.clone(), challenge)
             .expect("software registration");
-        (credential, authenticator)
+        let key = SoftKey {
+            authenticator,
+            credential_id: credential.raw_id.to_vec(),
+        };
+        (credential, key)
     }
 }
