@@ -2,7 +2,10 @@
 //! policies all read, and the independent request budgets of each class.
 
 use crate::routes::{ACCOUNT_PREFIX, audit, dashboard, oidc, page, passkey, pictures, service};
-use axum::extract::{MatchedPath, Request};
+use axum::{
+    extract::{MatchedPath, Request},
+    http::Method,
+};
 
 /// The header the search script sends with a live search's refresh, which spends
 /// the search budget rather than the pages'. A client gains nothing by sending it
@@ -124,17 +127,17 @@ impl Endpoint {
         }
     }
 
-    /// Whether a browser navigates to it, so that a failure a browser without
-    /// fetch metadata gets is shown as a page when it accepts HTML. A client
-    /// calling a protocol or JSON route keeps its JSON, whatever it accepts.
-    pub(super) const fn browsed(self) -> bool {
+    /// Whether a browser navigates to it with `method`, so that a failure a
+    /// browser without fetch metadata gets is shown as a page when it accepts
+    /// HTML. A client calling a protocol or JSON route keeps its JSON, whatever it
+    /// accepts: among the other routes, browsers only `GET` the providers'
+    /// callbacks and unknown paths, while scripts post the ceremonies' JSON.
+    pub(super) fn browsed(self, method: &Method) -> bool {
         match self {
-            Self::Authorize
-            | Self::Logout
-            | Self::Page
-            | Self::Dashboard
-            | Self::Unsubscribe
-            | Self::Other => true,
+            Self::Authorize | Self::Logout | Self::Page | Self::Dashboard | Self::Unsubscribe => {
+                true
+            }
+            Self::Other => matches!(*method, Method::GET | Method::HEAD),
             Self::OAuthBackChannel
             | Self::UserInfo
             | Self::Discovery

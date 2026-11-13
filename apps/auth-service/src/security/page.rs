@@ -7,7 +7,7 @@ use super::{ApiError, endpoint::Endpoint};
 use crate::{assets::EmbeddedAssets, config::PolicyLinks, routes};
 use axum::{
     body::Body,
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     response::Response,
 };
 use sourceorigin_telemetry::HttpTelemetry;
@@ -36,18 +36,18 @@ impl ErrorPages {
     const POLICY: &'static str = "default-src 'none'; style-src 'self'; font-src 'self'; \
          img-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
 
-    /// Whether the request to `endpoint` with `headers` is a browser's navigation,
-    /// which shows a page, rather than a `fetch` or another client, which reads
-    /// JSON: by its fetch metadata, or, from a browser that sends none, by whether
-    /// it accepts HTML on a route browsers navigate to. Health probes keep their
-    /// JSON.
-    pub(super) fn navigation(headers: &HeaderMap, endpoint: Endpoint) -> bool {
+    /// Whether the `method` request to `endpoint` with `headers` is a browser's
+    /// navigation, which shows a page, rather than a `fetch` or another client,
+    /// which reads JSON: by its fetch metadata, or, from a browser that sends none,
+    /// by whether it accepts HTML on a route browsers navigate to
+    /// ([`Endpoint::browsed`]). Health probes keep their JSON.
+    pub(super) fn navigation(headers: &HeaderMap, method: &Method, endpoint: Endpoint) -> bool {
         let text = |name| headers.get(name).and_then(|value| value.to_str().ok());
         !matches!(endpoint, Endpoint::Health)
             && match text("sec-fetch-mode") {
                 Some(mode) => mode == "navigate",
                 None => {
-                    endpoint.browsed()
+                    endpoint.browsed(method)
                         && text(header::ACCEPT.as_str())
                             .is_some_and(|accept| accept.contains("text/html"))
                 }

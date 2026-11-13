@@ -427,7 +427,7 @@ impl HttpSecurity {
             Listener::Admin(_) => Endpoint::dashboard(&request),
         };
         // The theme of a navigation's error page.
-        let navigation = ErrorPages::navigation(request.headers(), endpoint)
+        let navigation = ErrorPages::navigation(request.headers(), request.method(), endpoint)
             .then(|| BrowserCookie::read_preferences(request.headers()));
         let slot = policy.admit(endpoint);
         // Set by the origin check, which runs under the deadline; an error response

@@ -35,23 +35,25 @@ async fn explained(admin: bool, response: impl IntoResponse) -> (Response, Strin
 }
 
 /// Navigations are told from fetches by their fetch metadata, or, from a browser
-/// that sends none, by whether they accept HTML on a route browsers navigate to:
-/// a client of a protocol route that happens to accept HTML keeps its JSON, and
-/// health probes always do.
+/// that sends none, by whether they accept HTML on a route browsers navigate to,
+/// as the routes classify: a client of a protocol or JSON route that happens to
+/// accept HTML keeps its JSON, a passkey ceremony's included, and health probes
+/// always do.
 #[test]
 fn navigations_are_told_from_fetches() {
-    assert!(ErrorPages::navigation(&fetched("navigate"), Endpoint::Page));
-    assert!(ErrorPages::navigation(
+    let navigation = |headers: &HeaderMap, method: Method, path: &str| {
+        ErrorPages::navigation(headers, &method, Endpoint::classify(path))
+    };
+    assert!(navigation(&fetched("navigate"), Method::GET, page::LOGIN));
+    assert!(navigation(&fetched("navigate"), Method::POST, oidc::TOKEN));
+    assert!(!navigation(
         &fetched("navigate"),
-        Endpoint::OAuthBackChannel
-    ));
-    assert!(!ErrorPages::navigation(
-        &fetched("navigate"),
-        Endpoint::Health
+        Method::GET,
+        service::READY
     ));
     for mode in ["cors", "same-origin", "no-cors"] {
         assert!(
-            !ErrorPages::navigation(&fetched(mode), Endpoint::Page),
+            !navigation(&fetched(mode), Method::GET, page::LOGIN),
             "{mode}"
         );
     }
@@ -60,18 +62,26 @@ fn navigations_are_told_from_fetches() {
         header::ACCEPT,
         HeaderValue::from_static("text/html,application/xhtml+xml"),
     );
-    assert!(ErrorPages::navigation(&accepting, Endpoint::Page));
-    assert!(ErrorPages::navigation(&accepting, Endpoint::Authorize));
-    for endpoint in [
-        Endpoint::OAuthBackChannel,
-        Endpoint::UserInfo,
-        Endpoint::Account,
+    for (method, path) in [
+        (Method::GET, page::LOGIN),
+        (Method::POST, page::LOGIN),
+        (Method::GET, oidc::AUTHORIZE),
+        (Method::GET, "/login/github/callback"),
+        (Method::GET, "/no-such-page"),
     ] {
-        assert!(!ErrorPages::navigation(&accepting, endpoint));
+        assert!(navigation(&accepting, method, path), "{path}");
+    }
+    for (method, path) in [
+        (Method::POST, oidc::TOKEN),
+        (Method::GET, oidc::USERINFO),
+        (Method::POST, "/webauthn/authenticate/start"),
+        (Method::GET, "/account/passkeys"),
+    ] {
+        assert!(!navigation(&accepting, method, path), "{path}");
     }
     accepting.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
-    assert!(!ErrorPages::navigation(&accepting, Endpoint::Page));
-    assert!(!ErrorPages::navigation(&HeaderMap::new(), Endpoint::Page));
+    assert!(!navigation(&accepting, Method::GET, page::LOGIN));
+    assert!(!navigation(&HeaderMap::new(), Method::GET, page::LOGIN));
 }
 
 /// A refusal's page says what its JSON says, at its status and with its

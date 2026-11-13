@@ -214,7 +214,8 @@ cause to the client:
 
 A browser's navigation never shows JSON or plain text. When a response to a
 navigation, told apart by `Sec-Fetch-Mode: navigate`, or by `Accept: text/html`
-from a browser that sends no fetch metadata, is a `4xx` or `5xx` that is not
+from a browser that sends no fetch metadata on a route browsers navigate to
+(`Endpoint::browsed`), is a `4xx` or `5xx` that is not
 already a page, `ErrorPages::explain` (`src/security/page.rs`) replaces its body
 with an error page: its status in words, what `ApiError` or an OAuth refusal
 said, or what the status means when nothing did, a link back to auth's or the
