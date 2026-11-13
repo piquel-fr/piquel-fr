@@ -78,4 +78,13 @@ test('downloading the data works again once the file is on its way', async ({ br
   // The page never changes for a download, so the button must not stay locked.
   for (let time = 0; time < 2; time++)
     await Promise.all([page.waitForEvent('download'), button.click()]);
+  // Nor once it confirms with a passkey first: the session confirmed moments ago,
+  // so mark the form as a page with a lapsed one would.
+  await page.locator('form', { has: button }).evaluate((form) => {
+    form.setAttribute('data-passkey-confirm', '');
+  });
+  for (let time = 0; time < 2; time++) {
+    await Promise.all([page.waitForEvent('download'), button.click()]);
+    await expect(button).toBeEnabled();
+  }
 });
