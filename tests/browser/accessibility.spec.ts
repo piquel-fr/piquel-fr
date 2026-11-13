@@ -76,6 +76,14 @@ test("the dashboard's pages", async ({ browser }) => {
     '/audit',
     '/announcements',
     '/alerts',
+    '/alerts/previous',
+    // The forms of changes no account or client page offers.
+    '/administrators/grant',
+    '/invitations/new',
+    '/announcements/new',
+    '/clients/new',
+    '/handles/reserve',
+    '/keys/rotate',
     '/no-such-page'
   ]) {
     await openDashboard(admin, path);

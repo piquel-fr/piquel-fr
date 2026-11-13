@@ -27,7 +27,8 @@ const PERMISSIONS_POLICY_HEADER: &str = "permissions-policy";
 /// for their copy buttons, and no other powerful feature, nor may anything they
 /// embed. A feature it leaves out keeps its default, often `self`, so every
 /// feature that reaches a device, the user's data or another site is listed,
-/// including ones only some browsers know.
+/// including ones only some browsers know yet, which Chromium logs as
+/// unrecognized or as needing an origin trial.
 pub const PERMISSIONS_POLICY: &str = "publickey-credentials-get=(self), publickey-credentials-create=(self), \
     clipboard-write=(self), accelerometer=(), ambient-light-sensor=(), \
     autoplay=(), bluetooth=(), browsing-topics=(), camera=(), \
