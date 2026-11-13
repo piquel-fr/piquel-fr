@@ -25,13 +25,18 @@ pub const PERMISSIONS_POLICY_HEADER: &str = "permissions-policy";
 
 /// `Permissions-Policy`: the pages may use passkeys and write to the clipboard,
 /// for their copy buttons, and no other powerful feature, nor may anything they
-/// embed.
+/// embed. A feature it leaves out keeps its default, often `self`, so every
+/// feature that reaches a device, the user's data or another site is listed.
 pub const PERMISSIONS_POLICY: &str = "publickey-credentials-get=(self), \
     publickey-credentials-create=(self), clipboard-write=(self), accelerometer=(), \
     ambient-light-sensor=(), attribution-reporting=(), autoplay=(), bluetooth=(), \
-    browsing-topics=(), camera=(), compute-pressure=(), display-capture=(), \
-    encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), \
-    hid=(), identity-credentials-get=(), idle-detection=(), local-fonts=(), \
-    magnetometer=(), microphone=(), midi=(), otp-credentials=(), payment=(), \
-    picture-in-picture=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), \
-    web-share=(), window-management=(), xr-spatial-tracking=()";
+    browsing-topics=(), camera=(), captured-surface-control=(), clipboard-read=(), \
+    compute-pressure=(), digital-credentials-get=(), direct-sockets=(), \
+    display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), \
+    gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), \
+    join-ad-interest-group=(), keyboard-map=(), local-fonts=(), magnetometer=(), \
+    microphone=(), midi=(), otp-credentials=(), payment=(), picture-in-picture=(), \
+    private-state-token-issuance=(), private-state-token-redemption=(), \
+    run-ad-auction=(), screen-wake-lock=(), serial=(), smart-card=(), \
+    speaker-selection=(), storage-access=(), usb=(), web-share=(), \
+    window-management=(), xr-spatial-tracking=()";
