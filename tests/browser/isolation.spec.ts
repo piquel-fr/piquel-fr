@@ -2,7 +2,9 @@
  * What auth's pages may ask of the browser, as Chromium enforces their
  * Permissions-Policy: passkeys and writing to the clipboard, beside the defaults
  * that reach nothing, so a feature a browser adds, or one the policy misses,
- * fails here rather than slipping through.
+ * fails here rather than slipping through. It checks the build the suite runs,
+ * which in CI is Chromium's headless shell: a feature only the full browser has,
+ * such as `tools`, is in the policy without this test seeing it.
  */
 import { expect, test } from '@playwright/test';
 

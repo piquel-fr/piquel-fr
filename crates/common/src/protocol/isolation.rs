@@ -43,7 +43,7 @@ pub const PERMISSIONS_POLICY: &str = "publickey-credentials-get=(self), publicke
     on-device-speech-recognition=(), otp-credentials=(), payment=(), \
     picture-in-picture=(), private-state-token-issuance=(), \
     private-state-token-redemption=(), screen-wake-lock=(), serial=(), \
-    smart-card=(), speaker-selection=(), storage-access=(), summarizer=(), \
+    smart-card=(), speaker-selection=(), storage-access=(), summarizer=(), tools=(), \
     translator=(), usb=(), web-share=(), window-management=(), \
     xr-spatial-tracking=()";
 
