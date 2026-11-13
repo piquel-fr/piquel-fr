@@ -110,8 +110,8 @@ history exists this can't be fixed, so it is settled before then.
 - For solo local use, the ID is random, generated beside the node key. It is
   not `$USER`.
 - **Signing in sets the identity.** `origin login` sets who authors revisions
-  for that remote. Cloning from SourceOrigin needs a sign-in, so the identity
-  is right before the first revision is written.
+  for that remote. A public repository can be cloned without an account, so
+  work may start before anyone signs in.
 - **History made before signing in** is authored by the local ID, and a
   revision's author must be the caller, so it can't be pushed as it is. It is
   re-authored once, before the first push, which is only allowed while nothing
@@ -142,11 +142,11 @@ asks it.
 - Offline, the CLI shows the ID, or a name it last displayed. That cache is
   only cosmetic.
 
-**Open:** who may ask. A lookup by the ID stored in every record links all of
-a person's history to them, which is more than a public handle reveals. The
-proposal is that only signed-in callers may ask. The deletion promise is also
-narrower than first written: the provider stops resolving the account, and
-anyone who looked it up before may have kept the answer.
+**Decided:** the lookup returns what a person's public profile shows, so it
+can be public. Profiles will be public pages, sourceorigin#101. An account
+with no public profile doesn't resolve, and its ID is shown. The deletion
+promise is narrower than first written: the provider stops resolving the
+account, and anyone who looked it up before may have kept the answer.
 
 An earlier idea was **dropped**: the server keeping its own table of ID to
 last-seen name, refreshed from token claims. piquel wanted something better
@@ -225,48 +225,59 @@ machine. The HTTP API has no way to create one, and the platform needs to.
   know about each.
 
 This settles how SourceOrigin manages repositories. The platform's own API
-creates a repository by adding it to its database, and it serves the registry
-from there. Origin needs no notion of who may create a repository, and what
-exists is recorded in one place.
+creates a repository: it adds it to its database, serves the registry from
+there, and tells the node to create it. What exists is recorded in one place.
 
-1. **The server asks about one repository and caches the answer** for a short
-   time. Asking on every request would add a network call to each one.
-2. **It looks up by the name in the URL and stores by a stable ID.** The entry
+1. **The server asks about one repository and caches the answer** for about
+   30 seconds. Asking on every request would add a network call to each one.
+2. **Two limits on staleness.** The cache's lifetime decides how fast a
+   suspension applies. A second, longer limit decides how long the server
+   keeps serving a repository when the registry can't be reached. After it,
+   the server stops taking writes. Without it, a suspended repository would
+   stay writable for as long as the registry is down.
+3. **It looks up by the name in the URL and stores by a stable ID.** The entry
    returns the repository's ID, which names it on disk. Renaming a repository
    then changes the registry only.
-3. **No secret keys in the registry.** See [authority keys](#authority-keys).
-4. **No path for now.** The server derives where a repository is from its ID,
+4. **A name is one or more segments separated by `/`,** each of letters,
+   digits, `.`, `_` and `-`, so SourceOrigin can use `<owner>/<repository>`.
+   Arbitrary text was considered and dropped: it brings look-alike characters,
+   case folding and URL encoding, which Origin Auth's handles already had to
+   solve.
+5. **No secret keys in the registry.** See [authority keys](#authority-keys).
+6. **No path for now.** The server derives where a repository is from its ID,
    so a registry can't point a name at an arbitrary directory. When other
    kinds of storage arrive, an entry gains a storage location in its place.
-5. **An entry carries the first admin and a state.** A state such as read-only
-   lets the platform suspend a repository without touching the node.
-6. **The server creates a listed repository the first time a request names
-   it.** That must be atomic: two first requests at once make it once, and a
-   crash halfway leaves nothing behind. The first admin is read only then, so
-   a registry that later changes it can't hand the repository to someone
-   else.
-7. **`file://` first.** Milestone 1 has no platform service to answer over
+7. **An entry carries a state.** A state such as read-only lets the platform
+   suspend a repository without touching the node.
+8. **`file://` first.** Milestone 1 has no platform service to answer over
    HTTP, and reading a file is the same code as reading a static list. The
    HTTP registry arrives with the platform's API.
-
-**Proposed,** not answered yet:
-
-- **Two limits on staleness.** The cache's lifetime, about 30 seconds, decides
-  how fast a suspension applies. A second, longer limit decides how long the
-  server keeps serving a repository when the registry can't be reached. After
-  it, the server stops taking writes. Without the second limit, a suspended
-  repository stays writable for as long as the registry is down.
-- **No Valkey.** piquel suggested keeping the registry in Valkey so changes
-  apply at once. A 30-second cache is nearly that, and Valkey would be a new
-  service that stock Origin has to speak to.
-- **A name is one or more segments separated by `/`,** each of letters,
-  digits, `.`, `_` and `-`, so SourceOrigin can use `<owner>/<repository>`.
-  piquel asked about arbitrary text. That brings Unicode look-alikes, case
-  folding and URL encoding, which Origin Auth's handles already had to solve.
-  The name no longer touches the file system, so only the API's paths change,
-  and that is cheap before anything is hosted.
+9. **No Valkey.** piquel suggested keeping the registry in Valkey so changes
+   apply at once. A 30-second cache is nearly that, and Valkey would be a new
+   service that stock Origin has to speak to.
 
 Tracked in origin#53.
+
+### Creating a repository
+
+**Decided.** Nothing is created implicitly. Someone calls SourceOrigin's
+"create" endpoint, and the platform then calls an explicit create on the
+node, with the repository's ID and its first admin. A request that names a
+repository the node hasn't created is refused, even if the registry lists it.
+
+An earlier proposal was **dropped**: the node creating a listed repository the
+first time a request names it.
+
+The create call is on a private listener of the node. See
+[between services](#between-services). Tracked in origin#84.
+
+### Between services
+
+**Decided.** Not everything goes over the public internet. Calls between the
+node and SourceOrigin's own services use private listeners, linked through
+piqueld, as the telemetry collector is linked today. That covers the
+registry, creating a repository, the display-name directory and the webhooks
+Origin sends.
 
 ## The git mirror
 
@@ -444,19 +455,31 @@ few possibilities, such as `DEBUG=1`, a short token or a file copied from an
 open project. A reader can also see when a hidden file changes, and whether
 two are equal. A nonce in a folder defeats all three.
 
+The descriptions, reviews and check output of hidden code stay readable to
+everyone who can see a change. Hiding them is a choice made for each change:
+see [private changes](#private-changes).
+
 **Proposed,** not answered yet:
 
-- **A revision is visible only to callers who can read every path it
-  changes,** with its description and the statements about it. Today a
-  revision is visible when it changes any path the caller reads, so the
-  descriptions, reviews and check output of closed code stay readable. What a
-  hidden revision landed is still visible through the target's snapshots.
-  This is simpler than giving each statement its own audience.
 - Gaining read access later is a sharp edge. A local folder then sits where
   the real one wants to go. Origin must refuse and ask. It must not overwrite
   the local files, and it must not record them as edits.
 
 Tracked in origin#71.
+
+## Private changes
+
+**Decided.** A change can be made private, by choice. Its revisions,
+description and statements are then visible only to the people it names, such
+as its author and a group of maintainers. piquel wanted this already: it lets
+a sensitive fix be written, reviewed and checked before the problem is public.
+
+It is never automatic. A rule that hid every revision touching a hidden path
+was proposed and **dropped**: a change in which someone touched a hidden file
+by accident would vanish for everyone else.
+
+To design: where the choice is recorded, who may be named, and what becomes
+visible when the change lands. Tracked in origin#87.
 
 ## Ignore files
 

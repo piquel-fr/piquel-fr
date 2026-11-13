@@ -41,19 +41,20 @@ security were missing.
 | CI on piquel's machine runs code nobody has read | Decided: no automatic CI at first, repositories start private, and a later worker runs in a sandbox | [origin](origin.md#ci) |
 | No storage or request limits until milestone 5 | Deferred: it matters little while there are few users. origin#83 | [roadmap](roadmap.md#origins-milestones) |
 | A nonce doesn't protect a single hidden file | Decided: only folders can be hidden | [origin](origin.md#hidden-paths) |
-| Descriptions, reviews and check output of hidden code stay readable | Proposed: a revision is visible only to those who can read every path it changes | [origin](origin.md#hidden-paths) |
+| Descriptions, reviews and check output of hidden code stay readable | Decided: private changes, by choice. Hiding them automatically was dropped | [origin](origin.md#private-changes) |
 | Git can't represent hidden paths, and the mirror would publish `policy` | Decided: hidden paths wait until the mirror is gone, and `policy` is never mirrored | [origin](origin.md#the-git-mirror) |
 | Mirrored commits must be reproducible, must not carry names, and the mirror must reconcile | Decided | [origin](origin.md#the-git-mirror) |
-| The display-name lookup links all of a person's history | Open: who may ask. Proposed: signed-in callers only | [origin](origin.md#display-names) |
+| The display-name lookup links all of a person's history | Decided: it returns what a public profile shows | [origin](origin.md#display-names) |
 | The registry's `path` is redundant | Decided: no path for now, a storage location later | [origin](origin.md#finding-repositories) |
-| Serving stale registry answers contradicts suspension | Proposed: a short cache and a limit on staleness, without Valkey | [origin](origin.md#finding-repositories) |
-| A repository name is one segment, with no room for an owner | Proposed: segments separated by `/` | [origin](origin.md#finding-repositories) |
+| Serving stale registry answers contradicts suspension | Decided: a short cache and a limit on staleness, without Valkey | [origin](origin.md#finding-repositories) |
+| A repository name is one segment, with no room for an owner | Decided: segments separated by `/` | [origin](origin.md#finding-repositories) |
+| Creating a repository the first time it is used must be atomic | Dropped: nothing is created implicitly. The platform calls an explicit create | [origin](origin.md#creating-a-repository) |
 | Bootstrapping is circular: piqueld would build from a node it hosts | Decided: the git mirror on GitHub is the fallback | [origin](origin.md#the-git-mirror) |
-| Backups of a live store aren't consistent, and a restore forks every chain | Proposed: stop the node to copy it, and a restored node takes back what it signed | [platform](platform.md#hosting-and-backups) |
+| Backups of a live store aren't consistent, and a restore forks every chain | Decided: stop the node to copy it, and a restored node takes back what it signed | [platform](platform.md#hosting-and-backups) |
 | Reviewed marks don't work as statements | Decided: they live in PostgreSQL | [platform](platform.md#marking-files-as-reviewed) |
 | The event cursor planned for replicas can lose events | Open, and deferred with replicas | [origin](origin.md#events-and-cursors) |
 | `cargo metadata` can't list every input of a check | Decided: generated Rust inputs, and the rest by hand | [repository](repository.md#ci-by-area) |
-| Porting all of Origin Auth off Topcoat isn't earned | Open | [below](#the-auth-port-and-the-admin-dashboard) |
+| Porting all of Origin Auth off Topcoat isn't earned | Decided: sign-in stays in Origin Auth, and the rest moves | [below](#the-auth-port-and-the-admin-dashboard) |
 | Server rendering was undecided, though it changes the experiment | Decided: the product renders on a server | [frontend](frontend.md#moving-over) |
 | Nothing serves diffs | Decided: Origin gains a diff endpoint | [origin](origin.md#diffs) |
 | `production` as a target duplicates piqueld | Dropped | [origin](origin.md#deploys) |
@@ -74,18 +75,17 @@ security were missing.
 | Which token system do agents use? | Origin Auth's. On SourceOrigin, all of Origin's sign-in goes through Origin Auth |
 | Do staging and previews get their own node and key? | Yes. Every environment starts from scratch |
 | How does piqueld learn of a landing? | Through a webhook |
-| What happens to a repository when its only admin deletes their account? | Proposed below |
+| What happens to a repository when its only admin deletes their account? | It is deleted with the account, after the waiting period, unless handed over first |
 
 ## The auth port and the admin dashboard
 
-**Open.** Two questions turned out to be one.
+Two questions turned out to be one.
 
 The first is whether to port Origin Auth's pages off Topcoat. All three
 reviewers said that porting every page isn't earned: it rewrites working,
 security-sensitive pages over a new JSON API. piquel's answer is that agents
 make porting, reviewing and hardening cheap, the service is young and still
-small, and consistency in development is worth a lot. If the port is big and
-risky even with agents, wait; otherwise do it.
+small, and consistency in development is worth a lot.
 
 The second is where SourceOrigin's admin dashboard goes. piquel wants the two
 admin surfaces close: clicking a user in the auth admin should lead to their
@@ -99,7 +99,7 @@ repositories, and back. piquel's options:
    sign-in pages. The account settings and the admin dashboard move to the
    product's frontend and call those APIs.
 
-**Proposed:** the third option, with one change.
+**Decided:** the third option.
 
 - Sign-in, consent and recovery stay in Origin Auth, rendered on its server as
   today. They are the pages where a mistake costs an account, and they are
@@ -108,37 +108,28 @@ repositories, and back. piquel's options:
   the product's frontend. That is most of the pages, and where one component
   library pays off. The admin dashboard is then one app for both services, so
   a user and their repositories are a link apart.
-- The change: the account settings get their own hostname, not a path on
-  `sourceorigin.dev`. The product's pages render content that users wrote,
-  such as READMEs and diffs. A script injected there could otherwise reach
-  the account settings, since both would share one origin.
-- Sensitive account changes, such as adding a passkey or deleting the
-  account, ask for a passkey again at Origin Auth, which already has step-up
-  sign-in.
 - This is not one page that loads everything. The frontend renders each page
   on its server.
+- It is done after the product's frontend exists, so the component library is
+  there first.
 
 Its cost: Origin Auth needs a JSON API for every account and admin operation,
 with its own protection against forged requests, and the browser tests and
-the documentation's screenshots are rewritten. It is done after the product's
-frontend exists, so the component library is there first.
+the documentation's screenshots are rewritten. With agents that is moderate.
+
+**Open:** whether the account settings get their own hostname, not a path on
+`sourceorigin.dev`. A browser lets any script on a page act as the signed-in
+person on every page of the same hostname. The product's pages show content
+that other people wrote, such as READMEs and diffs. If a bug ever let such
+content run a script, that script could open the settings and add its own
+passkey. On another hostname the browser stops it. The cheaper alternative
+keeps `/settings` and asks for a passkey again, at Origin Auth, before every
+sensitive change.
 
 ## Still to answer
 
-- The auth port and the admin dashboard, above.
-- The registry's two staleness limits, and what a repository name may be. See
-  [finding repositories](origin.md#finding-repositories).
-- The backup proposals. See
-  [hosting and backups](platform.md#hosting-and-backups).
-- Who may see a revision that touches a hidden folder. See
-  [hidden paths](origin.md#hidden-paths).
-- Who may use the display-name lookup. See
-  [display names](origin.md#display-names).
-- **Whether cloning a public repository needs a sign-in.** piquel said cloning
-  from SourceOrigin needs one, and also that a repository can be public. A
-  public repository that can't be cloned without an account is unusual, and
-  it keeps tools that fetch source from using Origin directly.
-- **What happens to a repository when its only admin deletes their account.**
-  Proposed: the deletion page lists the repositories the account owns, and
-  they are deleted with it after the same waiting period, unless the owner
-  hands them to someone else first.
+- Whether the account settings get their own hostname, above.
+- How private changes work in detail. See
+  [private changes](origin.md#private-changes).
+- What happens when a reader gains access to a hidden folder they already
+  have local files in. See [hidden paths](origin.md#hidden-paths).

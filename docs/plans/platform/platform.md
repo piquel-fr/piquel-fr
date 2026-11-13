@@ -53,6 +53,8 @@ What Origin's own authorization looks like is still open. See
 - The web UI is a client of that API. See [the frontend](frontend.md).
 - **Decided:** the product's pages render on a server, for search engines. So
   a second process serves the frontend beside the Rust API.
+- **Decided:** calls between the platform and the node use private listeners.
+  See [between services](origin.md#between-services).
 - **Decided:** the platform writes to Origin as the user. A review only counts
   if its issuer is the caller, so the platform's own credential can't issue
   one. Origin Auth's token exchange, sourceorigin#70, was moved from its v1.0
@@ -66,35 +68,30 @@ What Origin's own authorization looks like is still open. See
   [one node first](origin.md#one-node-first).
 - Backups use piqueld's backup features, which are in piqueld's v0.2
   milestone. See [the roadmap](roadmap.md#piqueld).
-- A scheduled job restores the latest backup into a scratch node and verifies
-  it. A backup that has never been restored is not known to work. piqueld's
-  restore drills, piqueld#340, were moved to its v0.2 for this.
-- Continuous backup is not piqueld's job. See
-  [continuous backup](origin.md#continuous-backup).
-
-The council found the first version of this unsafe. **Proposed,** not
-answered yet:
-
-- **Stop the node to copy it.** A copy of a live store can catch a target's
-  head before the objects it names, and a restore drill passing once says
-  nothing about the next backup. piqueld's `stop` method already avoids this:
-  it stops the node, copies the volume and starts it again. A few seconds of
-  downtime at night costs one person nothing.
-- **Later, a consistent copy without stopping.** Origin gains a command that
-  writes one, by reading the heads first and the objects after. Records are
-  immutable, so everything those heads name is then in the copy.
+- **The node is stopped to be copied.** A copy of a live store can catch a
+  target's head before the objects it names, and a restore drill passing once
+  says nothing about the next backup. piqueld's `stop` method stops the node,
+  copies the volume and starts it again. A few seconds of downtime at night
+  costs one person nothing.
 - **A restored node takes back what it signed.** A restore puts the node
   behind acceptances that clients and the mirror already hold. If it signed
   new ones at the same positions, every chain would fork. So before it takes
   writes, it accepts back the acceptances that carry its own signature.
-- **The drill does more than check chains.** It runs `origin verify`, which
-  checks that every record a record names is present, then clones, fetches
-  and lands.
+  Tracked in origin#85.
+- **A scheduled drill** restores the latest backup into a scratch node, runs
+  `origin verify`, which checks that every record a record names is present,
+  then clones, fetches and lands. A backup that has never been restored is
+  not known to work. piqueld's restore drills, piqueld#340, were moved to its
+  v0.2 for this.
 - **What may be lost.** With a nightly backup, landed code is safe in clients
   and in the mirror. Up to a day of changes in progress, reviews and check
   results that nobody fetched can be lost.
 - **The backup holds the authority key,** because piqueld's backups include
   secrets. The backup repository must be encrypted.
+- **Deferred:** a consistent copy without stopping. Origin gains a command
+  that reads the heads first and the objects after. Tracked in origin#86.
+- Continuous backup is not piqueld's job. See
+  [continuous backup](origin.md#continuous-backup).
 
 ## Notifications
 
@@ -214,6 +211,11 @@ From piquel's notes, not discussed in depth:
   Their members are stored in policy, like everyone else.
 - Every environment has its own Origin node and key: production, staging and
   each preview start from scratch.
+- A public repository can be cloned without an account. Callers who aren't
+  signed in get their own, lower rate limits. Tracked in origin#83.
+- When an account is deleted, the repositories it alone administers are
+  deleted with it, after the same waiting period, unless the owner hands them
+  to someone else first. The deletion page lists them.
 
 Projects and organizations are in milestone 5.
 

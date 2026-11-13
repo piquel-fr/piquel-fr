@@ -68,18 +68,20 @@ Every item carries one of these:
 | Formats | Records carry a time, a repository's identity is in its genesis, content can be redacted, and Origin has ignore files | Decided | [origin](origin.md#ignore-files) |
 | Origin's roadmap | Four milestones in `sourceorigin-dev/origin`, with epics as parent issues: v0.1 the prototype merged, v0.2 hostable, v0.3 daily use, v1.0 the rest | Decided | [roadmap](roadmap.md#origins-milestones) |
 | The open pull requests | Nothing in the stack has to change for hosting. piquel reviews and merges it from the bottom | Decided | [roadmap](roadmap.md#origin) |
-| Finding repositories | The server reads which repositories exist from a registry named in its configuration, one repository at a time, and caches the answer | Decided | [origin](origin.md#finding-repositories) |
-| Repositories | Private when created, public by the owner's choice, three per account unless an administrator changes it | Decided | [platform](platform.md#projects) |
+| Finding repositories | The server reads which repositories exist from a registry named in its configuration, one repository at a time, and caches the answer. Creating one is an explicit call | Decided | [origin](origin.md#finding-repositories) |
+| Repositories | Private when created, public by the owner's choice, three per account unless an administrator changes it. A public one can be cloned without an account | Decided | [platform](platform.md#projects) |
 | Colocated mode | A working copy that is an Origin workspace and a git worktree at once, so git tools can read it. Built in Origin's v0.2 | Decided | [origin](origin.md#colocated-mode) |
 | Encrypted remotes | The client has no TLS, which blocks a hosted node. Fixed in v0.2 | Decided | [origin](origin.md#operations) |
-| Backups | piqueld's backups, with a restore drill. How to copy a live store safely is proposed | Decided in part | [platform](platform.md#hosting-and-backups) |
+| Backups | piqueld's backups with the node stopped, a restore drill, and a restored node that takes back what it signed | Decided | [platform](platform.md#hosting-and-backups) |
 | Git mirror | A one-way Origin-to-git mirror, built before the web UI, for Nix, Cargo and as the fallback. It continues the existing git history | Decided | [origin](origin.md#the-git-mirror) |
 | CI | No automatic CI at first. Checks are run by hand, after review. A worker in a sandbox comes later | Decided | [origin](origin.md#ci) |
 | Deploys | piqueld builds from Origin, told by a webhook. Deploys are recorded as statements. Environments stay in piqueld | Decided | [origin](origin.md#deploys) |
 | Hidden paths | Only folders can be hidden, each with a nonce. Built once the mirror is no longer needed | Decided | [origin](origin.md#hidden-paths) |
 | Release channels | Nightly and stable map to targets for the CLI and the SDKs. The hosted service uses feature flags on one version | Deferred | [origin](origin.md#releases-and-channels) |
 | Frontend framework | Topcoat goes. An experiment picks between React with TanStack Start and SvelteKit. Leptos is out. The product renders on a server | Decided | [frontend](frontend.md) |
-| Origin Auth's pages | Which of them move to the new frontend, and where the settings and the admin dashboard live | Open | [review](review.md#the-auth-port-and-the-admin-dashboard) |
+| Origin Auth's pages | Sign-in, consent and recovery stay in Origin Auth. The settings, the developer console and the admin dashboard move to the product's frontend, as one admin app for both services | Decided | [review](review.md#the-auth-port-and-the-admin-dashboard) |
+| Between services | Calls between the node and SourceOrigin's services use private listeners, linked through piqueld | Decided | [origin](origin.md#between-services) |
+| Private changes | A change can be made private by choice, for sensitive fixes | Decided | [origin](origin.md#private-changes) |
 | Diff performance | Diffs must be as fast as Pierre's diffshub. Origin gains a diff endpoint | Decided | [frontend](frontend.md#what-pierre-provides) |
 | Reviewed marks | Which files a person has reviewed is private state in PostgreSQL, not statements | Decided | [platform](platform.md#marking-files-as-reviewed) |
 | Integrations | A worker that needs only Origin's API is an Origin plugin. One that needs accounts, tenancy or billing lives here | Decided | [platform](platform.md#integrations) |

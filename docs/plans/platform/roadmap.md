@@ -104,14 +104,14 @@ milestones. Each epic is a parent issue, and its issues are sub-issues.
 | **v0.1**, the prototype, merged | origin#42 the prototype, merged | The ten pull requests above; origin#19 and origin#39, the known defects; origin#76 ignore files; origin#77 times on records |
 | **v0.2**, hostable | origin#43 identity | origin#44 principals are stable IDs; origin#45 OpenID Connect; origin#46 `origin login`; origin#47 display name lookup; origin#48 readable `policy.toml` |
 | | origin#49 authorization | origin#50 the authorization design; origin#51 repositories start closed; origin#34 revocable and per-repository tokens |
-| | origin#52 operating a server | origin#33 TLS for remotes; origin#53 the repository registry; origin#54 health endpoints; origin#55 telemetry; origin#56 a repository format version; origin#20 pack format errors; origin#57 `origin verify`; origin#78 a repository's identity in its genesis; origin#79 rotating and recovering authority keys; origin#80 redacting a record's content |
+| | origin#52 operating a server | origin#33 TLS for remotes; origin#53 the repository registry; origin#54 health endpoints; origin#55 telemetry; origin#56 a repository format version; origin#20 pack format errors; origin#57 `origin verify`; origin#78 a repository's identity in its genesis; origin#79 rotating and recovering authority keys; origin#80 redacting a record's content; origin#84 creating a repository over a private admin API; origin#85 a restored node takes back what it signed |
 | | origin#60 agents | origin#61 agent skills for the Origin workflow. origin#21, a typed library API, is its other sub-issue and stays in v0.3 |
 | | No epic | origin#58 the one-way mirror to git; origin#59 colocated mode |
 | **v0.3**, daily use | origin#62 deploys | origin#63 a convention for deploy statements; origin#64 exporting an acceptance's snapshot for a build; origin#24 webhooks |
 | | No epic | origin#81 the diff between two records |
 | **v1.0**, the rest | origin#65 more than one server | origin#66 the storage boundary; origin#67 coordination without `flock`; origin#68 events that survive a change of server; origin#28 remotes on plain storage |
-| | origin#69 policy and paths | origin#71 hidden paths; origin#72 an authority key per repository |
-| | No epic | origin#82 importing a git repository; origin#83 storage and request budgets; everything else that was open: origin#22, origin#23, origin#25, origin#26, origin#27, origin#29, origin#30, origin#31, origin#32 and origin#35 |
+| | origin#69 policy and paths | origin#71 hidden paths; origin#72 an authority key per repository; origin#87 private changes |
+| | No epic | origin#82 importing a git repository; origin#83 storage and request budgets; origin#86 a consistent copy of a live repository; everything else that was open: origin#22, origin#23, origin#25, origin#26, origin#27, origin#29, origin#30, origin#31, origin#32 and origin#35 |
 
 Origin's v0.1 and v0.2 are what milestone 1 below needs, and its v0.3 is what
 milestones 2 and 3 need. Agent skills and colocated mode moved from v0.3 to
