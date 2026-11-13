@@ -79,7 +79,7 @@ Every item carries one of these:
 | Hidden paths | Only folders can be hidden, each with a nonce. Built once the mirror is no longer needed | Decided | [origin](origin.md#hidden-paths) |
 | Release channels | Nightly and stable map to targets for the CLI and the SDKs. The hosted service uses feature flags on one version | Deferred | [origin](origin.md#releases-and-channels) |
 | Frontend framework | Topcoat goes. An experiment picks between React with TanStack Start and SvelteKit. Leptos is out. The product renders on a server | Decided | [frontend](frontend.md) |
-| Origin Auth's pages | Sign-in, consent and recovery stay in Origin Auth. The settings, the developer console and the admin dashboard move to the product's frontend, as one admin app for both services | Decided | [review](review.md#the-auth-port-and-the-admin-dashboard) |
+| Origin Auth's pages | Sign-in, consent and recovery stay in Origin Auth. The settings, on a hostname of their own, the developer console and the admin dashboard move to the product's frontend, as one admin app for both services | Decided | [review](review.md#the-auth-port-and-the-admin-dashboard) |
 | Between services | Calls between the node and SourceOrigin's services use private listeners, linked through piqueld | Decided | [origin](origin.md#between-services) |
 | Private changes | A change can be made private by choice, for sensitive fixes | Decided | [origin](origin.md#private-changes) |
 | Diff performance | Diffs must be as fast as Pierre's diffshub. Origin gains a diff endpoint | Decided | [frontend](frontend.md#what-pierre-provides) |

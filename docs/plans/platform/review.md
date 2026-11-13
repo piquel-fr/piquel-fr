@@ -117,18 +117,18 @@ Its cost: Origin Auth needs a JSON API for every account and admin operation,
 with its own protection against forged requests, and the browser tests and
 the documentation's screenshots are rewritten. With agents that is moderate.
 
-**Open:** whether the account settings get their own hostname, not a path on
+**Decided:** the account settings get their own hostname, not a path on
 `sourceorigin.dev`. A browser lets any script on a page act as the signed-in
 person on every page of the same hostname. The product's pages show content
 that other people wrote, such as READMEs and diffs. If a bug ever let such
 content run a script, that script could open the settings and add its own
-passkey. On another hostname the browser stops it. The cheaper alternative
-keeps `/settings` and asks for a passkey again, at Origin Auth, before every
-sensitive change.
+passkey. On another hostname the browser stops it. Keeping `/settings` and
+asking for a passkey again before every sensitive change was the cheaper
+alternative; the hostname costs one route now, and changing URLs later is
+harder.
 
 ## Still to answer
 
-- Whether the account settings get their own hostname, above.
 - How private changes work in detail. See
   [private changes](origin.md#private-changes).
 - What happens when a reader gains access to a hidden folder they already

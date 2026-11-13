@@ -142,9 +142,9 @@ asks it.
 - Offline, the CLI shows the ID, or a name it last displayed. That cache is
   only cosmetic.
 
-**Decided:** the lookup returns what a person's public profile shows, so it
-can be public. Profiles will be public pages, sourceorigin#101. An account
-with no public profile doesn't resolve, and its ID is shown. The deletion
+**Decided:** the lookup returns what is public about a person, so it can be
+public. That is the handle from the start, since handles are public already,
+and what a public profile shows once profiles exist, sourceorigin#101. The deletion
 promise is narrower than first written: the provider stops resolving the
 account, and anyone who looked it up before may have kept the answer.
 

@@ -119,6 +119,49 @@ v0.2 after the council's review, because milestone 1 ships them. origin#70, a
 target that accepts landings only from another target, is closed: see
 [deploys](origin.md#deploys).
 
+## What Origin needs first
+
+**Proposed.** SourceOrigin's milestone 0 needs nothing from Origin and can
+start at once. Everything after it waits on Origin, in this order.
+
+Before any real repository exists, because these are written into records or
+into `policy.toml` and can't be changed afterwards:
+
+1. The stack merged: the ten pull requests, with origin#19 and origin#39.
+2. origin#76 ignore files.
+3. origin#77 times on records.
+4. origin#44 principals as IDs, with one issuer per repository.
+5. origin#78 a repository's identity in its genesis.
+6. origin#79 the design for rotating and recovering authority keys.
+7. origin#56 a repository format version.
+
+To host the first repository, which is milestone 1:
+
+1. origin#33 TLS in the client.
+2. origin#45 OpenID Connect and origin#46 `origin login`, with sourceorigin#68
+   on the other side.
+3. origin#51 repositories that start closed.
+4. origin#54 health endpoints, which piqueld's health check needs.
+5. origin#57 `origin verify` and origin#85 taking back acceptances after a
+   restore, with piqueld's backups.
+6. origin#58 the git mirror, then origin#59 colocated mode and origin#61 the
+   agent skills.
+
+The first node needs no registry: `origin repo create` on the node is enough
+until the platform has an API.
+
+To build the platform's service against:
+
+1. origin#53 the registry and origin#84 creating a repository.
+2. origin#47 the display-name lookup.
+3. origin#81 diffs.
+4. origin#24 webhooks, origin#63 deploy statements and origin#64 exporting a
+   snapshot.
+
+Not on the path: origin#48 readable policy files, origin#50 the authorization
+design, origin#34, origin#55 telemetry, origin#80 redaction and origin#20.
+They are in v0.2 and matter before outside users arrive.
+
 ## Milestones
 
 **Decided**, milestone by milestone. piquel agreed to each row.
