@@ -33,6 +33,7 @@ use tower::ServiceExt;
 mod caching;
 mod devices;
 mod forwarding;
+mod isolation;
 mod origins;
 mod pages;
 mod rate_limits;
@@ -114,6 +115,10 @@ impl SecurityFixture {
                     &crate::tests::WEB_ORIGIN.parse().expect("web origin"),
                 ),
             },
+            content: super::content::ContentPolicy::auth(&crate::AuthConfig::test(
+                &crate::tests::AUTH_ORIGIN.parse().expect("auth origin"),
+            ))
+            .expect("policy"),
         };
         let mut router = Router::new();
         for path in [

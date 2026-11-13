@@ -245,15 +245,31 @@ errors and preflights included:
   `no-store, no-transform`. [Caching](../operations/deploying.md#caching) lists
   the classes and what uses them.
 - **Isolation:** `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
-  `X-Frame-Options: DENY` and `Strict-Transport-Security: max-age=31536000`.
+  `X-Frame-Options: DENY`, `Strict-Transport-Security: max-age=31536000`, and
+  `Cross-Origin-Opener-Policy: same-origin`, so a page of another site that opens
+  sign-in or consent in a window keeps no handle on it. `Permissions-Policy`
+  allows passkeys and writing to the clipboard, for the copy buttons, and turns
+  off every other powerful feature (`sourceorigin_common::protocol::isolation`).
+- **`Cross-Origin-Resource-Policy`:** `cross-origin` for what other sites may
+  embed or read, the responses with the public CORS grant, such as profile
+  pictures, discovery and the keys, and `same-origin` for everything else: each
+  listener's pages load only its own files.
 - **CORS**, once the origin check allowed the request's origin: `*` for public
   documents, or the exact origin with `Vary: Origin` and the methods and headers
   its class takes, which may then read `X-Trace-Id` and `Retry-After`. A refusal
 for the in-flight limit grants any origin, since it skips the origin check.
 
-An error page carries its own `Content-Security-Policy`, which loads the
-stylesheet and its typefaces and nothing else. Pages add their own
-`Content-Security-Policy` when they render
-(`WebApplication::render_document`): the stylesheet, the passkey and picture
-scripts, auth's own images and the `blob:` of a picture being chosen, and a
-`form-action` naming auth and the origins the form may redirect to.
+Each listener also has one `Content-Security-Policy`, which goes on every
+response: pages, JSON, redirects, downloads and errors (`ContentPolicy`, in
+`src/security/content.rs`). It is built once, at startup.
+
+- **Auth's** loads the stylesheet, its typefaces and the scripts embedded under
+  `/assets/`. It fetches only auth itself, shows auth's own images and the
+  `blob:` of a picture being chosen, and lets forms post only to auth.
+- **The dashboard's** loads its own files and auth's images, and lets forms go
+  on to auth's handoff page.
+
+A page widens only its `form-action`, with the origins its forms may redirect
+to. `WebApplication::render_document` puts them on the response as
+`FormTargets`. Only `FormTarget::of` makes one, from a URL whose origin a policy
+can name, so no page can loosen another directive.

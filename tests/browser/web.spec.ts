@@ -35,7 +35,7 @@ test("sourceorigin.dev's pages lead to auth, and auth's footer back to its polic
   ).toBe('grid');
 
   // The homepage sends people to auth to sign up.
-  await page.getByRole('link', { name: 'SourceOrigin home' }).click();
+  await page.getByRole('banner').getByRole('link', { name: 'SourceOrigin', exact: true }).click();
   await page
     .getByRole('main')
     .getByRole('link', { name: 'Create an account', exact: true })

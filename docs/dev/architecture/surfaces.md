@@ -86,6 +86,11 @@ them never expire, so the redirect stays until
 sourceorigin.dev serves pages of its own at those paths, such as public profiles
 *(planned)*.
 
+Every response, redirects and errors included, carries the
+`Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy: same-origin` and
+`Permissions-Policy` that auth's do. Its Content-Security-Policy loads only the
+stylesheet and its typefaces.
+
 ## admin.sourceorigin.dev
 
 Auth serves the admin dashboard itself, on its admin listener

@@ -16,8 +16,7 @@ test('an address with no page is a page saying so, and a fetch of it JSON', asyn
   await expect(page.getByText('There is no page at this address.')).toBeVisible();
   await page.getByRole('link', { name: 'Go to Origin Auth', exact: true }).click();
   await expect(page).toHaveURL(/\/settings$/);
-  // A fetch from a page of auth's reads the same failure as JSON. The error
-  // page itself fetches nothing: its policy allows none.
+  // A fetch from a page of auth's reads the same failure as JSON.
   const fetched = await page.evaluate(async () => {
     const answer = await fetch('/no-such-page');
     return { status: answer.status, body: (await answer.json()) as unknown };

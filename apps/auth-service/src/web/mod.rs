@@ -10,10 +10,11 @@
 //! and their trailing-slash twins, which Topcoat redirects to the page, never as the
 //! fallback, so the security layer classifies them as pages by their route: it
 //! attaches the request context, spends the pages' own rate budget, and accepts a
-//! form only from auth's own pages. Every page's Content-Security-Policy loads
-//! nothing but the stylesheet, the passkey, picture, search and copy scripts and
-//! auth's own images, the profile pictures and the `blob:` of one being chosen,
-//! and lets its forms post only to auth and to where they redirect.
+//! form only from auth's own pages. The security layer's Content-Security-Policy
+//! (`security::content`) loads nothing but the stylesheet, the scripts and auth's
+//! own images, the profile pictures and the `blob:` of one being chosen, and lets
+//! a page's forms post only to auth and to where they redirect, the
+//! [`FormTargets`] the page names.
 
 /// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
 /// and taking its form, whose failures explain themselves as the page `title`.
@@ -52,7 +53,7 @@ use crate::{
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
     passkey::PasskeyApplication,
     pictures, routes,
-    security::{ApiError, BrowserCookie, RequestContext},
+    security::{ApiError, BrowserCookie, FormTarget, FormTargets, RequestContext},
 };
 pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
@@ -61,7 +62,7 @@ use sourceorigin_common::config::Origin;
 use sourceorigin_repository::Database;
 use sourceorigin_telemetry::HttpTelemetry;
 use sourceorigin_ui::{Onward, PreferenceChange, QueryError, Title};
-use std::{fmt, sync::Arc};
+use std::fmt;
 use topcoat::{
     Error, Result,
     context::Cx,
@@ -77,7 +78,7 @@ use topcoat::{
     },
     view::{Child, View, ViewExt, view},
 };
-use url::{Host, Url};
+use url::Url;
 
 /// The pages, and what every one of them needs.
 #[derive(Clone)]
@@ -102,8 +103,6 @@ pub(crate) struct WebApplication {
     issuer: Origin,
     /// SourceOrigin's policies on sourceorigin.dev, which every page's footer links.
     policies: PolicyLinks,
-    /// Every page's Content-Security-Policy but its `form-action`.
-    policy: Arc<str>,
 }
 
 /// What a page answers when it cannot show itself.
@@ -177,18 +176,6 @@ impl WebApplication {
         passkeys: PasskeyApplication,
     ) -> Self {
         let origin = &config.oidc.origin;
-        // A source with a path needs the whole URL: `'self'` names none. The passkey
-        // script's ceremonies fetch auth's own JSON routes. Profile pictures are
-        // auth's own, and the picture script shows the one being chosen from a
-        // `blob:` URL of the file, before it is uploaded.
-        let scripts = EmbeddedAssets::SCRIPTS.map(|script| origin.join(&script.path()));
-        let policy = format!(
-            "default-src 'none'; style-src {}; script-src {}; font-src 'self'; \
-             connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; \
-             base-uri 'none'",
-            origin.join(&EmbeddedAssets::STYLESHEET.path()),
-            scripts.join(" "),
-        );
         let dashboard = config.dashboard.as_ref().map(|dashboard| {
             DashboardSignIn::new(database.clone(), origin.clone(), dashboard.origin.clone())
         });
@@ -202,7 +189,6 @@ impl WebApplication {
             email: config.email.clone(),
             issuer: origin.clone(),
             policies: config.oidc.policies.clone(),
-            policy: policy.into(),
         }
     }
 
@@ -397,29 +383,11 @@ impl WebApplication {
         Ok(form)
     }
 
-    /// The Content-Security-Policy source naming `target`'s origin, or `None` when no
-    /// policy can name it. Host sources name domains whose labels are letters,
-    /// digits and hyphens, and never match an IP address (CSP3 §6.7.2.6), such as a
-    /// native application's loopback callback (RFC 8252 §7.3).
-    fn source(target: &Url) -> Option<String> {
-        let nameable = match target.host() {
-            Some(Host::Domain(domain)) => domain.split('.').all(|label| {
-                !label.is_empty()
-                    && label
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            }),
-            Some(Host::Ipv4(_) | Host::Ipv6(_)) | None => false,
-        };
-        let origin = target.origin();
-        (nameable && origin.is_tuple()).then(|| origin.ascii_serialization())
-    }
-
     /// Sends the browser on to `target` once a form is done: a `303`, or, when the
     /// page's `form-action` could not name `target`, a page linking there, since the
     /// browser would block the form's redirect.
     async fn onward(&self, cx: &Cx, title: &str, target: &Url) -> Result<Response> {
-        if Self::source(target).is_some() {
+        if FormTarget::of(target).is_some() {
             return see_other(target).into_response(cx);
         }
         self.link(cx, title, target, Onward::Application).await
@@ -453,7 +421,7 @@ impl WebApplication {
     }
 
     /// Answers with `page` in the narrow frame of a page outside the account's
-    /// shell, titled `title`, under the page policy, with the trace ID of a server
+    /// shell, titled `title`, with the trace ID of a server
     /// error. Its forms may post to auth's own pages, and redirect on to the
     /// origins of `targets`.
     fn render<'a>(
@@ -493,7 +461,7 @@ impl WebApplication {
     }
 
     /// Answers with the whole `page`, its shell included, inside the document
-    /// titled `title`, under the page policy, with the browser's theme and sidebar
+    /// titled `title`, with the browser's theme and sidebar
     /// preferences, coloured as the admin dashboard when `admin`. Its forms may
     /// post to auth's own pages, and redirect on to the origins of `targets`:
     /// browsers apply `form-action` to a form's redirects too.
@@ -524,27 +492,19 @@ impl WebApplication {
         .single()
         .await?
         .render(cx);
-        let mut form_action = "'self'".to_owned();
-        for source in targets.iter().filter_map(Self::source) {
-            form_action.push(' ');
-            form_action.push_str(&source);
-        }
-        let policy = format!("{}; form-action {form_action}", self.policy);
-        (
+        // The security layer's policy lets the page's forms redirect on to them.
+        let targets = FormTargets(targets.iter().filter_map(FormTarget::of).collect());
+        let mut response = (
             status,
-            [
-                (
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static("text/html; charset=utf-8"),
-                ),
-                (
-                    header::CONTENT_SECURITY_POLICY,
-                    HeaderValue::try_from(policy)?,
-                ),
-            ],
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            )],
             html,
         )
-            .into_response(cx)
+            .into_response(cx)?;
+        response.extensions_mut().insert(targets);
+        Ok(response)
     }
 
     /// Answers with why the page titled `title` cannot go on: what `error`'s code

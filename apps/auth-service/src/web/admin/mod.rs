@@ -6,11 +6,11 @@
 //!
 //! The pages declare their own paths, under [`routes::dashboard::PREFIXES`], and
 //! the admin listener mounts them there, never as the fallback, so the listener's
-//! security layer gives each its request context and rate budget. Every answer
-//! carries the dashboard's Content-Security-Policy: its own script and
-//! stylesheet alone, with auth's profile pictures, fetching from the dashboard
-//! only, and forms posting only to the dashboard, whose answer may go on to
-//! auth's handoff page.
+//! security layer gives each its request context and rate budget, and gives every
+//! answer the dashboard's Content-Security-Policy (`security::content`): its own
+//! scripts and stylesheet alone, with auth's profile pictures, fetching from the
+//! dashboard only, and forms posting only to the dashboard, whose answer may go
+//! on to auth's handoff page.
 //!
 //! A browser without a dashboard session, or whose session timed out, goes
 //! through auth's handoff page, which asks for a passkey, and back. A page that
@@ -73,7 +73,6 @@ use crate::{
     routes,
     security::{ApiError, BrowserCookie, RequestContext},
 };
-use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
 use serde::Deserialize;
 use sourceorigin_common::{ClientId, ErrorChain, UserId, config::Origin};
@@ -255,8 +254,6 @@ pub(crate) struct AdminApplication {
     kek: Arc<KeyEncryptionKeys>,
     /// The signing keys, which the signing keys page rotates, revokes and rewraps.
     keys: KeyStore,
-    /// Every answer's Content-Security-Policy.
-    policy: HeaderValue,
     /// SourceOrigin's policies on sourceorigin.dev, which every page's footer links.
     policies: PolicyLinks,
     /// What the overview last found, and when, shared by every page.
@@ -339,24 +336,9 @@ impl AdminApplication {
         config: &AuthConfig,
         dashboard: &DashboardConfig,
         passkeys: PasskeyApplication,
-    ) -> Result<Self, InvalidHeaderValue> {
+    ) -> Self {
         let auth = config.passkey.origin.clone();
-        // A form's answer may send the browser on to auth's handoff page, to sign
-        // in or confirm again: browsers apply `form-action` to its redirects too.
-        // The scripts fetch only the dashboard's own passkey ceremonies and search.
-        // Profile pictures are served by auth.
-        let scripts =
-            EmbeddedAssets::DASHBOARD_SCRIPTS.map(|script| dashboard.origin.join(&script.path()));
-        let policy = format!(
-            "default-src 'none'; script-src {}; style-src {}; font-src 'self'; img-src {}; \
-             connect-src 'self'; form-action 'self' {}; frame-ancestors 'none'; \
-             base-uri 'none'",
-            scripts.join(" "),
-            dashboard.origin.join(&EmbeddedAssets::STYLESHEET.path()),
-            auth.serialized(),
-            auth.join(routes::page::ADMIN),
-        );
-        Ok(Self {
+        Self {
             service: AdminService::new(database.clone(), config.email.smtp.is_some()),
             account: AccountService::new(database.clone()),
             keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_keys)),
@@ -369,10 +351,9 @@ impl AdminApplication {
             invitation_links: config.email.invitation_links.clone(),
             audit_key: config.audit.verifier().clone(),
             kek: Arc::clone(&config.key_encryption_keys),
-            policy: HeaderValue::try_from(policy)?,
             policies: config.oidc.policies.clone(),
             attention: Arc::default(),
-        })
+        }
     }
 
     /// The dashboard's routes: its pages, mounted on each of their prefixes and
@@ -846,9 +827,8 @@ impl<I> std::ops::Deref for Refused<I> {
 }
 
 /// Answers a page that failed with a [`HandOff`] with its redirect, and one the service
-/// refused with what the refusal means, and gives every answer the dashboard's
-/// Content-Security-Policy. A `GET`'s answer deletes what a change sealed for its
-/// page to show, which shows once.
+/// refused with what the refusal means. A `GET`'s answer deletes what a change
+/// sealed for its page to show, which shows once.
 #[layer("/")]
 async fn answers(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
     let mut response = match next.run(cx, body).await {
@@ -858,10 +838,6 @@ async fn answers(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
     if method(cx) == Method::GET && BrowserCookie::DashboardReveal.value(headers(cx)).is_some() {
         BrowserCookie::DashboardReveal.clear_on(&mut response)?;
     }
-    response.headers_mut().insert(
-        header::CONTENT_SECURITY_POLICY,
-        AdminApplication::of(cx).policy.clone(),
-    );
     Ok(response)
 }
 
@@ -1038,8 +1014,9 @@ impl AdminApplication {
         }
     }
 
-    /// What the request's change page acts on, as [`Self::parent`] finds it: the
-    /// account or client, which its page names beside its button.
+    /// What the request's page acts on, as [`Self::parent`] finds it: the account
+    /// or client, which a change's page names beside its button, and an account's
+    /// settings page in its heading.
     async fn target(cx: &Cx) -> Option<Target<'_>> {
         Self::parent(cx).await.as_ref().map(Parent::target)
     }

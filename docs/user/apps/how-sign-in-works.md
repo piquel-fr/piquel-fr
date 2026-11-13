@@ -37,6 +37,11 @@ or HTTP on a loopback IP for a native app.
 An app can also register post-logout URIs: pages auth may send the user back to
 after they sign out.
 
+Send the user to auth in the window they are using, as the SDKs do. Auth's pages
+never show inside a frame, and a page that opens them in a popup loses its handle
+on the popup, so OIDC libraries' popup sign-in, such as `signinPopup`, doesn't
+work.
+
 ## Scopes
 
 Scopes say what your app asks to receive about the user:

@@ -1,13 +1,14 @@
 //! Shared HTTP trust boundaries: origin, proxy, timeout, request-limit and
 //! in-flight-limit policy, and the cache, isolation and CORS headers of every response.
 
+use super::content::ContentPolicy;
 use super::endpoint::Endpoint;
 use super::page::ErrorPages;
 use super::{ApiError, BrowserCookie, CSRF_HEADER, RequestContext};
 use axum::{
     extract::{ConnectInfo, MatchedPath, Request, State},
     http::{
-        HeaderMap, HeaderValue, Method, StatusCode,
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
         header::{self, InvalidHeaderValue},
         uri::Authority,
     },
@@ -15,7 +16,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ipnet::IpNet;
-use sourceorigin_common::{config::Origin, protocol::same_origin::BrowserRequest};
+use sourceorigin_common::{
+    config::Origin,
+    protocol::{isolation, same_origin::BrowserRequest},
+};
 use sourceorigin_crypto::Digest;
 use sourceorigin_repository::{Database, DatabaseError};
 use sourceorigin_telemetry::{Counter, HttpTelemetry, Label};
@@ -251,6 +255,8 @@ pub(crate) struct HttpSecurity {
     pub(super) listener: Listener,
     /// The pages a navigation's failure shows.
     pub(super) pages: ErrorPages,
+    /// The Content-Security-Policy of every response.
+    pub(super) content: ContentPolicy,
 }
 
 /// The listener an [`HttpSecurity`] guards.
@@ -268,23 +274,30 @@ pub(super) enum Listener {
 
 impl HttpSecurity {
     /// Derives the public listener's policy from validated startup configuration.
-    pub(crate) fn new(config: &crate::AuthConfig, database: Database) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Fails when auth's origin cannot be sent in its Content-Security-Policy.
+    pub(crate) fn new(
+        config: &crate::AuthConfig,
+        database: Database,
+    ) -> Result<Self, InvalidHeaderValue> {
+        let origin = config.passkey.origin.as_url().origin();
+        let content = ContentPolicy::auth(config)?;
+        Ok(Self::listening(
+            config,
             database,
-            trusted_proxies: Arc::new(config.trusted_proxies.clone()),
-            request_timeout: REQUEST_TIMEOUT,
-            requests_per_minute: config.requests_per_minute,
-            in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
-            origin: config.passkey.origin.as_url().origin(),
-            listener: Listener::Public,
-            pages: ErrorPages {
-                policies: config.oidc.policies.clone(),
-            },
-        }
+            Listener::Public,
+            origin,
+            content,
+        ))
     }
 
     /// Derives the admin listener's policy, for the dashboard at `dashboard`, from
     /// validated startup configuration.
+    ///
+    /// # Errors
+    /// Fails when the dashboard's host, or an origin of its Content-Security-Policy,
+    /// cannot be sent in a header.
     pub(crate) fn admin(
         config: &crate::AuthConfig,
         database: Database,
@@ -295,11 +308,34 @@ impl HttpSecurity {
             Some(port) => format!("{}:{port}", dashboard.host()),
             None => dashboard.host().to_owned(),
         };
-        Ok(Self {
-            listener: Listener::Admin(HeaderValue::from_str(&host)?),
-            origin: dashboard.as_url().origin(),
-            ..Self::new(config, database)
-        })
+        let listener = Listener::Admin(HeaderValue::from_str(&host)?);
+        let content = ContentPolicy::dashboard(config, dashboard)?;
+        let origin = dashboard.as_url().origin();
+        Ok(Self::listening(config, database, listener, origin, content))
+    }
+
+    /// The policy of `listener`, serving `origin`'s pages under `content`, with
+    /// the budgets and proxies `config` sets.
+    fn listening(
+        config: &crate::AuthConfig,
+        database: Database,
+        listener: Listener,
+        origin: url::Origin,
+        content: ContentPolicy,
+    ) -> Self {
+        Self {
+            database,
+            trusted_proxies: Arc::new(config.trusted_proxies.clone()),
+            request_timeout: REQUEST_TIMEOUT,
+            requests_per_minute: config.requests_per_minute,
+            in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
+            origin,
+            listener,
+            pages: ErrorPages {
+                policies: config.oidc.policies.clone(),
+            },
+            content,
+        }
     }
 
     /// Refuses a request to the admin listener that names another host, by its
@@ -462,6 +498,7 @@ impl HttpSecurity {
             _ => origin.filter(|_| allowed).map(CorsGrant::Client),
         };
         Self::decorate(&mut response, grant);
+        policy.content.set_on(&mut response);
         response
     }
 
@@ -551,7 +588,9 @@ impl HttpSecurity {
 
     /// Adds the enforced [`CacheClass`] and browser isolation headers, plus the CORS
     /// `grant` when set. A cacheable response is the same for every origin, so public
-    /// data is granted to all origins and other cached responses to none.
+    /// data is granted to all origins and other cached responses to none. Other
+    /// sites' pages may embed or read only public responses, such as profile
+    /// pictures (`Cross-Origin-Resource-Policy`).
     pub(super) fn decorate(response: &mut Response, grant: Option<CorsGrant>) {
         let class = CacheClass::enforced(response);
         let grant = match class {
@@ -560,9 +599,16 @@ impl HttpSecurity {
             // Pictures are public; the build assets need no grant.
             CacheClass::Immutable => grant.filter(|grant| matches!(grant, CorsGrant::Public)),
         };
+        let public = matches!(grant, Some(CorsGrant::Public));
         let headers = response.headers_mut();
         // Replaces any handler value: only the class decides.
         headers.insert(header::CACHE_CONTROL, class.cache_control());
+        for (name, value) in isolation::headers(public) {
+            headers.insert(
+                HeaderName::from_static(name),
+                HeaderValue::from_static(value),
+            );
+        }
         for (name, value) in [
             // No MIME sniffing.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),

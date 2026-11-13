@@ -244,9 +244,7 @@ async fn a_server_error_shows_its_trace_id() {
     let passkeys = config
         .dashboard_passkeys(database.clone(), &keys)
         .expect("passkeys");
-    let pages = AdminApplication::new(database, &config, &dashboard, passkeys)
-        .expect("dashboard")
-        .routes();
+    let pages = AdminApplication::new(database, &config, &dashboard, passkeys).routes();
     let pages = HttpTelemetry::default().wrap(pages);
     let response = Browser::signed_out()
         .visit(&pages, &format!("{DASHBOARD}/users"))
@@ -310,8 +308,8 @@ async fn signing_in_asks_auth_for_a_passkey_once() {
     let page = harness.visit(&signed_in, "/users").await;
     assert_eq!(page.status(), StatusCode::OK);
     let csp = policy(&page).to_owned();
-    let handoff = format!("form-action 'self' {AUTH_ORIGIN}{};", routes::page::ADMIN);
-    assert!(csp.contains(&handoff), "{csp}");
+    let handoff = format!("; form-action 'self' {AUTH_ORIGIN}{}", routes::page::ADMIN);
+    assert!(csp.ends_with(&handoff), "{csp}");
     let (script, search, copy, client_form) = (
         EmbeddedAssets::DASHBOARD_SCRIPT.path(),
         EmbeddedAssets::SEARCH_SCRIPT.path(),

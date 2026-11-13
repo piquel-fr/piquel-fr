@@ -131,9 +131,10 @@ pub enum StartupError {
     /// The HTTP client that sends deliveries could not initialize.
     #[error("could not initialize the outbound HTTP client")]
     Outbound(#[source] reqwest::Error),
-    /// The admin dashboard's origin or policy cannot be sent in a header.
-    #[error("could not initialize the admin dashboard")]
-    Dashboard(#[from] axum::http::header::InvalidHeaderValue),
+    /// A listener's host or Content-Security-Policy, from the configured origins,
+    /// cannot be sent in a header.
+    #[error("could not build a listener's security headers")]
+    Headers(#[from] axum::http::header::InvalidHeaderValue),
 }
 
 impl AuthConfig {
@@ -166,7 +167,7 @@ impl AuthConfig {
             .merge(PictureApplication::new(database.clone()).routes())
             .merge(web.routes())
             .merge(oidc.routes());
-        let policy = security::HttpSecurity::new(self, database);
+        let policy = security::HttpSecurity::new(self, database)?;
         let protected = application
             .fallback(get(
                 |uri: Uri| async move { EmbeddedAssets::serve(uri.path()) },
@@ -219,7 +220,7 @@ impl AuthConfig {
     /// `keys`.
     ///
     /// # Errors
-    /// Fails when the dashboard's origin or policy cannot be sent in a header, or
+    /// Fails when the dashboard's host or policy cannot be sent in a header, or
     /// its passkey ceremonies cannot initialize.
     pub fn admin_router(
         &self,
@@ -229,7 +230,7 @@ impl AuthConfig {
     ) -> Result<Router, StartupError> {
         let policy = security::HttpSecurity::admin(self, database.clone(), &dashboard.origin)?;
         let passkeys = self.dashboard_passkeys(database.clone(), keys)?;
-        let pages = AdminApplication::new(database, self, dashboard, passkeys)?
+        let pages = AdminApplication::new(database, self, dashboard, passkeys)
             .routes()
             .layer(DefaultBodyLimit::max(MAX_DASHBOARD_BODY_BYTES))
             .layer(middleware::from_fn_with_state(

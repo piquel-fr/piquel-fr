@@ -31,11 +31,6 @@ pub(super) struct ErrorPages {
 }
 
 impl ErrorPages {
-    /// The policy of an error page: the stylesheet and its typefaces, nothing
-    /// else, and no form, frame or script.
-    const POLICY: &'static str = "default-src 'none'; style-src 'self'; font-src 'self'; \
-         img-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
-
     /// Whether the `method` request to `endpoint` with `headers` is a browser's
     /// navigation, which shows a page, rather than a `fetch` or another client,
     /// which reads JSON: by its fetch metadata, or, from a browser that sends none,
@@ -133,10 +128,6 @@ impl ErrorPages {
         headers.insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/html; charset=utf-8"),
-        );
-        headers.insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(Self::POLICY),
         );
     }
 

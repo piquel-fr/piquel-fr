@@ -85,7 +85,7 @@ fn navigations_are_told_from_fetches() {
 }
 
 /// A refusal's page says what its JSON says, at its status and with its
-/// headers, under a policy of its own, and leads back to auth.
+/// headers, and leads back to auth.
 #[tokio::test]
 async fn a_refusal_navigated_to_is_a_page_saying_why() {
     let refusal = ApiError::too_many_requests(
@@ -99,10 +99,6 @@ async fn a_refusal_navigated_to_is_a_page_saying_why() {
         response.headers()[header::CONTENT_TYPE],
         "text/html; charset=utf-8"
     );
-    let policy = response.headers()[header::CONTENT_SECURITY_POLICY]
-        .to_str()
-        .expect("policy");
-    assert!(policy.starts_with("default-src 'none';"), "{policy}");
     assert!(page.contains("<h1>Too many requests</h1>"), "{page}");
     assert!(
         page.contains("Too many requests. Please wait a minute."),

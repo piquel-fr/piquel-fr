@@ -5,6 +5,9 @@ binary and PostgreSQL, over HTTPS, with Chromium's virtual passkey authenticator
 Nothing is mocked. Each spec says at its top what it covers.
 `no-javascript.spec.ts` runs in a project of its own, `no-javascript`, with
 JavaScript disabled: run it alone with `just web test-browser no-javascript`.
+`accessibility.spec.ts` runs [axe](https://github.com/dequelabs/axe-core) on
+the pages in both themes; its dashboard test needs `E2E_ADMIN_URL` and
+`E2E_GRANT_ADMIN`, as `admin.spec.ts` does.
 
 Run it against a deployment you can throw away: the tests create accounts,
 passkeys and sessions in it. CI runs it on every pull request that can affect

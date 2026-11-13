@@ -115,8 +115,9 @@ pub async fn auth_shell<'a>(
     Ok(view! {
         <div class="auth">
             <header>
-                <a class="brand" href=(home) aria-label="Origin Auth home">
-                    <span class="mark">"o"</span>
+                // Named by what it shows, as voice control users read it.
+                <a class="brand" href=(home)>
+                    <span class="mark" aria-hidden="true">"o"</span>
                     "Origin Auth"
                     if admin {
                         <span class="area">"Admin"</span>
@@ -150,8 +151,8 @@ pub async fn site_shell<'a>(
     Ok(view! {
         <div class="auth site">
             <header>
-                <a class="brand" href=(home) aria-label="SourceOrigin home">
-                    <span class="mark">"s"</span>
+                <a class="brand" href=(home)>
+                    <span class="mark" aria-hidden="true">"s"</span>
                     "SourceOrigin"
                 </a>
                 <nav class="site-links" aria-label="SourceOrigin">

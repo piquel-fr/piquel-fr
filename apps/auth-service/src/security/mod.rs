@@ -13,6 +13,8 @@ use sourceorigin_common::{
 use sourceorigin_repository::DatabaseError;
 use std::{borrow::Cow, time::Duration as StdDuration};
 
+/// The Content-Security-Policy of every response.
+mod content;
 /// Where a request came from, which handlers attribute events to.
 mod context;
 /// Host-only browser cookies.
@@ -26,6 +28,7 @@ mod page;
 /// Browser sessions, their credentials and their extractors.
 mod session;
 
+pub(crate) use content::{FormTarget, FormTargets};
 pub(crate) use context::RequestContext;
 pub(crate) use cookie::BrowserCookie;
 pub(crate) use http::{CacheClass, Cached, FETCH_SITE_HEADER, HttpSecurity, HttpSecurityError};

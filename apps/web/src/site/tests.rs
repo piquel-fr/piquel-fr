@@ -46,7 +46,7 @@ async fn serves_its_pages() {
 }
 
 /// Every other path, a sent settings link's included, goes on to auth with its
-/// query, and nobody caches that.
+/// query, and nobody caches that. The redirect is isolated as a page is.
 #[tokio::test]
 async fn sends_every_other_path_to_auth() {
     let response = visit("/settings/emails/verify?remove=1").await;
@@ -56,4 +56,12 @@ async fn sends_every_other_path_to_auth() {
         "https://auth.sourceorigin.dev/settings/emails/verify?remove=1"
     );
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    let headers = response.headers();
+    assert_eq!(headers[header::CONTENT_SECURITY_POLICY], POLICY);
+    assert_eq!(headers["cross-origin-opener-policy"], "same-origin");
+    assert_eq!(headers["cross-origin-resource-policy"], "same-origin");
+    assert_eq!(
+        headers["permissions-policy"],
+        sourceorigin_common::protocol::isolation::PERMISSIONS_POLICY
+    );
 }
