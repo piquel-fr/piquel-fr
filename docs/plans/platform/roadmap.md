@@ -28,26 +28,36 @@ The web UI is not what gates the move. Four things that only speak git do:
 - The repository is `sourceorigin-dev/origin`, public, under Apache-2.0.
 - `main` has the platform crate, records and on-disk storage, pack files, the
   record index, the change workflow, and statements with promotion.
-- Everything a host needs is still an open pull request:
+- Everything a host needs is still an open pull request. They form one linear
+  stack, each based on the one before it, all rebased on `main` on 10 November
+  and all mergeable. This is the order they merge in:
 
-  | Pull request | What it adds |
-  | --- | --- |
-  | #4 | `OriginService`, the HTTP API and the client SDK |
-  | #5 | Clone, push, fetch and remote landing |
-  | #6 | Capabilities and scoped tokens |
-  | #13 | Targets, policy and the landing queue |
-  | #14 | Copy-on-write workspaces |
-  | #15 | The operation log, undo and watch |
-  | #16 | The `origin-ci` plugin |
-  | #17 | The swarm scenario skill |
-  | #36 | Deleting objects, and remembering when they were stored |
-  | #37 | Dropping statement payloads past their retention |
+  | Order | Pull request | What it adds |
+  | --- | --- | --- |
+  | 1 | #13 | Targets, policy and the landing queue |
+  | 2 | #36 | Deleting objects, and remembering when they were stored |
+  | 3 | #37 | Dropping statement payloads past their retention |
+  | 4 | #14 | Copy-on-write workspaces |
+  | 5 | #15 | The operation log, undo and watch |
+  | 6 | #4 | `OriginService`, the HTTP API and the client SDK |
+  | 7 | #5 | Clone, push, fetch and remote landing |
+  | 8 | #6 | Capabilities and scoped tokens |
+  | 9 | #16 | The `origin-ci` plugin |
+  | 10 | #17 | The swarm scenario skill |
 
+- CI is green on all of them except #17, whose macOS job fails while #16 below
+  it passes. Nobody has looked into why.
 - So Origin cannot be hosted yet. piquel needs time on Origin before the
   platform work can start properly.
-- The design document is `docs/design.md` in that repository. Everything this
-  plan says about Origin comes from that document. The unmerged code was not
-  read.
+- **Decided:** nothing in the stack has to change for hosting. Everything a
+  hosted node needs is additive, so piquel reviews and merges the stack from
+  the bottom. See [what was found in the stack](origin.md#what-the-stack-already-has).
+- The stack was read for the places this plan depends on, about 30,000 lines
+  in all. It was not reviewed for correctness.
+- The design document is `docs/design.md` in that repository.
+- The thread that owns the stack was asked to fix its two known defects:
+  origin #19, where a CI result can stand for a `checks.toml` other than the
+  target's, and origin #39, where superseding a statement isn't serialized.
 
 ### SourceOrigin
 
@@ -78,6 +88,28 @@ The web UI is not what gates the move. Four things that only speak git do:
   restoring volumes and environments, #341 volumes, backups and daemon
   settings.
 - Restore drills (#340) and btrfs storage pools (#339) are in piqueld's v1.0.
+
+## Origin's milestones
+
+**Decided.** Origin's work is tracked in `sourceorigin-dev/origin` as four
+milestones. Each epic is a parent issue, and its issues are sub-issues. The
+numbers below are issues in that repository.
+
+| Milestone | Epic | Issues |
+| --- | --- | --- |
+| **v0.1**, the prototype, merged | #42 the prototype, merged | The ten pull requests above; #19 and #39, the known defects |
+| **v0.2**, hostable | #43 identity | #44 principals are stable IDs; #45 OpenID Connect; #46 `origin login`; #47 display name lookup; #48 readable `policy.toml` |
+| | #49 authorization | #50 the authorization design; #51 repositories start closed; #34 revocable and per-repository tokens |
+| | #52 operating a server | #33 TLS for remotes; #53 the repository registry; #54 health endpoints; #55 telemetry; #56 a repository format version; #20 pack format errors; #57 `origin verify` |
+| | No epic | #58 the one-way mirror to git |
+| **v0.3**, daily use | No epic | #59 a working copy that git tools can read, which is colocated mode and still only proposed |
+| | #60 agents | #61 agent skills for the Origin workflow; #21 a typed library API |
+| | #62 deploys | #63 a convention for deploy statements; #64 exporting an acceptance's snapshot for a build |
+| **v1.0**, the rest | #65 more than one server | #66 the storage boundary; #67 coordination without `flock`; #68 events that survive a change of server; #28 remotes on plain storage |
+| | #69 policy and paths | #70 a target that accepts landings only from another target; #71 hidden paths; #72 an authority key per repository |
+| | No epic | Everything else that was open: #22 to #27, #29 to #32 and #35 |
+
+Origin's v0.2 lines up with milestone 1 below, and its v0.3 with milestone 2.
 
 ## Milestones
 

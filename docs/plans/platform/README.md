@@ -9,6 +9,14 @@ It is a plan, not documentation. It says what we intend to build, not how
 SourceOrigin works today. Nothing here is listed in `docs/SUMMARY.md`, so none
 of it is published in the book.
 
+## Keeping it current
+
+This is the design document of the whole product while it is being planned.
+Update it in the same session whenever something is decided, changed or
+dropped, and push the change to its pull request,
+[sourceorigin #527](https://github.com/sourceorigin-dev/sourceorigin/pull/527).
+A decision that only lives in a conversation is lost.
+
 ## The goal
 
 Move all of piquel's development off Git and GitHub onto SourceOrigin, as early
@@ -46,11 +54,15 @@ Every item carries one of these:
 | Where data lives | Reviews, CI results, deploys and releases are Origin statements. PostgreSQL holds only what can't live in a repository | Decided | [platform](platform.md#data-lives-in-origin) |
 | Permissions | No second permission system. The permissions page edits `policy.toml` and lands the change on `policy` | Decided | [platform](platform.md#permissions) |
 | Sign-in for Origin | Stock Origin validates tokens from any OpenID Connect issuer. SourceOrigin hosting is stock Origin pointed at Origin Auth | Decided | [origin](origin.md#sign-in-with-openid-connect) |
-| Principals | Records hold an opaque, stable ID scoped by issuer, never a name | Decided | [origin](origin.md#principals) |
+| Principals | Records hold an opaque, stable ID, never a name. The record format needs no change | Decided | [origin](origin.md#principals) |
 | Display names | The identity provider is the only source of names. Origin asks it through a lookup | Decided | [origin](origin.md#display-names) |
 | Readable policy files | How `policy.toml` stays readable when it holds IDs | Open | [origin](origin.md#readable-policy-files) |
 | Authorization in Origin | Origin's defaults are too open for a public host. piquel is designing a proper authorization system | Open | [origin](origin.md#authorization) |
 | Hosting | One Origin node with a local volume. No replicas for now | Decided | [origin](origin.md#one-node-first) |
+| Origin's roadmap | Four milestones in `sourceorigin-dev/origin`, with epics as parent issues: v0.1 the prototype merged, v0.2 hostable, v0.3 daily use, v1.0 the rest | Decided | [roadmap](roadmap.md#origins-milestones) |
+| The open pull requests | Nothing in the stack has to change for hosting. piquel reviews and merges it from the bottom | Decided | [roadmap](roadmap.md#origin) |
+| Finding repositories | The server reads which repositories exist from a registry named in its configuration. The details are proposed | Proposed | [origin](origin.md#finding-repositories) |
+| Encrypted remotes | The client has no TLS, which blocks a hosted node. Fixed in v0.2 | Decided | [origin](origin.md#operations) |
 | Authority key | One node key for every hosted repository, mounted as a piqueld secret. Keys per repository come later | Decided | [origin](origin.md#authority-keys) |
 | Backups | piqueld's scheduled volume backups. Continuous backup comes with object storage, not from piqueld | Decided | [platform](platform.md#hosting-and-backups) |
 | Git mirror | A one-way Origin-to-git mirror, built before the web UI, for Nix, Cargo and backup | Decided | [origin](origin.md#the-git-mirror) |
@@ -67,9 +79,13 @@ Every item carries one of these:
 
 ## What comes next
 
-The discussion ended with the plan agreed in outline. The next step is to go
-into practical depth on each part. Writing milestone 0 as issues in the v0.2
-milestone was offered and declined for now.
+The focus is on getting Origin ready. Its roadmap is now issues and epics in
+`sourceorigin-dev/origin`: see [Origin's milestones](roadmap.md#origins-milestones).
+piquel reviews and merges the open stack, and the two known defects went to
+the thread that owns the stack.
+
+Writing SourceOrigin's own milestone 0 as issues in its v0.2 milestone was
+offered and declined for now.
 
 ## Open questions
 
@@ -79,6 +95,10 @@ milestone was offered and declined for now.
   [authorization](origin.md#authorization).
 - Which frontend framework wins the experiment. See
   [the experiment](frontend.md#the-experiment).
+- How the repository registry works in detail. See
+  [finding repositories](origin.md#finding-repositories).
+- Whether colocated mode is built. See
+  [colocated mode](origin.md#colocated-mode).
 - Whether v0.2 is exactly milestones 0 and 1. It was proposed and not answered.
   See [the roadmap](roadmap.md#milestones).
 - How deeply T3 Code depends on git, which decides how much the fork must

@@ -3,10 +3,35 @@
 SourceOrigin hosts stock Origin. This page lists what Origin must gain or
 change for that to work, and the reasoning behind each item.
 
-Everything here about Origin comes from `docs/design.md` in
-`sourceorigin-dev/origin`. The unmerged pull requests were not read.
+What this page says about Origin comes from `docs/design.md` in
+`sourceorigin-dev/origin`, and from reading the open stack of pull requests
+for the places this plan depends on. Each item names the issue that tracks it
+in that repository; [Origin's milestones](roadmap.md#origins-milestones) lists
+them all.
 
 See [the plan's overview](README.md) for what each status means.
+
+## What the stack already has
+
+Reading the open stack on 13 November 2026 changed three things this plan had
+assumed:
+
+- **Principals need no format change.** A principal name already accepts
+  letters, digits, `.`, `_` and `-`, so a UUID fits as it is. Only where the
+  value comes from changes. Earlier advice to change principals before merging
+  the stack was wrong.
+- **Sign-in has its seam.** `auth.rs` has an `Authenticator` trait, and its
+  comment names identity providers as other implementations.
+- **The storage boundary can wait.** The store's API is already close to "put,
+  get and list objects". The file system shows through its directory accessors
+  and its locks. With replicas dropped, drawing the boundary is a later
+  refactor.
+
+It also showed two gaps:
+
+- **The client has no TLS.** See [operations](#operations).
+- **Repositories can't be created over the API.** See
+  [finding repositories](#finding-repositories).
 
 ## One node first
 
@@ -44,6 +69,8 @@ Origin's API is a resource with its own scopes (#71).
 `crates/auth-sdk` is under Apache-2.0, like Origin, so Origin could use it to
 validate tokens.
 
+Tracked in origin #45 (the authenticator) and #46 (`origin login`).
+
 ## Principals
 
 **Decided.** A principal in a record is an opaque, stable ID, never a name.
@@ -52,12 +79,18 @@ The problem: Origin's principals are names today (`user:<name>`), and they are
 written into immutable records. Origin Auth handles can change. Once real
 history exists this can't be fixed, so it is settled before then.
 
-- For OpenID Connect, the ID is the token's `sub` claim, scoped by its issuer.
+- For OpenID Connect, the ID is the token's `sub` claim.
+- **Open:** whether the issuer is part of the ID, so that IDs from two
+  identity providers can't collide when records move between nodes.
+- The record format doesn't change. See
+  [what the stack already has](#what-the-stack-already-has).
 - For solo local use, it is a random ID generated beside the node key. It is
   not `$USER`.
 - Deleting an account becomes possible. Purging an Origin Account cuts the
   link between history and the person. A name written into immutable records
   could never be removed, since Origin has no way to erase history.
+
+Tracked in origin #44.
 
 ### Display names
 
@@ -73,6 +106,8 @@ asks it.
 - A deleted account stops resolving.
 - Offline, the CLI shows the ID, or a name it last displayed. That cache is
   only cosmetic.
+
+Tracked in origin #47.
 
 An earlier idea was **dropped**: the server keeping its own table of ID to
 last-seen name, refreshed from token claims. piquel wanted something better
@@ -91,6 +126,8 @@ The starting idea is that the CLI and the web editor accept handles and write
 IDs, and show names when they print the file. piquel wants this thought
 through more before deciding.
 
+Tracked in origin #48.
+
 ## Authorization
 
 **Open.** Origin's defaults are too open for a public host:
@@ -101,6 +138,9 @@ through more before deciding.
 
 piquel agrees and was already thinking about a proper authorization system
 inside Origin. Its design is not part of this plan yet.
+
+Tracked in origin #50 (the design), #51 (repositories start closed) and #34
+(revocable and per-repository tokens).
 
 What is settled is where it lives. See
 [permissions](platform.md#permissions): the platform does not build a second
@@ -117,7 +157,48 @@ permission system.
   depend on the platform, and a database leak could forge acceptances.
 - One node key covers every hosted repository. That is the trade-off.
 - **Deferred:** a key per repository, which would shrink what one leaked key
-  can do.
+  can do. Tracked in origin #72.
+
+## Finding repositories
+
+Repositories are created with `origin repo create` on the server's own
+machine. The HTTP API has no way to create one, and the platform needs to.
+
+**Decided** in direction, as piquel designed it:
+
+- The server's configuration names a registry: where the list of repositories
+  is. The value is a URL whose scheme says how to read it, such as
+  `https://sourceorigin.dev/repositories` or
+  `file:///var/origin/repositories.json`.
+- The registry is a map of repositories, with what the server needs to know
+  about each: where to find it, which is a path on the file system for now.
+- The server asks the registry on requests. A query parameter narrows the
+  answer, so it doesn't fetch every repository.
+
+This settles how SourceOrigin manages repositories. The platform's own API
+creates a repository by adding it to its database, and it serves the registry
+from there. Origin needs no notion of who may create a repository, and what
+exists is recorded in one place.
+
+**Proposed,** not answered yet:
+
+- **Ask about one repository and cache the answer.** Asking on every request
+  adds a network call to each one, and makes every clone fail when the
+  platform is down. The server keeps a short-lived cache and goes on serving
+  the repositories it knows when the registry can't be reached.
+- **Look up by the name in the URL, store by a stable ID.** The entry returns
+  the repository's ID, which names it on disk. Renaming a repository then
+  changes the registry only.
+- **No secret keys in the registry.** This plan keeps authority keys out of
+  SourceOrigin's database. See [authority keys](#authority-keys).
+- **Paths stay under the server's own root** when the registry is remote, so a
+  registry can't point a name at an arbitrary directory.
+- **An entry carries the first admin and a state.** The server creates a
+  listed repository the first time it is used, with that admin. A state such
+  as read-only lets the platform suspend a repository without touching the
+  node.
+
+Tracked in origin #53.
 
 ## The git mirror
 
@@ -134,6 +215,8 @@ web UI.
 - A full two-way bridge can wait.
 - By [the integrations rule](platform.md#integrations) it is an Origin plugin.
 
+Tracked in origin #58. The two-way bridge stays origin #32.
+
 ## Colocated mode
 
 **Proposed.** A working copy that is both an Origin workspace and a git
@@ -142,11 +225,34 @@ worktree, so tools that expect git keep working during the move.
 - The design already reserves both `.origin` and `.git` as names that are
   never stored.
 - This is how jj was adopted.
-- T3 Code would see a git worktree and work unchanged.
+
+How it works:
+
+1. The folder holds both `.git/` and `.origin/`. Each tool ignores the other's
+   directory.
+2. Origin is the source of truth. Nobody commits with git.
+3. The [git mirror](#the-git-mirror) gives each acceptance a git commit.
+4. Whenever Origin moves the working copy, it points git's `HEAD` at the
+   mirrored commit of what the change is based on. It doesn't touch files.
+5. `git status` and `git diff` then show exactly the current change's edits.
+   Cargo, Nix and a tool's diff view see an ordinary git repository.
+
+Its limits:
+
+- It gives tools read access through git, not write access. A tool that
+  commits, pushes a branch or opens a pull request still writes something
+  Origin ignores. So T3 Code's diff views would work, and its pull request
+  workflow would still need the [provider](platform.md#t3-code).
+- A change stacked on another change is based on a revision, not an
+  acceptance. The mirror would have to write local commits for revisions too.
+- Nix flakes only see files git tracks, so Origin would have to mark new files
+  as intended to be added.
 
 piquel's answer was "we'll see". Recent T3 Code changes seem to reduce its
 dependence on git, and some adapting may still be needed. How deeply T3 Code
 depends on git was not measured.
+
+Tracked in origin #59, marked as a proposal.
 
 ## CI
 
@@ -168,9 +274,10 @@ How this repository's CI maps onto `checks.toml` is in
 
 **Decided.**
 
-- piqueld builds from an Origin acceptance.
+- piqueld builds from an Origin acceptance. Tracked in origin #64.
 - For now, a deploy is recorded as a statement on the acceptance of `main`
-  that was deployed. That needs no new Origin feature.
+  that was deployed. That needs no new Origin feature, only a convention,
+  tracked in origin #63.
 
 **Deferred:** making `production` a target, so that promoting is
 `origin land --from main --onto production`.
@@ -179,7 +286,8 @@ How this repository's CI maps onto `checks.toml` is in
 - Landing is granted per target, so only piqueld's node would hold
   `land production`.
 - What is missing is a policy rule that a target accepts landings only from
-  another target. Until Origin has one, deploys stay statements.
+  another target. Until Origin has one, deploys stay statements. Tracked in
+  origin #70.
 
 ## Releases and channels
 
@@ -224,26 +332,34 @@ repository.
   real one wants to go. Origin must refuse and ask. It must not overwrite the
   local file, and it must not record it as an edit.
 
+Tracked in origin #71.
+
 ## Operations
 
 **Decided.** Mostly for the server:
 
+- **TLS for remotes.** The client is built without TLS, so the CLI can't reach
+  a hosted node over HTTPS. This blocks hosting. The server can leave TLS to
+  the proxy in front of it. Tracked in origin #33.
 - A format version with migrations. This also applies to local repositories.
+  Packs, operation log segments and the index each have a version already; the
+  repository as a whole has none. Tracked in origin #56.
 - A command that verifies a repository. This also applies to local
-  repositories.
-- Health endpoints and telemetry.
+  repositories. Tracked in origin #57.
+- Health endpoints and telemetry. Tracked in origin #54 and #55.
 
 ## More than one server
 
 **Deferred.** None of this blocks milestone 1. It is kept because the list was
-worked out and agreed.
+worked out and agreed. Tracked in origin #65, with #66, #67, #68 and #28.
 
 1. **A storage boundary.** Today's traits are shaped like a file system
    (`Durability`, `FileLock`, `CloneFile`). Running without local state needs
    a higher one: put and get immutable objects, compare-and-swap a reference,
    append to a log. Local disk and object storage are two implementations.
-   This is the only urgent item: it is cheap to draw before the server pull
-   requests harden, and expensive after.
+   It was first thought urgent, to be drawn before the server pull requests
+   hardened. Reading the stack showed the store's API is already close to it,
+   so it waits with the rest.
 2. **Coordination without `flock`.** Target heads, change heads, the queue and
    the compactor become compare-and-swap objects. "One authority node" becomes
    "one authority key, any number of processes".
