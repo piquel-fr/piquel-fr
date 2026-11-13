@@ -1,41 +1,57 @@
 /**
  * What auth's pages may ask of the browser, as Chromium enforces their
- * Permissions-Policy: passkeys and writing to the clipboard, and no other
- * feature that reaches a device, the user's data or another site.
+ * Permissions-Policy: passkeys and writing to the clipboard, and none of the
+ * features it turns off.
  */
 import { expect, test } from '@playwright/test';
 
-/** Powerful features no page of auth's uses. */
-const unused = [
+/** Every feature the policy turns off, which no page of auth's uses. */
+const off = [
+  'accelerometer',
+  'ambient-light-sensor',
+  'attribution-reporting',
+  'autoplay',
   'bluetooth',
+  'browsing-topics',
   'camera',
   'captured-surface-control',
   'clipboard-read',
+  'compute-pressure',
   'digital-credentials-get',
   'direct-sockets',
   'display-capture',
+  'encrypted-media',
   'fullscreen',
   'gamepad',
   'geolocation',
+  'gyroscope',
   'hid',
   'identity-credentials-get',
   'idle-detection',
+  'join-ad-interest-group',
+  'keyboard-map',
   'local-fonts',
+  'magnetometer',
   'microphone',
   'midi',
   'otp-credentials',
   'payment',
+  'picture-in-picture',
+  'private-state-token-issuance',
+  'private-state-token-redemption',
+  'run-ad-auction',
   'screen-wake-lock',
   'serial',
   'smart-card',
   'speaker-selection',
+  'storage-access',
   'usb',
   'web-share',
   'window-management',
   'xr-spatial-tracking'
 ];
 
-test("auth's pages may use passkeys and the clipboard, and no other powerful feature", async ({
+test("auth's pages may use passkeys and the clipboard, and no feature their policy turns off", async ({
   page
 }) => {
   await page.goto('/login');
@@ -53,5 +69,5 @@ test("auth's pages may use passkeys and the clipboard, and no other powerful fea
       'clipboard-write'
     ])
   );
-  expect(allowed.filter((feature) => unused.includes(feature))).toEqual([]);
+  expect(allowed.filter((feature) => off.includes(feature))).toEqual([]);
 });
