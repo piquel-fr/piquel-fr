@@ -280,7 +280,7 @@ pub async fn verify<'a>(
                 <p class="help">
                     "Copy the whole link from the email and paste it here. Confirm only if you added this address to your own Origin Account."
                 </p>
-                <button>"Confirm this address"</button>
+                <button>"Confirm with this link"</button>
             </form>
         </noscript>
     })

@@ -35,22 +35,43 @@ async fn explained(admin: bool, response: impl IntoResponse) -> (Response, Strin
 }
 
 /// Navigations are told from fetches by their fetch metadata, or, from a browser
-/// that sends none, by whether they accept HTML.
+/// that sends none, by whether they accept HTML on a route browsers navigate to:
+/// a client of a protocol route that happens to accept HTML keeps its JSON, and
+/// health probes always do.
 #[test]
 fn navigations_are_told_from_fetches() {
-    assert!(ErrorPages::navigation(&fetched("navigate")));
+    assert!(ErrorPages::navigation(&fetched("navigate"), Endpoint::Page));
+    assert!(ErrorPages::navigation(
+        &fetched("navigate"),
+        Endpoint::OAuthBackChannel
+    ));
+    assert!(!ErrorPages::navigation(
+        &fetched("navigate"),
+        Endpoint::Health
+    ));
     for mode in ["cors", "same-origin", "no-cors"] {
-        assert!(!ErrorPages::navigation(&fetched(mode)), "{mode}");
+        assert!(
+            !ErrorPages::navigation(&fetched(mode), Endpoint::Page),
+            "{mode}"
+        );
     }
     let mut accepting = HeaderMap::new();
     accepting.insert(
         header::ACCEPT,
         HeaderValue::from_static("text/html,application/xhtml+xml"),
     );
-    assert!(ErrorPages::navigation(&accepting));
+    assert!(ErrorPages::navigation(&accepting, Endpoint::Page));
+    assert!(ErrorPages::navigation(&accepting, Endpoint::Authorize));
+    for endpoint in [
+        Endpoint::OAuthBackChannel,
+        Endpoint::UserInfo,
+        Endpoint::Account,
+    ] {
+        assert!(!ErrorPages::navigation(&accepting, endpoint));
+    }
     accepting.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
-    assert!(!ErrorPages::navigation(&accepting));
-    assert!(!ErrorPages::navigation(&HeaderMap::new()));
+    assert!(!ErrorPages::navigation(&accepting, Endpoint::Page));
+    assert!(!ErrorPages::navigation(&HeaderMap::new(), Endpoint::Page));
 }
 
 /// A refusal's page says what its JSON says, at its status and with its

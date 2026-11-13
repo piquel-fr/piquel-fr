@@ -139,9 +139,10 @@ async fn connected_apps_are_listed_and_removed() {
 }
 
 /// A change that needs a recent passkey confirmation asks the passkey script for
-/// one while the session has none. Posted anyway, it is refused, and its row opens
-/// again, with what was typed, to ask once more. A confirmed session makes it at
-/// once.
+/// one while the session has none: its button starts disabled, saying what it
+/// needs, until the script finds the browser can run the ceremony. Posted anyway,
+/// it is refused, and its row opens again, with what was typed, to ask once more.
+/// A confirmed session makes it at once.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn confirmed_changes_ask_for_a_passkey_first() {
@@ -160,6 +161,12 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
     };
     let page = html(social.visit(&replicas.a, settings::EMAILS).await).await;
     assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(page.contains("This change needs your passkey"), "{page}");
+    let send = page
+        .find(">Send a confirmation link</button>")
+        .expect("the add form's button");
+    let button = &page[page[..send].rfind("<button").expect("its tag")..send];
+    assert!(button.contains(r#"disabled="""#), "{button}");
     let refused = social.post(&replicas, settings::EMAILS, &add).await;
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     let page = html(refused).await;
@@ -172,6 +179,7 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
 
     let page = html(confirmed.visit(&replicas.a, settings::EMAILS).await).await;
     assert!(!page.contains("data-passkey-confirm"), "{page}");
+    assert!(!page.contains("This change needs your passkey"), "{page}");
     let added = confirmed.post(&replicas, settings::EMAILS, &add).await;
     assert_eq!(cookie(&added, BrowserCookie::Notice).0, "email_added");
     let page = html(confirmed.visit(&replicas.a, settings::EMAILS).await).await;

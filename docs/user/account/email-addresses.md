@@ -48,7 +48,7 @@ browser runs no scripts, confirm the address by pasting its link instead:
 
 1. Copy the whole link from the email.
 2. On **Confirm your email address**, paste it into **Link from the email**.
-3. Select **Confirm this address** below it.
+3. Select **Confirm with this link**.
 
 ## Choose your primary address
 

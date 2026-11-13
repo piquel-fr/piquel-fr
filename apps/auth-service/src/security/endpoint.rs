@@ -124,6 +124,29 @@ impl Endpoint {
         }
     }
 
+    /// Whether a browser navigates to it, so that a failure a browser without
+    /// fetch metadata gets is shown as a page when it accepts HTML. A client
+    /// calling a protocol or JSON route keeps its JSON, whatever it accepts.
+    pub(super) const fn browsed(self) -> bool {
+        match self {
+            Self::Authorize
+            | Self::Logout
+            | Self::Page
+            | Self::Dashboard
+            | Self::Unsubscribe
+            | Self::Other => true,
+            Self::OAuthBackChannel
+            | Self::UserInfo
+            | Self::Discovery
+            | Self::Checkpoints
+            | Self::Picture
+            | Self::Health
+            | Self::Account
+            | Self::DashboardSearch
+            | Self::RelatedLogin => false,
+        }
+    }
+
     /// Selects the budget of a matched route, reads included: they verify token
     /// signatures or hold a connection from the small database pool. Only routes that
     /// do neither are free. Discovery is cacheable, and served from memory but for

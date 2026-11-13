@@ -68,6 +68,6 @@ test('an address is confirmed by pasting its link', async ({ browser }) => {
   await page.goto(link);
   // The page cannot read the link's fragment, so it asks for the link itself.
   await page.getByLabel('Link from the email', { exact: true }).fill(link);
-  await page.getByRole('button', { name: 'Confirm this address', exact: true }).last().click();
+  await page.getByRole('button', { name: 'Confirm with this link', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Address confirmed' })).toBeVisible();
 });

@@ -595,7 +595,10 @@ impl WebApplication {
     /// The provider the `query` says was just linked, if the signed-in account
     /// holds an identity at it: a link anyone can write never says so otherwise.
     async fn just_linked(&self, cx: &Cx, query: &LoginQuery) -> Result<Option<Provider>, Failure> {
-        let (Some(provider), Some(owner)) = (query.linked, self.owner(cx).await?) else {
+        let Some(provider) = query.linked else {
+            return Ok(None);
+        };
+        let Some(owner) = self.owner(cx).await? else {
             return Ok(None);
         };
         let identities = self.account.identities(&Viewer::from(&owner)).await?;

@@ -426,10 +426,9 @@ impl HttpSecurity {
             Listener::Public => Endpoint::of(&request),
             Listener::Admin(_) => Endpoint::dashboard(&request),
         };
-        // The theme of a navigation's error page; health probes keep their JSON.
-        let navigation = (!matches!(endpoint, Endpoint::Health)
-            && ErrorPages::navigation(request.headers()))
-        .then(|| BrowserCookie::read_preferences(request.headers()));
+        // The theme of a navigation's error page.
+        let navigation = ErrorPages::navigation(request.headers(), endpoint)
+            .then(|| BrowserCookie::read_preferences(request.headers()));
         let slot = policy.admit(endpoint);
         // Set by the origin check, which runs under the deadline; an error response
         // still carries CORS headers once the origin is known to be allowed. A
