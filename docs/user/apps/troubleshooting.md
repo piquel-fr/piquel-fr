@@ -87,7 +87,7 @@ categories a reason naming the check that failed. Rust errors return both from
 | Category | What failed | What to do |
 | --- | --- | --- |
 | `discovery` | Fetching or checking auth's metadata. | Configure the issuer exactly as the app's **Overview** tab shows it: `https://auth.sourceorigin.dev`. |
-| `keys` | Fetching or reading auth's signing keys. | Usually temporary: the SDKs keep the last good keys. |
+| `keys` | Fetching or reading auth's signing keys. | Usually temporary: the SDKs keep the last good keys, for up to 15 minutes after their cache lifetime ends. |
 | `invalid_token` | A token failed validation. The reason names the check, such as `expired`, `wrong_audience` or `bad_signature`. | For `expired`, `not_yet_valid` or `issued_in_future`, check your server's clock ([below](#clock-skew)). |
 | `insufficient_scope` | A valid token lacks a scope the API requires. | Request the scope at sign-in, and allow it on the app. |
 | `insufficient_user_authentication` | A valid token's sign-in is too weak or too old. | [Step up](#step-up-challenges). |

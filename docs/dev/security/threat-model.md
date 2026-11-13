@@ -99,8 +99,8 @@ Beyond these, database access is trusted: it can bind any passkey to any account
   judgment, not two recovery factors. Self-service recovery and dedicated
   recovery rate limits are not built ([limits](account-recovery.md#limits)).
 - **Issued tokens outlive their session.** An access token stays valid up to five
-  minutes after its session ends. After a signing key is revoked, apps that
-  cached the key set accept it for up to an hour
+  minutes after its session ends. After a signing key is revoked, apps verifying
+  with the SDKs accept it for up to 90 minutes
   ([a compromised signing key](../operations/incidents.md#a-compromised-signing-key)).
 - **Undo doesn't reach inside apps.** What a recovery's link holder did in an app
   that doesn't ask for `phr` stays done ([undoing a recovery](account-recovery.md#undoing-a-recovery)).

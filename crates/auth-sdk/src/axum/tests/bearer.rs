@@ -118,3 +118,28 @@ async fn scoped_write_rejects_a_read_only_token() {
         )
     );
 }
+
+/// Keys that cannot be fetched are the server failing, not the token: the request is
+/// answered 503 without a challenge, so the client retries instead of signing out.
+#[tokio::test]
+async fn unavailable_keys_answer_503() {
+    let server = KeyServer::start(Vec::new(), None).await;
+    let clock = token_case("access-valid").clock();
+    let issuer = Issuer::with_keys(
+        metadata(),
+        server.keys(&clock),
+        Http::plain(reqwest::Client::builder()),
+        Arc::new(clock),
+    );
+    let app = Router::new()
+        .route("/me", get(|_: Authenticated| async {}))
+        .layer(BearerLayer::new(
+            issuer.resource(Resource::new(RESOURCE).expect("resource")),
+        ));
+    let token = format!("Bearer {}", vector_token("access-valid"));
+    let response = get_with(&app, "/me", &[(header::AUTHORIZATION, &token)]).await;
+    assert_eq!(
+        challenge(&response),
+        (StatusCode::SERVICE_UNAVAILABLE, String::new())
+    );
+}

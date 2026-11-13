@@ -83,7 +83,8 @@
 //! # Signing keys
 //!
 //! [`KeyCache`] caches a JWKS for any issuer. An unknown `kid` triggers one refetch,
-//! fetches happen at most every 30 seconds, and the last good keys survive an outage.
+//! fetches happen at most every 30 seconds, and the last good keys survive an outage
+//! until 15 minutes past their freshness.
 //! Each [`Issuer`] holds one for its own keys, and [`KeyCache::fixed`] holds a
 //! [`KeySet`] that is never fetched, for pinned keys. [`Jws`] parses a token so it
 //! can be checked by hand, as for Google ID tokens.
