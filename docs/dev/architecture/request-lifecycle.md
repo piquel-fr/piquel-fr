@@ -212,18 +212,27 @@ cause to the client:
   alert explains (`FederationError::callback_error`). Only internal failures
   answer as errors.
 
-A browser's navigation never shows JSON or plain text. When a response to a
-navigation, told apart by `Sec-Fetch-Mode: navigate`, or by `Accept: text/html`
-from a browser that sends no fetch metadata on a route browsers navigate to
-(`Endpoint::browsed`), is a `4xx` or `5xx` that is not
-already a page, `ErrorPages::explain` (`src/security/page.rs`) replaces its body
-with an error page: its status in words, what `ApiError` or an OAuth refusal
-said, or what the status means when nothing did, a link back to auth's or the
-dashboard's home, and, for a server error, only that it failed, with its trace
-ID. Health probes keep their JSON. Its status and headers, such as `Retry-After`, stay.
-That covers the security layer's refusals, unknown paths, a JSON route opened as
-a page and Topcoat's plain-text failures, on both listeners. A `fetch` still gets
-the JSON.
+A browser's navigation gets a page, never JSON or plain text. A navigation is a
+request with `Sec-Fetch-Mode: navigate`. From a browser that sends no fetch
+metadata, it is one that accepts `text/html` on a route browsers navigate to
+(`Endpoint::browsed`): the pages, authorization, logout, the dashboard, and a
+`GET` of a provider's callback or an unknown path. A protocol or JSON route, such
+as the token endpoint or a passkey ceremony, keeps its JSON for such a client,
+whatever it accepts.
+
+When a navigation's response is a `4xx` or `5xx` that is not already a page,
+`ErrorPages::explain` (`src/security/page.rs`) replaces its body with an error
+page:
+
+- its status in words;
+- what `ApiError` or an OAuth refusal said, or what the status means when nothing
+  did, and, for a server error, only that it failed, with its trace ID;
+- a link back to auth's or the dashboard's home.
+
+Its status and headers, such as `Retry-After`, stay. That covers the security
+layer's refusals, unknown paths, a JSON route a browser opens as a page, and
+Topcoat's plain-text failures, on both listeners. Health probes and `fetch`
+requests keep their JSON.
 
 ## Responses
 

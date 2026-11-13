@@ -12,8 +12,9 @@ use axum::{
 /// with other requests: each budget is as small as the other.
 pub(super) const LIVE_HEADER: &str = "x-sourceorigin-live";
 
-/// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
-/// classification, so it must list every route that differs from `Other`.
+/// How the HTTP boundary treats a route. Origin, CSRF and rate policy, and whether a
+/// failure is shown as a page, all read this one classification, so it must list
+/// every route that differs from `Other`.
 #[derive(Clone, Copy)]
 pub(super) enum Endpoint {
     /// Token, revocation and pushed authorization requests, authenticated by client
