@@ -105,7 +105,7 @@ coverage *ARGS:
 
 # Regenerate tests/sdk-vectors; `just test` fails while the committed files are stale.
 sdk-vectors:
-    @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p sourceorigin-common --test sdk_vectors
+    @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p sourceorigin-crypto --test sdk_vectors
 
 # Regenerate the TypeScript SDK's wire types, packages/auth/src/protocol.ts, from
 # sourceorigin_common::protocol; `just test` fails while the committed file is stale.

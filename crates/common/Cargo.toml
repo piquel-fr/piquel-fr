@@ -43,11 +43,6 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-# The vector generator signs with auth's own signer. A dev-dependency cycle is
-# allowed, and integration tests link the same build of this crate as the signer.
-# Path-only, so `cargo publish` strips it: this crate is published first.
-sourceorigin-crypto = { path = "../crypto" }
-aws-lc-rs.workspace = true
 base64.workspace = true
 serde_json.workspace = true
 # The protocol types derive `TS` under `cfg(test)` only, so no build depends on it.

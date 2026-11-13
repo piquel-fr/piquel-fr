@@ -467,7 +467,7 @@ string, so it still yields the rest of the error body or challenge.
 
 `tests/sdk-vectors` holds one JSON file per case: inputs, a fixed `now`, and either
 the parsed value or the expected error code. The generator,
-`crates/common/tests/sdk_vectors.rs`, builds them from fixed test keys and the
+`crates/crypto/tests/sdk_vectors.rs`, builds them from fixed test keys and the
 shared claim types and signs them with auth's signer. `just sdk-vectors` rewrites
 them, and `just test`, and so `just validate`, fails when they are stale. Every
 SDK's test suite runs every case.
