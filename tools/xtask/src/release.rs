@@ -10,9 +10,6 @@ pub struct Release<'a> {
     workspace: &'a Workspace,
     /// The workspace version, such as `0.2.0`.
     version: String,
-    /// The latest release tag `HEAD` contains, such as `v0.1.0`; `None` before
-    /// the first release.
-    previous: Option<String>,
     /// Runs the checks and the publish dry run, and only prints what the other
     /// steps would do.
     dry_run: bool,
@@ -20,43 +17,38 @@ pub struct Release<'a> {
 
 impl<'a> Release<'a> {
     pub fn new(workspace: &'a Workspace, dry_run: bool) -> Result<Self> {
-        let tags = workspace.git(&[
-            "tag",
-            "--list",
-            "v*",
-            "--merged",
-            "HEAD",
-            "--sort=-v:refname",
-        ])?;
         Ok(Self {
             workspace,
             version: workspace.version()?.to_owned(),
-            previous: tags.lines().next().map(str::to_owned),
             dry_run,
         })
     }
 
     /// Checks that `HEAD` is the latest `origin/main`, that the version isn't
-    /// tagged yet, and that the crates' API changes fit it. Then publishes the
-    /// SDKs, tags `HEAD` `v<version>`, pushes the tag, creates its GitHub
-    /// release, and closes its minor version's milestone, such as `v0.2`.
+    /// tagged yet, and that the crates' API changes fit it. Then writes the
+    /// release notes, publishes the SDKs, tags `HEAD` `v<version>`, pushes the
+    /// tag, creates its GitHub release, and closes its minor version's
+    /// milestone, such as `v0.2`.
     pub fn run(&self) -> Result<()> {
         self.check()?;
-        self.semver()?;
+        let previous = self.previous()?;
+        let previous = previous.as_deref();
+        self.semver(previous)?;
+        let tag = self.tag();
+        let notes = self
+            .workspace
+            .root()
+            .join(format!("target/release-notes-{tag}.md"));
+        fs::write(&notes, self.notes(previous)?)
+            .with_context(|| format!("write {}", notes.display()))?;
+        println!("the release notes are in {}", notes.display());
         Publish {
             workspace: self.workspace,
             dry_run: self.dry_run,
             allow_dirty: false,
         }
         .run()?;
-        let tag = self.tag();
         let title = format!("SourceOrigin {}", self.version);
-        let notes = self
-            .workspace
-            .root()
-            .join(format!("target/release-notes-{tag}.md"));
-        fs::write(&notes, self.notes()?).with_context(|| format!("write {}", notes.display()))?;
-        println!("the release notes are in {}", notes.display());
         let notes = notes.to_string_lossy();
         self.step("git", &["tag", "--annotate", &tag, "--message", &title])?;
         self.step("git", &["push", "origin", &tag])?;
@@ -82,9 +74,10 @@ impl<'a> Release<'a> {
     }
 
     /// Fails unless `HEAD` is the latest `origin/main`, and the version isn't
-    /// tagged on `origin` yet.
+    /// tagged on `origin` yet. Fetches `origin`'s tags too, so the previous
+    /// release is known.
     fn check(&self) -> Result<()> {
-        self.workspace.git(&["fetch", "origin", "main"])?;
+        self.workspace.git(&["fetch", "--tags", "origin", "main"])?;
         ensure!(
             self.workspace.git(&["rev-parse", "HEAD"])?
                 == self.workspace.git(&["rev-parse", "FETCH_HEAD"])?,
@@ -101,10 +94,27 @@ impl<'a> Release<'a> {
         Ok(())
     }
 
-    /// Fails when a published crate's API breaks compatibility with the previous
-    /// release without a version that allows it, by `cargo semver-checks`.
-    fn semver(&self) -> Result<()> {
-        let Some(previous) = &self.previous else {
+    /// The latest release tag `HEAD` contains, such as `v0.1.0`, other than this
+    /// release's own, which a failed earlier run may have left; `None` before
+    /// the first release.
+    fn previous(&self) -> Result<Option<String>> {
+        let tag = self.tag();
+        let tags = self.workspace.git(&[
+            "tag",
+            "--list",
+            "v*",
+            "--merged",
+            "HEAD",
+            "--sort=-v:refname",
+        ])?;
+        Ok(tags.lines().find(|line| *line != tag).map(str::to_owned))
+    }
+
+    /// Fails when a published crate's API breaks compatibility with the
+    /// `previous` release without a version that allows it, by
+    /// `cargo semver-checks`.
+    fn semver(&self, previous: Option<&str>) -> Result<()> {
+        let Some(previous) = previous else {
             println!("no earlier release to check the crates' API against");
             return Ok(());
         };
@@ -122,9 +132,10 @@ impl<'a> Release<'a> {
     }
 
     /// The release notes: what was published, then the pull requests merged
-    /// since the previous release, by the titles' Conventional Commits type.
-    fn notes(&self) -> Result<String> {
-        let npm = self.workspace.npm_package()?;
+    /// since the `previous` release, by the titles' Conventional Commits type.
+    /// The npm package is listed only when its version changed since then,
+    /// since only then is it published.
+    fn notes(&self, previous: Option<&str>) -> Result<String> {
         let mut notes = String::from("Published:\n\n");
         for package in self.workspace.published() {
             let (name, version) = (&package.name, &package.version);
@@ -133,16 +144,19 @@ impl<'a> Release<'a> {
                 "- [`{name}` {version}](https://crates.io/crates/{name}/{version}) on crates.io"
             )?;
         }
-        let (name, version) = (&npm.name, &npm.version);
-        writeln!(
-            notes,
-            "- [`{name}` {version}](https://www.npmjs.com/package/{name}/v/{version}) on npm"
-        )?;
+        let npm = self.workspace.npm_package(None)?;
+        let released = previous
+            .map(|tag| self.workspace.npm_package(Some(tag)))
+            .transpose()?;
+        if released.is_none_or(|released| released.version != npm.version) {
+            let (name, version) = (&npm.name, &npm.version);
+            writeln!(
+                notes,
+                "- [`{name}` {version}](https://www.npmjs.com/package/{name}/v/{version}) on npm"
+            )?;
+        }
 
-        let range = self
-            .previous
-            .as_ref()
-            .map_or_else(|| "HEAD".to_owned(), |tag| format!("{tag}..HEAD"));
+        let range = previous.map_or_else(|| "HEAD".to_owned(), |tag| format!("{tag}..HEAD"));
         let log =
             self.workspace
                 .git(&["log", "--first-parent", "--reverse", "--format=%s", &range])?;

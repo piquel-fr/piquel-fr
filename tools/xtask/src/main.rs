@@ -138,11 +138,17 @@ impl Workspace {
         Ok(&first.version)
     }
 
-    /// The TypeScript SDK's name and version, which it is published at.
-    fn npm_package(&self) -> Result<NpmPackage> {
-        let path = self.root.join(NPM_PACKAGE).join("package.json");
-        let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))
+    /// The TypeScript SDK's name and version, which it is published at: in the
+    /// working tree, or at `revision`, such as a release tag.
+    fn npm_package(&self, revision: Option<&str>) -> Result<NpmPackage> {
+        let path = format!("{NPM_PACKAGE}/package.json");
+        let text = match revision {
+            None => {
+                fs::read_to_string(self.root.join(&path)).with_context(|| format!("read {path}"))?
+            }
+            Some(revision) => self.git(&["show", &format!("{revision}:{path}")])?,
+        };
+        serde_json::from_str(&text).with_context(|| format!("parse {path}"))
     }
 
     /// Cargo, run from the workspace root.

@@ -97,7 +97,7 @@ impl Publish<'_> {
 
     /// Publishes the npm package, unless npm has its version already.
     fn npm(&self) -> Result<()> {
-        let package = self.workspace.npm_package()?;
+        let package = self.workspace.npm_package(None)?;
         let mut npm = self.workspace.command("npm");
         npm.arg("publish")
             .current_dir(self.workspace.root().join(NPM_PACKAGE));

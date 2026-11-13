@@ -144,7 +144,8 @@ toolchain of `rust-toolchain.toml`, Node and pnpm.
 5. For a release that breaks existing apps, edit its GitHub release to say how
    to upgrade.
 
-The release notes list what was published, then the pull requests merged since
+The release notes list what was published, the npm package only when its
+version changed since the previous release, then the pull requests merged since
 the previous release, from the titles of their squashed commits on `main`:
 breaking changes (a `!` after the type, as in `feat(sdk)!:`), features (`feat`),
 fixes (`fix`), and the rest. A title's scope leads its line, in bold.
@@ -176,9 +177,10 @@ closed.
 - **Tagging fails.** Everything is published. If the tag was created but not
   pushed, remove it with `git tag --delete v<version>`. Then run `just release`
   again.
-- **Creating the GitHub release or closing the milestone fails.** The tag is
-  pushed, so `just release` refuses to run again. Run the `gh` command it printed
-  for the step that failed, and the ones after it.
+- **Creating the GitHub release fails.** The tag is pushed, so `just release`
+  refuses to run again. Run the `gh release create` command it printed, then
+  close the `v<major>.<minor>` milestone on GitHub.
+- **Closing the milestone fails.** Close it on GitHub.
 - **A published version is broken.** A version can't be replaced. Yank each
   crate with `cargo yank --version <version> <crate>`, deprecate the npm version
   with `npm deprecate @sourceorigin/auth@<version> "<why>"`, and release a fixed
