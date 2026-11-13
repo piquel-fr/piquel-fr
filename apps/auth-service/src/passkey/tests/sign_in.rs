@@ -69,6 +69,37 @@ async fn handle_sign_in_lists_no_credentials_and_refuses_another_accounts_passke
     fixture.login().await;
 }
 
+/// A forged assertion naming an account's ID fails the same way whichever
+/// handle the sign-in named, so it can't find the account's current handle.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_forged_assertion_doesnt_tell_which_handle_an_account_has() {
+    let mut fixture = Fixture::new().await;
+    let other = Fixture::new().await;
+    let mut answers = Vec::new();
+    for handle in [fixture.username.clone(), other.username.clone()] {
+        let (started, browser) = fixture
+            .start(
+                routes::passkey::AUTHENTICATE_START,
+                "",
+                json!({ "handle": handle }),
+            )
+            .await;
+        let mut forged = fixture.assertion(&started);
+        forged.response.user_handle = Some(other.user_id.as_uuid().as_bytes().to_vec().into());
+        let response = fixture
+            .request(
+                routes::passkey::AUTHENTICATE_FINISH,
+                Method::POST,
+                &browser,
+                json!({"ceremony_id": started["ceremony_id"], "credential": forged}),
+            )
+            .await;
+        answers.push((response.status(), Fixture::json(response).await));
+    }
+    assert_eq!(answers[0], answers[1]);
+}
+
 /// Signing in with a passkey in a browser holding a social session of the same
 /// account confirms that session, keeping its ID but replacing its cookie. A
 /// session records the passkey that signed it in, or confirmed it since; a social

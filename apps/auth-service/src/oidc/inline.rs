@@ -62,7 +62,7 @@ impl OidcApplication {
     /// Consumes `client_id`'s claimed request inside `tx` and issues its code to
     /// `session`, which the inline passkey sign-in on the page at `origin` just
     /// created, if it meets the request's requirements as the redirect flow's would.
-    /// A new session meets any `prompt=login` and `max_age`, and the sign-in offered
+    /// A new session meets any `prompt=login` and `max_age`, and the sign-in accepted
     /// only the hinted account's passkeys. A recovered passkey during its probation
     /// does not confirm the session, so it meets no `acr_values=phr`: the page then
     /// sends the browser to auth, whose answer the client understands. While the

@@ -319,7 +319,9 @@ impl PasskeyApplication {
     /// Checks `credential` against a sign-in `ceremony` with `webauthn`, and
     /// returns the account it signs in to with `WebAuthn`'s verdict, which
     /// [`Self::accept_credential`] takes. A credential that names no account, or
-    /// another account than the ceremony named, is rejected, and recorded, here.
+    /// that signed for another account than the ceremony named, is rejected, and
+    /// recorded, here. A forged one naming another account fails in
+    /// [`Self::accept_credential`], as any bad signature for the named account does.
     pub(super) async fn verify(
         &self,
         webauthn: &Webauthn,
@@ -333,29 +335,39 @@ impl PasskeyApplication {
             }
             AuthenticationCeremony::Discover(DiscoverCeremony { state }) => (None, state),
         };
-        match self.discover(credential, named).await {
-            Ok((user_id, keys)) => Ok((
-                user_id,
-                webauthn.finish_discoverable_authentication(credential, state, &keys),
-            )),
-            Err(error) => Err(self.reject(context, Actor::Anonymous, named, error).await),
+        let (user_id, keys) = match self.discover(credential).await {
+            Ok(discovered) => discovered,
+            Err(error) => return Err(self.reject(context, Actor::Anonymous, named, error).await),
+        };
+        let verified = webauthn.finish_discoverable_authentication(credential, state, &keys);
+        match named {
+            // Only a passkey that signed learns it is another account's. A forged
+            // assertion fails as one of the named account's would, so naming an
+            // account ID tells nothing about which handle is its.
+            Some(named) if named != user_id => match verified {
+                Ok(_) => Err(self
+                    .reject(
+                        context,
+                        Actor::Anonymous,
+                        Some(named),
+                        PasskeyError::OtherAccount,
+                    )
+                    .await),
+                Err(error) => Ok((named, Err(error))),
+            },
+            _ => Ok((user_id, verified)),
         }
     }
 
-    /// Reads the account a discoverable credential names, which must be `named`
-    /// when the ceremony named one, and that account's keys.
+    /// Reads the account a discoverable credential names, and that account's keys.
     async fn discover(
         &self,
         credential: &PublicKeyCredential,
-        named: Option<UserId>,
     ) -> Result<(UserId, Vec<DiscoverableKey>), PasskeyError> {
         let (uuid, _) = self
             .webauthn
             .identify_discoverable_authentication(credential)?;
         let user_id = UserId::from_uuid(uuid).map_err(PasskeyError::InvalidUserHandle)?;
-        if named.is_some_and(|named| named != user_id) {
-            return Err(PasskeyError::OtherAccount);
-        }
         let keys = self
             .keys(user_id)
             .await?

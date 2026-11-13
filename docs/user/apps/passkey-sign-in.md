@@ -69,7 +69,8 @@ Send the browser to auth's pages, at
   pages restore.
 - **When the browser lacks related origins**: `PublicKeyCredential.getClientCapabilities()`
   has no `relatedOrigins`.
-- **When start or the passkey prompt failed**, with a newly pushed request,
+- **When start, the passkey prompt or finish failed**, as when the user chose a
+  passkey of another account than the hinted one, with a newly pushed request,
   since auth may have claimed the first.
 
 ## Check that it works

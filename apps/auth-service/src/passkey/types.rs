@@ -72,8 +72,9 @@ validated_name! {
 #[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum PasskeyKind {
-    /// Allows security keys and device unlock. Resident credentials are preferred,
-    /// so account pickers work where supported while username-only keys remain usable.
+    /// Allows security keys and device unlock. The credential must be resident, since
+    /// every sign-in lets the authenticator name the account
+    /// (`docs/dev/security/handles.md`).
     #[default]
     Standard,
     /// Requests a resident platform credential with a client-device hint and omits

@@ -50,7 +50,10 @@ confirmation in a signed-in session, and the undo of a recovery from the owner's
 link.
 The authenticator names the account in its answer, and auth refuses a passkey
 of any account other than the one the handle named (`verify` in
-`apps/auth-service/src/passkey/login.rs`). A related origin's sign-in for the
+`apps/auth-service/src/passkey/login.rs`). It says so only once the passkey
+signed: the account an assertion names is the client's claim, so a forged one
+fails as any bad signature does, and an app that knows an account's ID can't try
+handles to find its current one. A related origin's sign-in for the
 account its client hints at works the same way.
 
 Listing the IDs would undo a rename. They are stable and unique, and a rename
