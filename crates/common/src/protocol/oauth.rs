@@ -319,6 +319,9 @@ crate::open_str_enum! {
         InvalidRequest = "invalid_request",
         /// Client authentication failed.
         InvalidClient = "invalid_client",
+        /// The client may not use this grant or way of asking, such as a client
+        /// that must push its requests sending one through the browser.
+        UnauthorizedClient = "unauthorized_client",
         /// An authorization code or refresh token is unusable.
         InvalidGrant = "invalid_grant",
         /// Requested scopes exceed the grant or the client's policy.
@@ -327,6 +330,11 @@ crate::open_str_enum! {
         InvalidTarget = "invalid_target",
         /// Bearer or browser authentication failed.
         InvalidToken = "invalid_token",
+        /// The access token lacks a scope the request needs (RFC 6750 §3.1).
+        InsufficientScope = "insufficient_scope",
+        /// The authorization endpoint does not support the requested
+        /// `response_type`.
+        UnsupportedResponseType = "unsupported_response_type",
         /// The token endpoint does not support the requested grant.
         UnsupportedGrantType = "unsupported_grant_type",
         /// A `prompt=none` request needs the user to sign in.

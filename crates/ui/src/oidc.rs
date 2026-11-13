@@ -117,7 +117,7 @@ pub async fn failure<'a>(
 ) -> Result<impl View> {
     let message = match code {
         ErrorCode::InvalidRequest => {
-            "This sign-in request is invalid or expired. Start again from the application."
+            "This request is invalid or expired. Start again from the application."
         }
         ErrorCode::InvalidToken | ErrorCode::LoginRequired => "Please sign in again.",
         ErrorCode::AccessDenied => "Sign-in was cancelled or access was declined.",
@@ -128,7 +128,10 @@ pub async fn failure<'a>(
         ErrorCode::ServerError => "Something went wrong on our side. Please try again.",
         ErrorCode::InvalidClient
         | ErrorCode::InvalidGrant
+        | ErrorCode::UnauthorizedClient
         | ErrorCode::InvalidScope
+        | ErrorCode::InsufficientScope
+        | ErrorCode::UnsupportedResponseType
         | ErrorCode::InvalidTarget
         | ErrorCode::UnsupportedGrantType
         | ErrorCode::RequestNotSupported

@@ -12,7 +12,11 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
     let mut flow = Flow::new(true, false).await;
     let id = flow.client.id.to_string();
     let response = flow.push(Scope::OpenId.as_str(), None, None).await;
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        Flow::json(response).await["error"],
+        OAuthCode::InvalidClient.as_str()
+    );
     let response = flow
         .push("openid unregistered", None, flow.basic.as_deref())
         .await;
@@ -44,12 +48,16 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
         )
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    // No redirect URI is known for a request_uri that can't be claimed, so auth's
+    // page explains it.
     let rejected = async |client_id: &str, request_uri: &str| {
         let response = flow.claim(client_id, request_uri, &[]).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(
-            Flow::json(response).await["error"],
-            OAuthCode::InvalidRequestUri.as_str()
+        let page = Flow::text(response).await;
+        assert!(
+            page.contains("request_uri is unknown, expired, already used or issued to another")
+                || page.contains("request_uri must come from the pushed authorization endpoint"),
+            "{page}"
         );
     };
     let other = crate::tests::registration(ClientKind::Public, "https://other.example");
@@ -97,7 +105,7 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
             &flow.client_redirect(&flow.authorize(Scope::OpenId.as_str(), None).await),
             "error"
         ),
-        OAuthCode::InvalidRequest.as_str()
+        OAuthCode::UnauthorizedClient.as_str()
     );
     let request_uri = flow.pushed(Scope::OpenId.as_str(), None).await;
     // The user consented above, so the claim returns a code at once.

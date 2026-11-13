@@ -21,6 +21,7 @@ use crate::security::{CacheClass, Cached};
 pub(crate) use authorize::{
     AuthorizationDecision, AuthorizationView, RecoveryQuestion, TransactionQuery,
 };
+use error::Challenge;
 pub use error::OidcConfigError;
 pub(crate) use error::{OAuthCode, OAuthError, Reject};
 pub(crate) use inline::{InlineClaim, InlineResponse};
@@ -334,20 +335,23 @@ impl IntoResponse for PublicDocument {
 pub(crate) struct ClientRedirect<'a> {
     /// Redirect URI, already matched against the client's registration.
     uri: &'a Url,
-    /// Client value returned unchanged.
-    state: &'a str,
+    /// Client value returned unchanged, if the request had one.
+    state: Option<&'a str>,
     /// Issuer identifier, exactly as in discovery.
     issuer: &'a str,
 }
 
 impl ClientRedirect<'_> {
-    /// The redirect URI with `parameters`, `state` and `iss` appended.
+    /// The redirect URI with `parameters`, any `state` and `iss` appended.
     fn url(&self, parameters: &[(&str, &str)]) -> Url {
         let mut url = self.uri.clone();
-        url.query_pairs_mut()
-            .extend_pairs(parameters)
-            .append_pair("state", self.state)
-            .append_pair("iss", self.issuer);
+        let mut query = url.query_pairs_mut();
+        query.extend_pairs(parameters);
+        if let Some(state) = self.state {
+            query.append_pair("state", state);
+        }
+        query.append_pair("iss", self.issuer);
+        drop(query);
         url
     }
 }
@@ -464,16 +468,31 @@ impl OidcApplication {
 
     /// Authenticates the client at the token, revocation and pushed authorization
     /// endpoints: public clients by ID alone, confidential clients with HTTP Basic.
-    /// A `client_id` form field, when sent, must name the same client.
+    /// A `client_id` form field, when sent, must name the same client. A client
+    /// that sent an `Authorization` header is refused with a Basic challenge, at
+    /// 401; one that sent none, at 400 (RFC 6749 §5.2).
     async fn authenticate_client(
         &self,
         headers: &HeaderMap,
         supplied_id: Option<&str>,
     ) -> Result<StoredOidcClient, OAuthError> {
-        let basic = headers
-            .get(header::AUTHORIZATION)
-            .map(Self::basic_credentials)
-            .transpose()?;
+        let authorization = headers.get(header::AUTHORIZATION);
+        self.authenticate(authorization, supplied_id)
+            .await
+            .map_err(|error| match authorization {
+                Some(_) => error.challenged(Challenge::Basic),
+                None => error,
+            })
+    }
+
+    /// [`Self::authenticate_client`], unchallenged, with the request's
+    /// `Authorization` header.
+    async fn authenticate(
+        &self,
+        authorization: Option<&HeaderValue>,
+        supplied_id: Option<&str>,
+    ) -> Result<StoredOidcClient, OAuthError> {
+        let basic = authorization.map(Self::basic_credentials).transpose()?;
         let id = basic
             .as_ref()
             .map(|(id, _)| id.as_str())
@@ -591,7 +610,7 @@ impl OidcApplication {
     }
 
     /// Responses to an authorization request with `state`, sent to its verified `uri`.
-    fn client_redirect<'a>(&'a self, uri: &'a Url, state: &'a str) -> ClientRedirect<'a> {
+    fn client_redirect<'a>(&'a self, uri: &'a Url, state: Option<&'a str>) -> ClientRedirect<'a> {
         ClientRedirect {
             uri,
             state,

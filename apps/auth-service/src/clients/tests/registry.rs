@@ -1,14 +1,16 @@
 //! The operator's registry: changes reaching every replica, secret rotation,
 //! applying a deployment's client, and the registration quota.
 use super::*;
+use crate::oidc::OAuthCode;
 use crate::tests::operator;
 use axum::{
     Router,
-    body::Body,
+    body::{Body, to_bytes},
     http::{Method, Request, StatusCode, header},
     response::Response,
 };
 use base64::Engine;
+use serde_json::Value;
 use sourceorigin_common::clients::AllowedScopes;
 use sourceorigin_crypto::Secret;
 use tower::ServiceExt;
@@ -55,7 +57,11 @@ async fn cors(replica: &Router, origin: &str) -> bool {
 async fn authenticates(replica: &Router, id: &ClientId, origin: &str) -> bool {
     let form = format!("grant_type=authorization_code&code=unusable&client_id={id}");
     let response = send(replica, Method::POST, "/oauth/token", origin, &form, None).await;
-    response.status() != StatusCode::UNAUTHORIZED
+    let body = to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("token response");
+    let error: Value = serde_json::from_slice(&body).expect("OAuth error");
+    error["error"] != OAuthCode::InvalidClient.as_str()
 }
 
 /// Creating, updating, disabling and enabling a public client changes CORS and

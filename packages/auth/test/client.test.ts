@@ -86,7 +86,7 @@ test('authorization requests are pushed when the issuer advertises it, and in th
   assert.equal(query.fetch.count(PAR_URL), 0);
 });
 
-test('a confidential client authenticates with HTTP Basic, a public one sends its ID', async () => {
+test('a confidential client authenticates with HTTP Basic, a public one with its ID alone', async () => {
   const refused = () => Response.json({ error: 'invalid_grant' }, { status: 400 });
   const confidential = await client(
     { [TOKEN_URL]: refused },
@@ -99,7 +99,12 @@ test('a confidential client authenticates with HTTP Basic, a public one sends it
   const basic = sent(confidential.fetch, TOKEN_URL);
   // RFC 6749 §2.3.1 form-encodes both before base64.
   assert.equal(basic.headers.get('authorization'), `Basic ${btoa('notes-web:a+secret%2F%2B')}`);
-  assert.deepEqual(basic.form, { grant_type: 'refresh_token', refresh_token: 'prt_v1_old' });
+  // The form names the client either way, as a pushed request needs (RFC 9126 §2.1).
+  assert.deepEqual(basic.form, {
+    grant_type: 'refresh_token',
+    refresh_token: 'prt_v1_old',
+    client_id: 'notes-web'
+  });
 
   const publicClient = await client({ [TOKEN_URL]: refused });
   await outcome(() => publicClient.client.refresh('prt_v1_old', SIGNED_IN));

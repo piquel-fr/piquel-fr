@@ -54,8 +54,8 @@ pub struct InsertAuthorizationRequest {
     pub client_id: ClientId,
     /// Registered redirect URI to answer on.
     pub redirect_uri: String,
-    /// The client's opaque `state` parameter.
-    pub client_state: String,
+    /// The client's opaque `state` parameter, if it sent one.
+    pub client_state: Option<String>,
     /// The client's `nonce` parameter, echoed in the ID token.
     pub nonce: Option<String>,
     /// PKCE `S256` code challenge; `None` when a confidential client sent none.
@@ -117,8 +117,8 @@ pub struct StoredAuthorizationRequest {
     pub client_display_name: String,
     /// Registered redirect URI to answer on.
     pub redirect_uri: String,
-    /// The client's opaque `state` parameter.
-    pub client_state: String,
+    /// The client's opaque `state` parameter, if it sent one.
+    pub client_state: Option<String>,
     /// The client's `nonce` parameter.
     pub nonce: Option<String>,
     /// PKCE `S256` code challenge; `None` when a confidential client sent none.

@@ -135,11 +135,9 @@ async fn post_protocol_endpoints_and_error_contracts() {
     let response = flow
         .request(Method::POST, "/oidc/userinfo", &[], None)
         .await;
+    // No token at all is challenged without an error code (RFC 6750 §3.1).
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response.headers()[header::WWW_AUTHENTICATE],
-        "Bearer error=\"invalid_token\""
-    );
+    assert_eq!(response.headers()[header::WWW_AUTHENTICATE], "Bearer");
     let response = flow
         .request(
             Method::POST,

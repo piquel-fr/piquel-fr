@@ -28,6 +28,7 @@ use url::Url;
 
 mod app_removal;
 mod authorization;
+mod errors;
 mod logout;
 mod policy;
 mod protocol;

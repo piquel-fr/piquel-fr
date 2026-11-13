@@ -898,21 +898,23 @@ impl Client {
     }
 
     /// Posts a form, authenticating as this client: HTTP Basic for confidential
-    /// clients, `client_id` in the form for public ones.
+    /// clients, the client ID alone for public ones. The form always names the
+    /// client with `client_id`, which a pushed request needs even with Basic
+    /// credentials (RFC 9126 §2.1).
     async fn post(&self, url: &Url, form: &[(&str, &str)]) -> Result<Reply, NetworkError> {
         let config = self.config();
-        let http = self.issuer().http();
-        match &config.credentials {
-            Credentials::None => {
-                let mut form = form.to_vec();
-                form.push(("client_id", config.client_id.as_str()));
-                http.post_form(url, &form, Authorization::None).await
-            }
+        let mut form = form.to_vec();
+        form.push(("client_id", config.client_id.as_str()));
+        let authorization = match &config.credentials {
+            Credentials::None => Authorization::None,
             Credentials::Secret(secret) => {
-                let basic = Authorization::Basic(config.client_id.as_str(), secret.expose_secret());
-                http.post_form(url, form, basic).await
+                Authorization::Basic(config.client_id.as_str(), secret.expose_secret())
             }
-        }
+        };
+        self.issuer()
+            .http()
+            .post_form(url, &form, authorization)
+            .await
     }
 
     /// Parses the body of a `success` answer, which is `201 Created` for the pushed

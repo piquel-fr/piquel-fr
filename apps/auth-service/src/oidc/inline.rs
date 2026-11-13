@@ -28,8 +28,9 @@ pub(crate) struct InlineResponse {
     /// The authorization code, redeemable with the request's PKCE verifier, or the
     /// client's secret.
     code: String,
-    /// The request's `state`.
-    state: String,
+    /// The request's `state`, if it had one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<String>,
     /// This issuer.
     iss: String,
 }

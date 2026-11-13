@@ -286,7 +286,7 @@ async fn signing_in_continues_the_authorization() {
             assert_eq!(used.status(), StatusCode::BAD_REQUEST, "{origin}");
             let page = html(used).await;
             assert!(
-                page.contains("This sign-in request is invalid or expired."),
+                page.contains("This request is invalid or expired."),
                 "{page}"
             );
             assert!(

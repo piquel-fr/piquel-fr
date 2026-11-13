@@ -17,8 +17,8 @@ that says what went wrong: search this page for either.
   ```
 
 - **At your redirect URI.** Once auth has checked the client and the redirect
-  URI, it sends the browser back with `error`, `error_description`, `state` and
-  `iss` in the query. The SDKs report it as an `oauth` error carrying both.
+  URI, it sends the browser back with `error`, `error_description`, `iss`, and
+  `state` if the request had one, in the query. The SDKs report it as an `oauth` error carrying both.
 - **At your server.** The code exchange, refreshes and pushed requests answer
   your server with the error as JSON.
 
@@ -29,13 +29,16 @@ that says what went wrong: search this page for either.
 | `client_id is not a registered, enabled client` | Check the client ID on the app's **Overview** tab. A disabled, suspended or deleted app answers this too. |
 | `redirect_uri is not registered for this client; it must match exactly` | Register the URI your app sends, character for character: scheme, host, port, path and trailing slash. See [local development](local-development.md#which-redirect-uris-work-locally) for loopback addresses. |
 | `authorization request is malformed: …` | A parameter is repeated or has the wrong type. The rest of the description names it. |
+| `state must be at most 512 bytes` | Send a shorter `state`. Auth won't send an oversized one back to your app. |
 | `request_uri is unknown, expired, already used or issued to another client` (`invalid_request_uri`) | A pushed request lasts 60 seconds and works once. Push a new one for each sign-in. A page that [signs users in with passkeys itself](passkey-sign-in.md) can get it from `/webauthn/related/start` too. |
 
 ## Errors at your redirect URI
 
 | `error` | Common causes | What to do |
 | --- | --- | --- |
-| `invalid_request` | A browser or native app's request lacks S256 PKCE, the request sends `state` or `nonce` longer than 512 bytes, or an `id_token_hint` issued to another app. Or the app requires pushed requests and this one came through the browser. | Fix what the description names. The SDKs send valid requests, and push them whenever auth offers it. |
+| `invalid_request` | A browser or native app's request lacks S256 PKCE, the request lacks `response_type`, sends a `nonce` longer than 512 bytes, or an `id_token_hint` issued to another app. | Fix what the description names. The SDKs send valid requests. |
+| `unsupported_response_type` | `response_type` isn't `code`, such as the implicit flow's `token`. | Use the authorization code flow, as the SDKs do. |
+| `unauthorized_client` | The app requires pushed requests, and this one came through the browser. | Push the request first. The SDKs push whenever auth offers it. |
 | `invalid_scope` | The request asks for a scope the app may not request, often `offline_access`, which the SDKs' login routes always request. | Check the scope under **Scopes** on the app's **Settings** tab ([app settings](app-settings.md#settings)). |
 | `invalid_target` | `audience` names something other than the app. | Leave `audience` out: an app registered in the console gets access tokens for itself only. |
 | `access_denied` | The user selected **Cancel** on the consent screen. | Let the user try again. |
@@ -50,7 +53,9 @@ that says what went wrong: search this page for either.
 | `error` | `error_description` | What to do |
 | --- | --- | --- |
 | `invalid_client` | `the client secret is incorrect or expired` | Deploy the app's current secret ([rotating a client secret](rotate-secrets.md)). |
-| `invalid_client` | `this client must authenticate with HTTP Basic credentials` | A confidential app sends its secret with HTTP Basic: give it to the SDK. |
+| `invalid_client` | `this client must authenticate with HTTP Basic credentials` | A confidential app sends its secret with HTTP Basic: give it to the SDK. Auth answers `400` when the request sent no credentials, and `401` with a `WWW-Authenticate: Basic` challenge when it sent wrong ones. |
+| `invalid_request` | `client_id is required` | A pushed request names its app with `client_id` in the form, even when it authenticates with HTTP Basic. The SDKs always send it. |
+| `invalid_request` | `code is required` or `refresh_token is required` | Send the code or refresh token the grant redeems. |
 | `invalid_grant` | `code is unknown or expired, …` | A code works once, within two minutes. Exchange it as soon as the callback arrives. It also fails when the app, the account or the user's session no longer allows it. |
 | `invalid_grant` | `redirect_uri must match the one sent with the authorization request` | Send the same redirect URI at both steps. |
 | `invalid_grant` | `code was already used, …` or `refresh_token was already used, …` | A code, or a browser app's refresh token, was presented twice, so auth revoked the tokens issued from it. Sign the user in again. |

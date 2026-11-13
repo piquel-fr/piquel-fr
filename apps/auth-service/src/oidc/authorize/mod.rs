@@ -22,15 +22,15 @@ use crate::{
     security::{RequestContext, Session},
 };
 use axum::{
-    Form,
+    body::Bytes,
     extract::{
-        Query, State,
-        rejection::{FormRejection, QueryRejection},
+        Query, RawForm, State,
+        rejection::{QueryRejection, RawFormRejection},
     },
     http::HeaderMap,
     response::Redirect,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sourceorigin_common::{RecoveryId, protocol::claims::Acr};
 use sourceorigin_repository::StoredAuthorizationRequest;
 use sourceorigin_ui::{Checkbox, LoginQuery};
@@ -40,6 +40,44 @@ use url::Url;
 const UNKNOWN_TRANSACTION: &str = "transaction is unknown, expired or already used";
 /// Rejection of a `prompt=none` request without a suitable sign-in.
 const SILENT_LOGIN_REQUIRED: &str = "prompt=none was requested, but the user must sign in first";
+
+/// An authorization request's parameters as the browser sent them, form-encoded,
+/// from the query or a form post. They are read in two steps: a pushed request's
+/// reference first, so no other parameter can fail a request that carries one
+/// (RFC 9126 §4), then every parameter of a request sent through the browser.
+struct AuthorizationRequest(Bytes);
+
+impl AuthorizationRequest {
+    /// The request's parameters; `RawForm` reads the query string of `GET`
+    /// requests.
+    fn new(form: Result<RawForm, RawFormRejection>) -> Result<Self, OAuthError> {
+        form.map(|RawForm(form)| Self(form)).map_err(|error| {
+            OAuthCode::InvalidRequest.reject_with(
+                format!("authorization request is malformed: {error}"),
+                error,
+            )
+        })
+    }
+
+    /// The parameters `T` names, ignoring the others.
+    fn read<T: DeserializeOwned>(&self) -> Result<T, OAuthError> {
+        serde_urlencoded::from_bytes(&self.0).map_err(|error| {
+            OAuthCode::InvalidRequest.reject_with(
+                format!("authorization request is malformed: {error}"),
+                error,
+            )
+        })
+    }
+}
+
+/// The parameters of a request continuing a pushed one: only these count.
+#[derive(Deserialize)]
+struct PushedReference {
+    /// The client that pushed the request.
+    client_id: Option<String>,
+    /// The pushed request's reference.
+    request_uri: Option<String>,
+}
 
 /// A pending authorization, by its opaque token: the one the browser returns with
 /// after signing in, or the consent page shows.
@@ -73,71 +111,19 @@ pub(crate) struct AuthorizationView {
 }
 
 impl OidcApplication {
-    /// Starts an authorization by GET query or form POST: validates it, stores it as
-    /// a pending transaction, then sends the browser to login, consent or the client.
-    /// A `request_uri` continues a pushed request instead.
+    /// Starts an authorization by `GET` query or form `POST`: validates it, stores it
+    /// as a pending transaction, then sends the browser to login, consent or the
+    /// client. A `request_uri` continues a pushed request instead, whatever the
+    /// other parameters say.
     pub(super) async fn authorize(
         State(app): State<Self>,
         context: RequestContext,
         headers: HeaderMap,
-        // `Form` reads the query string of GET requests.
-        form: Result<Form<AuthorizationParameters>, FormRejection>,
+        form: Result<RawForm, RawFormRejection>,
     ) -> Result<Redirect, OAuthError> {
-        let Form(q) = form.map_err(|error| {
-            OAuthCode::InvalidRequest.reject_with(
-                format!("authorization request is malformed: {error}"),
-                error,
-            )
-        })?;
-        let client_id = q.client_id.as_deref().unwrap_or_default();
-        if let Some(request_uri) = &q.request_uri {
-            let next = app
-                .claim_pushed(context, &headers, client_id, request_uri)
-                .await?;
-            return Ok(Redirect::to(next.as_str()));
-        }
-        let client = app
-            .database
-            .oidc()
-            .find_client(client_id)
-            .await?
-            .filter(|client| client.enabled)
-            .ok_or_else(|| {
-                OAuthCode::InvalidRequest.reject("client_id is not a registered, enabled client")
-            })?;
-        let redirect = q.redirect_uri(&client)?;
-        // The redirect URI is now verified, so rejections go back to the client.
-        let client_redirect = app.client_redirect(&redirect, &q.state);
-        let back = |error: OAuthError| error.redirected(&client_redirect);
-        if client.require_pushed_authorization_requests {
-            return Err(back(OAuthCode::InvalidRequest.reject(
-                "this client must push its authorization requests and send their request_uri",
-            )));
-        }
-        let validated = q.validate(&app, &client, false).map_err(back)?;
-        let request = &validated.request;
-        let session = Session::resolve(&app.database, context, &headers).await?;
-        let requires_login = session.as_ref().is_none_or(|session| {
-            !Self::session_satisfies(
-                session,
-                request.interaction.forces_login(),
-                request.max_age,
-                request.hinted_user_id,
-                request.target_acr,
-                None,
-            )
-        });
-        if request.interaction.is_silent() && requires_login {
-            return Err(back(OAuthCode::LoginRequired.reject(SILENT_LOGIN_REQUIRED)));
-        }
-        let target_acr = request.target_acr;
-        let transaction = validated.store(&app).await?;
-        let next = if requires_login {
-            app.sign_in_page(transaction, target_acr)?
-        } else {
-            app.continue_authorization(context, &headers, transaction, RecoveryQuestion::Unanswered)
-                .await?
-        };
+        let next = app
+            .start_authorization(context, &headers, &AuthorizationRequest::new(form)?)
+            .await?;
         Ok(Redirect::to(next.as_str()))
     }
 
@@ -161,6 +147,68 @@ impl OidcApplication {
             )
             .await?;
         Ok(Redirect::to(next.as_str()))
+    }
+
+    /// Where [`Self::authorize`] sends the browser for `request`. A rejection goes
+    /// back to the client once its redirect URI is verified.
+    async fn start_authorization(
+        &self,
+        context: RequestContext,
+        headers: &HeaderMap,
+        request: &AuthorizationRequest,
+    ) -> Result<Url, OAuthError> {
+        let pushed: PushedReference = request.read()?;
+        if let Some(request_uri) = &pushed.request_uri {
+            let client_id = pushed.client_id.as_deref().unwrap_or_default();
+            return self
+                .claim_pushed(context, headers, client_id, request_uri)
+                .await;
+        }
+        let q: AuthorizationParameters = request.read()?;
+        let client_id = q.client_id.as_deref().unwrap_or_default();
+        let client = self
+            .database
+            .oidc()
+            .find_client(client_id)
+            .await?
+            .filter(|client| client.enabled)
+            .ok_or_else(|| {
+                OAuthCode::InvalidRequest.reject("client_id is not a registered, enabled client")
+            })?;
+        let redirect = q.redirect_uri(&client)?;
+        q.state()?;
+        // The redirect URI is now verified, so rejections go back to the client.
+        let client_redirect = self.client_redirect(&redirect, q.state.as_deref());
+        let back = |error: OAuthError| error.redirected(&client_redirect);
+        if client.require_pushed_authorization_requests {
+            return Err(back(OAuthCode::UnauthorizedClient.reject(
+                "this client must push its authorization requests and send their request_uri",
+            )));
+        }
+        let validated = q.validate(self, &client, false).map_err(back)?;
+        let request = &validated.request;
+        let session = Session::resolve(&self.database, context, headers).await?;
+        let requires_login = session.as_ref().is_none_or(|session| {
+            !Self::session_satisfies(
+                session,
+                request.interaction.forces_login(),
+                request.max_age,
+                request.hinted_user_id,
+                request.target_acr,
+                None,
+            )
+        });
+        if request.interaction.is_silent() && requires_login {
+            return Err(back(OAuthCode::LoginRequired.reject(SILENT_LOGIN_REQUIRED)));
+        }
+        let target_acr = request.target_acr;
+        let transaction = validated.store(self).await?;
+        if requires_login {
+            self.sign_in_page(transaction, target_acr)
+        } else {
+            self.continue_authorization(context, headers, transaction, RecoveryQuestion::Unanswered)
+                .await
+        }
     }
 
     /// The pending authorization `transaction`, as the sign-in page continuing it sees
@@ -235,7 +283,7 @@ impl OidcApplication {
         let request = self.find_authorization_request(&transaction).await?;
         let silent = request.interaction.is_silent();
         let redirect = Url::parse(&request.redirect_uri)?;
-        let client_redirect = self.client_redirect(&redirect, &request.client_state);
+        let client_redirect = self.client_redirect(&redirect, request.client_state.as_deref());
         let back =
             |code: OAuthCode, description| code.reject(description).redirected(&client_redirect);
         let session = Session::resolve(&self.database, context, headers).await?;

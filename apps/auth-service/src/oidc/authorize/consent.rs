@@ -143,7 +143,7 @@ impl OidcApplication {
             .map_err(|refusal| refusal.reject(OAuthCode::InvalidRequest))?;
         Self::require_authorization_session(&request, &session)?;
         let redirect = Url::parse(&request.redirect_uri)?;
-        let client_redirect = self.client_redirect(&redirect, &request.client_state);
+        let client_redirect = self.client_redirect(&redirect, request.client_state.as_deref());
         let redirect = match input.decision {
             ConsentDecision::Unsupported => {
                 return Err(OAuthCode::InvalidRequest.reject("decision must be approve or deny"));
