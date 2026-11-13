@@ -623,10 +623,14 @@ impl WebApplication {
             continuation,
         } = visit;
         // A provider just linked says so even when the authorization it goes on to
-        // expired meanwhile: going on says that instead.
+        // was refused meanwhile, as once it expired: going on says that instead.
+        // An internal failure still fails the page, which logs it.
         let linked = self.just_linked(cx, &query).await?;
         let (targets, target_acr) = match self.targets(&continuation, &query).await {
-            Err(Failure::Explained { .. }) if linked.is_some() => (Vec::new(), None),
+            Err(Failure::Explained {
+                error: OAuthError::Protocol { .. },
+                ..
+            }) if linked.is_some() => (Vec::new(), None),
             found => found?,
         };
         if let Some(question) = self
