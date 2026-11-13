@@ -384,8 +384,8 @@ struct KeyCacheInner {
 ///   whatever the client builder says.
 /// - A failed fetch keeps the last good keys, which keep verifying until 15 minutes
 ///   past their freshness, as auth bounds its own stale keys. Past that, verification
-///   fails with [`KeyError::Unavailable`] until a fetch succeeds, so a resource server
-///   answers 503 and clients retry.
+///   fails with [`KeyError::Unavailable`], or the failed fetch's own error, until a
+///   fetch succeeds, so a resource server answers 503 and clients retry.
 ///
 /// ```no_run
 /// # async fn run(token: &str) -> Result<(), Box<dyn std::error::Error>> {

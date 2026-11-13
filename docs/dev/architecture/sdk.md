@@ -149,8 +149,9 @@ The SDK caches the issuer's key set:
   their freshness: `max-age` plus 15 minutes after the last successful fetch.
   Stale keys may still trust a revoked key, so this is the bound auth gives its
   own key set (`STALE_AFTER`, see [signing keys](keys.md#reload-and-readiness)).
-  Past it, verification fails with `network` until a fetch succeeds, so a resource
-  server answers 503 and clients retry rather than sign the user out. A fixed set
+  Past it, verification fails with `network`, or the failed fetch's own error,
+  until a fetch succeeds, so a resource server answers 503 and clients retry rather
+  than sign the user out. A fixed set
   never goes stale.
 - Keys of an unknown `kty`, keys whose `use` is not `sig`, and keys whose `key_ops`
   does not list `verify` are skipped (RFC 7517 §4.3, §5). A set where two keys share a `kid` is rejected as a whole, and the previous

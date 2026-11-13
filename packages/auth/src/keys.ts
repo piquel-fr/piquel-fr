@@ -344,8 +344,9 @@ type Source = {
  * - Every fetch is `https`, follows no redirect, and gives up after 10 seconds.
  * - A failed fetch keeps the last good keys, and still counts as a fetch. They keep
  *   verifying until 15 minutes past their freshness, as auth bounds its own stale
- *   keys. Past that, verification fails with `network` until a fetch succeeds, so a
- *   resource server answers 503 and clients retry.
+ *   keys. Past that, verification fails with `network`, or the failed fetch's own
+ *   error, until a fetch succeeds, so a resource server answers 503 and clients
+ *   retry.
  */
 export class KeyCache {
   /** Where keys are fetched from; `undefined` for a fixed set. */
