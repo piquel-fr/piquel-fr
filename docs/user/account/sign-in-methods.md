@@ -79,6 +79,9 @@ of the account you linked, if it shares one. If your account had no confirmed em
 SourceOrigin also adds the provider's, as when you
 [create an account with it](creating-an-account.md#create-an-account-with-github-or-google).
 
+When you link a provider while signing in to an app, **Sign-in method added**
+says it is linked. Select **Continue** to go on to the app.
+
 The **Overview** tab also offers **Link GitHub** or **Link Google** while one
 is not linked. Select **Not now** to hide that suggestion in this browser.
 
@@ -102,5 +105,8 @@ account.
   it. Try again, or use another device.
 - **"This provider account is already linked to another Origin Account."**
   Unlink it from that account first, or link another GitHub or Google account.
+- **"Your session changed while the provider was being linked. Please start
+  linking it again."** You signed out or in to another account before coming
+  back from the provider. Select **Link GitHub** or **Link Google** again.
 - **A provider says it is currently unavailable.** SourceOrigin no longer offers
   sign-in with it. You can still unlink it, but not sign in with it.

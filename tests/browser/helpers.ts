@@ -5,6 +5,7 @@ import {
   expect,
   type Browser,
   type BrowserContext,
+  type BrowserContextOptions,
   type CDPSession,
   type Page
 } from '@playwright/test';
@@ -207,9 +208,15 @@ export async function addSecondPasskey(
   return second;
 }
 
-/** A page in a browser of its own, with a passkey authenticator. */
-export async function withPasskeys(browser: Browser): Promise<Page> {
-  const context = await browser.newContext();
+/**
+ * A page in a browser of its own, with a passkey authenticator, made with
+ * `options`, such as JavaScript enabled where the project disables it.
+ */
+export async function withPasskeys(
+  browser: Browser,
+  options: BrowserContextOptions = {}
+): Promise<Page> {
+  const context = await browser.newContext(options);
   const page = await context.newPage();
   await addPasskeys(context, page);
   return page;

@@ -41,6 +41,15 @@ Your first confirmed address becomes your primary address.
 
 If the link expired, select **Resend link** beside the address.
 
+### Without JavaScript
+
+The page reads the link's secret part, after its `#`, with a script. If your
+browser runs no scripts, confirm the address by pasting its link instead:
+
+1. Copy the whole link from the email.
+2. On **Confirm your email address**, paste it into **Link from the email**.
+3. Select **Confirm with this link**.
+
 ## Choose your primary address
 
 1. Select **Make primary** beside a confirmed address.
@@ -77,6 +86,8 @@ Without a confirmed address, apps receive none.
   Wait, then select **Resend link**.
 - **"This verification link is invalid, has expired or was already used."**
   Select **Resend link** beside the address for a new one.
+- **"Paste the whole link from the email, including everything after its #."**
+  The pasted link lost its end. Copy the whole link again.
 - **"This link adds the address to an Origin Account other than the one you
   are signed in to."** Sign out first if the address is meant for the other
   account.

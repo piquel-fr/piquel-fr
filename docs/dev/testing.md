@@ -117,7 +117,9 @@ just web test-browser
 The browser suite runs Chromium against a running deployment of auth over HTTPS:
 CI's, or a [preview](getting-started.md#run-your-changes) of your checkout. Write
 one for what only a browser shows: a page's layout or script, a passkey ceremony,
-a sign-in that crosses origins. The
+a sign-in that crosses origins. Its `no-javascript` project runs
+`tests/browser/no-javascript.spec.ts` with JavaScript disabled, for what a page
+must do without scripts. The
 [browser tests' README](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/browser/README.md)
 says how to run them.
 

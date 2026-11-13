@@ -2,15 +2,19 @@
 //! policies all read, and the independent request budgets of each class.
 
 use crate::routes::{ACCOUNT_PREFIX, audit, dashboard, oidc, page, passkey, pictures, service};
-use axum::extract::{MatchedPath, Request};
+use axum::{
+    extract::{MatchedPath, Request},
+    http::Method,
+};
 
 /// The header the search script sends with a live search's refresh, which spends
 /// the search budget rather than the pages'. A client gains nothing by sending it
 /// with other requests: each budget is as small as the other.
 pub(super) const LIVE_HEADER: &str = "x-sourceorigin-live";
 
-/// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
-/// classification, so it must list every route that differs from `Other`.
+/// How the HTTP boundary treats a route. Origin, CSRF and rate policy, and whether a
+/// failure is shown as a page, all read this one classification, so it must list
+/// every route that differs from `Other`.
 #[derive(Clone, Copy)]
 pub(super) enum Endpoint {
     /// Token, revocation and pushed authorization requests, authenticated by client
@@ -121,6 +125,30 @@ impl Endpoint {
             | Self::DashboardSearch
             | Self::RelatedLogin
             | Self::Other => false,
+        }
+    }
+
+    /// Whether a browser navigates to it with `method`, so that a failure a
+    /// browser without fetch metadata gets is shown as a page when it accepts
+    /// HTML. A client calling a protocol or JSON route keeps its JSON, whatever it
+    /// accepts: among the other routes, browsers only `GET` or `HEAD` the
+    /// providers' callbacks, an authorization's resumption, the assets and unknown
+    /// paths, while scripts post the ceremonies' JSON.
+    pub(super) fn browsed(self, method: &Method) -> bool {
+        match self {
+            Self::Authorize | Self::Logout | Self::Page | Self::Dashboard | Self::Unsubscribe => {
+                true
+            }
+            Self::Other => matches!(*method, Method::GET | Method::HEAD),
+            Self::OAuthBackChannel
+            | Self::UserInfo
+            | Self::Discovery
+            | Self::Checkpoints
+            | Self::Picture
+            | Self::Health
+            | Self::Account
+            | Self::DashboardSearch
+            | Self::RelatedLogin => false,
         }
     }
 

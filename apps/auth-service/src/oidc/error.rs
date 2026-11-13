@@ -3,7 +3,7 @@
 use super::ClientRedirect;
 use crate::{
     keys::StaleKeys,
-    security::{ApiError, SessionError},
+    security::{ApiError, Explanation, SessionError},
 };
 use axum::{
     Json,
@@ -258,7 +258,9 @@ impl OAuthError {
 }
 
 impl IntoResponse for OAuthError {
-    /// Redirects to the client, or answers with OAuth error JSON.
+    /// Redirects to the client, or answers with OAuth error JSON, whose
+    /// description a browser navigating here, as to the authorization endpoint,
+    /// reads on its error page.
     fn into_response(self) -> Response {
         let (status, code, description) = self.public();
         if let Self::Protocol {
@@ -269,11 +271,13 @@ impl IntoResponse for OAuthError {
             return Redirect::to(location.as_str()).into_response();
         }
         let challenge = Self::challenge(&code);
+        let explanation = Explanation(format!("The app's request was refused: {description}."));
         let body = ErrorResponse {
             error: code,
             error_description: Some(ErrorDescription::lossy(description)),
         };
         let mut response = (status, Json(body)).into_response();
+        response.extensions_mut().insert(explanation);
         if let Some(challenge) =
             challenge.and_then(|challenge| HeaderValue::try_from(challenge).ok())
         {

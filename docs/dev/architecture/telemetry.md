@@ -41,7 +41,8 @@ telemetry for free and adds the rest in one line.
   `X-Trace-Id`, which CORS exposes to public clients' origins. JSON error bodies
   do not repeat it. A page answering a server error, on auth or the admin
   dashboard, shows the same trace ID as a reference to quote in a report, since
-  a browser never shows the header; no other page shows one. `tracing::error!` events with an `error` field, such as
+  a browser never shows the header, and so does the error page a navigation's
+  failure gets ([errors](request-lifecycle.md#errors)); no other page shows one. `tracing::error!` events with an `error` field, such as
   `ApiError::log_error`'s, also mark their span. Every request of an
   administrator the dashboard or auth's handoff page refuses is logged as `admin
   dashboard request refused`, with its `admin.failure` reason.

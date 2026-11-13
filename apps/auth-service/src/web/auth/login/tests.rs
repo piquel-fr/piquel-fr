@@ -614,6 +614,68 @@ async fn linking_confirms_the_account_with_a_passkey() {
     assert_eq!(identity.user_id, owner.user_id);
 }
 
+/// Linking a provider on the way to an application says it is linked, then goes
+/// on from there: going on may fail, as for an authorization that expired, but
+/// the link is made and shown, never a failure.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn linking_for_an_application_says_so_before_going_on() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let owner = Browser::new_account(&database).await;
+    passkey(&database, owner.user_id).await;
+    let expired = Continuation::Authorization("ar_expired".into());
+    let resume = expired.return_to().expect("path");
+    let (evidence, secret) = pending(&database, |pending| PendingFederation {
+        email: Some(format!("{}@example.com", owner.user_id)),
+        return_to: resume.clone(),
+        link_user_id: Some(owner.user_id),
+        ..pending
+    })
+    .await;
+    let browser = owner.with_cookie(BrowserCookie::FederationPending, &secret);
+    let here = waiting(PendingDestination::Link, &resume);
+    let linked = browser.post(&replicas, &here, &LoginChange::Link {}).await;
+    assert_eq!(linked.status(), StatusCode::SEE_OTHER);
+    let shown = LoginQuery {
+        transaction: Some("ar_expired".to_owned()),
+        linked: Some(Provider::GitHub),
+        ..LoginQuery::default()
+    };
+    assert_eq!(redirect(&linked), link(LOGIN, &shown));
+    let identity = database
+        .federation()
+        .find_active(&evidence.issuer, &evidence.subject)
+        .await
+        .expect("identity")
+        .expect("linked");
+    assert_eq!(identity.user_id, owner.user_id);
+
+    // A link anyone can write says nothing was linked when nothing is.
+    let other = Browser::new_account(&database).await;
+    let page = html(other.visit(&replicas.a, &link(LOGIN, &shown)).await).await;
+    assert!(!page.contains("Sign-in method added"), "{page}");
+
+    let page = owner.visit(&replicas.a, &link(LOGIN, &shown)).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let page = html(page).await;
+    assert!(page.contains("<h1>Sign-in method added</h1>"), "{page}");
+    assert!(
+        page.contains("GitHub is now linked to your Origin Account"),
+        "{page}"
+    );
+    assert!(
+        page.contains(r#"<input type="hidden" name="action" value="signed_in">"#),
+        "{page}"
+    );
+    assert!(page.contains(">Continue</button>"), "{page}");
+    // Going on says the authorization expired, the link still made.
+    let went = owner
+        .post(&replicas, &link(LOGIN, &shown), &LoginChange::SignedIn {})
+        .await;
+    assert_eq!(went.status(), StatusCode::BAD_REQUEST);
+}
+
 /// Cancelling a link abandons the provider's sign-in: one the settings started goes
 /// back there, and one an email matched offers to sign in before going on. Only an
 /// email match offers another account the link: one the settings started belongs to

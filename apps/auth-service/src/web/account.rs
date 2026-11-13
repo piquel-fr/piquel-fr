@@ -33,7 +33,7 @@ use topcoat::{
     router::{
         Body, Method, RouteHandlerFn, StatusCode,
         content::Form,
-        error::see_other,
+        error::{ContentTooLargeError, see_other},
         parse_query_params,
         request::{FromRequest, headers, method, uri},
         response::{IntoResponse, Response},
@@ -62,11 +62,10 @@ pub(super) trait AccountPage: 'static {
     /// The row a failed `change` shows open again, with what was typed into it.
     fn reopened(change: &Self::Change) -> Self::Row;
 
-    /// The change the page's form posted, or `None` when it does not decode, as a
-    /// form from an older page does. Forms post text, which
-    /// [`WebApplication::change`] reads, unless the page reads its own, as an
-    /// upload's.
-    fn decode(cx: &Cx, body: Body) -> impl Future<Output = Option<Self::Change>> + Send {
+    /// The change the page's form posted, or why it was refused, as
+    /// [`WebApplication::change`] says, which reads forms, which post text, unless
+    /// the page reads its own, as an upload's.
+    fn decode(cx: &Cx, body: Body) -> impl Future<Output = Result<Self::Change, ApiError>> + Send {
         WebApplication::change(cx, body)
     }
 
@@ -291,7 +290,8 @@ impl WebApplication {
 
     /// `POST` of the account page `P`: makes the change its form names, then
     /// answers as [`Applied`] says, or renders the page again with why it failed.
-    /// A form from an older page that does not decode changes nothing.
+    /// A form from an older page that does not decode, or one larger than a page
+    /// reads, changes nothing.
     async fn submit<P: AccountPage>(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let Some(owner) = web.owner(cx).await? else {
@@ -299,15 +299,16 @@ impl WebApplication {
                 .signed_out(cx, P::SECTION, P::TITLE, StatusCode::UNAUTHORIZED)
                 .await;
         };
-        let Some(change) = P::decode(cx, body).await else {
-            let outcome = (
-                StatusCode::BAD_REQUEST,
-                Messages::alert(Alert::Page(sourceorigin_ui::OUT_OF_DATE)),
-            );
-            let reader = Reader::new(web, owner).await?;
-            return web
-                .rendered::<P>(cx, &reader, P::Row::default(), outcome)
-                .await;
+        let change = match P::decode(cx, body).await {
+            Ok(change) => change,
+            Err(refused) => {
+                let (status, message) = refused.public();
+                let outcome = (status, Messages::alert(Alert::Page(message)));
+                let reader = Reader::new(web, owner).await?;
+                return web
+                    .rendered::<P>(cx, &reader, P::Row::default(), outcome)
+                    .await;
+            }
         };
         let row = P::reopened(&change);
         let error = match P::apply(web, cx, owner.clone(), change).await {
@@ -385,17 +386,31 @@ impl WebApplication {
         }
     }
 
-    /// The change a page's form posted, as `T`, or `None` when it does not decode,
-    /// as a form from an older page does. Why is logged at debug level, as the
-    /// client caused it.
-    pub(super) async fn change<T: DeserializeOwned + Send>(cx: &Cx, body: Body) -> Option<T> {
-        Form::from_request(cx, body)
-            .await
-            .inspect_err(|error| {
-                tracing::debug!(error = %ErrorChain(&**error), "page form rejected");
-            })
-            .ok()
-            .map(|Form(change)| change)
+    /// The change a page's form posted, as `T`, or why it was not read: it is
+    /// larger than a page reads (`413`), or it does not decode, as a form from an
+    /// older page does (`400`). Why is logged at debug level, as the client caused
+    /// it.
+    pub(super) async fn change<T: DeserializeOwned + Send>(
+        cx: &Cx,
+        body: Body,
+    ) -> Result<T, ApiError> {
+        match Form::from_request(cx, body).await {
+            Ok(Form(change)) => Ok(change),
+            Err(error) => {
+                tracing::debug!(error = %ErrorChain(&*error), "page form rejected");
+                Err(Self::unread(&error))
+            }
+        }
+    }
+
+    /// Why a page's form that failed to read with `error` was refused: too large,
+    /// or out of date.
+    pub(super) fn unread(error: &Error) -> ApiError {
+        if error.is::<ContentTooLargeError>() {
+            ApiError::too_large(sourceorigin_ui::TOO_LARGE)
+        } else {
+            ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE)
+        }
     }
 
     /// The owner of the request's browser session, if it has one.

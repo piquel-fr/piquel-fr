@@ -55,6 +55,17 @@ Passkeys are bound to the `auth.sourceorigin.dev` RP ID, so passkey ceremonies a
 run on auth. A settings change that needs a recent passkey confirmation asks for
 it on its page before the form posts. Users never unlock settings explicitly.
 
+Every page reads, and every form that needs no passkey posts, without scripts.
+A form that needs a passkey, a confirming one included, renders its button
+disabled beside a note saying it needs a browser with passkeys and scripts
+allowed; the passkey script enables it and hides the note once passkeys work
+there. A form answering with a file, such as **Download your data**, posts again
+whenever its button is selected, since its page never changes: it is marked
+`data-download`, so the passkey script also lets its passkey button work again
+once it posted. Confirming an address reads the token from the link's
+fragment, which only a script can; without scripts, its page asks for the link
+pasted instead, and auth reads the token from it.
+
 ## sourceorigin.dev
 
 sourceorigin.dev is its own product, served by its own web server, `apps/web`. It relies

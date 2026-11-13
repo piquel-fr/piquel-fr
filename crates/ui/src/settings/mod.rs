@@ -23,7 +23,9 @@ mod timeline;
 
 pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, connected_apps};
 pub use data::{DataChange, DataState, account_data, account_deleted};
-pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
+pub use emails::{
+    EmailChange, EmailRow, EmailsState, PASTE_WHOLE_LINK, addresses, verified, verify,
+};
 pub use notifications::{
     InboxChange, InboxPage, InboxRow, InboxState, NotificationPage, NotificationState, SignOutStep,
     UnsubscribeStep, inbox, notification, sign_out_everywhere, unsubscribe,

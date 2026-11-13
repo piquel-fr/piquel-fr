@@ -20,7 +20,7 @@ impl From<AssetError> for ApiError {
     /// Keeps missing-file replies in the same JSON shape as other browser errors.
     fn from(error: AssetError) -> Self {
         match error {
-            AssetError::NotFound => Self::not_found("Not found."),
+            AssetError::NotFound => Self::not_found("There is no page at this address."),
         }
     }
 }

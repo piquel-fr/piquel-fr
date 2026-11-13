@@ -7,8 +7,10 @@ that says what went wrong: search this page for either.
 ## Where errors appear
 
 - **In the browser, at auth.** Until auth knows the request comes from your
-  app, it never sends the browser back to it. It answers `400` with the error
-  as JSON instead, and your app hears nothing:
+  app, it never sends the browser back to it. It answers `400` with a page
+  saying **The app's request was refused:** and the `error_description`, and
+  your app hears nothing. Any request that isn't a browser's navigation, such
+  as `curl`, gets the error as JSON:
 
   ```json
   {"error":"invalid_request","error_description":"redirect_uri is not registered for this client; it must match exactly"}

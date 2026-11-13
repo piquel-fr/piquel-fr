@@ -236,12 +236,17 @@ async fn address_row<'a>(
     })
 }
 
+/// What the verification page says of a pasted link without its token.
+pub const PASTE_WHOLE_LINK: &str =
+    "Paste the whole link from the email, including everything after its #.";
+
 /// Confirming an address from its verification link, which posts to `action`.
 /// The link carries its token in the fragment, which never reaches a server: the
 /// passkey script copies it into the form when it is posted, enabling the button
 /// once it finds one, and shows instead that the link is incomplete when it has
-/// none, as after a confirmation that failed, whose `alert` says why. Its links
-/// lead to the addresses at `emails`.
+/// none, as after a confirmation that failed, whose `alert` says why. Without
+/// scripts, a second form asks for the link itself, pasted, whose token auth reads.
+/// Its links lead to the addresses at `emails`.
 #[component]
 pub async fn verify<'a>(
     action: &'a str,
@@ -255,7 +260,7 @@ pub async fn verify<'a>(
             change: (),
             fragments: &["token"],
             label: "Confirm this address",
-            unavailable: "Confirming an address needs scripts allowed.",
+            unavailable: "Without scripts, paste the link from the email below instead.",
             alert: alert,
             missing: view! {
                 <h2>"This link is incomplete"</h2>
@@ -266,6 +271,18 @@ pub async fn verify<'a>(
                 "Confirm only if you added this address to your own Origin Account: the email names the account it joins."
             </p>
         )
+        <noscript>
+            <form class="card stack" method="post" action=(action)>
+                <label>
+                    "Link from the email"
+                    <input type="url" name="link" required="" autocomplete="off" spellcheck="false">
+                </label>
+                <p class="help">
+                    "Copy the whole link from the email and paste it here. Confirm only if you added this address to your own Origin Account."
+                </p>
+                <button>"Confirm with this link"</button>
+            </form>
+        </noscript>
     })
 }
 

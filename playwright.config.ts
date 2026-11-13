@@ -18,8 +18,14 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: 'screenshots/**',
+      testIgnore: ['screenshots/**', 'no-javascript.spec.ts'],
       use: { browserName: 'chromium' }
+    },
+    // The pages in a browser that runs no script of theirs.
+    {
+      name: 'no-javascript',
+      testMatch: 'no-javascript.spec.ts',
+      use: { browserName: 'chromium', javaScriptEnabled: false }
     },
     // The documentation's screenshots, which `just docs screenshots` takes into
     // docs/images. They are not tests, so the suite never runs them.

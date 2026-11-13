@@ -211,9 +211,12 @@ fn opaque_tokens_preserve_envelopes_and_reject_wrong_purpose() {
     }
 }
 
-/// Checks that protocol failures retain both internal and rejected-input source chains.
+/// Checks that protocol failures retain both internal and rejected-input source
+/// chains. A rejection's description is what a browser navigating to it, as to the
+/// authorization endpoint, reads on its error page.
 #[tokio::test]
 async fn oauth_failures_preserve_sources_and_statuses() {
+    use crate::security::Explanation;
     use axum::response::IntoResponse;
     use std::error::Error;
     let error = OAuthError::from(sourceorigin_repository::DatabaseError::Operation(Box::new(
@@ -223,10 +226,8 @@ async fn oauth_failures_preserve_sources_and_statuses() {
         error.source().expect("internal source").to_string(),
         "internal diagnostic"
     );
-    assert_eq!(
-        error.into_response().status(),
-        StatusCode::INTERNAL_SERVER_ERROR
-    );
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let error = OAuthCode::InvalidGrant.reject_with(
         "code is \"malformed\" \u{2014} retry",
         sourceorigin_crypto::CryptoError::SecretLength,
@@ -234,6 +235,13 @@ async fn oauth_failures_preserve_sources_and_statuses() {
     assert!(error.source().is_some());
     let response = error.into_response();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response
+            .extensions()
+            .get::<Explanation>()
+            .map(|shown| shown.0.as_str()),
+        Some("The app's request was refused: code is \"malformed\" \u{2014} retry.")
+    );
     // The description reaches the client, restricted to the RFC 6749 character set.
     assert_eq!(
         Flow::json(response).await,

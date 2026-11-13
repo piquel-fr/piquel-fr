@@ -40,7 +40,9 @@ fn return_destinations_and_browser_bindings_are_strict() {
     assert!(BrowserCookie::FederationPending.read(&headers).is_none());
 }
 
-/// Callbacks require browser state and retain unregistered subjects as pending evidence.
+/// Callbacks require browser state and retain unregistered subjects as pending
+/// evidence. One whose state names no flow of this browser's, such as a forged
+/// one, leaves the sign-in under way in it as it is.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
@@ -58,7 +60,20 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
         ))
         .await
         .expect("unbound callback");
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    // Another browser's callback names no continuation it may go on to.
+    assert_eq!(TestApp::refused(&response, "social_expired"), None);
+    let forged = router
+        .clone()
+        .oneshot(TestApp::request(
+            Method::GET,
+            "/login/github/callback?code=mock-code&state=forged",
+            Some(&cookie),
+            &serde_json::Value::Null,
+        ))
+        .await
+        .expect("forged callback");
+    TestApp::refused(&forged, "social_expired");
+    assert!(forged.headers().get(header::SET_COOKIE).is_none());
     let response = router
         .clone()
         .oneshot(TestApp::request(
@@ -90,7 +105,7 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
         ))
         .await
         .expect("replay");
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    TestApp::refused(&response, "social_expired");
 }
 
 /// Cancelled or failed authorization preserves the original continuation and consumes state.
@@ -154,6 +169,6 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
             ))
             .await
             .expect("replay");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        TestApp::refused(&response, "social_expired");
     }
 }

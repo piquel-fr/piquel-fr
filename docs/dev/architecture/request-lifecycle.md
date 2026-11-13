@@ -198,10 +198,41 @@ cause to the client:
 - **OIDC endpoints** answer `OAuthError` (`src/oidc/error.rs`): an OAuth error
   JSON body, or, once the redirect URI is verified, a redirect to the client with
   `error`, `state` and `iss`. Its consent and logout pages show what the code
-  means.
+  means. A browser navigating to an endpoint that answers JSON, as to the
+  authorization endpoint with an unknown client, reads the description on the
+  error page below; a server error's page says only that.
 - **Pages** answer a `Failure` (`src/web/mod.rs`), which renders the page
   explaining it at its status. An internal failure is logged and shows a server
-  error with its trace ID, since a browser never shows `X-Trace-Id`.
+  error with its trace ID, since a browser never shows `X-Trace-Id`. A form
+  larger than a page reads answers `413`, and one from an older page that no
+  longer decodes `400`, each on the page saying so.
+- **Provider callbacks** (`/login/{provider}/callback`) that the browser can
+  start again from, such as one that expired, was replayed, or came back to
+  another browser or session, redirect to the sign-in page with an `error` its
+  alert explains (`FederationError::callback_error`). Only internal failures
+  answer as errors.
+
+A browser's navigation gets a page, never JSON or plain text. A navigation is a
+request with `Sec-Fetch-Mode: navigate`. From a browser that sends no fetch
+metadata, it is one that accepts `text/html` on a route browsers navigate to
+(`Endpoint::browsed`): the pages, authorization, logout, the dashboard, and a
+`GET` or `HEAD` of a provider's callback, an authorization's resumption or an
+unknown path. A protocol or JSON route of auth's, such as the token endpoint or a
+passkey ceremony, keeps its JSON for such a client, whatever it accepts.
+
+When a navigation's response is a `4xx` or `5xx` that is not already a page,
+`ErrorPages::explain` (`src/security/page.rs`) replaces its body with an error
+page:
+
+- its status in words;
+- what `ApiError` or an OAuth refusal said, or what the status means when nothing
+  did, and, for a server error, only that it failed, with its trace ID;
+- a link back to auth's or the dashboard's home.
+
+Its status and headers, such as `Retry-After`, stay. That covers the security
+layer's refusals, unknown paths, a JSON route a browser opens as a page, and
+Topcoat's plain-text failures, on both listeners. Health probes and `fetch`
+requests keep their JSON.
 
 ## Responses
 
@@ -220,7 +251,9 @@ errors and preflights included:
   its class takes, which may then read `X-Trace-Id` and `Retry-After`. A refusal
 for the in-flight limit grants any origin, since it skips the origin check.
 
-Pages add their own `Content-Security-Policy` when they render
+An error page carries its own `Content-Security-Policy`, which loads the
+stylesheet and its typefaces and nothing else. Pages add their own
+`Content-Security-Policy` when they render
 (`WebApplication::render_document`): the stylesheet, the passkey and picture
 scripts, auth's own images and the `blob:` of a picture being chosen, and a
 `form-action` naming auth and the origins the form may redirect to.

@@ -70,6 +70,11 @@ your passkey…** meanwhile. Once you unlock it, the change goes ahead. The
 confirmation lasts five minutes from then, and only in this browser: using
 SourceOrigin doesn't extend it.
 
+A change that needs the confirmation keeps its button disabled, under **This
+change needs your passkey: open this page in a browser that supports passkeys,
+with scripts allowed.**, while your browser can't use passkeys on the page, as
+when it runs no scripts.
+
 Renaming a passkey, changing your display name or profile picture, signing out
 devices and removing an app's access need no confirmation.
 
@@ -91,3 +96,13 @@ devices and removing an app's access need no confirmation.
   [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev).
 - **The passkey button stays disabled.** Your browser can't use passkeys here.
   Open the page in a browser that supports them, with scripts allowed.
+- **"This sign-in did not start in this browser, has expired or was already
+  used. Please start again."** You came back from GitHub or Google in another
+  browser, too late, or with a link you had used. Select **GitHub** or
+  **Google** again.
+- **A page says "Too many requests".** You, or others on your network, made many
+  requests in a short time. Wait a minute, then select **Go to Origin Auth** or
+  go back and try again.
+- **A page says "Something went wrong".** Try again. If it keeps happening, write
+  to [contact@sourceorigin.dev](mailto:contact@sourceorigin.dev) with the
+  reference the page shows.

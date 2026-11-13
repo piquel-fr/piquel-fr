@@ -20,7 +20,7 @@ mod sections;
 /// The shell of the signed-in pages.
 mod signed_in;
 
-pub use frames::{Health, Policies, SOURCE, auth_shell, site_shell};
+pub use frames::{Health, Policies, SOURCE, auth_shell, error_page, site_shell};
 pub use html::{PreferenceChange, Preferences, Sidebar, Theme, Title, document};
 pub use parts::{Pager, page_head};
 pub use search::{Destination, Group, Search, SearchPage, search_results};

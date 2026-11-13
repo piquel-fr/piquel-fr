@@ -288,6 +288,27 @@ impl TestApp {
         );
         headers
     }
+    /// Asserts `response` sends the browser back to the sign-in page saying the
+    /// callback failed for `error`, and returns where it then goes on to, if
+    /// anywhere.
+    fn refused(response: &Response, error: &str) -> Option<String> {
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response.headers()[header::LOCATION]
+            .to_str()
+            .expect("location");
+        let target = Url::parse(location).expect("target");
+        assert_eq!(target.path(), crate::routes::page::LOGIN);
+        assert!(
+            target
+                .query_pairs()
+                .any(|(key, value)| key == "error" && value == error),
+            "{location}"
+        );
+        target
+            .query_pairs()
+            .find(|(key, _)| key == "return_to")
+            .map(|(_, value)| value.into_owned())
+    }
     /// Builds a JSON HTTP request with an optional browser-cookie header.
     fn request(
         method: Method,

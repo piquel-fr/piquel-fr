@@ -492,7 +492,8 @@ async fn account_pages_ask_a_signed_out_browser_to_sign_in() {
 }
 
 /// A form from an older page, whose change no page knows, changes nothing and says
-/// why, on every account page, an app's included.
+/// why, on every account page, an app's included, and so does one larger than a
+/// page reads, at `413`.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn account_pages_refuse_forms_they_do_not_know() {
@@ -512,6 +513,13 @@ async fn account_pages_refuse_forms_they_do_not_know() {
             page.contains("This page was out of date. Try again."),
             "{page}"
         );
+        let long = "x".repeat(crate::MAX_REQUEST_BODY_BYTES);
+        let large = browser
+            .submit(&replicas.b, &path, &[("action", &long)], OWN_PAGE)
+            .await;
+        assert_eq!(large.status(), StatusCode::PAYLOAD_TOO_LARGE, "{path}");
+        let page = html(large).await;
+        assert!(page.contains(sourceorigin_ui::TOO_LARGE), "{page}");
     }
 }
 

@@ -61,6 +61,7 @@ pub async fn account_data<'a>(
                     label: "Download your data",
                     class: "secondary small",
                     confirm: !confirmed,
+                    download: true,
                 )
             </header>
             <p class="help">

@@ -34,6 +34,7 @@ mod caching;
 mod devices;
 mod forwarding;
 mod origins;
+mod pages;
 mod rate_limits;
 mod sessions;
 
@@ -108,6 +109,11 @@ impl SecurityFixture {
             database,
             origin: site(),
             listener: Listener::Public,
+            pages: super::page::ErrorPages {
+                policies: crate::config::PolicyLinks::on(
+                    &crate::tests::WEB_ORIGIN.parse().expect("web origin"),
+                ),
+            },
         };
         let mut router = Router::new();
         for path in [

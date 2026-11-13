@@ -91,7 +91,7 @@ impl WebApplication {
     pub(in crate::web) async fn recover_change(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let refused = match Self::change(cx, body).await {
-            Some(RecoverChange::Open { token }) => match web.account.open_recovery(&token).await {
+            Ok(RecoverChange::Open { token }) => match web.account.open_recovery(&token).await {
                 Ok(opened) => {
                     let account = opened.account();
                     let step = RecoverStep::Enroll {
@@ -106,13 +106,13 @@ impl WebApplication {
                 }
                 Err(error) => ApiError::from(error),
             },
-            Some(RecoverChange::Recovered {}) => {
+            Ok(RecoverChange::Recovered {}) => {
                 return match web.owner(cx).await? {
                     Some(_) => Self::notify(cx, settings::HOME, Notice::Recovered),
                     None => Ok(see_other(page::LOGIN).into_response(cx)?),
                 };
             }
-            None => ApiError::bad_request(sourceorigin_ui::OUT_OF_DATE),
+            Err(refused) => refused,
         };
         let (status, message) = refused.public();
         web.recover_page(cx, status, RecoverStep::Open, Some(message))
@@ -150,12 +150,13 @@ impl WebApplication {
         body: Body,
     ) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
-        let Some(change) = Self::change(cx, body).await else {
-            let step = UndoStep::Open { signed_in: None };
-            let alert = Some(sourceorigin_ui::OUT_OF_DATE);
-            return web
-                .undo_page(cx, StatusCode::BAD_REQUEST, step, alert)
-                .await;
+        let change = match Self::change(cx, body).await {
+            Ok(change) => change,
+            Err(refused) => {
+                let step = UndoStep::Open { signed_in: None };
+                let (status, message) = refused.public();
+                return web.undo_page(cx, status, step, Some(message)).await;
+            }
         };
         match change {
             UndoChange::Open { recovery } => {

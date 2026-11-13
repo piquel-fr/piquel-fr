@@ -79,6 +79,24 @@ pub(crate) async fn status_bar<'a>(
     })
 }
 
+/// The page of a browser's request that failed before a page of its own could
+/// explain it, such as one refused for its rate, or an address with no page:
+/// what failed, as `title`, why, as `message`, and the way back to the area's
+/// `home`, labelled `back`. It goes in an [`auth_shell`].
+#[component]
+pub async fn error_page<'a>(
+    title: &'a str,
+    message: &'a str,
+    home: &'a str,
+    back: &'a str,
+) -> Result<impl View> {
+    Ok(view! {
+        <h1>(title)</h1>
+        <p class="lead">(message)</p>
+        <a class="button" href=(home)>(back)</a>
+    })
+}
+
 /// The frame of a page a signed-out browser sees, or one outside the account's
 /// shell: the brand above, the page as `child` in one narrow column, and the
 /// status bar below. The brand links `home`. A page answering a server error

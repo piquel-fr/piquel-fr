@@ -139,9 +139,10 @@ async fn connected_apps_are_listed_and_removed() {
 }
 
 /// A change that needs a recent passkey confirmation asks the passkey script for
-/// one while the session has none. Posted anyway, it is refused, and its row opens
-/// again, with what was typed, to ask once more. A confirmed session makes it at
-/// once.
+/// one while the session has none: its button starts disabled, saying what it
+/// needs, until the script finds the browser can run the ceremony. Posted anyway,
+/// it is refused, and its row opens again, with what was typed, to ask once more.
+/// A confirmed session makes it at once.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn confirmed_changes_ask_for_a_passkey_first() {
@@ -160,6 +161,12 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
     };
     let page = html(social.visit(&replicas.a, settings::EMAILS).await).await;
     assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(page.contains("This change needs your passkey"), "{page}");
+    let send = page
+        .find(">Send a confirmation link</button>")
+        .expect("the add form's button");
+    let button = &page[page[..send].rfind("<button").expect("its tag")..send];
+    assert!(button.contains(r#"disabled="""#), "{button}");
     let refused = social.post(&replicas, settings::EMAILS, &add).await;
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     let page = html(refused).await;
@@ -172,6 +179,7 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
 
     let page = html(confirmed.visit(&replicas.a, settings::EMAILS).await).await;
     assert!(!page.contains("data-passkey-confirm"), "{page}");
+    assert!(!page.contains("This change needs your passkey"), "{page}");
     let added = confirmed.post(&replicas, settings::EMAILS, &add).await;
     assert_eq!(cookie(&added, BrowserCookie::Notice).0, "email_added");
     let page = html(confirmed.visit(&replicas.a, settings::EMAILS).await).await;
@@ -876,9 +884,11 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     assert_eq!(redirect(&reported), shown);
 }
 
-/// The verification page never verifies on its own: its form does, signed out.
-/// Neither another account nor a token that does not match can, and a refused
-/// confirmation still leads to the addresses.
+/// The verification page never verifies on its own: its form does, signed out,
+/// with the token its script reads from the link, or, without scripts, the link
+/// pasted whole. Neither another account nor a token that does not match can, nor
+/// a link without its token, and a refused confirmation still leads to the
+/// addresses.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn verification_links_are_confirmed_by_their_form() {
@@ -902,6 +912,8 @@ async fn verification_links_are_confirmed_by_their_form() {
     assert_eq!(page.status(), StatusCode::OK);
     let page = html(page).await;
     assert!(page.contains("data-fragment-form"), "{page}");
+    // Without scripts, the link itself is pasted.
+    assert!(page.contains(r#"<input type="url" name="link""#), "{page}");
     let refused = browser
         .submit(
             &replicas.b,
@@ -931,13 +943,23 @@ async fn verification_links_are_confirmed_by_their_form() {
         "{page}"
     );
 
-    let verified = browser
+    let partial = browser
         .submit(
             &replicas.b,
             settings::VERIFY,
-            &[("token", &token)],
+            &[("link", &format!("{AUTH_ORIGIN}{}", settings::VERIFY))],
             OWN_PAGE,
         )
+        .await;
+    assert_eq!(partial.status(), StatusCode::BAD_REQUEST);
+    let page = html(partial).await;
+    assert!(
+        page.contains("Paste the whole link from the email"),
+        "{page}"
+    );
+    let link = format!("{AUTH_ORIGIN}{}#token={token}", settings::VERIFY);
+    let verified = browser
+        .submit(&replicas.b, settings::VERIFY, &[("link", &link)], OWN_PAGE)
         .await;
     assert_eq!(verified.status(), StatusCode::OK);
     let page = html(verified).await;
