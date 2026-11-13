@@ -164,7 +164,8 @@ permission system.
 Repositories are created with `origin repo create` on the server's own
 machine. The HTTP API has no way to create one, and the platform needs to.
 
-**Decided** in direction, as piquel designed it:
+**Decided.** piquel designed the registry, and agreed to the five points
+after it:
 
 - The server's configuration names a registry: where the list of repositories
   is. The value is a URL whose scheme says how to read it, such as
@@ -172,31 +173,29 @@ machine. The HTTP API has no way to create one, and the platform needs to.
   `file:///var/origin/repositories.json`.
 - The registry is a map of repositories, with what the server needs to know
   about each: where to find it, which is a path on the file system for now.
-- The server asks the registry on requests. A query parameter narrows the
-  answer, so it doesn't fetch every repository.
 
 This settles how SourceOrigin manages repositories. The platform's own API
 creates a repository by adding it to its database, and it serves the registry
 from there. Origin needs no notion of who may create a repository, and what
 exists is recorded in one place.
 
-**Proposed,** not answered yet:
-
-- **Ask about one repository and cache the answer.** Asking on every request
-  adds a network call to each one, and makes every clone fail when the
-  platform is down. The server keeps a short-lived cache and goes on serving
-  the repositories it knows when the registry can't be reached.
-- **Look up by the name in the URL, store by a stable ID.** The entry returns
-  the repository's ID, which names it on disk. Renaming a repository then
-  changes the registry only.
-- **No secret keys in the registry.** This plan keeps authority keys out of
-  SourceOrigin's database. See [authority keys](#authority-keys).
-- **Paths stay under the server's own root** when the registry is remote, so a
-  registry can't point a name at an arbitrary directory.
-- **An entry carries the first admin and a state.** The server creates a
-  listed repository the first time it is used, with that admin. A state such
-  as read-only lets the platform suspend a repository without touching the
-  node.
+1. **The server asks about one repository and caches the answer.** Asking on
+   every request would add a network call to each one, and make every clone
+   fail when the platform is down. The server keeps a short-lived cache and
+   goes on serving the repositories it knows when the registry can't be
+   reached.
+2. **It looks up by the name in the URL and stores by a stable ID.** The entry
+   returns the repository's ID, which names it on disk. Renaming a repository
+   then changes the registry only.
+3. **No secret keys in the registry.** This plan keeps authority keys out of
+   SourceOrigin's database. See [authority keys](#authority-keys).
+4. **Paths are sanitized and stay under the server's own root** when the
+   registry is remote, so a registry can't point a name at an arbitrary
+   directory.
+5. **An entry carries the first admin and a state.** The server creates a
+   listed repository the first time it is used, with that admin. A state such
+   as read-only lets the platform suspend a repository without touching the
+   node.
 
 Tracked in origin #53.
 
@@ -219,8 +218,9 @@ Tracked in origin #58. The two-way bridge stays origin #32.
 
 ## Colocated mode
 
-**Proposed.** A working copy that is both an Origin workspace and a git
-worktree, so tools that expect git keep working during the move.
+**Decided.** A working copy that is both an Origin workspace and a git
+worktree, so tools that expect git keep working during the move. piquel first
+answered "we'll see", then decided for it once it was clear how it works.
 
 - The design already reserves both `.origin` and `.git` as names that are
   never stored.
@@ -248,11 +248,11 @@ Its limits:
 - Nix flakes only see files git tracks, so Origin would have to mark new files
   as intended to be added.
 
-piquel's answer was "we'll see". Recent T3 Code changes seem to reduce its
-dependence on git, and some adapting may still be needed. How deeply T3 Code
-depends on git was not measured.
+Recent T3 Code changes seem to reduce its dependence on git, and some
+adapting may still be needed. How deeply T3 Code depends on git was not
+measured.
 
-Tracked in origin #59, marked as a proposal.
+Tracked in origin #59.
 
 ## CI
 

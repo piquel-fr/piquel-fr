@@ -61,7 +61,8 @@ Every item carries one of these:
 | Hosting | One Origin node with a local volume. No replicas for now | Decided | [origin](origin.md#one-node-first) |
 | Origin's roadmap | Four milestones in `sourceorigin-dev/origin`, with epics as parent issues: v0.1 the prototype merged, v0.2 hostable, v0.3 daily use, v1.0 the rest | Decided | [roadmap](roadmap.md#origins-milestones) |
 | The open pull requests | Nothing in the stack has to change for hosting. piquel reviews and merges it from the bottom | Decided | [roadmap](roadmap.md#origin) |
-| Finding repositories | The server reads which repositories exist from a registry named in its configuration. The details are proposed | Proposed | [origin](origin.md#finding-repositories) |
+| Finding repositories | The server reads which repositories exist from a registry named in its configuration, one repository at a time, and caches the answer | Decided | [origin](origin.md#finding-repositories) |
+| Colocated mode | A working copy that is an Origin workspace and a git worktree at once, so git tools can read it. Built in Origin's v0.3 | Decided | [origin](origin.md#colocated-mode) |
 | Encrypted remotes | The client has no TLS, which blocks a hosted node. Fixed in v0.2 | Decided | [origin](origin.md#operations) |
 | Authority key | One node key for every hosted repository, mounted as a piqueld secret. Keys per repository come later | Decided | [origin](origin.md#authority-keys) |
 | Backups | piqueld's scheduled volume backups. Continuous backup comes with object storage, not from piqueld | Decided | [platform](platform.md#hosting-and-backups) |
@@ -95,10 +96,6 @@ offered and declined for now.
   [authorization](origin.md#authorization).
 - Which frontend framework wins the experiment. See
   [the experiment](frontend.md#the-experiment).
-- How the repository registry works in detail. See
-  [finding repositories](origin.md#finding-repositories).
-- Whether colocated mode is built. See
-  [colocated mode](origin.md#colocated-mode).
 - Whether v0.2 is exactly milestones 0 and 1. It was proposed and not answered.
   See [the roadmap](roadmap.md#milestones).
 - How deeply T3 Code depends on git, which decides how much the fork must

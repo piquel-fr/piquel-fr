@@ -102,7 +102,7 @@ numbers below are issues in that repository.
 | | #49 authorization | #50 the authorization design; #51 repositories start closed; #34 revocable and per-repository tokens |
 | | #52 operating a server | #33 TLS for remotes; #53 the repository registry; #54 health endpoints; #55 telemetry; #56 a repository format version; #20 pack format errors; #57 `origin verify` |
 | | No epic | #58 the one-way mirror to git |
-| **v0.3**, daily use | No epic | #59 a working copy that git tools can read, which is colocated mode and still only proposed |
+| **v0.3**, daily use | No epic | #59 a working copy that git tools can read, which is colocated mode |
 | | #60 agents | #61 agent skills for the Origin workflow; #21 a typed library API |
 | | #62 deploys | #63 a convention for deploy statements; #64 exporting an acceptance's snapshot for a build |
 | **v1.0**, the rest | #65 more than one server | #66 the storage boundary; #67 coordination without `flock`; #68 events that survive a change of server; #28 remotes on plain storage |
