@@ -39,6 +39,11 @@ impl<'a> Release<'a> {
             .workspace
             .root()
             .join(format!("target/release-notes-{tag}.md"));
+        // `target` may not exist yet when `CARGO_TARGET_DIR` puts builds elsewhere.
+        if let Some(directory) = notes.parent() {
+            fs::create_dir_all(directory)
+                .with_context(|| format!("create {}", directory.display()))?;
+        }
         fs::write(&notes, self.notes(previous)?)
             .with_context(|| format!("write {}", notes.display()))?;
         println!("the release notes are in {}", notes.display());
