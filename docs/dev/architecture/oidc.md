@@ -14,7 +14,7 @@ revocation, userinfo and logout work. Read it before changing anything under
 | `oidc/inline.rs` | Completing a pushed request from a passkey sign-in on an app's own page |
 | `oidc/policy.rs` | `ClientPolicy`, the check of the client's current registration |
 | `oidc/token.rs` | The token, revocation and userinfo endpoints |
-| `oidc/logout.rs` | RP-initiated logout |
+| `oidc/logout.rs` | RP-initiated logout, validated when its page asks to confirm it and again when the user confirms |
 | `web/auth/` | The sign-in, consent and logout pages the flow sends the browser to |
 
 ```text
@@ -231,15 +231,32 @@ itself carries, released by its scopes. It reads nothing from the database.
 
 RP-initiated logout takes two requests:
 
-1. `/oidc/logout` (`start_logout`) validates the request: an `id_token_hint`
-   auth signed, which may be expired and signed by a retired key, a `client_id`
-   matching the hint's audience, and a `post_logout_redirect_uri` registered
-   exactly for that client. It then sends the browser to auth's `/logout` page
-   with the same parameters.
-2. The page asks the user to confirm. Its form validates the parameters again and
-   signs the browser out (`end_session`), recording
-   `RelyingPartyLogout` with the client that asked, or `Logout` when none is
-   named. The browser goes on to the redirect URI with `state`, or to sign-in.
+1. `/oidc/logout`, by query or a form `POST`, which apps send cross-site, answers
+   the page asking to confirm the request (`logout_request`), served by the pages
+   (`web/auth/oidc.rs`) under the protocol's own security class. It validates
+   the request: a `client_id` matching the `id_token_hint`'s audience, and a
+   `post_logout_redirect_uri` registered exactly for that client. A hint auth
+   signed may be expired and signed by a retired key. One it can't verify is
+   ignored rather than blocking the logout: the request then names no client,
+   and the browser goes back to sign-in, not to the redirect URI. The page says
+   so, and says when the hint names another account than the browser's. It
+   carries the request's parameters as hidden fields of its form, so an ID token
+   never sits in a page's address.
+2. The form posts them to `/logout`, which validates them again. An app posts
+   its request cross-site, without auth's `SameSite=Lax` cookie, so its page
+   can't tell whose browser it is: when the hint names another account than the
+   browser's and the page didn't warn, `/logout` shows the page again, warning,
+   with a `warned` field. Otherwise it signs the browser out (`end_session`),
+   recording `RelyingPartyLogout` with the client that asked, or `Logout` when
+   none is named. It also revokes the session the hint's `sid` names, if it is
+   the hinted account's sign-in on that app's own page (`is_inline_for`): such a
+   session has no cookie, so no browser could end it. A session with a cookie
+   ends only through its own browser: an ID token alone ends only the sign-in on
+   the app's page it was issued for. The browser goes on to the redirect URI
+   with `state`, or to sign-in.
+
+A request with no parameters, as the settings and the admin dashboard post to
+`/logout`, signs the browser out of auth itself.
 
 Signing out revokes the session, which tells every app that received tokens from
 it ([back-channel logout](sessions.md#back-channel-logout)).

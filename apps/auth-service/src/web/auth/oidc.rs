@@ -3,11 +3,11 @@
 
 use crate::web::{Failure, WebApplication};
 use crate::{
-    oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
+    oidc::{AuthorizationDecision, LogoutQuery, LogoutView, OAuthError, TransactionQuery},
     routes,
 };
 use sourceorigin_common::Handle;
-use sourceorigin_ui::{LoginQuery, Query, Title};
+use sourceorigin_ui::{LoginQuery, LogoutNotice, Query, Title};
 use std::slice;
 use topcoat::{
     Error,
@@ -70,33 +70,81 @@ impl WebApplication {
         Ok(web.onward(cx, Title::Consent.as_str(), &redirect).await?)
     }
 
-    /// `GET /logout?…`: asks to confirm an application's logout request, which
-    /// `GET /oidc/logout` sends here once it is valid.
+    /// `GET /oidc/logout?…`: asks to confirm an application's logout request, saying
+    /// so when auth couldn't verify which sign-in it ends, or when it names another
+    /// account. `GET /logout`, with no request, asks to sign out of auth itself.
     pub(in crate::web) async fn logout(cx: &Cx) -> Result<Response, Failure> {
-        let web = app_context::<Self>(cx);
         let request: LogoutQuery = Self::query(cx)?;
-        let (destination, _) = web.oidc.logout_destination(&request).await?;
-        let fields: Vec<_> = request.fields().collect();
+        Self::confirm_logout(cx, &request).await
+    }
+
+    /// `POST /oidc/logout`: the same request, posted as a form.
+    pub(in crate::web) async fn logout_form(cx: &Cx, body: Body) -> Result<Response, Failure> {
+        let request: LogoutQuery = Self::form(cx, body).await?;
+        Self::confirm_logout(cx, &request).await
+    }
+
+    /// The page confirming the logout `request`, whose form posts its parameters
+    /// back to `/logout`, so they never sit in the page's address.
+    async fn confirm_logout(cx: &Cx, request: &LogoutQuery) -> Result<Response, Failure> {
+        let web = app_context::<Self>(cx);
+        let view = web.oidc.logout_request(headers(cx), request).await?;
+        Self::logout_page(cx, request, &view).await
+    }
+
+    /// The logout page for `request`, as `view` shows it. A page warning that the
+    /// hint names another account says so in its form.
+    async fn logout_page(
+        cx: &Cx,
+        request: &LogoutQuery,
+        view: &LogoutView,
+    ) -> Result<Response, Failure> {
+        let web = app_context::<Self>(cx);
+        let notice = if view.unverified {
+            Some(LogoutNotice::Unverified)
+        } else if view.another_account {
+            Some(LogoutNotice::AnotherAccount)
+        } else {
+            None
+        };
+        let mut fields: Vec<_> = request.fields().collect();
+        if view.another_account {
+            fields.push(("warned", "another_account"));
+        }
         let page = view! { cx =>
-            sourceorigin_ui::logout(action: routes::page::LOGOUT, fields: &fields, keep: routes::page::LOGIN)
+            sourceorigin_ui::logout(
+                action: routes::page::LOGOUT,
+                fields: &fields,
+                keep: routes::page::LOGIN,
+                notice: notice,
+            )
         };
         Ok(web
             .render(
                 cx,
                 StatusCode::OK,
                 Title::Logout.as_str(),
-                slice::from_ref(&destination),
+                slice::from_ref(&view.destination),
                 page,
             )
             .await?)
     }
 
-    /// `POST /logout`: ends the session and sends the browser where the application
-    /// asked, or to sign-in.
+    /// `POST /logout`: validates the request again, ends the session and sends the
+    /// browser where the application asked, or to sign-in. An application posts its
+    /// request cross-site, without auth's `SameSite=Lax` cookie, so its page could
+    /// not tell whether the hint names another account than the browser's: if it
+    /// does, and the page didn't warn, the page is shown again, warning.
     pub(in crate::web) async fn end_session(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let context = Self::context(cx)?;
         let request: LogoutQuery = Self::form(cx, body).await?;
+        if !request.warned() {
+            let view = web.oidc.logout_request(headers(cx), &request).await?;
+            if view.another_account {
+                return Self::logout_page(cx, &request, &view).await;
+            }
+        }
         let (destination, signed_out) =
             web.oidc.end_session(context, headers(cx), &request).await?;
         let mut response = web.onward(cx, Title::Logout.as_str(), &destination).await?;

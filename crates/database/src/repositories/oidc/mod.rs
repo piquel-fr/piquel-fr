@@ -834,9 +834,9 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// The clients that received tokens from `session` and registered a back-channel
-    /// logout URI, with the session's account. A trigger records each client when it
-    /// redeems a code.
+    /// The clients that received tokens from `session`, registered a back-channel
+    /// logout URI and aren't deleted, with the session's account. A trigger records
+    /// each client when it redeems a code.
     pub(crate) async fn logout_clients(
         &mut self,
         session: SessionId,
@@ -855,6 +855,7 @@ impl OidcRepository<'_> {
                 JOIN sessions s ON s.id = sc.session_id
                 WHERE sc.session_id = $1
                 AND c.backchannel_logout_uri IS NOT NULL
+                AND c.deleted_at IS NULL
                 ORDER BY c.id"#,
                 session.as_uuid(),
             )

@@ -20,7 +20,7 @@
  */
 import { parseChallenge, stepUpRequirement } from './challenge.ts';
 import { type AuthorizeRequest, type Client, type ClientConfig, pendingLogin } from './client.ts';
-import type { PendingLogin, Tokens } from './client.ts';
+import type { LogoutRequest, PendingLogin, Tokens } from './client.ts';
 import { AuthError } from './error.ts';
 import type { Issuer } from './issuer.ts';
 import * as json from './json.ts';
@@ -201,6 +201,12 @@ export class BrowserClient {
     return new Promise<never>(() => undefined);
   }
 
+  /** @internal Posts `request` as a form, a navigation this page does not come back from. */
+  post(request: LogoutRequest): Promise<never> {
+    this.platform.submit(request.action, request.fields);
+    return new Promise<never>(() => undefined);
+  }
+
   /**
    * Where `request`'s login comes back to: its `returnTo`, which must be on this
    * page's origin, or this page. Checked before anything is sent.
@@ -372,7 +378,7 @@ export class Session {
   async logout(postLogout?: string): Promise<never> {
     const { client } = this.#owner;
     if (this.#tokens.refreshToken !== undefined) await client.revoke(this.#tokens.refreshToken);
-    return this.#owner.away(client.logoutUrl(this.#tokens.idToken, postLogout));
+    return this.#owner.post(client.logout(this.#tokens.idToken, postLogout));
   }
 
   #clock(): number {

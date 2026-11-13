@@ -14,6 +14,8 @@ export type Platform = {
   capabilities: () => Promise<PublicKeyCredentialClientCapabilities>;
   /** Sends a session's requests to resource servers. */
   fetch: (request: Request) => Promise<Response>;
+  /** Navigates by posting `fields` to `action` as a form. */
+  submit: (action: string, fields: Readonly<Record<string, string>>) => void;
 };
 
 /** @internal The current page's APIs. */
@@ -28,6 +30,20 @@ export function platform(): Platform {
         ? // A browser that cannot tell has no related origins to offer.
           PublicKeyCredential.getClientCapabilities().catch(() => ({}))
         : {},
-    fetch: (request) => fetch(request)
+    fetch: (request) => fetch(request),
+    submit: (action, fields) => {
+      const form = document.createElement('form');
+      form.method = 'post';
+      form.action = action;
+      for (const [name, value] of Object.entries(fields)) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        form.append(input);
+      }
+      document.body.append(form);
+      form.submit();
+    }
   };
 }

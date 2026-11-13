@@ -25,7 +25,7 @@ use error::Challenge;
 pub use error::OidcConfigError;
 pub(crate) use error::{OAuthCode, OAuthError, Reject};
 pub(crate) use inline::{InlineClaim, InlineResponse};
-pub(crate) use logout::LogoutQuery;
+pub(crate) use logout::{LogoutQuery, LogoutView};
 use sourceorigin_crypto::{ClientSecret, CryptoError, Digest, Secret};
 
 use axum::{
@@ -445,10 +445,6 @@ impl OidcApplication {
             .route(
                 routes::oidc::USERINFO,
                 get(Self::userinfo).post(Self::userinfo),
-            )
-            .route(
-                routes::oidc::LOGOUT,
-                get(Self::start_logout).post(Self::start_logout),
             )
             .with_state(self)
     }

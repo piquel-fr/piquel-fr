@@ -177,6 +177,93 @@ impl LoginError {
     }
 }
 
+/// An RP-initiated logout request ([`Client::logout`]): the fields the browser posts
+/// to auth's end-session endpoint, as a form, so the ID token naming the sign-in
+/// never appears in a URL, a log or a `Referer`.
+#[derive(Clone, PartialEq, Eq)]
+pub struct LogoutRequest {
+    /// Auth's end-session endpoint.
+    action: Url,
+    /// The request's parameters, in the order they are posted.
+    fields: Vec<(&'static str, String)>,
+}
+
+impl LogoutRequest {
+    /// Where the form posts: auth's end-session endpoint.
+    #[must_use]
+    pub const fn action(&self) -> &Url {
+        &self.action
+    }
+
+    /// The form's fields, by name, in the order they are posted.
+    pub fn fields(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.fields
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+    }
+
+    /// An HTML page that posts the request as soon as it loads, and offers a
+    /// button where no script runs. Answer the browser with it, uncached. The app's
+    /// `form-action` policy, if it sets one, must allow auth's origin.
+    #[must_use]
+    pub fn page(&self) -> String {
+        self.to_string()
+    }
+
+    /// Escapes `value` for an HTML attribute.
+    fn escape(value: &str) -> String {
+        value
+            .replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+}
+
+impl fmt::Debug for LogoutRequest {
+    /// Names the fields, never the ID token.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let fields: Vec<_> = self
+            .fields()
+            .map(|(name, value)| match name {
+                "id_token_hint" => (name, "REDACTED"),
+                _ => (name, value),
+            })
+            .collect();
+        formatter
+            .debug_struct("LogoutRequest")
+            .field("action", &self.action.as_str())
+            .field("fields", &fields)
+            .finish()
+    }
+}
+
+impl fmt::Display for LogoutRequest {
+    /// Writes [`Self::page`].
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            concat!(
+                r#"<!doctype html><html><head><meta charset="utf-8"><title>Signing out</title></head>"#,
+                r#"<body><form method="post" action="{}">"#
+            ),
+            Self::escape(self.action.as_str())
+        )?;
+        for (name, value) in self.fields() {
+            write!(
+                formatter,
+                r#"<input type="hidden" name="{}" value="{}">"#,
+                Self::escape(name),
+                Self::escape(value)
+            )?;
+        }
+        formatter.write_str(concat!(
+            "<button>Continue signing out</button></form>",
+            "<script>document.forms[0].submit()</script></body></html>"
+        ))
+    }
+}
+
 /// How the client authenticates at the token and revocation endpoints.
 ///
 /// ```
@@ -831,31 +918,50 @@ impl Client {
         Ok(user)
     }
 
-    /// The RP-initiated logout URL: auth ends the browser session, then sends the
-    /// browser to `post_logout`, which must be registered for this client. Without
-    /// one, auth shows its own page. `id_token_hint` names the sign-in being ended
-    /// when the app kept its ID token; auth asks the user to confirm either way.
+    /// The RP-initiated logout request: auth asks the user to confirm, ends the
+    /// browser session, then sends the browser to `post_logout`, which must be
+    /// registered for this client. Without one, auth shows its own page.
+    /// `id_token_hint` names the sign-in being ended when the app kept its ID token,
+    /// so auth also ends a sign-in that has no cookie in the browser, such as a
+    /// passkey sign-in on the app's own page. The browser posts it as a form, so the
+    /// ID token never appears in a URL: answer with [`LogoutRequest::page`].
     ///
     /// ```no_run
     /// # fn run(client: sourceorigin_auth::Client, id_token: sourceorigin_auth::IdToken) -> Result<(), url::ParseError> {
-    /// // Redirect the browser here once the app's own session is gone.
+    /// // Answer with this page once the app's own session is gone.
     /// let after: url::Url = "https://notes.sourceorigin.dev/".parse()?;
-    /// let logout = client.logout_url(Some(&id_token), Some(&after));
+    /// let page = client.logout(Some(&id_token), Some(&after)).page();
     /// # Ok(()) }
     /// ```
     #[must_use]
-    pub fn logout_url(&self, id_token_hint: Option<&IdToken>, post_logout: Option<&Url>) -> Url {
-        let mut url = self.issuer().metadata().end_session_endpoint.clone();
-        {
-            let mut query = url.query_pairs_mut();
-            if let Some(id_token) = id_token_hint {
-                query.append_pair("id_token_hint", id_token.as_str());
-            }
-            query.append_pair("client_id", self.config().client_id.as_str());
-            if let Some(post_logout) = post_logout {
-                query.append_pair("post_logout_redirect_uri", post_logout.as_str());
-            }
+    pub fn logout(
+        &self,
+        id_token_hint: Option<&IdToken>,
+        post_logout: Option<&Url>,
+    ) -> LogoutRequest {
+        let mut fields = Vec::new();
+        if let Some(id_token) = id_token_hint {
+            fields.push(("id_token_hint", id_token.as_str().to_owned()));
         }
+        fields.push(("client_id", self.config().client_id.as_str().to_owned()));
+        if let Some(post_logout) = post_logout {
+            fields.push(("post_logout_redirect_uri", post_logout.as_str().to_owned()));
+        }
+        LogoutRequest {
+            action: self.issuer().metadata().end_session_endpoint.clone(),
+            fields,
+        }
+    }
+
+    /// The RP-initiated logout request without an ID token, as an address to
+    /// redirect the browser to: it has no ID token to keep out of URLs, and a
+    /// redirect needs no script and no `form-action`. With an ID token, use
+    /// [`Self::logout`].
+    #[must_use]
+    pub fn logout_redirect(&self, post_logout: Option<&Url>) -> Url {
+        let request = self.logout(None, post_logout);
+        let mut url = request.action().clone();
+        url.query_pairs_mut().extend_pairs(request.fields());
         url
     }
 

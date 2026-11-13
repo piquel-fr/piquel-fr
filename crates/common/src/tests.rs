@@ -404,3 +404,67 @@ fn announcements_split_into_paragraphs_of_lines() {
         Vec::<Vec<&str>>::new()
     );
 }
+
+/// Only public addresses pass the shared check, however they are written: an
+/// embedded IPv4 address (mapped, NAT64, 6to4) is checked too. A back-channel
+/// logout URI on a literal address registers exactly when deliveries could reach
+/// it.
+#[test]
+fn only_public_addresses_are_public() {
+    use net::PublicAddress;
+    let check = |address: &str, public: bool| {
+        let ip: std::net::IpAddr = address.parse().expect("address");
+        assert_eq!(ip.is_public(), public, "{address}");
+        // The URI as the browser would write it, so only the address can refuse it.
+        let host: url::Host = match ip {
+            std::net::IpAddr::V4(v4) => url::Host::Ipv4(v4),
+            std::net::IpAddr::V6(v6) => url::Host::Ipv6(v6),
+        };
+        let uri = format!("https://{host}/logout");
+        match uri.parse::<clients::BackchannelLogoutUri>() {
+            Ok(_) => assert!(public, "{uri}"),
+            Err(error) => assert!(
+                !public && matches!(error, clients::InvalidRedirectUri::Unreachable { .. }),
+                "{uri}: {error}"
+            ),
+        }
+    };
+    for public in [
+        "93.184.215.14",
+        "100.63.255.255",
+        "100.128.0.0",
+        "2606:2800:21f:cb07:6820:80da:af6b:8b2c",
+        "64:ff9b::5db8:d70e",
+        "2002:5db8:d70e::1",
+    ] {
+        check(public, true);
+    }
+    for refused in [
+        "127.0.0.1",
+        "10.1.2.3",
+        "172.16.0.1",
+        "192.168.1.1",
+        "169.254.169.254",
+        "100.64.0.0",
+        "100.127.255.255",
+        "0.0.0.0",
+        "255.255.255.255",
+        "224.0.0.1",
+        "::1",
+        "::",
+        "fd00::1",
+        "fe80::1",
+        "fec0::1",
+        "ff02::1",
+        "::ffff:127.0.0.1",
+        "::ffff:10.0.0.1",
+        "::7f00:1",
+        "64:ff9b::a00:1",
+        "64:ff9b:1::a00:1",
+        "2002:a00:1::1",
+        "198.18.0.1",
+        "240.0.0.1",
+    ] {
+        check(refused, false);
+    }
+}

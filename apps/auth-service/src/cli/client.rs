@@ -10,8 +10,8 @@ use sourceorigin_common::{
     ClientId,
     admin::{ApprovedOrigin, Client},
     clients::{
-        AllowedScopes, ClientKind, ClientRegistration, DisplayName, PostLogoutUris, RedirectUri,
-        RedirectUris, RelatedOrigin, ScopeName,
+        AllowedScopes, BackchannelLogoutUri, ClientKind, ClientRegistration, DisplayName,
+        PostLogoutUris, RedirectUri, RedirectUris, RelatedOrigin, ScopeName,
     },
     config::{Origin, SecretReference},
 };
@@ -461,7 +461,7 @@ pub(super) struct CreateClient {
     /// Where auth posts a logout token when a session the client holds tokens from
     /// ends (OIDC Back-Channel Logout); HTTPS with a public address.
     #[arg(long)]
-    backchannel_logout_uri: Option<RedirectUri>,
+    backchannel_logout_uri: Option<BackchannelLogoutUri>,
     /// Why, recorded with the change: 1 to 500 characters.
     #[arg(long)]
     reason: Reason,
@@ -595,7 +595,7 @@ pub(super) struct UpdateClient {
     no_require_par: bool,
     /// Post logout tokens to this URI instead.
     #[arg(long, conflicts_with = "no_backchannel_logout_uri")]
-    backchannel_logout_uri: Option<RedirectUri>,
+    backchannel_logout_uri: Option<BackchannelLogoutUri>,
     /// Stop posting logout tokens to the client.
     #[arg(long)]
     no_backchannel_logout_uri: bool,

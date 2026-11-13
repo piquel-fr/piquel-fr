@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    c.id AS \"client_id: ClientId\",\n                    c.backchannel_logout_uri AS \"backchannel_logout_uri!\",\n                    s.user_id AS \"user_id: UserId\"\n                FROM oidc_session_clients sc\n                JOIN oidc_clients c ON c.id = sc.client_id\n                JOIN sessions s ON s.id = sc.session_id\n                WHERE sc.session_id = $1\n                AND c.backchannel_logout_uri IS NOT NULL\n                AND c.deleted_at IS NULL\n                ORDER BY c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "backchannel_logout_uri!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "157d808cbe97493724eceb7c4354fd0b28cd0e00f3dffe4007e391f254360e0e"
+}

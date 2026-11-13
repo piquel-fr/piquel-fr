@@ -5,7 +5,7 @@ use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use sourceorigin_common::{
-    AuthenticationMethod, PasskeyId, SessionId, UserId,
+    AuthenticationMethod, ClientId, PasskeyId, SessionId, UserId,
     admin::{KnownDevice, Session},
     events::{DomainEvent, EventContext, RevocationReason, UserAgentFamily},
     protocol::claims::{Acr, Amr},
@@ -234,6 +234,35 @@ impl SessionRepository<'_> {
                 FROM sessions
                 WHERE id = $1"#,
                 id.as_uuid(),
+            )
+        )
+    }
+
+    /// Whether `session` is a sign-in on `client`'s own page, with no browser
+    /// cookie, whose tokens `client` received.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn is_inline_for(
+        &mut self,
+        session: SessionId,
+        client: &ClientId,
+    ) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                    SELECT 1 FROM oidc_session_clients sc
+                    WHERE sc.session_id = $1
+                    AND sc.client_id = $2
+                    AND NOT EXISTS (
+                        SELECT 1 FROM browser_session_secrets b WHERE b.session_id = $1
+                    )
+                ) AS "inline!""#,
+                session.as_uuid(),
+                client.as_str(),
             )
         )
     }

@@ -82,46 +82,15 @@ fn retries_back_off_and_honor_retry_after_until_the_maximum_age() {
     assert!((0.0..1.0).contains(&jitter), "{jitter}");
 }
 
-/// Only public addresses are reachable, however they are written.
+/// Only public addresses are reachable, by the shared check
+/// (`sourceorigin_common::net`, whose tests list the ranges), and loopback too in
+/// tests.
 #[test]
 fn only_public_addresses_are_reachable() {
-    let allowed = |address: &str| Reachable::Public.allows(address.parse().expect("address"));
-    for public in [
-        "93.184.215.14",
-        "2606:2800:21f:cb07:6820:80da:af6b:8b2c",
-        "64:ff9b::5db8:d70e",
-        "2002:5db8:d70e::1",
-    ] {
-        assert!(allowed(public), "{public}");
-    }
-    for refused in [
-        "127.0.0.1",
-        "10.1.2.3",
-        "172.16.0.1",
-        "192.168.1.1",
-        "169.254.169.254",
-        "100.64.0.1",
-        "0.0.0.0",
-        "255.255.255.255",
-        "224.0.0.1",
-        "::1",
-        "::",
-        "fd00::1",
-        "fe80::1",
-        "ff02::1",
-        "::ffff:127.0.0.1",
-        "::ffff:10.0.0.1",
-        "::7f00:1",
-        "64:ff9b::a00:1",
-        "64:ff9b:1::a00:1",
-        "2002:a00:1::1",
-        "198.18.0.1",
-        "240.0.0.1",
-    ] {
-        assert!(!allowed(refused), "{refused}");
-    }
-    let loopback: IpAddr = "::1".parse().expect("address");
-    assert!(Reachable::PublicOrLoopback.allows(loopback));
+    let address = |text: &str| -> IpAddr { text.parse().expect("address") };
+    assert!(Reachable::Public.allows(address("93.184.215.14")));
+    assert!(!Reachable::Public.allows(address("100.64.0.1")));
+    assert!(Reachable::PublicOrLoopback.allows(address("::1")));
 }
 
 /// Only 408, 429 and 5xx are retried, after `Retry-After` in seconds or as a date

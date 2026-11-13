@@ -341,7 +341,10 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
   on the host share the rest.
 - **Logout.** `POST <mount>/logout` revokes the session's refresh token at auth
   (RFC 7009), clears the cookies, and redirects to RP-initiated logout with
-  `client_id`, since there is no ID token to send as `id_token_hint`. If auth
+  `client_id`, since there is no ID token to send as `id_token_hint`. Both SDKs'
+  `logout_redirect` (`logoutRedirect`) gives that request as an address. With an
+  ID token, `logout` builds a `LogoutRequest` whose `page()` posts it, as a
+  browser app's does, so an ID token never appears in a URL. If auth
   cannot revoke it, the answer is 502 and the cookie stays, for the user to try
   again: clearing it would leave any copy refreshing. A sign-in revokes the refresh
   token of the session it replaces once its code is redeemed and its user checked,

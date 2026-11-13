@@ -193,7 +193,7 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 26] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 27] {
         use routes::page::{
             ADMIN, CONSENT, LOGIN, LOGOUT, PREFERENCES, RECOVER, RECOVER_UNDO, REGISTER, SIGN_OUT,
             UNSUBSCRIBE, settings::VERIFY,
@@ -222,6 +222,14 @@ impl WebApplication {
                 Title::Logout.as_str(),
                 Self::logout,
                 Self::end_session
+            ),
+            // An application's logout request, by query or form: its page asks to
+            // confirm it, posting it to `LOGOUT`.
+            page!(
+                routes::oidc::LOGOUT,
+                Title::Logout.as_str(),
+                Self::logout,
+                Self::logout_form
             ),
             page!(
                 ADMIN,

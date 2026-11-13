@@ -74,7 +74,7 @@
 //!    before the code goes anywhere. It then validates the ID token against the
 //!    pending login.
 //! 3. [`Client::refresh`], [`Client::revoke`], [`Client::userinfo`] and
-//!    [`Client::logout_url`] cover the rest of a session.
+//!    [`Client::logout`] cover the rest of a session.
 //!
 //! When auth ends a session, it posts a logout token to the client's back-channel
 //! logout URI; [`Client::logout_token`] validates it. The axum login routes receive
@@ -135,7 +135,7 @@ mod tests;
 
 pub use client::{
     AuthorizeRequest, BearerToken, CallbackParams, Client, ClientConfig, Credentials, LoginError,
-    OAuthError, PendingLogin, RefreshToken, Tokens,
+    LogoutRequest, OAuthError, PendingLogin, RefreshToken, Tokens,
 };
 pub use http::NetworkError;
 pub use issuer::{DiscoveryError, Issuer, IssuerBuilder};

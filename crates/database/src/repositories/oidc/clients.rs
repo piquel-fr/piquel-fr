@@ -15,8 +15,8 @@ use sourceorigin_common::{
     ClientId, ClientSecretId, UserId,
     admin::{ApprovedOrigin, Client},
     clients::{
-        ClientField, ClientKind, ClientOwner, ClientRegistration, RedirectUri, RelatedOrigin,
-        ScopeName,
+        BackchannelLogoutUri, ClientField, ClientKind, ClientOwner, ClientRegistration,
+        RedirectUri, RelatedOrigin, ScopeName,
     },
 };
 use sqlx::types::Json;
@@ -136,7 +136,7 @@ impl StoredOidcClient {
                     == registration
                         .backchannel_logout_uri
                         .as_ref()
-                        .map(RedirectUri::as_str),
+                        .map(BackchannelLogoutUri::as_str),
             ),
         ]
         .into_iter()
@@ -259,7 +259,7 @@ impl OidcRepository<'_> {
                 registration
                     .backchannel_logout_uri
                     .as_ref()
-                    .map(RedirectUri::as_str),
+                    .map(BackchannelLogoutUri::as_str),
             )
         )?;
         Ok(())
@@ -325,7 +325,7 @@ impl OidcRepository<'_> {
                 registration
                     .backchannel_logout_uri
                     .as_ref()
-                    .map(RedirectUri::as_str),
+                    .map(BackchannelLogoutUri::as_str),
             )
         )?;
         Ok(())
