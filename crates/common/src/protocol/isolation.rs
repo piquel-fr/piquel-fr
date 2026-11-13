@@ -33,19 +33,19 @@ pub const PERMISSIONS_POLICY: &str = "publickey-credentials-get=(self), publicke
     clipboard-write=(self), accelerometer=(), ambient-light-sensor=(), \
     autoplay=(), bluetooth=(), browsing-topics=(), camera=(), \
     captured-surface-control=(), clipboard-read=(), compute-pressure=(), \
-    deferred-fetch=(), deferred-fetch-minimal=(), digital-credentials-create=(), \
-    digital-credentials-get=(), direct-sockets=(), display-capture=(), \
-    encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), \
-    hid=(), identity-credentials-get=(), idle-detection=(), interest-cohort=(), \
-    keyboard-map=(), language-detector=(), language-model=(), local-fonts=(), \
-    local-network=(), local-network-access=(), loopback-network=(), \
-    magnetometer=(), media-playback-while-not-visible=(), microphone=(), midi=(), \
-    on-device-speech-recognition=(), otp-credentials=(), payment=(), \
-    picture-in-picture=(), private-state-token-issuance=(), \
-    private-state-token-redemption=(), screen-wake-lock=(), serial=(), \
-    smart-card=(), speaker-selection=(), storage-access=(), summarizer=(), tools=(), \
-    translator=(), usb=(), web-share=(), window-management=(), \
-    xr-spatial-tracking=()";
+    deferred-fetch=(), deferred-fetch-minimal=(), device-attributes=(), \
+    digital-credentials-create=(), digital-credentials-get=(), direct-sockets=(), \
+    display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), \
+    geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), \
+    idle-detection=(), interest-cohort=(), keyboard-map=(), language-detector=(), \
+    language-model=(), local-fonts=(), local-network=(), local-network-access=(), \
+    loopback-network=(), magnetometer=(), media-playback-while-not-visible=(), \
+    microphone=(), midi=(), on-device-speech-recognition=(), otp-credentials=(), \
+    payment=(), picture-in-picture=(), private-state-token-issuance=(), \
+    private-state-token-redemption=(), rewriter=(), screen-wake-lock=(), \
+    serial=(), smart-card=(), speaker-selection=(), storage-access=(), \
+    summarizer=(), tools=(), translator=(), usb=(), web-share=(), \
+    window-management=(), writer=(), xr-spatial-tracking=()";
 
 /// The isolation headers of a response, by name and value: other sites may embed
 /// or read it only if it is `public`.
