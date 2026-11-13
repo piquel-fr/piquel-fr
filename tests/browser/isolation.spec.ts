@@ -8,10 +8,22 @@
  */
 import { expect, test } from '@playwright/test';
 
-/** Allowed features that reach no device, data or other site. */
+/**
+ * Allowed features that reach no device, data or other site: the defaults the
+ * policy leaves unlisted (`crates/common/src/protocol/isolation.rs`).
+ */
 const harmless = (feature: string) =>
   feature.startsWith('ch-') ||
-  ['aria-notify', 'cross-origin-isolated', 'sync-xhr', 'unload'].includes(feature);
+  [
+    'aria-notify',
+    'cross-origin-isolated',
+    'execution-while-not-rendered',
+    'execution-while-out-of-viewport',
+    'focus-without-user-activation',
+    'sync-xhr',
+    'unload',
+    'vertical-scroll'
+  ].includes(feature);
 
 test("auth's pages may use passkeys and the clipboard, and nothing else that reaches beyond the page", async ({
   page

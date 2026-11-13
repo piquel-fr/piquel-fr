@@ -32,9 +32,10 @@ const PERMISSIONS_POLICY_HEADER: &str = "permissions-policy";
 /// registry of features (`permissions_policy_features.json5`, release 153): all
 /// are listed but the defaults that reach nothing beyond the page (client hints,
 /// `sync-xhr`, `unload`, `aria-notify`, `cross-origin-isolated`, `vertical-scroll`,
-/// `focus-without-user-activation` and the `execution-while-*` pair), and
-/// `autofill` and `manual-text`, test-only features whose effect is undocumented,
-/// so that turning one off can't stop the browser filling in the sign-in forms.
+/// `focus-without-user-activation` and the `execution-while-*` pair),
+/// `frobulate`, Chromium's sample feature, and `autofill` and `manual-text`,
+/// test-only features whose effect is undocumented, so that turning one off can't
+/// stop the browser filling in the sign-in forms.
 pub const PERMISSIONS_POLICY: &str = "publickey-credentials-get=(self), publickey-credentials-create=(self), \
     clipboard-write=(self), accelerometer=(), all-screens-capture=(), \
     ambient-light-sensor=(), autoplay=(), bluetooth=(), browsing-topics=(), \
