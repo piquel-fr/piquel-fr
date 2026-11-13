@@ -216,9 +216,9 @@ A browser's navigation gets a page, never JSON or plain text. A navigation is a
 request with `Sec-Fetch-Mode: navigate`. From a browser that sends no fetch
 metadata, it is one that accepts `text/html` on a route browsers navigate to
 (`Endpoint::browsed`): the pages, authorization, logout, the dashboard, and a
-`GET` of a provider's callback or an unknown path. A protocol or JSON route, such
-as the token endpoint or a passkey ceremony, keeps its JSON for such a client,
-whatever it accepts.
+`GET` or `HEAD` of a provider's callback, an authorization's resumption or an
+unknown path. A protocol or JSON route of auth's, such as the token endpoint or a
+passkey ceremony, keeps its JSON for such a client, whatever it accepts.
 
 When a navigation's response is a `4xx` or `5xx` that is not already a page,
 `ErrorPages::explain` (`src/security/page.rs`) replaces its body with an error

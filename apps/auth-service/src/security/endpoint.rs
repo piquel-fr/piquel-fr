@@ -131,8 +131,9 @@ impl Endpoint {
     /// Whether a browser navigates to it with `method`, so that a failure a
     /// browser without fetch metadata gets is shown as a page when it accepts
     /// HTML. A client calling a protocol or JSON route keeps its JSON, whatever it
-    /// accepts: among the other routes, browsers only `GET` the providers'
-    /// callbacks and unknown paths, while scripts post the ceremonies' JSON.
+    /// accepts: among the other routes, browsers only `GET` or `HEAD` the
+    /// providers' callbacks, an authorization's resumption, the assets and unknown
+    /// paths, while scripts post the ceremonies' JSON.
     pub(super) fn browsed(self, method: &Method) -> bool {
         match self {
             Self::Authorize | Self::Logout | Self::Page | Self::Dashboard | Self::Unsubscribe => {
