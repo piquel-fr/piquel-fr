@@ -45,11 +45,18 @@ What Origin's own authorization looks like is still open. See
 
 **Proposed.**
 
-- One Rust service, on axum, sqlx and utoipa, which Origin already uses.
+- One Rust service for the API, on axum, sqlx and utoipa. Origin uses axum and
+  utoipa too; it has no database.
 - It reads and writes Origin only through Origin's public API. That matches
   Origin's own rule that a plugin can do nothing the API can't.
 - Every API is described with OpenAPI. That is from piquel's notes.
 - The web UI is a client of that API. See [the frontend](frontend.md).
+- **Decided:** the product's pages render on a server, for search engines. So
+  a second process serves the frontend beside the Rust API.
+- **Decided:** the platform writes to Origin as the user. A review only counts
+  if its issuer is the caller, so the platform's own credential can't issue
+  one. Origin Auth's token exchange, sourceorigin#70, was moved from its v1.0
+  to its v0.3 for this.
 
 ## Hosting and backups
 
@@ -57,14 +64,37 @@ What Origin's own authorization looks like is still open. See
 
 - One Origin node with a local volume. See
   [one node first](origin.md#one-node-first).
-- Backups use piqueld's scheduled volume backups, which are in piqueld's v0.2
+- Backups use piqueld's backup features, which are in piqueld's v0.2
   milestone. See [the roadmap](roadmap.md#piqueld).
 - A scheduled job restores the latest backup into a scratch node and verifies
-  every chain. A backup that has never been restored is not known to work.
-- One risk to watch: a file-by-file copy of a live store can catch a pack
-  manifest before the pack it names. The restore drill would catch that.
+  it. A backup that has never been restored is not known to work. piqueld's
+  restore drills, piqueld#340, were moved to its v0.2 for this.
 - Continuous backup is not piqueld's job. See
   [continuous backup](origin.md#continuous-backup).
+
+The council found the first version of this unsafe. **Proposed,** not
+answered yet:
+
+- **Stop the node to copy it.** A copy of a live store can catch a target's
+  head before the objects it names, and a restore drill passing once says
+  nothing about the next backup. piqueld's `stop` method already avoids this:
+  it stops the node, copies the volume and starts it again. A few seconds of
+  downtime at night costs one person nothing.
+- **Later, a consistent copy without stopping.** Origin gains a command that
+  writes one, by reading the heads first and the objects after. Records are
+  immutable, so everything those heads name is then in the copy.
+- **A restored node takes back what it signed.** A restore puts the node
+  behind acceptances that clients and the mirror already hold. If it signed
+  new ones at the same positions, every chain would fork. So before it takes
+  writes, it accepts back the acceptances that carry its own signature.
+- **The drill does more than check chains.** It runs `origin verify`, which
+  checks that every record a record names is present, then clones, fetches
+  and lands.
+- **What may be lost.** With a nightly backup, landed code is safe in clients
+  and in the mirror. Up to a day of changes in progress, reviews and check
+  results that nobody fetched can be lost.
+- **The backup holds the authority key,** because piqueld's backups include
+  secrets. The backup repository must be encrypted.
 
 ## Notifications
 
@@ -140,16 +170,22 @@ it.
 
 From piquel's notes, reviewing should be first class for bots and humans:
 
-- Marking a file as reviewed, in the UI or through the API, marks it for the
-  head revision.
+- Marking a file as reviewed marks it for the head revision.
 - After a push, a file that changed since then is shown as changed since the
   last review, with its diff since the reviewed revision and a button to see
   the full diff.
 - This makes incremental review far more powerful, above all for the author.
 
-**Proposed:** this falls out of Origin's promotion. A `review.seen` statement
-with `inputs = [path]` carries over to a new revision only if that file is
-unchanged.
+**Decided:** the marks live in the platform's PostgreSQL, as each person's
+private state. They record which revision of a file a person saw, and
+"changed since my review" is the diff between that revision and the head.
+
+**Dropped:** the marks as `review.seen` statements carried over by promotion.
+The council showed it doesn't work: marking a second file supersedes the
+first, and a direct statement drops the ones carried over. As statements they
+would also be permanent, copied to every clone and readable by everyone, and
+anyone could flood a repository with them. A bot doesn't need to know which
+files a person looked at.
 
 ### Releases
 
@@ -167,8 +203,17 @@ From piquel's notes, not discussed in depth:
 - A project is the main unit of organization. A user or an organization owns
   it.
 - A project holds repositories, permissions and integration settings.
-- A large monorepo could have smaller public repositories that depend on it,
-  for SDKs, examples and documentation.
+
+**Decided:**
+
+- A repository is private when it is created: its policy lets only its owner
+  in. The owner can make it public.
+- An account may create up to three repositories. Administrators can change
+  the limit.
+- Organizations will sit beside users as owners. They are not needed yet.
+  Their members are stored in policy, like everyone else.
+- Every environment has its own Origin node and key: production, staging and
+  each preview start from scratch.
 
 Projects and organizations are in milestone 5.
 
@@ -186,8 +231,13 @@ Not discussed:
   yet, and starting work adds revisions to it. piquel wants issue objects that
   can be created in advance, grouped into epics, and linked with metadata. The
   idea is dropped.
-- **A project management system.** Not for now. piquel's notes suggest
-  discussions and bug reports might go through deep Discord integrations.
+- **A project management system.** Not for now. Issues live in Linear, which
+  piquel is moving all development to, and a Linear integration is planned.
+  piquel's notes suggest discussions and bug reports might go through deep
+  Discord integrations.
+- **Production as a target.** See [deploys](origin.md#deploys).
+- **Reviewed marks as statements.** See
+  [marking files as reviewed](#marking-files-as-reviewed).
 
 ## Not discussed yet
 

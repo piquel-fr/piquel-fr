@@ -57,9 +57,13 @@ From piquel's [notes](notes.md) and the discussion:
 The design tokens in `crates/ui/assets/style` are plain CSS, so they can stay
 the single source of the look while the pages move.
 
-**Open:** whether the product app renders on a server. Public repository
-pages will want it for search engines and link previews. It was not
-discussed.
+**Decided:** the product app renders on a server. piquel calls it a must, for
+search engines, above all on repository home pages. For Origin Auth's own
+pages it is nice to have and not important.
+
+**Open:** how much of Origin Auth moves, and where its settings and admin
+pages live. The council's three reviewers all said that porting every auth
+page is not earned. See [the council review](review.md#the-auth-port-and-the-admin-dashboard).
 
 ## What Pierre provides
 

@@ -67,19 +67,22 @@ from the changed paths which ones a pull request needs.
 - That is the shape of Origin's `checks.toml`, where a check declares its
   inputs, and a result carries over to a new revision when those inputs didn't
   change. Moving to `origin-ci` is then mechanical.
-- Generate each area's inputs from `cargo metadata`, so the lists can't fall
-  behind the code. Generated files are committed here, with a test that fails
-  while they are stale.
+- Generate the Rust part of each area's inputs from `cargo metadata`, and list
+  the rest by hand: shared recipes, embedded assets, migrations, Dockerfiles,
+  JavaScript packages and deployment files. `cargo metadata` knows none of
+  those, and a missing input means a result carried over when it shouldn't
+  be. Start with broad inputs and narrow them only with a reason.
 
-Where CI runs is in [CI](origin.md#ci): on piquel's machine at first, with
-macOS by hand.
+Where CI runs is in [CI](origin.md#ci): by hand at first, after review.
 
 ## Deployment
 
 **Decided.**
 
 - piqueld builds from an Origin acceptance, without going through the git
-  mirror.
+  mirror. A webhook tells it of a landing.
+- Environments stay in piqueld: `main` builds staging, and production is
+  promoted from staging.
 - A deploy is recorded as a statement. See [deploys](origin.md#deploys).
 
 ## Tests to add
