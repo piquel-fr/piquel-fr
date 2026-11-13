@@ -69,13 +69,14 @@ impl DeviceRow<'_> {
         format!(
             "Sign out {}, {}, signed in {}",
             self.name(),
-            self.details(now).replace(" · ", ", "),
+            self.details(now).join(", "),
             Precision::Day.write(self.authenticated_at)
         )
     }
 
-    /// How it signed in, from where, and when it was last active, as of `now`.
-    pub(crate) fn details(&self, now: DateTime<Utc>) -> String {
+    /// How it signed in, from where, and when it was last active, as of `now`,
+    /// which a row shows joined by `·`.
+    pub(crate) fn details(&self, now: DateTime<Utc>) -> Vec<String> {
         let methods = self
             .methods
             .iter()
@@ -93,8 +94,7 @@ impl DeviceRow<'_> {
         .into_iter()
         .flatten()
         .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ")
+        .collect()
     }
 
     /// When it was last active, as of `now`: now for the browser looking at the
@@ -200,7 +200,7 @@ pub async fn devices<'a>(
             <ul class="list">
                 for row in rows {
                     let name = row.name();
-                    let details = row.details(now);
+                    let details = row.details(now).join(" · ");
                     <li>
                         <div class="text">
                             <strong>(name.as_str())</strong>
@@ -234,4 +234,45 @@ pub async fn devices<'a>(
         </section>
         known_devices(known: known)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    //! What a device's "Sign out" button is named.
+    use super::*;
+    use sourceorigin_common::events::{Browser, Platform};
+
+    /// Two devices of one name get Sign out buttons of different names, from
+    /// what their rows show: here, where they were last seen and when they
+    /// signed in.
+    #[test]
+    fn devices_of_one_name_are_signed_out_by_different_names() {
+        let now = Utc::now();
+        let firefox = DeviceRow {
+            id: SessionId::new(),
+            current: false,
+            device: Some(UserAgentFamily {
+                browser: Browser::Firefox,
+                platform: Platform::Linux,
+            }),
+            ip: Some(IpAddr::from([192, 0, 2, 1])),
+            methods: &[AuthenticationMethod::Passkey],
+            authenticated_at: now - TimeDelta::days(3),
+            last_seen_at: now,
+            dashboard: &[],
+        };
+        let other = DeviceRow {
+            id: SessionId::new(),
+            ip: Some(IpAddr::from([192, 0, 2, 2])),
+            authenticated_at: now - TimeDelta::days(1),
+            ..firefox
+        };
+        let label = firefox.sign_out_label(now);
+        assert!(
+            label.starts_with("Sign out Firefox on Linux, Passkey, 192.0.2.1, "),
+            "{label}"
+        );
+        assert!(!label.contains('·'), "{label}");
+        assert_ne!(label, other.sign_out_label(now));
+    }
 }

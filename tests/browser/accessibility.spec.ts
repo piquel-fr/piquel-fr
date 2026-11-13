@@ -63,7 +63,21 @@ test("the dashboard's pages", async ({ browser }) => {
   test.skip(!adminUrl || !grantAdmin, 'Set E2E_ADMIN_URL and E2E_GRANT_ADMIN.');
   const handle = `axe-admin-${Date.now().toString(36)}`;
   const admin = await administrator(browser, handle);
-  for (const path of ['/', '/users', '/clients', '/keys', '/events', '/no-such-page']) {
+  for (const path of [
+    '/',
+    '/users',
+    '/administrators',
+    '/invitations',
+    '/handles',
+    '/clients',
+    '/events',
+    '/deliveries',
+    '/keys',
+    '/audit',
+    '/announcements',
+    '/alerts',
+    '/no-such-page'
+  ]) {
     await openDashboard(admin, path);
     await expectAccessible(admin, path);
   }

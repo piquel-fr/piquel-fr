@@ -148,7 +148,7 @@ pub async fn account_overview<'a>(
                                 if device.current {
                                     " " <span class="badge ok">"This device"</span>
                                 }
-                                <small>(device.details(overview.now))</small>
+                                <small>(device.details(overview.now).join(" · "))</small>
                             </div>
                         </li>
                     }

@@ -1,57 +1,17 @@
 /**
  * What auth's pages may ask of the browser, as Chromium enforces their
- * Permissions-Policy: passkeys and writing to the clipboard, and none of the
- * features it turns off.
+ * Permissions-Policy: passkeys and writing to the clipboard, beside the defaults
+ * that reach nothing, so a feature a browser adds, or one the policy misses,
+ * fails here rather than slipping through.
  */
 import { expect, test } from '@playwright/test';
 
-/** Every feature the policy turns off, which no page of auth's uses. */
-const off = [
-  'accelerometer',
-  'ambient-light-sensor',
-  'attribution-reporting',
-  'autoplay',
-  'bluetooth',
-  'browsing-topics',
-  'camera',
-  'captured-surface-control',
-  'clipboard-read',
-  'compute-pressure',
-  'digital-credentials-get',
-  'direct-sockets',
-  'display-capture',
-  'encrypted-media',
-  'fullscreen',
-  'gamepad',
-  'geolocation',
-  'gyroscope',
-  'hid',
-  'identity-credentials-get',
-  'idle-detection',
-  'join-ad-interest-group',
-  'keyboard-map',
-  'local-fonts',
-  'magnetometer',
-  'microphone',
-  'midi',
-  'otp-credentials',
-  'payment',
-  'picture-in-picture',
-  'private-state-token-issuance',
-  'private-state-token-redemption',
-  'run-ad-auction',
-  'screen-wake-lock',
-  'serial',
-  'smart-card',
-  'speaker-selection',
-  'storage-access',
-  'usb',
-  'web-share',
-  'window-management',
-  'xr-spatial-tracking'
-];
+/** Allowed features that reach no device, data or other site. */
+const harmless = (feature: string) =>
+  feature.startsWith('ch-') ||
+  ['aria-notify', 'cross-origin-isolated', 'sync-xhr', 'unload'].includes(feature);
 
-test("auth's pages may use passkeys and the clipboard, and no feature their policy turns off", async ({
+test("auth's pages may use passkeys and the clipboard, and nothing else that reaches beyond the page", async ({
   page
 }) => {
   await page.goto('/login');
@@ -62,12 +22,9 @@ test("auth's pages may use passkeys and the clipboard, and no feature their poli
         document as Document & { featurePolicy?: { allowedFeatures(): string[] } }
       ).featurePolicy?.allowedFeatures() ?? []
   );
-  expect(allowed).toEqual(
-    expect.arrayContaining([
-      'publickey-credentials-get',
-      'publickey-credentials-create',
-      'clipboard-write'
-    ])
-  );
-  expect(allowed.filter((feature) => off.includes(feature))).toEqual([]);
+  expect(allowed.filter((feature) => !harmless(feature)).sort()).toEqual([
+    'clipboard-write',
+    'publickey-credentials-create',
+    'publickey-credentials-get'
+  ]);
 });

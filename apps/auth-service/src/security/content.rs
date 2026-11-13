@@ -54,6 +54,7 @@ pub(super) struct ContentPolicy {
 
 impl ContentPolicy {
     /// The policy of every directive in `base` and the `form_action` sources.
+    /// `form-action` comes last, so a page's targets extend it by appending.
     ///
     /// # Errors
     /// Fails when a configured origin cannot be sent in a header.

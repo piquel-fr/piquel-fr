@@ -33,15 +33,6 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 
 /// Fetch metadata header naming how a request's initiator relates to its target.
 pub(crate) const FETCH_SITE_HEADER: &str = "sec-fetch-site";
-/// Whether another site's page that opens this one keeps a handle on it.
-const CROSS_ORIGIN_OPENER_POLICY: HeaderName =
-    HeaderName::from_static(isolation::OPENER_POLICY_HEADER);
-/// Which sites' pages may embed or read a response.
-const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
-    HeaderName::from_static(isolation::RESOURCE_POLICY_HEADER);
-/// Which powerful features a page, and what it embeds, may use.
-const PERMISSIONS_POLICY: HeaderName =
-    HeaderName::from_static(isolation::PERMISSIONS_POLICY_HEADER);
 /// Trusted ingress must overwrite this header with exactly one client address.
 pub(super) const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 /// Requests refused because their client's budget was exhausted, by category, or
@@ -290,23 +281,23 @@ impl HttpSecurity {
         config: &crate::AuthConfig,
         database: Database,
     ) -> Result<Self, InvalidHeaderValue> {
-        Ok(Self {
+        let origin = config.passkey.origin.as_url().origin();
+        let content = ContentPolicy::auth(config)?;
+        Ok(Self::listening(
+            config,
             database,
-            trusted_proxies: Arc::new(config.trusted_proxies.clone()),
-            request_timeout: REQUEST_TIMEOUT,
-            requests_per_minute: config.requests_per_minute,
-            in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
-            origin: config.passkey.origin.as_url().origin(),
-            listener: Listener::Public,
-            pages: ErrorPages {
-                policies: config.oidc.policies.clone(),
-            },
-            content: ContentPolicy::auth(config)?,
-        })
+            Listener::Public,
+            origin,
+            content,
+        ))
     }
 
     /// Derives the admin listener's policy, for the dashboard at `dashboard`, from
     /// validated startup configuration.
+    ///
+    /// # Errors
+    /// Fails when the dashboard's host, or an origin of its Content-Security-Policy,
+    /// cannot be sent in a header.
     pub(crate) fn admin(
         config: &crate::AuthConfig,
         database: Database,
@@ -317,12 +308,34 @@ impl HttpSecurity {
             Some(port) => format!("{}:{port}", dashboard.host()),
             None => dashboard.host().to_owned(),
         };
-        Ok(Self {
-            listener: Listener::Admin(HeaderValue::from_str(&host)?),
-            origin: dashboard.as_url().origin(),
-            content: ContentPolicy::dashboard(config, dashboard)?,
-            ..Self::new(config, database)?
-        })
+        let listener = Listener::Admin(HeaderValue::from_str(&host)?);
+        let content = ContentPolicy::dashboard(config, dashboard)?;
+        let origin = dashboard.as_url().origin();
+        Ok(Self::listening(config, database, listener, origin, content))
+    }
+
+    /// The policy of `listener`, serving `origin`'s pages under `content`, with
+    /// the budgets and proxies `config` sets.
+    fn listening(
+        config: &crate::AuthConfig,
+        database: Database,
+        listener: Listener,
+        origin: url::Origin,
+        content: ContentPolicy,
+    ) -> Self {
+        Self {
+            database,
+            trusted_proxies: Arc::new(config.trusted_proxies.clone()),
+            request_timeout: REQUEST_TIMEOUT,
+            requests_per_minute: config.requests_per_minute,
+            in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
+            origin,
+            listener,
+            pages: ErrorPages {
+                policies: config.oidc.policies.clone(),
+            },
+            content,
+        }
     }
 
     /// Refuses a request to the admin listener that names another host, by its
@@ -586,19 +599,17 @@ impl HttpSecurity {
             // Pictures are public; the build assets need no grant.
             CacheClass::Immutable => grant.filter(|grant| matches!(grant, CorsGrant::Public)),
         };
-        let resource_policy = match grant {
-            Some(CorsGrant::Public) => isolation::RESOURCE_POLICY_PUBLIC,
-            _ => isolation::RESOURCE_POLICY_PRIVATE,
-        };
+        let public = matches!(grant, Some(CorsGrant::Public));
         let headers = response.headers_mut();
         // Replaces any handler value: only the class decides.
         headers.insert(header::CACHE_CONTROL, class.cache_control());
+        for (name, value) in isolation::headers(public) {
+            headers.insert(
+                HeaderName::from_static(name),
+                HeaderValue::from_static(value),
+            );
+        }
         for (name, value) in [
-            // A page that opens one of auth's keeps no handle on it.
-            (CROSS_ORIGIN_OPENER_POLICY, isolation::OPENER_POLICY),
-            (CROSS_ORIGIN_RESOURCE_POLICY, resource_policy),
-            // Passkeys and the clipboard only.
-            (PERMISSIONS_POLICY, isolation::PERMISSIONS_POLICY),
             // No MIME sniffing.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             // Navigation must not leak authentication URLs.

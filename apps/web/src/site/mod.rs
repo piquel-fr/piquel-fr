@@ -152,22 +152,15 @@ impl Site {
     /// errors.
     fn secure(mut response: Response) -> Response {
         let headers = response.headers_mut();
+        // No other site may embed what it serves.
+        for (name, value) in isolation::headers(false) {
+            headers.insert(
+                HeaderName::from_static(name),
+                HeaderValue::from_static(value),
+            );
+        }
         for (name, value) in [
             (header::CONTENT_SECURITY_POLICY, POLICY),
-            // A page that opens one of sourceorigin.dev's keeps no handle on it.
-            (
-                HeaderName::from_static(isolation::OPENER_POLICY_HEADER),
-                isolation::OPENER_POLICY,
-            ),
-            // No other site may embed what it serves.
-            (
-                HeaderName::from_static(isolation::RESOURCE_POLICY_HEADER),
-                isolation::RESOURCE_POLICY_PRIVATE,
-            ),
-            (
-                HeaderName::from_static(isolation::PERMISSIONS_POLICY_HEADER),
-                isolation::PERMISSIONS_POLICY,
-            ),
             // No MIME sniffing.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             // Links to apps carry no path of sourceorigin.dev.
