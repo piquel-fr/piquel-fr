@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+keywords = ["oauth", "openid-connect", "jwt", "authentication", "axum"]
+categories = ["authentication", "web-programming"]
 
 [features]
 # Extractors, layers and login routes for axum.
@@ -36,6 +41,11 @@ trybuild.workspace = true
 [[example]]
 name = "notes"
 required-features = ["axum"]
+
+[package.metadata.docs.rs]
+all-features = true
+# Labels feature-gated items with the features they need.
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

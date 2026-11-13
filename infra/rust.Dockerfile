@@ -17,6 +17,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 COPY crates crates
 COPY apps apps
+COPY tools tools
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS backend
@@ -30,6 +31,7 @@ COPY .cargo .cargo
 # executables embed.
 COPY crates crates
 COPY apps apps
+COPY tools tools
 # The committed audit verifier keys, compiled into `audit verify` and `audit prune`.
 COPY docs/dev/security/audit-key.pub docs/dev/security/audit-key.pub
 # Only the binaries leave this layer: without the build's target directory,

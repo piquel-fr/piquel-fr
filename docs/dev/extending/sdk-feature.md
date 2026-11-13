@@ -107,7 +107,7 @@ use `fetch` and WebCrypto only.
 
 ## 6. Pin it with vectors
 
-Add cases to the generator, `crates/common/tests/sdk_vectors.rs`, in the method of
+Add cases to the generator, `crates/crypto/tests/sdk_vectors.rs`, in the method of
 their category, such as `tokens` or `id_tokens`. A case gives the inputs, a fixed
 `now`, and either the parsed value or the expected error's category and reason.
 Then:

@@ -17,6 +17,7 @@ exceptions = [
     { crate = "sourceorigin-repository", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-telemetry", allow = ["PolyForm-Noncommercial-1.0.0"] },
     { crate = "sourceorigin-ui", allow = ["PolyForm-Noncommercial-1.0.0"] },
+    { crate = "xtask", allow = ["PolyForm-Noncommercial-1.0.0"] },
 ]
 
 [bans]

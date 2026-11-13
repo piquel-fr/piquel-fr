@@ -14,6 +14,8 @@ This repository contains everything under the sourceorigin.dev domain:
   `telemetry` and `ui`.
 - `packages/auth`: the TypeScript SDK.
 - `infra/`: Dockerfiles and piqueld deployments.
+- `tools/xtask`: `cargo xtask`, which publishes the SDKs and releases a version
+  (`just publish`, `just release`).
 - `tests/browser` (Playwright) and `tests/sdk-vectors` (cases every SDK passes).
 - `docs/`: the documentation book, a user guide and a contributor guide.
 

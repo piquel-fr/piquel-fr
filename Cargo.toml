@@ -9,14 +9,20 @@ members = [
     "crates/database",
     "crates/telemetry",
     "crates/ui",
+    "tools/xtask",
 ]
 
 [workspace.package]
 edition = "2024"
 # Non-commercial by default. The SDK and the crates it depends on (auth-sdk,
-# common, crypto) override this with Apache-2.0, so any application can use them.
+# common, crypto) override this with Apache-2.0, so any application can use them;
+# every other crate sets `publish = false`. See docs/dev/releasing.md.
 license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/sourceorigin-dev/sourceorigin"
+homepage = "https://sourceorigin.dev"
+# The oldest Rust the published crates build with, which the `msrv` CI job checks.
+rust-version = "1.88"
+# Every crate shares it, and the published ones are released together.
 version = "0.1.0"
 
 [workspace.lints.rust]
@@ -42,15 +48,17 @@ self_named_module_files = "warn"
 [workspace.dependencies]
 # Local crates. Each names the workspace's version: cargo-deny (deny.toml)
 # denies a dependency with no version as a wildcard, and crates.io would refuse
-# to publish the SDK without one.
-sourceorigin-common        = { version = "0.1.0", path = "crates/common" }
-sourceorigin-crypto        = { version = "0.1.0", path = "crates/crypto" }
+# to publish the SDK without one. The published crates require each other at
+# exactly that version, since they are released together.
+sourceorigin-common        = { version = "=0.1.0", path = "crates/common" }
+sourceorigin-crypto        = { version = "=0.1.0", path = "crates/crypto" }
 sourceorigin-repository    = { version = "0.1.0", path = "crates/database" }
 sourceorigin-telemetry     = { version = "0.1.0", path = "crates/telemetry" }
 sourceorigin-auth          = { version = "0.1.0", path = "crates/auth-sdk" }
 sourceorigin-ui            = { version = "0.1.0", path = "crates/ui" }
 
 # External crates
+anyhow = "1"
 async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"

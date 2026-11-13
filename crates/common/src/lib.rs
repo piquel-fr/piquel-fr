@@ -14,6 +14,8 @@
 //! - `similarity`: look-alike detection, and the handle and client name checks
 //!   built on it.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
+// docs.rs labels feature-gated items with the features they need.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// The views of administration: what the admin dashboard shows and the CLI prints.
 #[cfg(feature = "admin")]

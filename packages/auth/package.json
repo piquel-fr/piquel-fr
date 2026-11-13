@@ -2,13 +2,24 @@
   "name": "@sourceorigin/auth",
   "version": "0.1.0",
   "description": "TypeScript SDK for auth.sourceorigin.dev",
+  "keywords": [
+    "oauth",
+    "openid-connect",
+    "oidc",
+    "jwt",
+    "authentication",
+    "passkey"
+  ],
+  "homepage": "https://docs.sourceorigin.dev/user/apps/sign-in-typescript.html",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sourceorigin-dev/sourceorigin.git",
     "directory": "packages/auth"
   },
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -33,6 +44,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepack": "tsc",
     "lint": "tsc && publint --strict && attw --pack --profile esm-only",
     "test": "node --test --experimental-test-coverage --test-coverage-exclude='test/**' 'test/**/*.test.ts'"
   },

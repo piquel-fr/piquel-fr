@@ -35,6 +35,19 @@
 //! # Ok(()) }
 //! ```
 //!
+//! # Quick start
+//!
+//! Add the SDK with its axum integration:
+//!
+//! ```sh
+//! cargo add sourceorigin-auth --features axum
+//! ```
+//!
+//! This notes service, the crate's `notes` example, protects an API with access
+//! tokens and signs users in to its page:
+//!
+#![cfg_attr(feature = "axum", doc = concat!("```no_run\n", include_str!("../examples/notes.rs"), "\n```"))]
+//!
 //! # Validating access tokens
 //!
 //! A resource server builds one [`ResourceValidator`] per API from its [`Resource`]
@@ -95,6 +108,8 @@
 //!
 //! The behavior follows `docs/dev/architecture/sdk.md` in the sourceorigin repository, and is
 //! tested against the shared vectors in `tests/sdk-vectors`.
+// docs.rs labels feature-gated items with the features they need.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 // Documented by its own inner docs, so their links resolve inside the module.
 #[cfg(feature = "axum")]

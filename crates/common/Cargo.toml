@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+keywords = ["oauth", "openid-connect", "jwt", "authentication"]
+categories = ["authentication", "data-structures"]
 
 [features]
 # The views of administration, for auth and its dashboard.
@@ -38,14 +43,15 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-# The vector generator signs with auth's own signer. A dev-dependency cycle is
-# allowed, and integration tests link the same build of this crate as the signer.
-sourceorigin-crypto.workspace = true
-aws-lc-rs.workspace = true
 base64.workspace = true
 serde_json.workspace = true
 # The protocol types derive `TS` under `cfg(test)` only, so no build depends on it.
 ts-rs.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+# Labels feature-gated items with the features they need.
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

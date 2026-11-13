@@ -16,16 +16,11 @@ The code on this page comes from the SDK's example,
 3. To keep users signed in for longer than an access token's five minutes, turn
    on the `offline_access` scope and **Allow refresh tokens**, and request
    `offline_access` when signing in.
-4. Add `@sourceorigin/auth` to your app. It is not on npm yet: build it from a checkout
-   of the repository, then install it from there.
+4. Add `@sourceorigin/auth` to your app:
 
    ```console
-   pnpm install --frozen-lockfile
-   pnpm --filter @sourceorigin/auth build
-   npm install <checkout>/packages/auth
+   npm install @sourceorigin/auth
    ```
-
-   The first two commands run in the checkout, and the last in your app.
 
 ## Sign users in
 

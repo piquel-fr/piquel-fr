@@ -27,14 +27,15 @@ The code on this page comes from the SDK's example app,
    secret [piqueld generates](deploying-with-piqueld.md#store-the-secrets).
    Keep it secret, like the client secret, and give every replica the same one.
    Changing it signs every user out.
-4. Add the SDK to your app's `Cargo.toml`:
+4. Add the SDK to your app, with axum at the version the SDK uses, and tokio:
 
-   ```toml
-   [dependencies]
-   sourceorigin-auth = { git = "https://github.com/sourceorigin-dev/sourceorigin", features = ["axum"] }
-   axum = "0.8"
-   tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+   ```console
+   cargo add sourceorigin-auth --features axum
+   cargo add axum@0.8
+   cargo add tokio --features macros,rt-multi-thread,net
    ```
+
+   The SDK needs Rust 1.88 or newer, and a C compiler for its cryptography.
 
 ## Sign users in
 

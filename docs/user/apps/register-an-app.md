@@ -50,10 +50,9 @@ be shown again; [rotate it](rotate-secrets.md) instead.
 The app's **Overview** tab shows what an OpenID Connect library needs: the
 **Issuer**, the **Discovery URL**, the **Client ID**, the **Client
 authentication** method and the **Scopes**. An app with a backend also gets a
-Rust example that signs users in with the
-[Rust SDK](https://github.com/sourceorigin-dev/sourceorigin/tree/main/crates/auth-sdk).
-A browser app signs users in with the
-[TypeScript SDK](browser-apps.md).
+Rust example that signs users in with the [Rust SDK](sign-in-rust.md), or it
+can use the [TypeScript SDK](sign-in-typescript.md). A browser app signs users in
+with the TypeScript SDK too, from the [browser](browser-apps.md).
 
 ![The overview of the registered app Notes: issuer, discovery URL, client ID, client authentication and scopes](../../images/apps/app-overview.png)
 

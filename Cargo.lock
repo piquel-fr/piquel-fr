@@ -3091,14 +3091,12 @@ dependencies = [
 name = "sourceorigin-common"
 version = "0.1.0"
 dependencies = [
- "aws-lc-rs",
  "base64 0.22.1",
  "chrono",
  "reqwest",
  "secrecy",
  "serde",
  "serde_json",
- "sourceorigin-crypto",
  "sqlx",
  "thiserror 2.0.18",
  "tracing",
@@ -4823,6 +4821,16 @@ dependencies = [
  "rusticata-macros",
  "thiserror 2.0.18",
  "time",
+]
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

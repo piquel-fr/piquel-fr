@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# Under the PolyForm Noncommercial License: never published.
+publish = false
 
 [dependencies]
 chrono.workspace = true

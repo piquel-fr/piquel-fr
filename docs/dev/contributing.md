@@ -36,7 +36,7 @@ in the same commit as their source:
 | Files | Source | Recipe |
 | --- | --- | --- |
 | `crates/database/.sqlx/` | SQL queries and migrations | `just db prepare` |
-| `tests/sdk-vectors/` | `crates/common/tests/sdk_vectors.rs` | `just sdk-vectors` |
+| `tests/sdk-vectors/` | `crates/crypto/tests/sdk_vectors.rs` | `just sdk-vectors` |
 | `packages/auth/src/protocol.ts` | the wire types in `crates/common` | `just sdk-types` |
 | `docs/dev/operations/variables/`, `docs/dev/operations/cli-commands.md` | the variables' doc comments, and the CLI's clap definitions | `just docs reference` |
 
