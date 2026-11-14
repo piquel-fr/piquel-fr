@@ -83,19 +83,47 @@ pub(crate) fn scope_label(scope: &str) -> &str {
     }
 }
 
-/// The confirmation of an application's logout request: a form posting `fields`,
-/// the request's parameters, back to `action`, and a link to `keep` the session.
+/// What the confirmation of an application's logout request warns about.
+#[derive(Clone, Copy, Debug)]
+pub enum LogoutNotice {
+    /// Auth couldn't verify which sign-in the application asked to end, so the
+    /// browser stays on auth afterwards.
+    Unverified,
+    /// The application asked to end another account's sign-in than this browser's.
+    AnotherAccount,
+}
+
+impl LogoutNotice {
+    /// What the page says.
+    const fn text(self) -> &'static str {
+        match self {
+            Self::Unverified => {
+                "Origin Auth couldn’t verify the app’s request, so you’ll stay here after signing out."
+            }
+            Self::AnotherAccount => {
+                "The app asked to sign out a different account than the one signed in here. Signing out signs this browser out too."
+            }
+        }
+    }
+}
+
+/// The confirmation of a logout: a form posting `fields`, the application's request,
+/// if one asked, back to `action`, a link to `keep` the session, and any `notice`.
 #[component]
 pub async fn logout<'a>(
     action: &'a str,
     fields: &'a [(&'a str, &'a str)],
     keep: &'a str,
+    #[default] notice: Option<LogoutNotice>,
 ) -> Result<impl View> {
     Ok(view! {
         <div>
             <h1>"Ready to sign out?"</h1>
             <p class="lead">"This will end your Origin Account session in this browser."</p>
         </div>
+        if let Some(notice) = notice {
+            <p class="notice" role="status">(notice.text())</p>
+        }
         <form method="post" action=(action)>
             for (name, value) in fields {
                 <input type="hidden" name=(*name) value=(*value)>

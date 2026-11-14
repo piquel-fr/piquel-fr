@@ -6,10 +6,6 @@ use super::*;
 /// provider over HTTPS, and rejects a mixed-up callback before any code exchange.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-#[expect(
-    clippy::too_many_lines,
-    reason = "The scenario follows one login from authorization through logout."
-)]
 async fn sdk_login_client_runs_against_the_provider() {
     use sourceorigin_auth::{
         AuthorizeRequest, CallbackParams, ClientConfig, Credentials, LoginError, OAuthError,
@@ -114,25 +110,9 @@ async fn sdk_login_client_runs_against_the_provider() {
         .as_str()
         .parse()
         .expect("post-logout URI");
-    let logout = client.logout_url(Some(id_token), Some(&post_logout));
-    let confirmation = location(
-        &flow
-            .request(
-                Method::GET,
-                &format!("{}?{}", logout.path(), logout.query().expect("query")),
-                &[],
-                None,
-            )
-            .await,
-    );
-    assert_eq!(confirmation.path(), routes::page::LOGOUT);
-    let fields: Vec<(String, String)> = confirmation.query_pairs().into_owned().collect();
-    let fields: Vec<_> = fields
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect();
-    let confirmed = flow
-        .request(Method::POST, routes::page::LOGOUT, &fields, None)
-        .await;
+    let logout = client.logout(Some(id_token), Some(&post_logout));
+    assert_eq!(logout.action().path(), routes::oidc::LOGOUT);
+    let fields: Vec<_> = logout.fields().collect();
+    let confirmed = flow.log_out(&fields).await;
     assert_eq!(location(&confirmed), post_logout);
 }

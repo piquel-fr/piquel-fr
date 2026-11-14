@@ -142,8 +142,13 @@ requirement.
 Outside axum, `Client`, from `issuer.client(config)`, runs the authorization code
 flow for either kind of app. `authorize` gives the URL to send the browser to, and
 a `PendingLogin` to keep server-side. `complete` checks the callback, then
-validates the ID token. `refresh`, `revoke`, `userinfo` and `logout_url` cover the
-rest of a session, and `logout_token` validates a back-channel logout token.
+validates the ID token. `refresh`, `revoke` and `userinfo` cover the rest of a
+session, and `logout_token` validates a back-channel logout token. `logout` gives
+the RP-initiated logout request: answer the browser with its `page()`, which
+posts it to Origin Auth, so the ID token you pass as `id_token_hint` never
+appears in a URL. If your app's Content-Security-Policy sets `form-action`, it
+must allow Origin Auth's origin. Without an ID token, redirect the browser to
+`logout_redirect()` instead, as the logout route does.
 
 ## Check that it works
 

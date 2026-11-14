@@ -167,7 +167,9 @@ sign-in**. See [passkey sign-in on your own pages](../../user/apps/passkey-sign-
   `update --no-require-par` lifts it.
 - **Back-channel logout** (`--backchannel-logout-uri`) is where auth posts a
   logout token when a session the client holds tokens from ends: see
-  [back-channel logout](../../user/apps/back-channel-logout.md).
+  [back-channel logout](../../user/apps/back-channel-logout.md). It uses HTTPS,
+  and an IP address host must be public. A name is checked when auth delivers,
+  since what it resolves to can change. A deleted client is sent none.
 
 ## Secrets
 

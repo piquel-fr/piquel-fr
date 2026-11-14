@@ -176,6 +176,8 @@ class FakeAuth {
 class FakePage {
   /** Where the page navigated, in order. */
   readonly navigations: string[] = [];
+  /** The forms the page posted, each a navigation too. */
+  readonly posted: { action: string; fields: Readonly<Record<string, string>> }[] = [];
   /** Every value ever written to storage. */
   readonly written: string[] = [];
   readonly storage = new Map<string, string>();
@@ -237,6 +239,10 @@ class FakePage {
     fetch: (request) => {
       this.requests.push(request);
       return Promise.resolve(this.resource(request));
+    },
+    submit: (action, fields) => {
+      this.posted.push({ action, fields });
+      this.location.assign(action);
     }
   };
 
@@ -652,12 +658,20 @@ describe('a session', () => {
     assert.equal(await session.accessToken(), `at_${String(NOW + 580)}`);
   });
 
-  test('logs out through auth, revoking its refresh token', async () => {
+  test('logs out through auth by posting its request, revoking its refresh token', async () => {
     const { auth, page, session } = await signedIn();
     await leaving(session.logout(`${APP}/`), page);
-    const logout = new URL(page.navigations.at(-1) ?? '');
-    assert.equal(`${logout.origin}${logout.pathname}`, `${ISSUER}/oidc/logout`);
-    assert.equal(logout.searchParams.get('post_logout_redirect_uri'), `${APP}/`);
+    const logout = page.posted.at(-1);
+    assert.ok(logout);
+    assert.equal(logout.action, `${ISSUER}/oidc/logout`);
+    // The ID token names the sign-in to end, in the form, never in a URL.
+    assert.deepEqual(Object.keys(logout.fields), [
+      'id_token_hint',
+      'client_id',
+      'post_logout_redirect_uri'
+    ]);
+    assert.equal(logout.fields.post_logout_redirect_uri, `${APP}/`);
+    assert.equal(new URL(page.navigations.at(-1) ?? '').search, '');
     assert.equal(auth.fetch.count(REVOKE_URL), 1);
   });
 });

@@ -23,6 +23,7 @@ export type * from './protocol.ts';
 export { formatChallenge, parseChallenge, type FormattedChallenge } from './challenge.ts';
 export {
   Client,
+  LogoutRequest,
   type AuthorizeRequest,
   type ClientConfig,
   type PendingLogin,

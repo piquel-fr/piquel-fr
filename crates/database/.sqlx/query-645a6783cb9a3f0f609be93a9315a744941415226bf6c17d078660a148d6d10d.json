@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT 1 FROM oidc_session_clients sc\n                    WHERE sc.session_id = $1\n                    AND sc.client_id = $2\n                    AND NOT EXISTS (\n                        SELECT 1 FROM browser_session_secrets b WHERE b.session_id = $1\n                    )\n                ) AS \"inline!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inline!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "645a6783cb9a3f0f609be93a9315a744941415226bf6c17d078660a148d6d10d"
+}

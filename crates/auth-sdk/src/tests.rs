@@ -841,3 +841,61 @@ async fn userinfo_must_name_the_signed_in_user() {
         )
     );
 }
+
+/// A logout request names the sign-in to end with its ID token in the posted form,
+/// never in the end-session URL, and its page escapes what it posts.
+#[tokio::test]
+async fn logout_requests_post_the_id_token_hint() {
+    let case = Case::all("tokens")
+        .into_iter()
+        .find(|case| case.name.ends_with("/id-valid.json"))
+        .expect("valid ID token vector");
+    let issuer = issuer(&case);
+    let audience: ClientId = case.text("audience").parse().expect("client ID");
+    let id_token = issuer
+        .id_token(
+            case.text("token"),
+            &audience,
+            Some(case.text("nonce")),
+            None,
+        )
+        .await
+        .expect("valid ID token");
+    let client = issuer.client(ClientConfig {
+        client_id: audience.clone(),
+        credentials: Credentials::None,
+        redirect_uri: "https://client.example.com/callback".parse().expect("URL"),
+    });
+    let after: Url = "https://client.example.com/?a=1&b=\"2\""
+        .parse()
+        .expect("URL");
+    let request = client.logout(Some(&id_token), Some(&after));
+    assert_eq!(request.action(), &issuer.metadata().end_session_endpoint);
+    assert!(request.action().query().is_none());
+    assert_eq!(
+        request.fields().collect::<Vec<_>>(),
+        [
+            ("id_token_hint", id_token.as_str()),
+            ("client_id", audience.as_str()),
+            ("post_logout_redirect_uri", after.as_str()),
+        ]
+    );
+    let page = request.page();
+    assert!(
+        page.contains(r#"value="https://client.example.com/?a=1&amp;b=%222%22""#),
+        "{page}"
+    );
+    assert!(!page.contains("b=\"2\""), "{page}");
+    let debug = format!("{request:?}");
+    assert!(!debug.contains(id_token.as_str()), "{debug}");
+    // Without an ID token, the request may be a URL.
+    let redirect = client.logout_redirect(Some(&after));
+    assert_eq!(redirect.path(), request.action().path());
+    assert_eq!(
+        redirect.query_pairs().collect::<Vec<_>>(),
+        [
+            ("client_id".into(), audience.as_str().into()),
+            ("post_logout_redirect_uri".into(), after.as_str().into()),
+        ]
+    );
+}

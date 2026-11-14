@@ -368,23 +368,25 @@ async fn consent_links_on_to_callbacks_no_policy_can_name() {
     }
 }
 
-/// The logout page confirms an application's logout request: its form ends the
-/// session and sends the browser where the application asked, with its `state`,
-/// even an empty one.
+/// The end-session endpoint answers the page confirming an application's logout
+/// request, sent by query or cross-site form, whose form posts it back to
+/// `/logout`: it ends the session and sends the browser where the application
+/// asked, with its `state`, even an empty one.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn logout_page_ends_the_session_from_its_own_form() {
     for state in ["bye", ""] {
         let harness = Harness::new("https://client.example").await;
         let post_logout = harness.client.post_logout_uris[0].as_str();
+        let fields = [
+            ("client_id", harness.client.id.as_str()),
+            ("post_logout_redirect_uri", post_logout),
+            ("state", state),
+        ];
         let query = form_urlencoded::Serializer::new(String::new())
-            .append_pair("client_id", harness.client.id.as_str())
-            .append_pair("post_logout_redirect_uri", post_logout)
-            .append_pair("state", state)
+            .extend_pairs(fields)
             .finish();
-        let confirm = location(&harness.visit(routes::oidc::LOGOUT, &query).await);
-        assert_eq!(confirm.path(), routes::page::LOGOUT);
-        let response = harness.follow(&confirm).await;
+        let response = harness.visit(routes::oidc::LOGOUT, &query).await;
         assert_eq!(response.status(), StatusCode::OK, "{state:?}");
         let policy = policy(&response).to_owned();
         assert!(
@@ -393,14 +395,24 @@ async fn logout_page_ends_the_session_from_its_own_form() {
         );
         let page = html(response).await;
         assert!(page.contains("<h1>Ready to sign out?</h1>"), "{page}");
+        let form = format!(r#"<form method="post" action="{}">"#, routes::page::LOGOUT);
+        assert!(page.contains(&form), "{page}");
         let field = format!(r#"<input type="hidden" name="state" value="{state}">"#);
         assert!(page.contains(&field), "{page}");
+        // The application may post the request from its own site instead.
+        let posted = harness
+            .submit(
+                routes::oidc::LOGOUT,
+                &fields,
+                &[
+                    ("sec-fetch-site", "cross-site"),
+                    ("origin", "https://client.example"),
+                ],
+            )
+            .await;
+        assert_eq!(posted.status(), StatusCode::OK, "{state:?}");
+        assert!(html(posted).await.contains(&field));
 
-        let fields: Vec<(String, String)> = confirm.query_pairs().into_owned().collect();
-        let fields: Vec<_> = fields
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_str()))
-            .collect();
         let signed_out = harness
             .submit(routes::page::LOGOUT, &fields, OWN_PAGE)
             .await;
@@ -615,10 +627,15 @@ async fn account_pages_tell_the_password_manager_every_passkey() {
 }
 
 /// Every page the router registers is one the security layer classifies as a page,
-/// and the other way around.
+/// and the other way around, but the end-session endpoint, whose page asks to
+/// confirm an application's logout request, and which keeps the protocol's class.
 #[test]
 fn every_page_is_mounted_and_classified() {
-    let mounted: Vec<_> = WebApplication::pages().map(|(path, ..)| path).into();
+    let mounted: Vec<_> = WebApplication::pages()
+        .map(|(path, ..)| path)
+        .into_iter()
+        .filter(|path| *path != routes::oidc::LOGOUT)
+        .collect();
     assert_eq!(mounted, routes::page::ALL);
 }
 

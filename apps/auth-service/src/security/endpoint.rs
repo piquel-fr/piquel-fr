@@ -32,8 +32,9 @@ pub(super) enum Endpoint {
     Health,
     /// Authorization requests, including cross-site form navigation.
     Authorize,
-    /// RP-initiated logout, validated by its own hint, which only sends the browser to
-    /// confirm on the logout page.
+    /// RP-initiated logout, which applications send cross-site, by query or form:
+    /// it only shows the page asking to confirm it, whose form posts to the logout
+    /// page.
     Logout,
     /// The account's JSON APIs, which browsers may call only from auth's own pages.
     Account,

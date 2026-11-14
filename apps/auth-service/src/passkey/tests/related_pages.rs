@@ -5,7 +5,7 @@ use crate::{
     ClientRegistry,
     tests::{change, operator, reason, register, until_blocked},
 };
-use sourceorigin_common::clients::RelatedOrigin;
+use sourceorigin_common::{ClientId, clients::RelatedOrigin};
 
 /// PKCE verifier of the pushed requests related pages complete.
 const PAGE_VERIFIER: &str = "related-page-verifier-0123456789-abcdefghijklmnop";
@@ -117,6 +117,20 @@ impl Fixture {
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
         self.send(request, form).await
     }
+    /// Confirms the logout of `client`'s page with its `id_token` on auth's logout
+    /// page, from a browser with no cookie at auth.
+    async fn log_out(&self, client: &ClientId, id_token: &str) -> Response {
+        let form = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([("id_token_hint", id_token), ("client_id", client.as_str())])
+            .finish();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(routes::page::LOGOUT)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header("sec-fetch-site", "same-origin")
+            .header(header::ORIGIN, "null");
+        self.send(request, form).await
+    }
     /// Lists the origins `/.well-known/webauthn` publishes.
     async fn related_origins(&self) -> Vec<String> {
         let request = Request::builder()
@@ -196,6 +210,10 @@ async fn related_pages_sign_in_for_pkce_bound_codes() {
     assert_eq!(redeemed.status(), StatusCode::BAD_REQUEST);
     let redeemed = fixture.redeem(&page, &codes[1], PAGE_VERIFIER).await;
     assert_eq!(redeemed.status(), StatusCode::OK);
+    let id_token = Fixture::json(redeemed).await["id_token"]
+        .as_str()
+        .expect("ID token")
+        .to_owned();
     let DomainEvent::SignedIn {
         session_id,
         method: AuthenticationMethod::Passkey,
@@ -224,6 +242,19 @@ async fn related_pages_sign_in_for_pkce_bound_codes() {
         SessionAuthentication::from(&session).acr,
         Acr::PhishingResistant
     );
+
+    // The page's logout, confirmed in a browser with no cookie at auth, ends the
+    // session its ID token names, which no cookie could.
+    let signed_out = fixture.log_out(&page.client.id, &id_token).await;
+    assert_eq!(signed_out.status(), StatusCode::SEE_OTHER);
+    let session = fixture
+        .app
+        .database
+        .sessions()
+        .find_active_by_id(session_id)
+        .await
+        .expect("session lookup");
+    assert!(session.is_none(), "the inline session ended");
 }
 
 /// Sign-in is refused to unapproved origins, for another client's request, from

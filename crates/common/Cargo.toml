@@ -30,6 +30,7 @@ sqlx = ["dep:sqlx"]
 
 [dependencies]
 chrono.workspace = true
+ipnet.workspace = true
 reqwest = { workspace = true, optional = true }
 secrecy = { workspace = true, optional = true }
 serde.workspace = true

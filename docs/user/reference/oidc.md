@@ -55,6 +55,23 @@ one can't be redeemed with a `code_verifier`, so an attacker can't strip PKCE
 from a request. Discovery advertises `S256` in
 `code_challenge_methods_supported`. The SDKs always send PKCE.
 
+## Logout
+
+RP-initiated logout (`end_session_endpoint`, `/oidc/logout`) takes `GET` or a
+form `POST`. Post it when it carries an `id_token_hint`, as the SDKs do, so the ID
+token stays out of URLs. Auth answers with its own page asking the user to
+confirm, which posts the request back. Auth then signs the browser out and sends
+it to the registered `post_logout_redirect_uri` with any `state`. With a verified
+`id_token_hint`, it also ends the session the hint's `sid` names if it is a
+passkey sign-in on the app's own page, which has no cookie at auth. Any other
+session ends only from its own browser, so an ID token ends no more than the
+sign-in on the app's page it was issued for. A hint auth can't verify doesn't
+block the logout: the user can still sign out, but the browser stays on auth's
+sign-in page. The page says so, and also when the hint names another account
+than the one signed in. Every app that received tokens from an ended session,
+and registered a [back-channel logout URI](../apps/back-channel-logout.md), is
+told.
+
 ## Codes, tokens and consent
 
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in

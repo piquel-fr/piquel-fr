@@ -110,6 +110,11 @@ Beyond these, database access is trusted: it can bind any passkey to any account
   provider's account that syncs it.
 - **Rate limits are per IP.** They slow one source, not an attacker with many
   addresses.
+- **An ID token ends its app's page sign-in.** A passkey sign-in on an app's
+  own page has no cookie at auth, so only its ID token can end it: whoever holds
+  that token, even expired, can sign that one session out through RP-initiated
+  logout. A session with a cookie ends only from its own browser
+  ([logout](../architecture/oidc.md#logout)).
 - **An approved related origin is trusted.** Its page runs passkey sign-in for
   its client, without auth's pages; an administrator approves each origin, for
   trusted clients only ([passkey sign-in](../../user/apps/passkey-sign-in.md)).

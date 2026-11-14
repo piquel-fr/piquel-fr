@@ -171,9 +171,13 @@ const tokens = await client.complete(pending, new URL(request.url).searchParams)
 
 `authorize` takes a `stepUp` requirement, and an `idTokenHint`, the signed-in
 user's ID token, so auth signs in that user only. `complete` checks the callback
-before the code goes anywhere, then validates the ID token. `refresh`, `revoke`,
-`userinfo` and `logoutUrl` cover the rest of a session, and `logoutToken` validates
-a back-channel logout token.
+before the code goes anywhere, then validates the ID token. `refresh`, `revoke` and
+`userinfo` cover the rest of a session, and `logoutToken` validates a back-channel
+logout token. `logout` gives the RP-initiated logout request: answer the browser
+with its `page()`, which posts it to Origin Auth, so the ID token you pass as
+`idTokenHint` never appears in a URL. If your app's Content-Security-Policy sets
+`form-action`, it must allow Origin Auth's origin. Without an ID token, redirect
+the browser to `logoutRedirect()` instead, as the logout route does.
 
 ## Check that it works
 

@@ -388,6 +388,51 @@ impl Flow {
             OAuthCode::InvalidGrant.as_str()
         );
     }
+    /// Sends an RP-initiated logout with `fields`, as an application posts it to the
+    /// end-session endpoint, which answers the page asking to confirm it. Answers
+    /// that page's text.
+    async fn logout_page(&self, fields: &[(&str, &str)]) -> String {
+        let page = self
+            .request(Method::POST, routes::oidc::LOGOUT, fields, None)
+            .await;
+        assert_eq!(page.status(), StatusCode::OK);
+        Self::text(page).await
+    }
+    /// Shows the logout page for `fields`, then confirms it by posting the hidden
+    /// fields the page rendered, as its form does, answering the confirmation's
+    /// response.
+    async fn log_out(&self, fields: &[(&str, &str)]) -> Response {
+        let page = self.logout_page(fields).await;
+        let rendered = Self::hidden_fields(&page);
+        for (name, _) in fields {
+            assert!(rendered.iter().any(|(field, _)| field == name), "{page}");
+        }
+        let rendered: Vec<_> = rendered
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        self.request(Method::POST, routes::page::LOGOUT, &rendered, None)
+            .await
+    }
+    /// The hidden fields of `page`'s forms, by name, their values unescaped.
+    fn hidden_fields(page: &str) -> Vec<(String, String)> {
+        page.split(r#"<input type="hidden" name=""#)
+            .skip(1)
+            .map(|input| {
+                let (name, rest) = input.split_once('"').expect("field name");
+                let value = rest
+                    .strip_prefix(r#" value=""#)
+                    .and_then(|rest| rest.split_once('"'))
+                    .map_or("", |(value, _)| value);
+                let value = value
+                    .replace("&quot;", "\"")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&");
+                (name.to_owned(), value)
+            })
+            .collect()
+    }
     /// Rotates a scenario refresh token using its registered client credentials.
     async fn refresh(&self, token: &str) -> Response {
         self.request(

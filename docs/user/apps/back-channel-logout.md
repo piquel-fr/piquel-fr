@@ -22,7 +22,10 @@ disables their account. It follows OpenID Connect Back-Channel Logout 1.0.
 1. Open the app's **Settings** tab in the developer console.
 2. Fill in **Back-channel logout URI**, such as
    `https://notes.example/auth/backchannel-logout`. The SDKs' login routes serve
-   it at `/backchannel-logout` beside their callback.
+   it at `/backchannel-logout` beside their callback. Origin Auth's server posts
+   to it, so it must use HTTPS and be reachable from the internet: an IP address
+   that isn't public, such as `127.0.0.1`, is refused, and a name that resolves to
+   one gets no logout tokens.
 3. Select **Save changes**.
 
 Operators set it for SourceOrigin's own apps with

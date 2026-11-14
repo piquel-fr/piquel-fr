@@ -104,7 +104,7 @@ at auth, which answers instead of sending the browser back to your app:
 | **Scopes** | What the app may ask for: `openid` (the user's stable ID), `profile` (their handle, display name and profile picture), `email` (their email address, when they have one) and `offline_access` (refresh tokens, if refresh is allowed). `openid`, `profile` and `email` by default, and `offline_access` for an app with a backend. |
 | **Allow refresh tokens** | Lets the app stay signed in without sending users back to Origin Auth, when it requests `offline_access`. On by default for an app with a backend, off for one without. |
 | **Require pushed authorization requests** | The app must post its sign-in requests to `/oauth/par` (RFC 9126), so none of their parameters travel through the browser. The SDKs push their requests whenever auth offers it. Off by default. |
-| **Back-channel logout URI** | Where Origin Auth tells the app that a user's session ended ([back-channel logout](back-channel-logout.md)), under the same rules as redirect URIs. None by default. |
+| **Back-channel logout URI** | Where Origin Auth tells the app that a user's session ended ([back-channel logout](back-channel-logout.md)). Origin Auth's server posts to it, so it uses HTTPS and, when its host is an IP address, a public one. None by default. |
 
 The kind of app, with a backend or without, can't change: register a new app
 instead.

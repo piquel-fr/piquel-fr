@@ -323,7 +323,7 @@ impl Login {
             }
             destination = login
                 .client
-                .logout_url(None, login.after_logout.as_ref())
+                .logout_redirect(login.after_logout.as_ref())
                 .into();
         }
         let mut response = Redirect::to(&destination).into_response();

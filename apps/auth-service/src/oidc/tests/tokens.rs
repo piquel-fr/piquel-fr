@@ -108,18 +108,13 @@ async fn confidential_refresh_keeps_its_token_logout_and_client_binding() {
         .await;
     let tokens = Flow::json(response).await;
     let response = flow
-        .request(
-            Method::POST,
-            routes::page::LOGOUT,
-            &[
-                ("client_id", flow.client.id.as_str()),
-                (
-                    "post_logout_redirect_uri",
-                    flow.client.post_logout_uris[0].as_str(),
-                ),
-            ],
-            None,
-        )
+        .log_out(&[
+            ("client_id", flow.client.id.as_str()),
+            (
+                "post_logout_redirect_uri",
+                flow.client.post_logout_uris[0].as_str(),
+            ),
+        ])
         .await;
     assert_eq!(
         location(&response).as_str(),

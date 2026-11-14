@@ -145,6 +145,49 @@ function formEncoded(value: string): string {
  * const tokens = await client.complete(pending, new URL(request.url).searchParams);
  * ```
  */
+/**
+ * An RP-initiated logout request ({@link Client.logout}): the fields the browser posts
+ * to auth's end-session endpoint, as a form, so the ID token naming the sign-in never
+ * appears in a URL, a log or a `Referer`.
+ */
+export class LogoutRequest {
+  /** Where the form posts: auth's end-session endpoint. */
+  readonly action: string;
+  /** The form's fields, by name, in the order they are posted. */
+  readonly fields: Readonly<Record<string, string>>;
+
+  /** @internal Built by {@link Client.logout}. */
+  constructor(action: string, fields: Record<string, string>) {
+    this.action = action;
+    this.fields = fields;
+  }
+
+  /**
+   * An HTML page that posts the request as soon as it loads, and offers a button where
+   * no script runs. Answer the browser with it, uncached. The app's `form-action`
+   * policy, if it sets one, must allow auth's origin.
+   */
+  page(): string {
+    const escape = (value: string) =>
+      value
+        .replaceAll('&', '&amp;')
+        .replaceAll('"', '&quot;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    const inputs = Object.entries(this.fields)
+      .map(
+        ([name, value]) => `<input type="hidden" name="${escape(name)}" value="${escape(value)}">`
+      )
+      .join('');
+    return (
+      '<!doctype html><html><head><meta charset="utf-8"><title>Signing out</title></head>' +
+      `<body><form method="post" action="${escape(this.action)}">${inputs}` +
+      '<button>Continue signing out</button></form>' +
+      '<script>document.forms[0].submit()</script></body></html>'
+    );
+  }
+}
+
 export class Client {
   /** The issuer it signs in with. */
   readonly issuer: Issuer;
@@ -317,17 +360,33 @@ export class Client {
   }
 
   /**
-   * The RP-initiated logout URL: auth ends the browser session, then sends the
-   * browser to `postLogout`, which must be registered for this client. Without one,
-   * auth shows its own page. `idTokenHint`, the sign-in's ID token when the app kept
-   * it, is sent as `id_token_hint`; `client_id` always is.
+   * The RP-initiated logout request: auth asks the user to confirm, ends the browser
+   * session, then sends the browser to `postLogout`, which must be registered for this
+   * client. Without one, auth shows its own page. `idTokenHint`, the sign-in's ID token
+   * when the app kept it, names the sign-in being ended, so auth also ends one with no
+   * cookie in the browser, such as a passkey sign-in on the app's own page. The browser
+   * posts it as a form, so the ID token never appears in a URL: answer with
+   * {@link LogoutRequest.page}.
    */
-  logoutUrl(idTokenHint?: IdToken, postLogout?: string): string {
-    const url = new URL(this.issuer.metadata.end_session_endpoint);
-    if (idTokenHint !== undefined) url.searchParams.append('id_token_hint', idTokenHint.token);
-    url.searchParams.append('client_id', this.config.clientId);
-    if (postLogout !== undefined) url.searchParams.append('post_logout_redirect_uri', postLogout);
-    return url.href;
+  logout(idTokenHint?: IdToken, postLogout?: string): LogoutRequest {
+    const fields: Record<string, string> = {};
+    if (idTokenHint !== undefined) fields.id_token_hint = idTokenHint.token;
+    fields.client_id = this.config.clientId;
+    if (postLogout !== undefined) fields.post_logout_redirect_uri = postLogout;
+    return new LogoutRequest(this.issuer.metadata.end_session_endpoint, fields);
+  }
+
+  /**
+   * The RP-initiated logout request without an ID token, as an address to redirect the
+   * browser to: it has no ID token to keep out of URLs, and a redirect needs no script
+   * and no `form-action`. With an ID token, use {@link logout}.
+   */
+  logoutRedirect(postLogout?: string): URL {
+    const request = this.logout(undefined, postLogout);
+    const url = new URL(request.action);
+    for (const [name, value] of Object.entries(request.fields))
+      url.searchParams.append(name, value);
+    return url;
   }
 
   /**

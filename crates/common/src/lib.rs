@@ -42,6 +42,8 @@ pub mod events;
 pub mod form;
 /// Handles: an account's public identifier and login name.
 pub mod handle;
+/// Which IP addresses are public, so auth may deliver to them.
+pub mod net;
 /// What an account's owner is told about their account, in their inbox.
 #[cfg(feature = "events")]
 pub mod notifications;

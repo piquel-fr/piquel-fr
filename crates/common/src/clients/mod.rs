@@ -21,10 +21,11 @@
 
 use crate::{
     UserId,
+    net::PublicAddress,
     protocol::oauth::{ClientAuthMethod, Scope, Scopes},
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt, ops::Deref, str::FromStr};
+use std::{fmt, net::IpAddr, ops::Deref, str::FromStr};
 use thiserror::Error;
 use url::{Host, Url};
 
@@ -301,10 +302,9 @@ impl FromStr for DisplayName {
     }
 }
 
-/// A URI of the client that auth sends the browser or a request to: an
-/// authorization callback, a post-logout page or a back-channel logout endpoint. It
-/// uses HTTPS, or HTTP on a loopback IP for native apps (RFC 8252 §7.3) and
-/// development, and has no user name, password or fragment.
+/// A URI of the client that auth sends the browser to: an authorization callback or
+/// a post-logout page. It uses HTTPS, or HTTP on a loopback IP for native apps (RFC
+/// 8252 §7.3) and development, and has no user name, password or fragment.
 ///
 /// It must be written exactly as URL parsing normalizes it, e.g.
 /// `https://app.example/` rather than `https://APP.example`: clients send it
@@ -312,8 +312,8 @@ impl FromStr for DisplayName {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RedirectUri(Url);
 
-/// Why a [`RedirectUri`] was rejected. The messages say "URI" alone, since
-/// post-logout pages and back-channel logout endpoints are checked as callbacks are.
+/// Why a [`RedirectUri`] or a [`BackchannelLogoutUri`] was rejected. The messages say
+/// "URI" alone, since post-logout pages are checked as callbacks are.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum InvalidRedirectUri {
     /// The value is not an absolute URL.
@@ -331,6 +331,13 @@ pub enum InvalidRedirectUri {
          e.g. http://127.0.0.1:8080/callback"
     )]
     Insecure {
+        /// The rejected value.
+        uri: String,
+    },
+    /// A back-channel logout URI that auth can't deliver to: not HTTPS, or an IP
+    /// address that isn't public.
+    #[error("URI {uri} must use https with a public address, which auth's server can reach")]
+    Unreachable {
         /// The rejected value.
         uri: String,
     },
@@ -401,6 +408,58 @@ impl FromStr for RedirectUri {
 }
 
 impl fmt::Display for RedirectUri {
+    /// Writes the URI as registered.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Where auth posts a client's back-channel logout tokens, server to server: a
+/// [`RedirectUri`] that auth can reach, so HTTPS, and, when its host is an IP
+/// address, a public one. A name is checked when auth delivers to it, since what
+/// it resolves to can change.
+///
+/// ```
+/// use sourceorigin_common::clients::BackchannelLogoutUri;
+///
+/// assert!("https://notes.example/logout".parse::<BackchannelLogoutUri>().is_ok());
+/// // No server reaches the client's own loopback or private network.
+/// assert!("http://127.0.0.1:8080/logout".parse::<BackchannelLogoutUri>().is_err());
+/// assert!("https://10.0.0.7/logout".parse::<BackchannelLogoutUri>().is_err());
+/// // Nor shared or reserved space, which deliveries refuse too.
+/// assert!("https://100.64.0.1/logout".parse::<BackchannelLogoutUri>().is_err());
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackchannelLogoutUri(RedirectUri);
+
+impl BackchannelLogoutUri {
+    /// The URI as registered.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl FromStr for BackchannelLogoutUri {
+    type Err = InvalidRedirectUri;
+    /// Applies [`RedirectUri`]'s rules, then this type's.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let uri: RedirectUri = value.parse()?;
+        let address = match uri.0.host() {
+            Some(Host::Ipv4(v4)) => Some(IpAddr::V4(v4)),
+            Some(Host::Ipv6(v6)) => Some(IpAddr::V6(v6)),
+            Some(Host::Domain(_)) | None => None,
+        };
+        if uri.0.scheme() != "https" || address.is_some_and(|address| !address.is_public()) {
+            return Err(InvalidRedirectUri::Unreachable {
+                uri: value.to_owned(),
+            });
+        }
+        Ok(Self(uri))
+    }
+}
+
+impl fmt::Display for BackchannelLogoutUri {
     /// Writes the URI as registered.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
@@ -644,9 +703,8 @@ pub struct ClientRegistration {
     /// none of its parameters travel through the browser.
     pub require_pushed_authorization_requests: bool,
     /// Where auth posts a logout token when a session the client holds tokens from
-    /// ends (OIDC Back-Channel Logout 1.0). Deliveries go only to HTTPS URIs with
-    /// public addresses, so a loopback URI is never reached.
-    pub backchannel_logout_uri: Option<RedirectUri>,
+    /// ends (OIDC Back-Channel Logout 1.0).
+    pub backchannel_logout_uri: Option<BackchannelLogoutUri>,
 }
 
 /// Focused tests for each field's rules.

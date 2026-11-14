@@ -103,7 +103,7 @@ pub use login::{
     CallbackError, Invited, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step,
     sign_in,
 };
-pub use oidc::{Onward, consent, failure, logout, onward};
+pub use oidc::{LogoutNotice, Onward, consent, failure, logout, onward};
 pub use recovery::{
     RecoverChange, RecoverStep, Recovery, RecoveryPasskey, RecoveryStage, UndoChange, UndoStep,
     recover, recovery_banner, recovery_prompt, undo_recovery,

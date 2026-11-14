@@ -821,7 +821,7 @@ export class Login {
       if (session.refreshToken !== undefined && !(await this.#revoke(session.refreshToken))) {
         return Login.text(502, 'Signing out could not reach the sign-in service; try again.');
       }
-      destination = this.client.logoutUrl(undefined, this.#afterLogout);
+      destination = this.client.logoutRedirect(this.#afterLogout).href;
     }
     return Login.#redirect(destination, [
       Login.#clearCookie(this.#sessionCookie),
