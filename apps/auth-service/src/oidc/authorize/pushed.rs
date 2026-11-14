@@ -50,9 +50,12 @@ impl OidcApplication {
                 error,
             )
         })?;
-        let client = app
-            .authenticate_client(&headers, q.client_id.as_deref())
-            .await?;
+        // RFC 9126 §2.1: the pushed parameters are an authorization request's,
+        // which always name the client (RFC 6749 §4.1.1), Basic credentials or not.
+        let Some(client_id) = q.client_id.as_deref() else {
+            return Err(OAuthCode::InvalidRequest.reject("client_id is required"));
+        };
+        let client = app.authenticate_client(&headers, Some(client_id)).await?;
         if q.request_uri.is_some() {
             return Err(OAuthCode::InvalidRequest.reject("request_uri cannot be pushed"));
         }

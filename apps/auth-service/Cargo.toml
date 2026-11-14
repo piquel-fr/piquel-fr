@@ -33,6 +33,7 @@ secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_json_canonicalizer.workspace = true
+serde_urlencoded.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
@@ -49,7 +50,6 @@ rcgen.workspace = true
 tokio-rustls.workspace = true
 sourceorigin-repository = { workspace = true, features = ["test-util"] }
 sourceorigin-telemetry = { workspace = true, features = ["test-util"] }
-serde_urlencoded.workspace = true
 insta.workspace = true
 webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
 

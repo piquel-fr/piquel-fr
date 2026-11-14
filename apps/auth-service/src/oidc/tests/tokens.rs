@@ -19,9 +19,10 @@ use sourceorigin_repository::SessionScope;
 async fn confidential_refresh_keeps_its_token_logout_and_client_binding() {
     let flow = Flow::new(true, true).await;
     let code = flow.code(EMAIL_REFRESH_SCOPES).await;
+    // Without credentials, the client is refused unchallenged (RFC 6749 §5.2).
     assert_eq!(
         flow.exchange(&code, Flow::verifier(), None).await.status(),
-        StatusCode::UNAUTHORIZED
+        StatusCode::BAD_REQUEST
     );
     let response = flow
         .exchange(&code, Flow::verifier(), flow.basic.as_deref())

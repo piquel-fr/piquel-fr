@@ -226,7 +226,8 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             None,
         )
         .await;
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    // A page refusing the browser's session challenges no scheme, so it isn't 401.
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 /// A consent that waits for the account lock while every session ends is not
@@ -269,7 +270,7 @@ async fn a_consent_whose_session_ended_while_waiting_is_not_saved() {
         .expect("every session ends");
     holder.commit().await.expect("commit");
 
-    assert_eq!(decision.await.expect("decision"), StatusCode::UNAUTHORIZED);
+    assert_eq!(decision.await.expect("decision"), StatusCode::FORBIDDEN);
     let consents = database.oidc().list_consents(flow.user_id).await;
     assert!(consents.expect("consents").is_empty(), "not saved");
 }

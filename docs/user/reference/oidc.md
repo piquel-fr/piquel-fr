@@ -20,10 +20,27 @@ through the browser: it posts the usual parameters to `/oauth/par`, authenticate
 as at the token endpoint, and receives a `request_uri` valid for 60 seconds. The
 browser then opens `/oauth/authorize?client_id=…&request_uri=…`. The `request_uri`
 works once, only for that client, and auth ignores every other parameter sent
-with it. A pushed request is validated exactly like a browser one, but its errors
-come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
+with it, even malformed ones. A pushed request names its client with `client_id`,
+even when it authenticates with HTTP Basic, and is validated exactly like a
+browser one, but its errors come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
 Client-hosted request objects (`request` and `request_uri` from RFC 9101) are not
 supported.
+
+## Errors
+
+Errors use the codes of RFC 6749 §4.1.2.1 and §5.2, RFC 6750 §3.1 and OIDC
+Core §3.1.2.6, with an `error_description`. Until auth has checked the client and
+its `redirect_uri`, it explains an authorization or logout request's error on its
+own page, and never sends the browser to an unverified URI. Once it has, the error
+goes back to the redirect URI with `iss`, and `state` only if the request had one.
+Auth checks `state` is at most 512 bytes before sending any error back with it.
+
+At the token, revocation and pushed authorization endpoints, `invalid_client`
+answers `401` with a `WWW-Authenticate: Basic` challenge when the request sent an
+`Authorization` header, and `400` when it sent none. `UserInfo` challenges a
+missing or rejected bearer token at `401`, and a token without the `openid` scope
+with `insufficient_scope` at `403`. Token responses carry
+`Cache-Control: no-store` and `Pragma: no-cache`.
 
 ## PKCE
 

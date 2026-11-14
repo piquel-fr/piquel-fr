@@ -9,6 +9,7 @@ revocation, userinfo and logout work. Read it before changing anything under
 | Module | Holds |
 | --- | --- |
 | `oidc/mod.rs` | `OidcApplication`, its routes, the discovery document, client authentication and opaque tokens |
+| `oidc/error.rs` | `OAuthError`, its status and `WWW-Authenticate` challenge, and the client redirect carrying it |
 | `oidc/authorize/` | Authorization requests, pushed requests, the sign-in requirements and the consent decision |
 | `oidc/inline.rs` | Completing a pushed request from a passkey sign-in on an app's own page |
 | `oidc/policy.rs` | `ClientPolicy`, the check of the client's current registration |
@@ -39,15 +40,19 @@ digest under every configured key, so a change of key breaks nothing
 ## Pending authorizations
 
 `/oauth/authorize` (`OidcApplication::authorize`) takes a request by query or
-form post. It finds the client, which must be enabled, and matches
-`redirect_uri` exactly against its registration. Until then an error answers as
-OAuth error JSON; from then on, every error goes back to the client's redirect
-URI, always with `state` and `iss` (`ClientRedirect`).
+form post. It reads a pushed request's `client_id` and `request_uri` first, so no
+other parameter can fail it. Otherwise it finds the client, which must be
+enabled, matches `redirect_uri` exactly against its registration, and bounds
+`state`. Until then an error answers as OAuth error JSON, which a browser's
+navigation reads on auth's error page; from then on, every error goes back to the
+client's redirect URI with `iss`, and `state` if the request had one
+(`ClientRedirect`).
 
 `AuthorizationParameters::validate` checks the rest the same way for browser and
 pushed requests, one named step per check: no request object and no
 `response_mode` but `query`, an `id_token_hint` that auth signed for this
-client, which names the only account that may answer, `response_type=code`, an
+client, which names the only account that may answer, `response_type=code`
+(`unsupported_response_type` for another), an
 S256 PKCE challenge, which only a confidential client may leave out, `state`, scopes and audience the client allows, `nonce`,
 `max_age` and `prompt`. It returns a `ValidatedAuthorization`, whose `store`
 saves the request and returns its token. The request is stored in
@@ -55,7 +60,8 @@ saves the request and returns its token. The request is stored in
 entry as its target `acr`. The browser carries its opaque token, the
 transaction, from then on.
 
-A client registered to push its requests is refused here.
+A client registered to push its requests is refused here with
+`unauthorized_client`.
 
 ### Pushed requests
 

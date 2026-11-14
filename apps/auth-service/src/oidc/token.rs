@@ -1,7 +1,7 @@
 //! Token exchange, refresh, revocation and `UserInfo`.
 
 use super::{
-    ACCESS_TOKEN_SECONDS, AuthScheme, GrantType, OAuthCode, OAuthError, OidcApplication,
+    ACCESS_TOKEN_SECONDS, AuthScheme, Challenge, GrantType, OAuthCode, OAuthError, OidcApplication,
     OpaqueToken, Reject, Scope, Scopes, TokenPrefix, TokenType, policy::ClientPolicy,
 };
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
 use axum::{
     Form, Json,
     extract::State,
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderName, StatusCode, header},
 };
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,7 @@ use sourceorigin_common::{
     ClientId, SessionId, TokenId, UserId,
     events::{CodeRedemptionFailure, DomainEvent, EventContext, GrantRevocation},
     protocol::{
+        challenge::{BearerChallenge, BearerError},
         claims::{
             AccessTokenClaims, Audience, AuthenticationClaims, IdTokenClaims, ProfileClaims,
             UserInfo,
@@ -273,7 +274,7 @@ impl OidcApplication {
         context: RequestContext,
         headers: HeaderMap,
         form: Result<Form<TokenForm>, axum::extract::rejection::FormRejection>,
-    ) -> Result<Json<TokenResponse>, OAuthError> {
+    ) -> Result<([(HeaderName, &'static str); 1], Json<TokenResponse>), OAuthError> {
         let Form(form) = form.map_err(|error| {
             OAuthCode::InvalidRequest
                 .reject_with(format!("token request is malformed: {error}"), error)
@@ -300,7 +301,9 @@ impl OidcApplication {
         if let Err(error) = app.database.oidc().touch_client(&client.id).await {
             ApiError::log_error(&error);
         }
-        Ok(Json(tokens))
+        // RFC 6749 §5.1: `Cache-Control: no-store`, which every response gets, and
+        // `Pragma: no-cache` for HTTP/1.0 caches.
+        Ok(([(header::PRAGMA, "no-cache")], Json(tokens)))
     }
 
     /// Exchanges a one-use code for the authenticated client after checking its client,
@@ -319,7 +322,7 @@ impl OidcApplication {
             TokenPrefix::AuthorizationCode,
             form.code
                 .as_deref()
-                .ok_or_else(|| OAuthCode::InvalidGrant.reject("code is required"))?,
+                .ok_or_else(|| OAuthCode::InvalidRequest.reject("code is required"))?,
         )?;
         let digests = self.accepted_digests(&opaque);
         let mut tx = self.database.begin().await?;
@@ -434,7 +437,7 @@ impl OidcApplication {
             TokenPrefix::RefreshToken,
             form.refresh_token
                 .as_deref()
-                .ok_or_else(|| OAuthCode::InvalidGrant.reject("refresh_token is required"))?,
+                .ok_or_else(|| OAuthCode::InvalidRequest.reject("refresh_token is required"))?,
         )?;
         let digests = self.accepted_digests(&opaque);
         let redemption = RefreshRedemption::from(client.kind);
@@ -635,31 +638,51 @@ impl OidcApplication {
         std::future::ready(app.userinfo_response(&headers))
     }
 
-    /// Builds scoped identity claims after synchronous verification of the supplied bearer token.
+    /// Builds scoped identity claims after synchronous verification of the supplied
+    /// bearer token. A missing token is challenged without an error code, a
+    /// rejected one with `invalid_token`, and one without the `openid` scope with
+    /// `insufficient_scope` (RFC 6750 §3.1).
     fn userinfo_response(&self, headers: &HeaderMap) -> Result<Json<UserInfo>, OAuthError> {
         let bearer = || format!("send an access token as {} credentials", AuthScheme::Bearer);
-        let authorization = headers
-            .get(header::AUTHORIZATION)
-            .ok_or_else(|| OAuthCode::InvalidToken.reject(bearer()))?
+        let Some(authorization) = headers.get(header::AUTHORIZATION) else {
+            return Err(OAuthCode::InvalidToken
+                .reject(bearer())
+                .challenged(Challenge::Bearer(BearerChallenge::default())));
+        };
+        let invalid = |error: OAuthError| {
+            error.challenged(Challenge::Bearer(BearerChallenge::error(
+                BearerError::InvalidToken,
+            )))
+        };
+        let authorization = authorization
             .to_str()
-            .map_err(|error| OAuthCode::InvalidToken.reject_with(bearer(), error))?;
+            .map_err(|error| invalid(OAuthCode::InvalidToken.reject_with(bearer(), error)))?;
         let token = AuthScheme::Bearer
             .credentials(authorization)
-            .ok_or_else(|| OAuthCode::InvalidToken.reject(bearer()))?;
+            .ok_or_else(|| invalid(OAuthCode::InvalidToken.reject(bearer())))?;
         let claims: AccessTokenClaims = self
             .keys
             .current()?
             .verify(token, TokenType::Access, &self.issuer)
             .map_err(|error| {
-                OAuthCode::InvalidToken
-                    .reject_with(format!("access token is invalid: {error}"), error)
+                invalid(
+                    OAuthCode::InvalidToken
+                        .reject_with(format!("access token is invalid: {error}"), error),
+                )
             })?;
         let scopes = Scopes::from_wire(claims.scope);
         if !scopes.contains(Scope::OpenId) {
-            return Err(OAuthCode::InvalidToken.reject(format!(
-                "access token was not granted the {} scope",
-                Scope::OpenId
-            )));
+            let mut needed = oauth::Scopes::default();
+            needed.insert(Scope::OpenId);
+            return Err(OAuthCode::InsufficientScope
+                .reject(format!(
+                    "access token was not granted the {} scope",
+                    Scope::OpenId
+                ))
+                .challenged(Challenge::Bearer(BearerChallenge {
+                    scope: Some(needed),
+                    ..BearerChallenge::error(BearerError::InsufficientScope)
+                })));
         }
         Ok(Json(UserInfo {
             sub: claims.sub,

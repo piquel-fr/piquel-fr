@@ -22,15 +22,14 @@ use url::Url;
 pub(in crate::oidc) struct AuthorizationParameters {
     /// Must be `code`.
     response_type: String,
-    /// Client making the request. A pushing client authenticated with HTTP Basic
-    /// may leave it out.
+    /// Client making the request.
     pub(super) client_id: Option<String>,
     /// Where to send the result; must exactly match a registered URI.
     redirect_uri: String,
     /// Requested scopes, space-separated.
     scope: String,
-    /// Client value returned unchanged with the result.
-    pub(super) state: String,
+    /// Client value returned unchanged with the result, if sent.
+    pub(super) state: Option<String>,
     /// Client value echoed in the ID token.
     nonce: Option<String>,
     /// PKCE challenge the code exchange must answer. Only a confidential client
@@ -179,13 +178,17 @@ impl AuthorizationParameters {
             })
     }
 
-    /// Requires `response_type=code`.
+    /// Requires `response_type=code`: a missing one is a malformed request, and
+    /// any other value one auth doesn't support.
     fn response_type(&self) -> Result<(), OAuthError> {
+        if self.response_type.is_empty() {
+            return Err(OAuthCode::InvalidRequest.reject("response_type is required"));
+        }
         match self
             .response_type
             .parse::<ResponseType>()
             .map_err(|error| {
-                OAuthCode::InvalidRequest.reject_with(
+                OAuthCode::UnsupportedResponseType.reject_with(
                     format!("response_type must be {}", ResponseType::Code),
                     error,
                 )
@@ -194,9 +197,14 @@ impl AuthorizationParameters {
         }
     }
 
-    /// Bounds `state`, which comes back with the result.
-    fn state(&self) -> Result<(), OAuthError> {
-        if self.state.len() > MAX_STATE_BYTES {
+    /// Bounds `state`, which comes back with the result, so it is checked before
+    /// any error goes back with it.
+    pub(super) fn state(&self) -> Result<(), OAuthError> {
+        if self
+            .state
+            .as_ref()
+            .is_some_and(|state| state.len() > MAX_STATE_BYTES)
+        {
             return Err(OAuthCode::InvalidRequest
                 .reject(format!("state must be at most {MAX_STATE_BYTES} bytes")));
         }

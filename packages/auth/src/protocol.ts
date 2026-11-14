@@ -566,7 +566,7 @@ export type Prompt = "none" | "login" | "consent" | "select_account";
 
 export type Scope = "openid" | "profile" | "email" | "offline_access";
 
-export type ErrorCode = "invalid_request" | "invalid_client" | "invalid_grant" | "invalid_scope" | "invalid_target" | "invalid_token" | "unsupported_grant_type" | "login_required" | "consent_required" | "unmet_authentication_requirements" | "request_not_supported" | "invalid_request_uri" | "access_denied" | "server_error" | (string & Record<never, never>);
+export type ErrorCode = "invalid_request" | "invalid_client" | "unauthorized_client" | "invalid_grant" | "invalid_scope" | "invalid_target" | "invalid_token" | "insufficient_scope" | "unsupported_response_type" | "unsupported_grant_type" | "login_required" | "consent_required" | "unmet_authentication_requirements" | "request_not_supported" | "invalid_request_uri" | "access_denied" | "server_error" | (string & Record<never, never>);
 
 /**
  * JSON error body of auth's OAuth endpoints (RFC 6749 §5.2).

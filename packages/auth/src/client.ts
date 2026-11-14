@@ -380,15 +380,16 @@ export class Client {
 
   /**
    * Posts a form, authenticating as this client: HTTP Basic for a confidential client,
-   * `client_id` in the form for a public one.
+   * the client ID alone for a public one. The form always names the client with
+   * `client_id`, which a pushed request needs even with Basic credentials (RFC 9126
+   * §2.1).
    */
   #post(url: string, form: Record<string, string>): Promise<Reply> {
     const { clientId } = this.config;
-    if (this.#secret === undefined) {
-      return this.issuer.http.post(url, { ...form, client_id: clientId });
-    }
+    const named = { ...form, client_id: clientId };
+    if (this.#secret === undefined) return this.issuer.http.post(url, named);
     const credentials = btoa(`${formEncoded(clientId)}:${formEncoded(this.#secret)}`);
-    return this.issuer.http.post(url, form, { authorization: `Basic ${credentials}` });
+    return this.issuer.http.post(url, named, { authorization: `Basic ${credentials}` });
   }
 
   /** Checks a token response and validates its ID token. */

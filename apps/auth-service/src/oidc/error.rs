@@ -13,7 +13,7 @@ use axum::{
 use sourceorigin_common::{
     ErrorChain,
     protocol::{
-        challenge::{BearerChallenge, BearerError},
+        challenge::BearerChallenge,
         oauth::{ErrorDescription, ErrorResponse, InvalidScope},
     },
 };
@@ -62,6 +62,7 @@ impl Reject for OAuthCode {
             code: self,
             description: description.into(),
             redirect: None,
+            challenge: None,
             source: None,
         }
     }
@@ -75,7 +76,40 @@ impl Reject for OAuthCode {
             code: self,
             description: description.into(),
             redirect: None,
+            challenge: None,
             source: Some(Box::new(error)),
+        }
+    }
+}
+
+/// The `WWW-Authenticate` challenge a rejected credential is answered with (RFC 9110
+/// §11.6.1), naming the scheme the request used, or should have.
+#[derive(Debug)]
+pub(crate) enum Challenge {
+    /// The client sent an `Authorization` header to authenticate itself, where only
+    /// HTTP Basic is accepted (RFC 6749 §5.2).
+    Basic,
+    /// A bearer token at `UserInfo`, missing or rejected (RFC 6750 §3).
+    Bearer(BearerChallenge),
+}
+
+impl Challenge {
+    /// The HTTP status the challenge is sent with: 401, or 403 for a token that
+    /// lacks a scope.
+    fn status(&self) -> StatusCode {
+        match self {
+            Self::Basic => StatusCode::UNAUTHORIZED,
+            Self::Bearer(challenge) => {
+                StatusCode::from_u16(challenge.status()).unwrap_or(StatusCode::UNAUTHORIZED)
+            }
+        }
+    }
+
+    /// The header value.
+    fn header(&self) -> String {
+        match self {
+            Self::Basic => format!("{} realm=\"token\"", super::AuthScheme::Basic),
+            Self::Bearer(challenge) => challenge.to_string(),
         }
     }
 }
@@ -95,6 +129,8 @@ pub(crate) enum OAuthError {
         /// Client redirect carrying the error; only set once the redirect URI is verified.
         /// Boxed to keep `Result<_, OAuthError>` small.
         redirect: Option<Box<Url>>,
+        /// The challenge of a rejected credential. Boxed for the same reason.
+        challenge: Option<Box<Challenge>>,
         /// Why the input was rejected.
         #[source]
         source: Option<Box<dyn StdError + Send + Sync>>,
@@ -123,18 +159,25 @@ pub(crate) enum OAuthError {
 }
 
 impl OAuthError {
-    /// HTTP status of the JSON error response for `code`.
+    /// HTTP status of the error response for `code`, when no credential is
+    /// challenged: a challenge decides it otherwise. Nothing is 401 without a
+    /// challenge, which RFC 9110 §15.5.2 requires of a 401: `invalid_client` is
+    /// 400 when the client sent no `Authorization` header (RFC 6749 §5.2), and a
+    /// page refusing the browser's session is 403.
     /// Auth never sends a code it does not know, but the open vocabulary needs an
     /// answer for one.
     const fn status(code: &OAuthCode) -> StatusCode {
         match code {
-            OAuthCode::InvalidClient | OAuthCode::InvalidToken => StatusCode::UNAUTHORIZED,
+            OAuthCode::InvalidToken | OAuthCode::InsufficientScope => StatusCode::FORBIDDEN,
             OAuthCode::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
             OAuthCode::InvalidRequest
+            | OAuthCode::InvalidClient
+            | OAuthCode::UnauthorizedClient
             | OAuthCode::InvalidGrant
             | OAuthCode::InvalidScope
             | OAuthCode::InvalidTarget
             | OAuthCode::UnsupportedGrantType
+            | OAuthCode::UnsupportedResponseType
             | OAuthCode::LoginRequired
             | OAuthCode::ConsentRequired
             | OAuthCode::UnmetAuthenticationRequirements
@@ -145,26 +188,29 @@ impl OAuthError {
         }
     }
 
-    /// `WWW-Authenticate` challenge sent with failed client or bearer authentication.
-    fn challenge(code: &OAuthCode) -> Option<String> {
-        match code {
-            OAuthCode::InvalidClient => Some("Basic realm=\"token\"".into()),
-            OAuthCode::InvalidToken => {
-                Some(BearerChallenge::error(BearerError::InvalidToken).to_string())
-            }
-            OAuthCode::InvalidRequest
-            | OAuthCode::InvalidGrant
-            | OAuthCode::InvalidScope
-            | OAuthCode::InvalidTarget
-            | OAuthCode::UnsupportedGrantType
-            | OAuthCode::LoginRequired
-            | OAuthCode::ConsentRequired
-            | OAuthCode::UnmetAuthenticationRequirements
-            | OAuthCode::RequestNotSupported
-            | OAuthCode::InvalidRequestUri
-            | OAuthCode::AccessDenied
-            | OAuthCode::ServerError
-            | OAuthCode::Other(_) => None,
+    /// Answers the rejection with `challenge`, which then sets its status.
+    pub(super) fn challenged(self, challenge: Challenge) -> Self {
+        match self {
+            Self::Protocol {
+                code,
+                description,
+                redirect,
+                source,
+                ..
+            } => Self::Protocol {
+                code,
+                description,
+                redirect,
+                challenge: Some(Box::new(challenge)),
+                source,
+            },
+            error @ (Self::Database(_)
+            | Self::Crypto(_)
+            | Self::Keys(_)
+            | Self::Url(_)
+            | Self::CookieHeader(_)
+            | Self::PageAddress(_)
+            | Self::StoredScopes(_)) => error,
         }
     }
 
@@ -194,12 +240,14 @@ impl OAuthError {
             Self::Protocol {
                 code,
                 description,
+                challenge,
                 source,
                 ..
             } => Self::Protocol {
                 redirect: Some(Box::new(code.redirect_url(to, &description))),
                 code,
                 description,
+                challenge,
                 source,
             },
             error @ (Self::Database(_)
@@ -224,13 +272,17 @@ impl OAuthError {
             Self::Protocol {
                 code,
                 description,
+                challenge,
                 source,
                 ..
             } => {
                 if source.is_some() {
                     tracing::debug!(error = %ErrorChain(self), "OAuth request rejected");
                 }
-                (code.clone(), description.as_ref())
+                let status = challenge
+                    .as_ref()
+                    .map_or_else(|| Self::status(code), |challenge| challenge.status());
+                return (status, code.clone(), description.as_ref());
             }
             Self::Keys(_) => {
                 ApiError::log_error(self);
@@ -270,7 +322,15 @@ impl IntoResponse for OAuthError {
         {
             return Redirect::to(location.as_str()).into_response();
         }
-        let challenge = Self::challenge(&code);
+        let challenge = if let Self::Protocol {
+            challenge: Some(challenge),
+            ..
+        } = &self
+        {
+            Some(challenge.header())
+        } else {
+            None
+        };
         let explanation = Explanation(format!("The app's request was refused: {description}."));
         let body = ErrorResponse {
             error: code,
