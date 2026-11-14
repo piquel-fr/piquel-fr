@@ -103,12 +103,14 @@ coverage *ARGS:
             close("sort"); print row("workspace", LH, LF, FH, FF)
         }' target/lcov.info
 
-# Without a URL, it builds and starts auth itself, on PostgreSQL and Caddy in
-# Docker. With one, CONFORMANCE_CLI must run that deployment's CLI. Needs Docker
-# and Playwright's Chromium; see tests/conformance/README.md.
+# Without a target, it builds and starts auth itself, on PostgreSQL and Caddy in
+# Docker. With a URL, such as a preview's, CONFORMANCE_CLI must run that
+# deployment's CLI. `release` tests staging's release on the OpenID Foundation's
+# hosted suite, then offers to promote it to production. Needs Docker and
+# Playwright's Chromium; see tests/conformance/README.md.
 # Run the OpenID conformance suite against auth, and compare with expected.json.
-conformance AUTH_URL='':
-    @tests/conformance/run.sh {{ quote(AUTH_URL) }}
+conformance TARGET='':
+    @tests/conformance/run.sh {{ quote(TARGET) }}
 
 # Regenerate tests/sdk-vectors; `just test` fails while the committed files are stale.
 sdk-vectors:

@@ -135,6 +135,10 @@ per-environment value is a runtime `environment` entry.
    piquelctl --timeout 30m env promote sourceorigin production --deployment <deployment-id> --yes
    ```
 
+`just conformance release` runs the OpenID Foundation's conformance suite
+against staging's current release first, then offers to promote that release:
+see [test a release](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/conformance/README.md#test-a-release).
+
 piqueld refuses the promotion unless staging's current deployment succeeded and
 every service runs healthy. With `--deployment`, it also refuses if staging
 deployed again since, so it never promotes something you didn't test.

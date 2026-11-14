@@ -1,7 +1,8 @@
 #:schema https://raw.githubusercontent.com/sourceorigin-dev/piqueld/main/docs/application-manifest.schema.json
 # SourceOrigin on piqueld. The environments below are the application's only ones:
 # staging builds `main` on every push, production only receives releases
-# promoted from staging, and previews deploy branches or local worktrees. See
+# promoted from staging, conformance tests them on the OpenID Foundation's hosted
+# suite first, and previews deploy branches or local worktrees. See
 # docs/dev/operations/deploying.md.
 api_version = "piqueld.dev/v1alpha1"
 kind = "Application"
@@ -79,6 +80,29 @@ github_client_id = "Ov23liZe9WmU9A4fqlqw"
 github_secret = "github-staging"
 google_client_id = "981383173703-rvipsfet9n9270sqp30jttjrsl8beo66.apps.googleusercontent.com"
 google_secret = "google-staging"
+
+# Staging's releases, public while `just conformance release` runs the OpenID
+# Foundation's hosted conformance suite against them, stopped otherwise. Flat
+# public hostnames, which Cloudflare's certificate for `*.sourceorigin.dev` covers,
+# and the admin dashboard on the tailnet, under `*.dev.sourceorigin.dev`. It has
+# no sign-in providers, and its test account no address to mail. See
+# tests/conformance/README.md.
+[spec.environments.conformance]
+promote_from = "staging"
+
+[spec.environments.conformance.variables]
+web_host = "conformance.sourceorigin.dev"
+auth_host = "auth-conformance.sourceorigin.dev"
+www_host = "www-conformance.sourceorigin.dev"
+admin_host = "admin-conformance.dev.sourceorigin.dev"
+docs_host = "docs-conformance.sourceorigin.dev"
+smtp_secret = "resend-dev"
+email_from = "Origin Account <security@dev.sourceorigin.dev>"
+github_client_id = ""
+github_secret = "no-provider-secret"
+google_client_id = ""
+google_secret = "no-provider-secret"
+otlp_endpoint = ""
 
 # Flat hostnames, so the `*.dev.sourceorigin.dev` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.

@@ -18,8 +18,13 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mailed } from '../browser/helpers.ts';
 
-/** The suite's address, which docker-compose.yml gives it. */
-const suiteUrl = 'https://localhost:8443';
+/**
+ * The suite's address: the OpenID Foundation's hosted one, or the one
+ * docker-compose.yml runs on this machine, which serves a self-signed certificate.
+ */
+const suiteUrl = process.env.CONFORMANCE_SUITE_URL ?? 'https://localhost:8443';
+/** Whether the suite runs on this machine. */
+const localSuite = new URL(suiteUrl).hostname === 'localhost';
 /** The name the suite gives this deployment in its callback URLs. */
 const alias = 'sourceorigin';
 /** How long one test may take, its waits included, before it counts as `UNKNOWN`. */
@@ -34,8 +39,8 @@ type Expectation = { result: Exclude<Result, 'PASSED' | 'UNKNOWN'>; reason: stri
 /**
  * A plan to run, with its variant, from plans.json. A `backchannel` plan's client
  * receives back-channel logout tokens, which no other plan expects. It runs only
- * against a local auth: the tokens must reach the suite on this machine, which a
- * preview can't.
+ * when auth can post to the suite: a local auth, or any auth to the hosted suite,
+ * but not a preview to the suite on this machine.
  */
 type Plan = { plan: string; variant: Record<string, string>; backchannel?: boolean };
 
@@ -58,8 +63,18 @@ function required(name: string): string {
 const authUrl = required('CONFORMANCE_AUTH_URL').replace(/\/$/, '');
 const output = required('CONFORMANCE_OUTPUT');
 const only = process.env.CONFORMANCE_TESTS?.split(',').filter(Boolean);
-/** Whether `run.sh` started auth on this machine. */
-const local = Boolean(process.env.CONFORMANCE_LOCAL);
+/** Whether auth can post back-channel logout tokens to the suite. */
+const backchannel = Boolean(process.env.CONFORMANCE_BACKCHANNEL);
+
+/**
+ * The value `reference` names, as `file:///path` or `env://NAME`, as auth reads its
+ * secrets, such as the hosted suite's API token.
+ */
+function resolve(reference: string): string {
+  if (reference.startsWith('env://')) return required(reference.slice('env://'.length));
+  if (reference.startsWith('file://')) return readFileSync(new URL(reference), 'utf8').trim();
+  throw new Error(`${reference} must be file:///path or env://NAME`);
+}
 
 /** The suite's REST API. */
 class Suite {
@@ -71,8 +86,13 @@ class Suite {
 
   /** Connects once the suite answers, which takes it a minute after starting. */
   static async connect(): Promise<Suite> {
-    // The suite serves its own self-signed certificate.
-    const api = await request.newContext({ baseURL: suiteUrl, ignoreHTTPSErrors: true });
+    // The hosted suite takes the API token of its user's account.
+    const token = process.env.CONFORMANCE_SUITE_TOKEN;
+    const api = await request.newContext({
+      baseURL: suiteUrl,
+      ignoreHTTPSErrors: localSuite,
+      extraHTTPHeaders: token ? { authorization: `Bearer ${resolve(token)}` } : {}
+    });
     for (let attempt = 0; attempt < 120; attempt++) {
       const ready = await api.get('/api/plan?length=1').catch(() => undefined);
       if (ready?.ok()) return new Suite(api);
@@ -261,8 +281,8 @@ class Browser {
   /** Launches Chromium with a virtual authenticator, which keeps its passkey for the run. */
   static async launch(): Promise<Browser> {
     const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE });
-    // The suite's certificate is always self-signed, and so is a local auth's.
-    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    // The local suite's certificate is self-signed, and so is a local auth's.
+    const context = await browser.newContext({ ignoreHTTPSErrors: localSuite });
     const page = await context.newPage();
     const cdp = await context.newCDPSession(page);
     await cdp.send('WebAuthn.enable');
@@ -449,17 +469,20 @@ function differences(
     ) {
       found.push(`${test}: expected.json must link the issue that fixes it`);
     }
-    if (!only && local && !results.has(test))
+    if (!only && backchannel && !results.has(test))
       found.push(`${test}: in expected.json, but no plan ran it`);
   }
   return found;
 }
 
 const here = import.meta.dirname;
-const plans = JSON.parse(readFileSync(join(here, 'plans.json'), 'utf8')) as Plan[];
-const expected = JSON.parse(readFileSync(join(here, 'expected.json'), 'utf8')) as Partial<
-  Record<string, Expectation>
->;
+// A release is tested against its own commit's plans and expectations.
+const plans = JSON.parse(
+  readFileSync(process.env.CONFORMANCE_PLANS ?? join(here, 'plans.json'), 'utf8')
+) as Plan[];
+const expected = JSON.parse(
+  readFileSync(process.env.CONFORMANCE_EXPECTED ?? join(here, 'expected.json'), 'utf8')
+) as Partial<Record<string, Expectation>>;
 mkdirSync(join(output, 'screenshots'), { recursive: true });
 
 const deployment = new Deployment(required('CONFORMANCE_CLI'));
@@ -488,8 +511,10 @@ const results = new Map<string, Result>();
 /** Each test's ID in the suite. */
 const ids = new Map<string, string>();
 for (const plan of plans) {
-  if (plan.backchannel && !local) {
-    console.log(`${plan.plan}: skipped, as auth is not on this machine`);
+  if (plan.backchannel && !backchannel) {
+    console.log(
+      `${plan.plan}: skipped, as auth can't post back-channel logout tokens to the suite`
+    );
     continue;
   }
   const created = await suite.createPlan(
