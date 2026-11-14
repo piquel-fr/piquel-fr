@@ -15,6 +15,12 @@ root, configures it.
   run it.
 - `docs/SUMMARY.md` is the table of contents. A page it doesn't list is not
   published, and a page it lists that doesn't exist fails the build.
+- `docs/plans/` holds plans for work that isn't built yet, such as the
+  [SourceOrigin platform plan](https://github.com/sourceorigin-dev/sourceorigin/blob/main/docs/plans/platform/README.md).
+  A plan says what we intend, so the rule to describe how SourceOrigin works
+  now doesn't apply to it. `docs/SUMMARY.md` never lists a plan, so the book
+  doesn't publish it: link to one with its GitHub URL, as for a file outside
+  `docs/`.
 - A page about one directory of the repository, such as how to run the browser
   tests, may stay a `README.md` in that directory, where GitHub shows it.
   `packages/auth/README.md` also introduces the TypeScript SDK wherever the
