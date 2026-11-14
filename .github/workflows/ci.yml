@@ -23,10 +23,14 @@
 #   docs   -> the documentation book, built with warnings denied, with every
 #             link and heading anchor in it and in the repository's Markdown
 #             checked offline
+#   conformance -> the OpenID Foundation's conformance suite against the real
+#             binary, every result compared with tests/conformance/expected.json
 #
 # Pull requests run only the jobs their changes can affect (see `changes`),
 # except `docs`: a change anywhere can break a link to it.
-# The merge queue, pushes to main and manual runs run everything: the queue
+# The merge queue, pushes to main, the nightly run and manual runs run
+# everything: the nightly run catches what changed outside the repository, such
+# as a dependency's behaviour. The queue
 # tests each pull request on top of the latest main before it merges, so two
 # pull requests that pass alone cannot break main together. `ci` is the single
 # status to require, and the queue waits for it: it fails if any job failed
@@ -45,6 +49,8 @@ on:
   merge_group:
   push:
     branches: [main]
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -82,6 +88,7 @@ jobs:
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
       app: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
       infra: ${{ github.event_name != 'pull_request' || steps.filter.outputs.infra == 'true' }}
+      conformance: ${{ github.event_name != 'pull_request' || steps.filter.outputs.conformance == 'true' }}
     steps:
       - if: github.event_name == 'pull_request'
         id: filter
@@ -108,6 +115,8 @@ jobs:
               - '!infra/piqueld.toml'
             infra:
               - '{infra/piqueld.toml,infra/telemetry.toml,infra/telemetry/*.yaml,justfile,just/infra.just,.github/workflows/ci.yml}'
+            conformance:
+              - '{apps/auth-service/src/oidc/**,crates/common/src/protocol/**,tests/conformance/**,.github/workflows/ci.yml}'
 
   checks:
     name: checks
@@ -430,6 +439,35 @@ jobs:
           tool: just,mdbook@0.5.4,lychee@0.24.2
       - run: just docs
 
+  # The suite in Docker, as `just conformance` runs it locally: auth's debug
+  # binary, configured as in production, behind Caddy with a throwaway
+  # certificate, since the suite requires HTTPS endpoints, and Chromium signing
+  # in with a virtual passkey. A result that differs from expected.json fails it, an
+  # unexpected PASSED included, so the file only shrinks.
+  conformance:
+    name: conformance
+    needs: changes
+    if: needs.changes.outputs.conformance == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - *install-just
+      - *setup-pnpm
+      - *setup-node
+      - *rust-cache
+      - run: just install
+      - run: pnpm exec playwright install --only-shell chromium
+      - run: just conformance
+      # The suite's logs per plan, the results, the screenshots REVIEW tests
+      # ask for, and auth's and the containers' logs.
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance
+          path: target/conformance
+          if-no-files-found: ignore
+
   ci:
     name: ci
     if: always()
@@ -445,10 +483,11 @@ jobs:
       - docker
       - infra
       - docs
+      - conformance
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
-          allowed-skips: checks, web, rust, rust-lint, package, msrv, e2e, docker, infra
+          allowed-skips: checks, web, rust, rust-lint, package, msrv, e2e, docker, infra, conformance
           jobs: ${{ toJSON(needs) }}

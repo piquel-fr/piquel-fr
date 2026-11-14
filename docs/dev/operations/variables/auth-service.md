@@ -11,6 +11,7 @@
 - `AUTH_REQUESTS_PER_MINUTE`: How many requests one client may make a minute in each rate category, such as pages, sign-in and tokens. Default: `120`.
 - `AUTH_TRUSTED_PROXIES`: The proxies in front of auth, as comma-separated IP addresses or CIDR ranges. Each must overwrite `X-Forwarded-For` with the one client address, which auth then throttles on. A missing or ambiguous header from one of them is refused, and the header is ignored from any other peer. Unset, auth trusts `PIQUELD_INGRESS_PROXIES`, and without either it throttles on the direct peer's address.
 - `PIQUELD_INGRESS_PROXIES`: The gateway ranges piqueld gives every service, trusted when `AUTH_TRUSTED_PROXIES` is unset.
+- `AUTH_LOOPBACK_LOGOUT_CA`: Only for tests on one machine, such as `just conformance`; never set it in a deployment. Where to read a certificate authority, in PEM, through `env://NAME` or `file:///path`. Set, back-channel logout tokens may also go to loopback addresses, over HTTPS certificates this authority signed.
 
 ### Database
 

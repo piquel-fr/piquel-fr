@@ -1,0 +1,74 @@
+# The OpenID Foundation's conformance suite, from its prebuilt image, pinned to
+# one release, behind Caddy's HTTPS, and, under the `local` profile, the
+# PostgreSQL and Mailpit a local auth runs with. Update the suite's `release-v…` tag on
+# purpose, and rerun `just conformance` (see README.md).
+#
+# Every service shares the host's network, so the suite reaches auth at the
+# same HTTPS address the browser driver uses, whatever it is: a local auth
+# behind Caddy, or a preview. These ports must be free:
+#
+#   8443   Caddy, serving the suite at https://localhost:8443
+#   7443   Caddy, serving a local auth at https://localhost:7443
+#   8080   the suite's server, behind Caddy
+#   27017  the suite's MongoDB
+#   7432   a local auth's PostgreSQL
+#   7025   a local auth's Mailpit, receiving its email over SMTP
+#   7026   that Mailpit's API, from which the driver reads its invitation
+
+name: sourceorigin-conformance
+
+services:
+  mongodb:
+    image: mongo:6.0.13
+    network_mode: host
+    command: ['--bind_ip', '127.0.0.1', '--port', '27017', '--quiet']
+    tmpfs: [/data/db]
+
+  server:
+    image: registry.gitlab.com/openid/conformance-suite:release-v5.3.4
+    network_mode: host
+    environment:
+      BASE_URL: https://localhost:8443
+      BASE_MTLS_URL: https://localhost:8444
+      MONGODB_HOST: 127.0.0.1
+      # Development mode: the API needs no sign-in. The server still requires
+      # its own sign-in providers' client IDs, which development mode never uses.
+      SPRING_PROFILES_ACTIVE: dev
+      OIDC_GOOGLE_CLIENTID: unused
+      OIDC_GOOGLE_SECRET: unused
+      OIDC_GITLAB_CLIENTID: unused
+      OIDC_GITLAB_SECRET: unused
+    depends_on: [mongodb]
+
+  postgres:
+    profiles: [local]
+    image: postgres:18-bookworm
+    network_mode: host
+    command: ['-c', 'listen_addresses=127.0.0.1', '-c', 'port=7432', '-c', 'fsync=off']
+    environment:
+      POSTGRES_PASSWORD: conformance
+    tmpfs: [/var/lib/postgresql]
+    healthcheck:
+      test: ['CMD', 'pg_isready', '--host', '127.0.0.1', '--port', '7432']
+      interval: 1s
+      retries: 30
+
+  # Receives a local auth's email, so the account the suite signs in to gets a
+  # verified address from the invitation mailed to it.
+  mailpit:
+    profiles: [local]
+    image: axllent/mailpit:v1.27
+    network_mode: host
+    environment:
+      MP_SMTP_BIND_ADDR: 127.0.0.1:7025
+      MP_UI_BIND_ADDR: 127.0.0.1:7026
+
+  # HTTPS for the suite, and for a local auth: the suite requires HTTPS
+  # endpoints, and auth accepts only HTTPS origins. Caddy terminates TLS with a
+  # throwaway certificate authority of its own, which a local auth trusts to
+  # deliver back-channel logout tokens to the suite. It replaces the suite's
+  # own nginx, whose self-signed certificate no client can verify.
+  caddy:
+    image: caddy:2.10.2-alpine
+    network_mode: host
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro']

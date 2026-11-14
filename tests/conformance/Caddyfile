@@ -1,0 +1,28 @@
+# HTTPS for the conformance suite and a local auth, for `just conformance`.
+{
+	auto_https disable_redirects
+	skip_install_trust
+	# Java sends no server name for `localhost`, so the suite's requests to auth
+	# would otherwise find no certificate.
+	default_sni localhost
+}
+
+# The suite's server, with the forwarded headers its own nginx would send. Its
+# TLS checks read the protocol in OpenSSL's spelling.
+localhost:8443 {
+	map {http.request.tls.version} {ssl_protocol} {
+		tls1.2 TLSv1.2
+		tls1.3 TLSv1.3
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Port 8443
+		header_up X-Forwarded-Uri {uri}
+		header_up X-Ssl-Protocol {ssl_protocol}
+		header_up X-Ssl-Cipher {http.request.tls.cipher_suite}
+	}
+}
+
+# A local auth.
+localhost:7443 {
+	reverse_proxy 127.0.0.1:7080
+}

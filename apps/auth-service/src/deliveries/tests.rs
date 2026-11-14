@@ -210,7 +210,8 @@ async fn responses_are_classified_by_status_alone() {
             }),
         )
         .route("/long", get(|| async { vec![b'a'; 100 * 1024] }));
-    let client = OutboundClient::local(TlsListener::serve(tcp, receiver));
+    let client =
+        OutboundClient::local(TlsListener::serve(tcp, receiver)).expect("local outbound client");
     let send = async |path: &str| {
         client
             .send(Method::GET, &format!("{origin}{path}"), |request| request)

@@ -305,22 +305,23 @@ export async function serveClient(
 export const mailUrl = process.env.E2E_MAIL_URL ?? '';
 
 /**
- * The first match of `pattern` in the plain text of each email Mailpit received
- * for `address` that has one, newest first, once there are at least `count` of
- * them, waiting up to 15 seconds: auth sends email from a queue.
+ * The first match of `pattern` in the plain text of each email the Mailpit at
+ * `api` received for `address` that has one, newest first, once there are at
+ * least `count` of them, waiting up to 15 seconds: auth sends email from a queue.
  */
 export async function mailedAll(
   address: string,
   pattern: RegExp,
-  count: number
+  count: number,
+  api = mailUrl
 ): Promise<string[]> {
   type Search = { messages: { ID: string }[] };
   const query = new URLSearchParams({ query: `to:"${address}"` });
   for (const deadline = Date.now() + 15_000; Date.now() < deadline;) {
-    const search = (await (await fetch(`${mailUrl}/api/v1/search?${query}`)).json()) as Search;
+    const search = (await (await fetch(`${api}/api/v1/search?${query}`)).json()) as Search;
     const found: string[] = [];
     for (const { ID } of search.messages) {
-      const { Text } = (await (await fetch(`${mailUrl}/api/v1/message/${ID}`)).json()) as {
+      const { Text } = (await (await fetch(`${api}/api/v1/message/${ID}`)).json()) as {
         Text: string;
       };
       const match = pattern.exec(Text)?.[0];
@@ -333,11 +334,11 @@ export async function mailedAll(
 }
 
 /**
- * The first match of `pattern` in the plain text of the newest email Mailpit
- * received for `address` that has one, waiting up to 15 seconds for it.
+ * The first match of `pattern` in the plain text of the newest email the Mailpit
+ * at `api` received for `address` that has one, waiting up to 15 seconds for it.
  */
-export async function mailed(address: string, pattern: RegExp): Promise<string> {
-  const [newest] = await mailedAll(address, pattern, 1);
+export async function mailed(address: string, pattern: RegExp, api = mailUrl): Promise<string> {
+  const [newest] = await mailedAll(address, pattern, 1, api);
   return newest;
 }
 

@@ -103,6 +103,13 @@ coverage *ARGS:
             close("sort"); print row("workspace", LH, LF, FH, FF)
         }' target/lcov.info
 
+# Without a URL, it builds and starts auth itself, on PostgreSQL and Caddy in
+# Docker. With one, CONFORMANCE_CLI must run that deployment's CLI. Needs Docker
+# and Playwright's Chromium; see tests/conformance/README.md.
+# Run the OpenID conformance suite against auth, and compare with expected.json.
+conformance AUTH_URL='':
+    @tests/conformance/run.sh {{ quote(AUTH_URL) }}
+
 # Regenerate tests/sdk-vectors; `just test` fails while the committed files are stale.
 sdk-vectors:
     @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p sourceorigin-crypto --test sdk_vectors

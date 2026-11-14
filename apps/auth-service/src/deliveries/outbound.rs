@@ -55,14 +55,16 @@ impl OutboundClient {
     }
 
     /// A client that also reaches loopback addresses and trusts `root`, so tests
-    /// can send to a local HTTPS server.
-    #[cfg(test)]
-    pub(crate) fn local(root: reqwest::Certificate) -> Self {
+    /// can send to a local HTTPS server, such as the conformance suite's.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the TLS backend cannot initialize.
+    pub(crate) fn local(root: reqwest::Certificate) -> Result<Self, reqwest::Error> {
         Self::build(
             Reachable::PublicOrLoopback,
             reqwest::Client::builder().add_root_certificate(root),
         )
-        .expect("local outbound client")
     }
 
     /// Applies the guarded settings to `builder`.
@@ -251,7 +253,6 @@ pub(super) enum Reachable {
     /// Only public addresses.
     Public,
     /// Public and loopback addresses, for tests' local servers.
-    #[cfg(test)]
     PublicOrLoopback,
 }
 
@@ -262,7 +263,6 @@ impl Reachable {
         let public = address.is_public();
         match self {
             Self::Public => public,
-            #[cfg(test)]
             Self::PublicOrLoopback => public || address.to_canonical().is_loopback(),
         }
     }

@@ -38,7 +38,8 @@ async fn logout_receiver() -> (
     )
     .parse()
     .expect("logout URI");
-    let outbound = OutboundClient::local(TlsListener::serve(tcp, receiver));
+    let outbound =
+        OutboundClient::local(TlsListener::serve(tcp, receiver)).expect("local outbound client");
     (uri, outbound, posted)
 }
 

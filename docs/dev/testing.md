@@ -126,6 +126,21 @@ belongs in its list. The
 [browser tests' README](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/browser/README.md)
 says how to run them.
 
+### OpenID conformance suite
+
+```console
+just conformance
+```
+
+The recipe runs the OpenID Foundation's conformance suite in Docker against a
+local auth it builds, or against a preview's URL, and compares every result
+with `tests/conformance/expected.json`. Run it when you change how auth
+answers an OAuth or OpenID Connect request. A result that changes, for better
+or worse, fails the run until `expected.json` says so: a fix removes its entry
+in the same pull request. The
+[suite's README](https://github.com/sourceorigin-dev/sourceorigin/blob/main/tests/conformance/README.md)
+says how to run it and read its results.
+
 ### Generated files
 
 Ordinary tests compare each committed generated file with what the code
@@ -168,6 +183,7 @@ expressions included.
 | Any command against a scratch cluster | `just db scratch -- psql` |
 | Browser tests, against a running deployment | `just web test-browser` |
 | Register the browser tests' clients with auth on `localhost` | `just web browser-client` |
+| The OpenID conformance suite, against a local auth or a preview (needs Docker) | `just conformance` / `just conformance <auth URL>` |
 | Dependency audits: cargo-deny's advisories, licenses, `*` requirements and sources other than crates.io, and pnpm's | `just audit` (`just rust audit` / `just web audit`) |
 | Validate the piqueld manifests with piquelctl, and the telemetry configs with the images that run them (needs Docker) | `just infra check` |
 | Regenerate the query cache, the SDK vectors, the TypeScript SDK's wire types, or the generated documentation | `just db prepare` / `just sdk-vectors` / `just sdk-types` / `just docs reference` |
@@ -190,18 +206,22 @@ CI runs the same recipes, in these jobs:
 | `docker` | Builds the auth, web and docs images, the first two from the layers `main` cached last |
 | `infra` | `just infra check`, with the latest piquelctl |
 | `docs` | `just docs` |
+| `conformance` | `just conformance`, uploading its results and screenshots as the `conformance` artifact |
 
 A pull request runs only the jobs its changes can affect, by the paths it changes:
 Rust jobs for Rust code and the files it reads, such as the committed audit keys
 and the generated reference pages, the web job for files Prettier, ESLint or tsc
 can see, `e2e` and `docker` for anything the service, its images, the TypeScript
-SDK or the browser suite is built from, and `infra` for the manifests and the
-telemetry configs. Other Markdown changes run only `docs`, which runs on every
+SDK or the browser suite is built from, `infra` for the manifests and the
+telemetry configs, and `conformance` for auth's OAuth and OpenID Connect code,
+the shared protocol types and the suite's own files. Other Markdown changes run only `docs`, which runs on every
 pull request, since a change anywhere can break a link to it. The `changes` job
 in [ci.yml](https://github.com/sourceorigin-dev/sourceorigin/blob/main/.github/workflows/ci.yml)
 has the exact filters.
 
-The merge queue, pushes to `main` and manual runs run every job. The `ci` check
+The merge queue, pushes to `main`, a nightly run and manual runs run every job.
+The nightly run catches what changes outside the repository, such as a
+dependency's behaviour. The `ci` check
 sums the others up: it fails if any job failed, and passes when the rest
 succeeded or were skipped. It is the one check the merge queue waits for.
 

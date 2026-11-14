@@ -65,6 +65,7 @@ Auth renders every page itself, sign-in included, and the account settings at
 | `packages/auth` | `@sourceorigin/auth`, the TypeScript SDK, published to npm: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page). It has no runtime dependencies, and `src/protocol.ts` is generated from `sourceorigin_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [SDK design](sdk.md#test-vectors) |
 | `tests/browser` | Playwright tests, and the documentation's screenshots |
+| `tests/conformance` | The OpenID Foundation's conformance suite, run by `just conformance`, and the results it is expected to give |
 | `infra/` | Dockerfiles and the piqueld manifests |
 | `tools/xtask` | `cargo xtask`: publishing the SDKs and releasing a version; see [releasing](../releasing.md) |
 
