@@ -1,6 +1,7 @@
 //! Pushed authorization requests completed by a passkey sign-in on an application's
 //! own page, from an approved related origin. The page gets the code as JSON
-//! instead of through the redirect URI; it is useless without the PKCE verifier.
+//! instead of through the redirect URI; it is useless without the PKCE verifier,
+//! or a confidential client's secret.
 
 use super::{OAuthCode, OidcApplication, policy::ClientPolicy};
 use crate::security::ApiError;
@@ -24,7 +25,8 @@ pub(crate) struct InlineClaim {
 /// The authorization response (RFC 9207), returned as JSON to the page.
 #[derive(Serialize)]
 pub(crate) struct InlineResponse {
-    /// The authorization code, redeemable with the request's PKCE verifier.
+    /// The authorization code, redeemable with the request's PKCE verifier, or the
+    /// client's secret.
     code: String,
     /// The request's `state`.
     state: String,

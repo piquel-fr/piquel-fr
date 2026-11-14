@@ -55,8 +55,8 @@ pub(super) struct TokenForm {
 impl TokenForm {
     /// Whether this form redeems the locked `code` for the authenticated
     /// `client_id`: the code was issued to it, for this `redirect_uri`, and this
-    /// `code_verifier` matches its PKCE challenge. Answers why it does not, with
-    /// the rejection.
+    /// `code_verifier` matches its PKCE challenge, or neither was sent. Answers why
+    /// it does not, with the rejection.
     fn redeems(
         &self,
         code: &ConsumedAuthorizationCode,
@@ -75,17 +75,29 @@ impl TokenForm {
                     .reject("redirect_uri must match the one sent with the authorization request"),
             ));
         }
-        sourceorigin_crypto::Pkce::verify(
-            self.code_verifier.as_deref().unwrap_or_default(),
-            &code.pkce_challenge,
-        )
-        .map_err(|error| {
-            (
+        match (&code.pkce_challenge, self.code_verifier.as_deref()) {
+            (Some(challenge), verifier) => {
+                sourceorigin_crypto::Pkce::verify(verifier.unwrap_or_default(), challenge).map_err(
+                    |error| {
+                        (
+                            CodeRedemptionFailure::InvalidVerifier,
+                            OAuthCode::InvalidGrant
+                                .reject_with(format!("code_verifier is invalid: {error}"), error),
+                        )
+                    },
+                )
+            }
+            // A confidential client sent no challenge, so it sends no verifier.
+            (None, None) => Ok(()),
+            // RFC 9700 §2.1.1: a verifier for a code issued without a challenge
+            // may be an attacker's downgrade of a request that had one.
+            (None, Some(_)) => Err((
                 CodeRedemptionFailure::InvalidVerifier,
-                OAuthCode::InvalidGrant
-                    .reject_with(format!("code_verifier is invalid: {error}"), error),
-            )
-        })
+                OAuthCode::InvalidGrant.reject(
+                    "code_verifier was sent, but the authorization request had no code_challenge",
+                ),
+            )),
+        }
     }
 
     /// Permits refresh scope narrowing while rejecting additions to the original grant.

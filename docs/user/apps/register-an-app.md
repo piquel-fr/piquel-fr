@@ -28,7 +28,8 @@ and never appear in the console: see [OIDC clients](../../dev/operations/clients
    - **No, it runs in the browser or on a device**: your app signs users in
      without a secret.
 
-   You can't change this later. Both kinds sign in with PKCE.
+   You can't change this later. An app without a secret must sign in with
+   PKCE; the SDKs use it for both kinds.
 4. Fill in **Redirect URIs**, one per line.
 5. Leave the other settings as they are for now: [app settings](app-settings.md)
    explains each one. An app with a backend starts with `offline_access` under

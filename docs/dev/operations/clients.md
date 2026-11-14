@@ -146,7 +146,8 @@ sign-in**. See [passkey sign-in on your own pages](../../user/apps/passkey-sign-
 
 - **Kind.** Clients are public by default, and authenticate with PKCE alone
   (`none`). Confidential clients (`--confidential`) use `client_secret_basic`
-  with a secret auth generates. Both require S256 PKCE.
+  with a secret auth generates. Public clients must send S256 PKCE; confidential
+  clients may leave it out, and a challenge they send is enforced.
 - **Redirect URIs** must match exactly. They use HTTPS, or HTTP on a loopback IP
   for native apps, without credentials or a fragment. Write them as URL parsing
   normalizes them: `https://app.example/`, not `https://APP.example`. The

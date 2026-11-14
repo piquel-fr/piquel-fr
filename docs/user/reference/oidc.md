@@ -25,6 +25,19 @@ come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
 Client-hosted request objects (`request` and `request_uri` from RFC 9101) are not
 supported.
 
+## PKCE
+
+A public client must send an S256 PKCE challenge (`code_challenge` and
+`code_challenge_method=S256`) with every authorization request. A confidential
+client may leave PKCE out, as RFC 9700 §2.1.1 allows: it authenticates with its
+secret when it redeems the code, and OpenID Connect's `nonce`, when it sends
+one, binds the ID token to its request. Without PKCE, send a `nonce` and check
+it, as RFC 9700 asks, so a stolen code can't be injected. A challenge a
+confidential client sends is enforced like any other, and a code issued without
+one can't be redeemed with a `code_verifier`, so an attacker can't strip PKCE
+from a request. Discovery advertises `S256` in
+`code_challenge_methods_supported`. The SDKs always send PKCE.
+
 ## Codes, tokens and consent
 
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in

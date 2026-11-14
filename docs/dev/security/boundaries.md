@@ -168,9 +168,11 @@ back-channel logout tokens.
 
 **What is checked** (`apps/auth-service/src/oidc`):
 
-- Redirect URIs must match a registered one exactly, and every client uses S256
-  PKCE (`oidc/authorize/parameters.rs`). A confidential client also
-  authenticates with its secret.
+- Redirect URIs must match a registered one exactly, and a public client must
+  use S256 PKCE (`oidc/authorize/parameters.rs`). A confidential client
+  authenticates with its secret, so PKCE is optional for it (RFC 9700 §2.1.1);
+  a challenge it sends is enforced, and a `code_verifier` for a code issued
+  without one is refused, so a request can't be downgraded.
 - A code is tried once, and every step re-reads the client's registration
   ([codes, tokens and consent](../../user/reference/oidc.md#codes-tokens-and-consent)).
 - Only the claims a client asked for, and the user consented to, are released.

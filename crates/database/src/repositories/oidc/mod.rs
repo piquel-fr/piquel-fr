@@ -58,8 +58,8 @@ pub struct InsertAuthorizationRequest {
     pub client_state: String,
     /// The client's `nonce` parameter, echoed in the ID token.
     pub nonce: Option<String>,
-    /// PKCE `S256` code challenge.
-    pub pkce_challenge: String,
+    /// PKCE `S256` code challenge; `None` when a confidential client sent none.
+    pub pkce_challenge: Option<String>,
     /// Requested scopes.
     pub scopes: Vec<String>,
     /// Requested token audience.
@@ -121,8 +121,8 @@ pub struct StoredAuthorizationRequest {
     pub client_state: String,
     /// The client's `nonce` parameter.
     pub nonce: Option<String>,
-    /// PKCE `S256` code challenge.
-    pub pkce_challenge: String,
+    /// PKCE `S256` code challenge; `None` when a confidential client sent none.
+    pub pkce_challenge: Option<String>,
     /// Requested scopes.
     pub scopes: Vec<String>,
     /// Requested token audience.
@@ -158,8 +158,8 @@ pub struct InsertAuthorizationCode {
     pub session_id: SessionId,
     /// Redirect URI the code was delivered to.
     pub redirect_uri: String,
-    /// PKCE `S256` code challenge.
-    pub pkce_challenge: String,
+    /// PKCE `S256` code challenge; `None` when a confidential client sent none.
+    pub pkce_challenge: Option<String>,
     /// The client's `nonce` parameter.
     pub nonce: Option<String>,
     /// Granted scopes.
@@ -187,8 +187,8 @@ pub struct ConsumedAuthorizationCode {
     pub session_id: SessionId,
     /// Redirect URI the code was delivered to.
     pub redirect_uri: String,
-    /// PKCE `S256` code challenge.
-    pub pkce_challenge: String,
+    /// PKCE `S256` code challenge; `None` when a confidential client sent none.
+    pub pkce_challenge: Option<String>,
     /// The client's `nonce` parameter.
     pub nonce: Option<String>,
     /// Granted scopes.
