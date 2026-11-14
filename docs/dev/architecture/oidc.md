@@ -48,7 +48,7 @@ URI, always with `state` and `iss` (`ClientRedirect`).
 pushed requests, one named step per check: no request object and no
 `response_mode` but `query`, an `id_token_hint` that auth signed for this
 client, which names the only account that may answer, `response_type=code`, an
-S256 PKCE challenge, `state`, scopes and audience the client allows, `nonce`,
+S256 PKCE challenge, which only a confidential client may leave out, `state`, scopes and audience the client allows, `nonce`,
 `max_age` and `prompt`. It returns a `ValidatedAuthorization`, whose `store`
 saves the request and returns its token. The request is stored in
 `authorization_requests` for ten minutes, with its first known `acr_values`
@@ -138,7 +138,8 @@ period.
 
 1. It locks the code's account, then the code (`lock_code`), and checks that the
    form redeems it: the same client, the same `redirect_uri`, and a
-   `code_verifier` matching its PKCE challenge. A failed check expires the code
+   `code_verifier` matching its PKCE challenge, or none for a code issued
+   without one. A failed check expires the code
    and records `CodeRedemptionFailed`, so a code is tried once. The account is
    locked whatever its status, and a disabled one isn't refused here. Its code
    fails as any other would: another client presenting it gets the usual

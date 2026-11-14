@@ -273,3 +273,61 @@ async fn a_consent_whose_session_ended_while_waiting_is_not_saved() {
     let consents = database.oidc().list_consents(flow.user_id).await;
     assert!(consents.expect("consents").is_empty(), "not saved");
 }
+
+/// PKCE is optional only for a confidential client, which authenticates at the
+/// token endpoint (RFC 9700 §2.1.1): a public client's request without it is
+/// refused, a challenge a confidential client sends is still enforced, and a
+/// verifier for a code issued without a challenge is refused as a downgrade.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn pkce_is_optional_only_for_confidential_clients() {
+    /// The scenario's authorization request without PKCE, followed to its code.
+    async fn without_pkce(flow: &Flow) -> Url {
+        let mut url = flow.authorization_url(Scope::OpenId.as_str(), None, &[]);
+        let kept: Vec<_> = url
+            .query_pairs()
+            .into_owned()
+            .filter(|(name, _)| !name.starts_with("code_challenge"))
+            .collect();
+        url.query_pairs_mut().clear().extend_pairs(kept);
+        let uri = format!("{}?{}", url.path(), url.query().expect("query"));
+        flow.consent(flow.request(Method::GET, &uri, &[], None).await)
+            .await
+    }
+    /// Exchanges `code` with the scenario's credentials and no verifier.
+    async fn exchange_without_verifier(flow: &Flow, code: &str) -> Response {
+        flow.request(
+            Method::POST,
+            "/oauth/token",
+            &[
+                ("grant_type", GrantType::AuthorizationCode.as_str()),
+                ("redirect_uri", flow.client.redirect_uris[0].as_str()),
+                ("code", code),
+            ],
+            flow.basic.as_deref(),
+        )
+        .await
+    }
+
+    let public = Flow::new(false, true).await;
+    assert_eq!(
+        parameter(&without_pkce(&public).await, "error"),
+        OAuthCode::InvalidRequest.as_str()
+    );
+
+    let confidential = Flow::new(true, true).await;
+    let downgraded = parameter(&without_pkce(&confidential).await, "code");
+    let basic = confidential.basic.as_deref();
+    Flow::assert_invalid_grant(
+        confidential
+            .exchange(&downgraded, Flow::verifier(), basic)
+            .await,
+    )
+    .await;
+    let code = parameter(&without_pkce(&confidential).await, "code");
+    confidential
+        .id_token(exchange_without_verifier(&confidential, &code).await)
+        .await;
+    let challenged = confidential.code(Scope::OpenId.as_str()).await;
+    Flow::assert_invalid_grant(exchange_without_verifier(&confidential, &challenged).await).await;
+}

@@ -10,7 +10,7 @@ use crate::oidc::{
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use sourceorigin_common::{UserId, protocol::claims::Acr};
+use sourceorigin_common::{UserId, clients::ClientKind, protocol::claims::Acr};
 use sourceorigin_repository::{InsertAuthorizationRequest, StoredOidcClient};
 use url::Url;
 
@@ -33,10 +33,11 @@ pub(in crate::oidc) struct AuthorizationParameters {
     pub(super) state: String,
     /// Client value echoed in the ID token.
     nonce: Option<String>,
-    /// PKCE challenge the code exchange must answer.
-    code_challenge: String,
-    /// Must be `S256`.
-    code_challenge_method: String,
+    /// PKCE challenge the code exchange must answer. Only a confidential client
+    /// may leave it out.
+    code_challenge: Option<String>,
+    /// Must be `S256` when `code_challenge` is sent.
+    code_challenge_method: Option<String>,
     /// Resource the access token is for; defaults to the client's first audience.
     audience: Option<String>,
     /// Space-separated [`Prompt`] values.
@@ -81,9 +82,8 @@ impl AuthorizationParameters {
         self.supported()?;
         let hinted_user_id = self.hinted_user_id(app, client)?;
         self.response_type()?;
-        self.code_challenge_method()?;
+        let pkce_challenge = self.pkce(client)?;
         self.state()?;
-        self.code_challenge()?;
         let scopes = self.scopes(client)?;
         let audience = self.audience(client)?;
         self.nonce()?;
@@ -104,7 +104,7 @@ impl AuthorizationParameters {
             client_id: client.id.clone(),
             redirect_uri: self.redirect_uri.clone(),
             client_state: self.state.clone(),
-            pkce_challenge: self.code_challenge.clone(),
+            pkce_challenge,
             nonce: self.nonce.clone(),
             scopes: scopes.into_stored(),
             audience,
@@ -194,24 +194,6 @@ impl AuthorizationParameters {
         }
     }
 
-    /// Requires `code_challenge_method=S256`.
-    fn code_challenge_method(&self) -> Result<(), OAuthError> {
-        match self
-            .code_challenge_method
-            .parse::<CodeChallengeMethod>()
-            .map_err(|error| {
-                OAuthCode::InvalidRequest.reject_with(
-                    format!(
-                        "code_challenge_method must be {}",
-                        CodeChallengeMethod::S256
-                    ),
-                    error,
-                )
-            })? {
-            CodeChallengeMethod::S256 => Ok(()),
-        }
-    }
-
     /// Bounds `state`, which comes back with the result.
     fn state(&self) -> Result<(), OAuthError> {
         if self.state.len() > MAX_STATE_BYTES {
@@ -221,13 +203,39 @@ impl AuthorizationParameters {
         Ok(())
     }
 
-    /// Requires the PKCE challenge to be a SHA-256 digest.
-    fn code_challenge(&self) -> Result<(), OAuthError> {
-        if !sourceorigin_crypto::Pkce::valid_challenge(&self.code_challenge) {
+    /// The PKCE challenge the code exchange must answer (RFC 7636): an `S256`
+    /// SHA-256 digest. Public clients must send one. A confidential client may
+    /// leave PKCE out, as RFC 9700 §2.1.1 allows, since it authenticates at the
+    /// token endpoint; a challenge it sends is enforced all the same.
+    fn pkce(&self, client: &StoredOidcClient) -> Result<Option<String>, OAuthError> {
+        let Some(challenge) = &self.code_challenge else {
+            return match (&self.code_challenge_method, client.kind) {
+                (Some(_), _) => Err(OAuthCode::InvalidRequest
+                    .reject("code_challenge_method was sent without a code_challenge")),
+                (None, ClientKind::Confidential) => Ok(None),
+                (None, ClientKind::Public) => Err(OAuthCode::InvalidRequest.reject(format!(
+                    "public clients must send a code_challenge, with code_challenge_method={}",
+                    CodeChallengeMethod::S256
+                ))),
+            };
+        };
+        let method = self.code_challenge_method.as_deref().unwrap_or_default();
+        match method.parse::<CodeChallengeMethod>().map_err(|error| {
+            OAuthCode::InvalidRequest.reject_with(
+                format!(
+                    "code_challenge_method must be {}",
+                    CodeChallengeMethod::S256
+                ),
+                error,
+            )
+        })? {
+            CodeChallengeMethod::S256 => {}
+        }
+        if !sourceorigin_crypto::Pkce::valid_challenge(challenge) {
             return Err(OAuthCode::InvalidRequest
                 .reject("code_challenge must be a base64url SHA-256 digest, 43 characters long"));
         }
-        Ok(())
+        Ok(Some(challenge.clone()))
     }
 
     /// Parses the scopes, which `client` must be allowed to request.

@@ -132,7 +132,7 @@ async fn pushed_requests_are_claimed_only_before_they_expire() {
             redirect_uri: format!("{origin}/callback"),
             client_state: "state".into(),
             nonce: None,
-            pkce_challenge: "challenge".into(),
+            pkce_challenge: Some("challenge".into()),
             scopes: vec![Scope::OpenId.as_str().into()],
             audience: client.id.to_string(),
             interaction: Interaction::AsNeeded,

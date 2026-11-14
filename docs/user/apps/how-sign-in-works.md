@@ -26,7 +26,9 @@ of two kinds, and its kind never changes:
 - **Browser or native app.** A single-page, mobile or desktop app can't hide a
   secret, so it proves each exchange with PKCE alone.
 
-Both kinds use PKCE (S256).
+A browser or native app must send PKCE (S256) with every sign-in. A web app with
+a backend should too, and the SDKs always do, but it may leave PKCE out: its
+secret already proves each exchange.
 
 ## Redirect URIs
 

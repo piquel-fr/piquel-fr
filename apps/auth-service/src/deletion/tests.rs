@@ -153,7 +153,7 @@ impl Fixture {
                 user_id: browser.user_id,
                 session_id: browser.session_id,
                 redirect_uri: "https://owned.example/callback".into(),
-                pkce_challenge: "challenge".into(),
+                pkce_challenge: Some("challenge".into()),
                 nonce: None,
                 scopes: vec!["openid".into()],
                 audience: client.to_string(),

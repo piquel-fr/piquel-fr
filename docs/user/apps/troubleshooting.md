@@ -35,7 +35,7 @@ that says what went wrong: search this page for either.
 
 | `error` | Common causes | What to do |
 | --- | --- | --- |
-| `invalid_request` | The request lacks S256 PKCE, sends `state` or `nonce` longer than 512 bytes, or an `id_token_hint` issued to another app. Or the app requires pushed requests and this one came through the browser. | Fix what the description names. The SDKs send valid requests, and push them whenever auth offers it. |
+| `invalid_request` | A browser or native app's request lacks S256 PKCE, the request sends `state` or `nonce` longer than 512 bytes, or an `id_token_hint` issued to another app. Or the app requires pushed requests and this one came through the browser. | Fix what the description names. The SDKs send valid requests, and push them whenever auth offers it. |
 | `invalid_scope` | The request asks for a scope the app may not request, often `offline_access`, which the SDKs' login routes always request. | Check the scope under **Scopes** on the app's **Settings** tab ([app settings](app-settings.md#settings)). |
 | `invalid_target` | `audience` names something other than the app. | Leave `audience` out: an app registered in the console gets access tokens for itself only. |
 | `access_denied` | The user selected **Cancel** on the consent screen. | Let the user try again. |
